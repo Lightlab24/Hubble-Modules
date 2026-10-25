@@ -106,8 +106,9 @@ const args=process.argv.slice(2),f=JSON.parse(readFileSync('fixture.json'));
 appendFileSync('operations.jsonl',JSON.stringify(args)+'\\n');
 if(args.includes('PUT')) { const input=JSON.parse(readFileSync(args[args.indexOf('--input')+1])); if(input.sha!=='previous-content-sha')throw Error('Missing compare-and-swap'); writeFileSync('published.json',Buffer.from(input.content,'base64')); console.log('{}'); }
 else if(args[0]==='release'&&args[1]==='edit')console.log('{}');
+else if(args[0]==='release'&&args[1]==='view')console.log(JSON.stringify({apiUrl:'https://api.github.com/repos/Lightlab24/Hubble-Modules/releases/123'}));
 else if(args[1]?.endsWith('/contents/catalog.json'))console.log(JSON.stringify(f.current));
-else if(args[1]?.includes('/releases/tags/'))console.log(JSON.stringify({draft:f.scenario!=='already-published',assets:[{name:f.filename,id:42,size:f.length,state:'uploaded'}]}));
+else if(args[1]?.endsWith('/releases/123'))console.log(JSON.stringify({draft:f.scenario!=='already-published',assets:[{name:f.filename,id:42,size:f.length,state:'uploaded'}]}));
 else if(args[1]?.endsWith('/releases/assets/42'))process.stdout.write(readFileSync('archive'));
 else throw Error('Unexpected request '+args);
 `;
@@ -147,7 +148,9 @@ else throw Error('Unexpected request '+args);
         .trim()
         .split("\n")
         .map(JSON.parse);
-      const edits = operations.filter((args) => args[0] === "release");
+      const edits = operations.filter(
+        (args) => args[0] === "release" && args[1] === "edit",
+      );
       const puts = operations.filter((args) => args.includes("PUT"));
       if (scenario === "corrupt") {
         assert.notEqual(result.status, 0);

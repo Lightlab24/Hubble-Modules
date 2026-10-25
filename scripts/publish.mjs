@@ -66,9 +66,19 @@ try {
     )
       continue;
     const { tag, filename } = releaseAsset(entry);
-    const release = JSON.parse(
-      gh(["api", `repos/${repository}/releases/tags/${tag}`]),
+    // GitHub's release-by-tag endpoint does not resolve unpublished drafts.
+    // The CLI resolves both drafts and published releases to their numeric API URL.
+    const metadata = JSON.parse(
+      gh(["release", "view", tag, "--repo", repository, "--json", "apiUrl"]),
     );
+    const prefix = `https://api.github.com/repos/${repository}/releases/`;
+    if (
+      typeof metadata.apiUrl !== "string" ||
+      !metadata.apiUrl.startsWith(prefix) ||
+      !/^\d+$/.test(metadata.apiUrl.slice(prefix.length))
+    )
+      throw Error("Unexpected release API URL");
+    const release = JSON.parse(gh(["api", metadata.apiUrl]));
     const assets = release.assets.filter(
       (asset) => asset.name === filename && asset.state === "uploaded",
     );
