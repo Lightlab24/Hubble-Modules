@@ -37,6 +37,10 @@ Clients trust the public key embedded in their host build, not a key downloaded
 alongside an arbitrary catalog. Key rotation requires a planned host update.
 Keep the catalog's expiry current even when no module versions change.
 
+GitHub immutable releases are enabled for this repository. Upload every intended
+asset while the release is still a draft. Once published, use a new version/tag
+for corrected bytes; an existing module release is not an editable update slot.
+
 The module catalog and the application's curated bundled-module lock are
 independent. Inclusion in a downloadable application release remains a separate
 maintainer decision. Do not publish an application release from this repository.

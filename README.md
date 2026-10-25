@@ -30,6 +30,11 @@ module submission issue linking your source repository. Maintainers review
 compatibility, observed completion/feedback, cleanup, reload, and saved action IDs.
 Submission does not automatically publish a module or include it in an app release.
 
+Publishing is restricted to approved maintainers. Public access allows reading,
+downloading, and proposing contributions; it does not grant write access. The
+catalog-signing workflow also requires approval from `Lightlab24`. Hubble accepts
+an official update only when its exact archive digest appears in the signed catalog.
+
 ## Updates and versions
 
 `catalog.json` is a signed version catalog. Hubble checks metadata in the
