@@ -10,7 +10,7 @@ var Fd=Object.defineProperty;var ee=(t,r)=>{for(var i in r)Fd(t,i,{get:r[i],enum
             })));
           }
         }
-        
+
         if (${U}.value === undefined) {
           if (${Z} in input) {
             newResult[${Z}] = undefined;
@@ -18,7 +18,7 @@ var Fd=Object.defineProperty;var ee=(t,r)=>{for(var i in r)Fd(t,i,{get:r[i],enum
         } else {
           newResult[${Z}] = ${U}.value;
         }
-        
+
       `):Au?$.write(`
         if (${U}.issues.length) {
           payload.issues = payload.issues.concat(${U}.issues.map(iss => ({
@@ -26,7 +26,7 @@ var Fd=Object.defineProperty;var ee=(t,r)=>{for(var i in r)Fd(t,i,{get:r[i],enum
             path: iss.path ? [${Z}, ...iss.path] : [${Z}]
           })));
         }
-        
+
         if (${U}.value === undefined) {
           if (${Z} in input) {
             newResult[${Z}] = undefined;
@@ -34,7 +34,7 @@ var Fd=Object.defineProperty;var ee=(t,r)=>{for(var i in r)Fd(t,i,{get:r[i],enum
         } else {
           newResult[${Z}] = ${U}.value;
         }
-        
+
       `):$.write(`
         const ${U}_present = ${Z} in input;
         if (${U}.issues.length) {
