@@ -1,0 +1,31 @@
+{
+  "name": "hubble-modules",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.0.8",
+  "engines": {
+    "node": "22.22.2",
+    "pnpm": "11.0.8"
+  },
+  "scripts": {
+    "build": "pnpm --filter @hubble/module-sdk build && pnpm --filter @hubble/module-tools build",
+    "build:modules": "node scripts/modules.mjs build",
+    "test:modules": "node scripts/modules.mjs test",
+    "package:modules": "node scripts/modules.mjs package",
+    "test": "node --test test/*.test.mjs packages/module-tools/test/*.test.mjs",
+    "typecheck": "pnpm --filter @hubble/module-sdk typecheck && tsc --noEmit",
+    "kit": "node scripts/build-developer-kit.mjs",
+    "test:protocols": "vitest run --config vitest.config.ts",
+    "build:host-bridge": "node packages/official-module-runtime/scripts/build.mjs",
+    "package:authors": "node scripts/package-author-distributions.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.17",
+    "esbuild": "0.27.3",
+    "tsx": "4.23.1",
+    "typescript": "6.0.3",
+    "vitest": "4.1.10",
+    "zod": "4.4.3",
+    "@hubble/module-sdk": "workspace:1.0.0"
+  }
+}

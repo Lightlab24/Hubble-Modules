@@ -1,0 +1,138 @@
+import { defineModuleManifest } from '@hubble/module-sdk/authoring'
+
+export default defineModuleManifest({
+  formatVersion: 1,
+  apiVersion: 1,
+  host: {
+    minimumVersion: '2.0.0',
+  },
+  configVersion: 1,
+  capabilities: ['persistent-connection', 'state-feedback', 'dynamic-choices'],
+  settings: [
+    {
+      id: 'port',
+      label: 'Port',
+      type: 'number',
+      required: true,
+      default: 52780,
+      min: 1,
+      max: 65535,
+    },
+    {
+      id: 'requestTimeoutMs',
+      label: 'Request timeout (ms)',
+      type: 'number',
+      required: true,
+      default: 3500,
+      min: 100,
+      max: 4000,
+    },
+  ],
+  actions: [
+    {
+      id: 'dit-browse.focus-camera',
+      label: 'Focus Camera',
+      description: 'Focus Camera and confirm the resulting DIT Browse state.',
+      completion: 'state-confirmed',
+      timeoutMs: 12000,
+      fields: [
+        {
+          id: 'cameraNumber',
+          label: 'Camera number',
+          type: 'number',
+          required: true,
+          default: 1,
+          min: 1,
+          max: 999999,
+        },
+      ],
+      legacy: true,
+    },
+    {
+      id: 'dit-browse.switch-workspace',
+      label: 'Switch Workspace',
+      description: 'Switch Workspace and confirm the resulting DIT Browse state.',
+      completion: 'state-confirmed',
+      timeoutMs: 12000,
+      fields: [
+        {
+          id: 'workspaceNumber',
+          label: 'Workspace number',
+          type: 'number',
+          required: true,
+          default: 1,
+          min: 1,
+          max: 9007199254740991,
+        },
+      ],
+      legacy: true,
+    },
+    {
+      id: 'dit-browse.show-grid',
+      label: 'Show Grid',
+      description: 'Show Grid and confirm the resulting DIT Browse state.',
+      completion: 'state-confirmed',
+      timeoutMs: 12000,
+      fields: [],
+      legacy: true,
+    },
+    {
+      id: 'dit-browse.cycle-workspaces',
+      label: 'Cycle Workspaces',
+      description: 'Cycle Workspaces and confirm the resulting DIT Browse state.',
+      completion: 'state-confirmed',
+      timeoutMs: 12000,
+      fields: [],
+      legacy: true,
+    },
+    {
+      id: 'dit-browse.set-grid-lock',
+      label: 'Set Grid Lock',
+      description: 'Set Grid Lock and confirm the resulting DIT Browse state.',
+      completion: 'state-confirmed',
+      timeoutMs: 12000,
+      fields: [
+        {
+          id: 'locked',
+          label: 'Locked',
+          type: 'boolean',
+          required: true,
+          default: true,
+        },
+        {
+          id: 'drivesTally',
+          label: 'Drive tally',
+          type: 'boolean',
+          required: true,
+          default: false,
+        },
+      ],
+      legacy: true,
+    },
+    {
+      id: 'dit-browse.toggle-grid-lock',
+      label: 'Toggle Grid Lock',
+      description: 'Toggle Grid Lock and confirm the resulting DIT Browse state.',
+      completion: 'state-confirmed',
+      timeoutMs: 12000,
+      fields: [
+        {
+          id: 'drivesTally',
+          label: 'Drive tally',
+          type: 'boolean',
+          required: true,
+          default: false,
+        },
+      ],
+      legacy: true,
+    },
+  ],
+  feedback: [
+    {
+      id: 'grid-locked',
+      label: 'Grid Locked',
+      description: 'Reported DIT Browse expansion state.',
+      fields: [],
+    },
+  ],
+})

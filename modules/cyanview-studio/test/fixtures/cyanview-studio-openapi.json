@@ -1,0 +1,96 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "description": "External control API: run macros and (soon) raw camera/group commands.",
+    "title": "CyanView Dashboard API",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/api/control/feed": {
+      "post": {
+        "callbacks": {},
+        "description": "Selects a studio feed either by its display number (1-based position in the feed strip, same order as the cmd+1..0 shortcuts) or by the camera cy_id linked to it (exactly one of the two is required). Each studio window resolves the target in its currently open project.",
+        "operationId": "CyCameraCompanionWeb.Api.StudioControlController.select_feed",
+        "parameters": [
+          {
+            "description": "Feed display number (1-based strip position)",
+            "example": 1,
+            "in": "query",
+            "name": "feed_number",
+            "required": false,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Camera cy_id",
+            "example": "cam1",
+            "in": "query",
+            "name": "camera_id",
+            "required": false,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandResponse"
+                }
+              }
+            },
+            "description": "Command accepted"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid parameter combination"
+          }
+        },
+        "summary": "Set active feed",
+        "tags": ["Studio"]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CommandResponse": {
+        "description": "Command accepted and broadcast to connected UIs",
+        "properties": {
+          "status": {
+            "description": "Always \"ok\"",
+            "example": "ok",
+            "type": "string"
+          }
+        },
+        "required": ["status"],
+        "title": "CommandResponse",
+        "type": "object"
+      },
+      "ErrorResponse": {
+        "description": "Generic error payload",
+        "properties": {
+          "error": {
+            "description": "Machine-readable error code",
+            "example": "not_found",
+            "type": "string"
+          }
+        },
+        "required": ["error"],
+        "title": "ErrorResponse",
+        "type": "object"
+      }
+    }
+  }
+}

@@ -1,31 +1,27 @@
 # Contributing a Hubble module
 
-Start with the developer kit linked from the README. Test using Hubble2 and
-simulators before using real equipment. Keep connection credentials, exported
-workspaces, local logs, and private device information out of submissions.
+Use the public TypeScript starter and [developer guide](docs/developer-kit.md).
+Official source lives in `modules/<name>/`; shared packages have focused protocol
+or contract ownership. Community proposals can use `submissions/<module-id>/` or
+link an independent repository and exact commit in a submission issue.
 
-Submit a pull request adding `submissions/<module-id>/` with:
+A source submission includes identity/version in `package.json`, typed descriptors,
+focused implementation files, fake-device tests, and equipment/configuration notes.
+Retain dependency licenses and declare the contribution license. Do not include
+credentials, real workspace exports or private device logs. Legacy JavaScript
+projects with `hubble-module.json` and `module.test.mjs` remain accepted.
 
-- `hubble-module.json`, declaring a unique ID, independent version, host/API
-  compatibility, settings, actions, gestures, feedback, and allowed package files.
-- A bundled JavaScript implementation with no install-time scripts or native
-  dependencies. Retain action/field IDs when updating an existing module.
-- `module.test.mjs`, covering normal execution, failure, cancellation, disposal,
-  reload, and migrations when settings change. Use protocol simulators; CI must
-  not contact real devices or require credentials.
-- `README.md` describing supported equipment, limitations, configuration, tested
-  hardware/firmware, and what each success or failure actually confirms.
-- An explicit license for your contribution and any bundled dependencies.
+Before review, build, typecheck, test, validate and package. Compare representative
+saved settings/actions with the previous release. Preserve action/feedback/field IDs
+and their meaning; settings migrations do not migrate workbook actions. Confirm
+startup/reconnect sends no controls, cancellation reaches waits/transport, uncertain
+commands do not replay, disposal cleans partial starts, feedback becomes unavailable
+when stale, and logs/errors contain no secrets. Test against simulators; CI must not
+contact real equipment or require credentials.
 
-The authoring skill explains immediate action dispatch, feedback subscriptions,
-button press/release semantics, unavailable state, structured logs, and the
-difference between an accepted command and confirmed device state. Log steps
-only when your implementation observes them.
+Keep module code independent of private Hubble source. New actions within the
+supported public contract must not require an app build. New host features require
+an explicit declared minimum host version and separate host implementation.
 
-Pull-request checks have no publication secrets. A maintainer reviews the exact
-candidate archive before publication. Approval for the catalog and selection for
-the app's bundled module set are separate decisions. Custom packages can be
-imported locally without becoming official catalog entries.
-
-If you maintain the source elsewhere, open a Module submission issue with a link
-and a specific commit/tag. Do not attach credentials or compiled app bundles.
+Candidate builds do not publish or activate code. Maintainers review exact bytes;
+official catalog publication and inclusion in an app's bundled lock are separate.

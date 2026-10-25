@@ -15,6 +15,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22.22.2
-      - run: node --test test/*.test.mjs
+      - uses: pnpm/action-setup@v4
+        with: { version: 11.0.8 }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm test
+      - run: pnpm build:modules
+      - run: pnpm typecheck
+      - run: pnpm test:protocols
+      - run: pnpm package:authors
+      - run: pnpm build:host-bridge
+      - run: pnpm kit
       - name: Test submitted portable projects without publication credentials
         run: node scripts/check-submissions.mjs

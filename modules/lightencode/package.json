@@ -1,0 +1,25 @@
+{
+  "name": "@hubble-module/lightencode",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "hubble": {
+    "id": "hubble-lightencode",
+    "name": "Light Encode"
+  },
+  "scripts": {
+    "build": "hubble-module build .",
+    "test": "hubble-module test .",
+    "package": "hubble-module build . && hubble-module test . && hubble-module pack . ../../artifacts/hubble-lightencode-1.0.0.hubble-module"
+  },
+  "dependencies": {
+    "@hubble/module-sdk": "workspace:1.0.0",
+    "@hubble/module-contracts": "workspace:1.0.0",
+    "@hubble/module-runtime-helpers": "workspace:1.0.0",
+    "zod": "4.4.3",
+    "@hubble/lightencode-client": "workspace:1.0.0"
+  },
+  "devDependencies": {
+    "@hubble/module-tools": "workspace:1.0.0"
+  }
+}

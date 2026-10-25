@@ -1,3 +1,4 @@
+import { catalogReadArgs } from "./publication-targets.mjs";
 // Run after qualification and review. Creates a draft and local catalog input only.
 import { readFile, writeFile, mkdtemp, cp, rm } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
@@ -48,9 +49,13 @@ const gh = (args) =>
 const keys = JSON.parse(
   await readFile(new URL("../keys/catalog.json", import.meta.url), "utf8"),
 );
-const current = JSON.parse(
-  gh(["api", `repos/${repository}/contents/catalog.json`]),
-);
+let current;
+try {
+  current = JSON.parse(gh(catalogReadArgs(repository, "catalog-v2.json")));
+} catch (error) {
+  if (!/404|Not Found/.test(String(error.stderr))) throw error;
+  current = JSON.parse(gh(catalogReadArgs(repository, "catalog.json")));
+}
 const envelope = JSON.parse(
   Buffer.from(current.content, "base64").toString("utf8"),
 );
@@ -69,6 +74,7 @@ if (
 const catalog = validateUpdate(
   {
     ...previous,
+    formatVersion: 2,
     sequence: previous.sequence + 1,
     issuedAt: new Date().toISOString(),
     expiresAt: new Date(Date.now() + 180 * 86400000).toISOString(),
@@ -91,6 +97,8 @@ try {
     "--repo",
     repository,
     "--draft",
+    "--target",
+    execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
     "--title",
     `${manifest.name} ${manifest.version}`,
     "--notes-file",

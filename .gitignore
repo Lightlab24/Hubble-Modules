@@ -3,3 +3,5 @@ artifacts/
 *.hubble-module
 *.pem
 .DS_Store
+**/dist/
+*.tgz

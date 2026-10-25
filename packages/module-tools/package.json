@@ -1,0 +1,28 @@
+{
+  "name": "@hubble/module-tools",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Build and qualify independent Hubble module packages",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "hubble-module": "bin/hubble-module.mjs"
+  },
+  "files": [
+    "dist",
+    "templates",
+    "bin"
+  ],
+  "scripts": {
+    "build": "node src/build-tools.mjs"
+  },
+  "dependencies": {
+    "ws": "8.21.0",
+    "esbuild-wasm": "0.27.3",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@hubble/module-sdk": "workspace:1.0.0"
+  }
+}

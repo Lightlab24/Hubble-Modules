@@ -1,0 +1,21 @@
+{
+  "name": "@hubble/router-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "4.4.3",
+    "@hubble/module-sdk": "workspace:1.0.0",
+    "@hubble/module-contracts": "workspace:1.0.0",
+    "@hubble/module-runtime-helpers": "workspace:1.0.0",
+    "@hubble/protocol-ultrix-ogp": "workspace:1.0.0",
+    "@hubble/protocol-videohub": "workspace:1.0.0"
+  }
+}
