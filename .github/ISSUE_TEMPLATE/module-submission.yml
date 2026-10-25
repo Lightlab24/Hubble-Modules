@@ -1,0 +1,24 @@
+name: Module submission
+description: Propose a module for review and official distribution
+title: "Module submission: "
+body:
+  - type: input
+    id: source
+    attributes:
+      label: Source repository and exact commit or tag
+    validations:
+      required: true
+  - type: textarea
+    id: capabilities
+    attributes:
+      label: Equipment, actions, feedback, and observed completion
+      description: Explain supported features and what success confirms.
+    validations:
+      required: true
+  - type: textarea
+    id: testing
+    attributes:
+      label: Tests and compatibility
+      description: Include simulator tests, hardware tested, reload behavior, saved ID compatibility, and license.
+    validations:
+      required: true

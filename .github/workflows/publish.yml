@@ -1,0 +1,36 @@
+name: Publish reviewed module catalog
+on:
+  workflow_dispatch:
+    inputs:
+      catalog:
+        description: Committed, reviewed catalog input path
+        required: true
+        default: catalog-input.json
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: module-publication
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: module-publication
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.2
+      - run: node --test test/*.test.mjs
+      - name: Verify exact packages, publish, and sign catalog
+        env:
+          CATALOG_INPUT: ${{ inputs.catalog }}
+          MODULE_SIGNING_KEY_ID: ${{ vars.HUBBLE_MODULE_SIGNING_KEY_ID }}
+          MODULE_SIGNING_PRIVATE_KEY: ${{ secrets.HUBBLE_MODULE_SIGNING_PRIVATE_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/publish.mjs

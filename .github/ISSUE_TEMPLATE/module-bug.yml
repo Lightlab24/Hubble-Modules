@@ -1,0 +1,20 @@
+name: Module bug
+description: Report a problem in an existing module
+body:
+  - type: input
+    id: versions
+    attributes:
+      label: Module ID/version and Hubble version
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction, expected result, and observed result
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Relevant logs and equipment details
+      description: Remove passwords, tokens, private addresses, and unrelated workspace data.

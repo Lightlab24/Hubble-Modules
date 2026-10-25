@@ -1,0 +1,5 @@
+node_modules/
+artifacts/
+*.hubble-module
+*.pem
+.DS_Store
