@@ -1,0 +1,9 @@
+{
+  "package": "@hubble/official-module-runtime",
+  "version": "1.0.0",
+  "file": "hubble-official-module-runtime-1.0.0.tgz",
+  "bytes": 209346,
+  "sha256": "a08581af480a437eb691f6363fd7322a4d305f1ac3ceeefd9faebae76926bafe",
+  "integrity": "sha512-nqZzyoXZEt26EwaASlJOklKCezJFthQf1Trpjlv/aVGAp9m2gUufYfwloG82TJpz727CgtiI7RwM2f86lGHrsw==",
+  "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/runtime-v1.0.0/hubble-official-module-runtime-1.0.0.tgz"
+}

@@ -1,0 +1,1 @@
+Initial independent 1.0.0 release for Hubble Module API 1. Existing saved action and feedback identities remain supported. Source, tests, protocol implementations, and authoring documentation are available in the versioned public repository. Requires a Hubble host with the capabilities declared in the manifest.

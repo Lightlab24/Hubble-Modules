@@ -1,0 +1,1583 @@
+{
+  "formatVersion": 2,
+  "sequence": 2,
+  "issuedAt": "2026-10-25T23:08:32.404Z",
+  "expiresAt": "2027-04-23T23:06:28.000Z",
+  "releases": [
+    {
+      "identity": {
+        "moduleId": "hubble-update-rehearsal",
+        "version": "0.1.0-test.1",
+        "digest": "10beb0f8c41eea0c1cfde9fec68668ad13ab33cb99c48c8fbe1a4ff09651b23b"
+      },
+      "manifest": {
+        "formatVersion": 1,
+        "id": "hubble-update-rehearsal",
+        "name": "Update rehearsal (simulation only)",
+        "version": "0.1.0-test.1",
+        "apiVersion": 1,
+        "host": {
+          "minMajor": 2,
+          "maxMajor": 2
+        },
+        "configVersion": 1,
+        "entry": "module.mjs",
+        "files": [
+          "module.mjs"
+        ],
+        "capabilities": [
+          "simulation"
+        ],
+        "settings": [
+          {
+            "id": "initialState",
+            "label": "Initial state",
+            "required": true,
+            "type": "boolean",
+            "default": false
+          }
+        ],
+        "actions": [
+          {
+            "id": "set-state",
+            "label": "Set simulated state",
+            "description": "Changes only this simulated instance.",
+            "fields": [
+              {
+                "id": "active",
+                "label": "Active",
+                "required": true,
+                "type": "boolean",
+                "default": true
+              }
+            ],
+            "completion": "local",
+            "timeoutMs": 1000
+          }
+        ],
+        "feedback": [
+          {
+            "id": "active",
+            "label": "Simulated state",
+            "description": "The last observed local simulation state.",
+            "fields": []
+          }
+        ]
+      },
+      "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-update-rehearsal-v0.1.0-test.1/hubble-update-rehearsal-0.1.0-test.1.hubble-module",
+      "bytes": 1652,
+      "notes": "Internal Hubble2 update-path rehearsal. Simulation only; no device/network/native control. Baseline set-state action and active feedback. API 1 preview; not a production device integration.\n",
+      "channel": "beta",
+      "publishedAt": "2026-10-25T04:10:04.243Z",
+      "status": "active"
+    },
+    {
+      "identity": {
+        "moduleId": "hubble-update-rehearsal",
+        "version": "0.1.1-test.1",
+        "digest": "259a0c8689047413079673303e852df7c26bc0dbd32de8c486ebafe563b44442"
+      },
+      "manifest": {
+        "formatVersion": 1,
+        "id": "hubble-update-rehearsal",
+        "name": "Update rehearsal (simulation only)",
+        "version": "0.1.1-test.1",
+        "apiVersion": 1,
+        "host": {
+          "minMajor": 2,
+          "maxMajor": 2
+        },
+        "configVersion": 1,
+        "entry": "module.mjs",
+        "files": [
+          "module.mjs"
+        ],
+        "capabilities": [
+          "simulation"
+        ],
+        "settings": [
+          {
+            "id": "initialState",
+            "label": "Initial state",
+            "required": true,
+            "type": "boolean",
+            "default": false
+          }
+        ],
+        "actions": [
+          {
+            "id": "set-state",
+            "label": "Set simulated state",
+            "description": "Changes only this simulated instance.",
+            "fields": [
+              {
+                "id": "active",
+                "label": "Active",
+                "required": true,
+                "type": "boolean",
+                "default": true
+              }
+            ],
+            "completion": "local",
+            "timeoutMs": 1000
+          },
+          {
+            "id": "toggle-state",
+            "label": "Toggle simulated state",
+            "description": "Toggles only this local simulated instance.",
+            "fields": [],
+            "completion": "local",
+            "timeoutMs": 1000
+          }
+        ],
+        "feedback": [
+          {
+            "id": "active",
+            "label": "Simulated state",
+            "description": "The last observed local simulation state.",
+            "fields": []
+          }
+        ]
+      },
+      "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-update-rehearsal-v0.1.1-test.1/hubble-update-rehearsal-0.1.1-test.1.hubble-module",
+      "bytes": 1697,
+      "notes": "Internal Hubble2 update-path rehearsal. Simulation only; no device/network/native control. Adds toggle-state while preserving set-state and active feedback. API 1 preview; not a production device integration.\n",
+      "channel": "beta",
+      "publishedAt": "2026-10-25T04:10:42.321Z",
+      "status": "active"
+    },
+    {
+      "identity": {
+        "moduleId": "hubble-http-requests",
+        "version": "1.0.0",
+        "digest": "2566534940e8c0e54effdd13df8621a6b18035cfdc639a32eba918f83e7770b3"
+      },
+      "manifest": {
+        "formatVersion": 1,
+        "id": "hubble-http-requests",
+        "name": "HTTP Requests",
+        "version": "1.0.0",
+        "apiVersion": 1,
+        "host": {
+          "minimumVersion": "2.0.0"
+        },
+        "configVersion": 1,
+        "entry": "module.mjs",
+        "files": [
+          "module.mjs",
+          "THIRD-PARTY-NOTICES.txt"
+        ],
+        "capabilities": [
+          "request-response"
+        ],
+        "settings": [
+          {
+            "id": "baseUrl",
+            "label": "Base URL",
+            "required": false,
+            "type": "text",
+            "default": ""
+          },
+          {
+            "id": "targetScope",
+            "label": "Target scope",
+            "required": true,
+            "type": "choice",
+            "default": "loopback",
+            "choices": [
+              {
+                "id": "loopback",
+                "label": "Loopback"
+              },
+              {
+                "id": "private-lan",
+                "label": "Private LAN"
+              },
+              {
+                "id": "public",
+                "label": "Public"
+              }
+            ]
+          },
+          {
+            "id": "proxyAddress",
+            "label": "Proxy address",
+            "required": false,
+            "type": "text",
+            "default": "",
+            "secret": true
+          },
+          {
+            "id": "rejectUnauthorized",
+            "label": "Verify TLS certificate",
+            "required": true,
+            "type": "boolean",
+            "default": true
+          },
+          {
+            "id": "insecureHTTPParser",
+            "label": "Allow legacy HTTP headers",
+            "required": true,
+            "type": "boolean",
+            "default": false
+          },
+          {
+            "id": "requestTimeoutMs",
+            "label": "Request timeout (ms)",
+            "required": true,
+            "type": "number",
+            "default": 5000,
+            "min": 100,
+            "max": 10000
+          }
+        ],
+        "actions": [
+          {
+            "id": "generic-http.get",
+            "label": "GET",
+            "description": "Send an HTTP GET request and wait for its response.",
+            "fields": [
+              {
+                "id": "requestTarget",
+                "label": "Request target",
+                "required": false,
+                "type": "text",
+                "default": "/"
+              },
+              {
+                "id": "header",
+                "label": "Headers",
+                "required": false,
+                "type": "text",
+                "default": "",
+                "secret": true
+              }
+            ],
+            "legacy": true,
+            "completion": "response",
+            "timeoutMs": 12000
+          },
+          {
+            "id": "generic-http.post",
+            "label": "POST",
+            "description": "Send an HTTP POST request and wait for its response.",
+            "fields": [
+              {
+                "id": "requestTarget",
+                "label": "Request target",
+                "required": false,
+                "type": "text",
+                "default": "/"
+              },
+              {
+                "id": "header",
+                "label": "Headers",
+                "required": false,
+                "type": "text",
+                "default": "",
+                "secret": true
+              },
+              {
+                "id": "body",
+                "label": "Body",
+                "required": false,
+                "type": "text",
+                "default": "",
+                "secret": true
+              },
+              {
+                "id": "contenttype",
+                "label": "Content type",
+                "required": false,
+                "type": "text",
+                "default": "application/json"
+              }
+            ],
+            "legacy": true,
+            "completion": "response",
+            "timeoutMs": 12000
+          },
+          {
+            "id": "generic-http.put",
+            "label": "PUT",
+            "description": "Send an HTTP PUT request and wait for its response.",
+            "fields": [
+              {
+                "id": "requestTarget",
+                "label": "Request target",
+                "required": false,
+                "type": "text",
+                "default": "/"
+              },
+              {
+                "id": "header",
+                "label": "Headers",
+                "required": false,
+                "type": "text",
+                "default": "",
+                "secret": true
+              },
+              {
+                "id": "body",
+                "label": "Body",
+                "required": false,
+                "type": "text",
+                "default": "",
+                "secret": true
+              },
+              {
+                "id": "contenttype",
+                "label": "Content type",
+                "required": false,
+                "type": "text",
+                "default": "application/json"
+              }
+            ],
+            "legacy": true,
+            "completion": "response",
+            "timeoutMs": 12000
+          },
+          {
+            "id": "generic-http.patch",
+            "label": "PATCH",
+            "description": "Send an HTTP PATCH request and wait for its response.",
+            "fields": [
+              {
+                "id": "requestTarget",
+                "label": "Request target",
+                "required": false,
+                "type": "text",
+                "default": "/"
+              },
+              {
+                "id": "header",
+                "label": "Headers",
+                "required": false,
+                "type": "text",
+                "default": "",
+                "secret": true
+              },
+              {
+                "id": "body",
+                "label": "Body",
+                "required": false,
+                "type": "text",
+                "default": "",
+                "secret": true
+              },
+              {
+                "id": "contenttype",
+                "label": "Content type",
+                "required": false,
+                "type": "text",
+                "default": "application/json"
+              }
+            ],
+            "legacy": true,
+            "completion": "response",
+            "timeoutMs": 12000
+          },
+          {
+            "id": "generic-http.delete",
+            "label": "DELETE",
+            "description": "Send an HTTP DELETE request and wait for its response.",
+            "fields": [
+              {
+                "id": "requestTarget",
+                "label": "Request target",
+                "required": false,
+                "type": "text",
+                "default": "/"
+              },
+              {
+                "id": "header",
+                "label": "Headers",
+                "required": false,
+                "type": "text",
+                "default": "",
+                "secret": true
+              },
+              {
+                "id": "body",
+                "label": "Body",
+                "required": false,
+                "type": "text",
+                "default": "",
+                "secret": true
+              }
+            ],
+            "legacy": true,
+            "completion": "response",
+            "timeoutMs": 12000
+          }
+        ],
+        "feedback": []
+      },
+      "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-http-requests-v1.0.0/hubble-http-requests-1.0.0.hubble-module",
+      "bytes": 426575,
+      "notes": "Initial independent 1.0.0 release for Hubble Module API 1. Existing saved action and feedback identities remain supported. Source, tests, protocol implementations, and authoring documentation are available in the versioned public repository. Requires a Hubble host with the capabilities declared in the manifest.\n",
+      "channel": "stable",
+      "publishedAt": "2026-10-25T23:06:27.426Z",
+      "status": "active"
+    },
+    {
+      "identity": {
+        "moduleId": "hubble-aja-kumo",
+        "version": "1.0.0",
+        "digest": "1447b126e3af8fcaf0254aa19a476a23dedb9a67c442450c5579ad10592e2e74"
+      },
+      "manifest": {
+        "formatVersion": 1,
+        "id": "hubble-aja-kumo",
+        "name": "AJA KUMO",
+        "version": "1.0.0",
+        "apiVersion": 1,
+        "host": {
+          "minimumVersion": "2.0.0",
+          "requiredFeatures": [
+            "host-services-v1"
+          ]
+        },
+        "configVersion": 1,
+        "entry": "module.mjs",
+        "files": [
+          "module.mjs",
+          "THIRD-PARTY-NOTICES.txt"
+        ],
+        "capabilities": [
+          "persistent-connection",
+          "state-feedback",
+          "host.router-groups",
+          "service.refreshNames",
+          "service.setDestinationLock",
+          "service.recallSalvo",
+          "service.routeCrosspoints",
+          "service.interrogateRouteTargets",
+          "service.selectDestination",
+          "service.selectSource",
+          "service.submitSelectSource",
+          "service.take",
+          "service.submitTake",
+          "service.directRoute",
+          "service.submitDirectRoute",
+          "service.submitDirectRouteTracked",
+          "service.watch",
+          "service.unwatch"
+        ],
+        "settings": [],
+        "actions": [
+          {
+            "id": "aja-kumo.select-source",
+            "label": "select source",
+            "description": "Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.",
+            "fields": [],
+            "legacy": true,
+            "completion": "submitted",
+            "timeoutMs": 120000
+          },
+          {
+            "id": "aja-kumo.select-destination",
+            "label": "select destination",
+            "description": "Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.",
+            "fields": [],
+            "legacy": true,
+            "completion": "submitted",
+            "timeoutMs": 120000
+          },
+          {
+            "id": "aja-kumo.take",
+            "label": "take",
+            "description": "Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.",
+            "fields": [],
+            "legacy": true,
+            "completion": "submitted",
+            "timeoutMs": 120000
+          },
+          {
+            "id": "aja-kumo.toggle-group-enabled",
+            "label": "toggle group enabled",
+            "description": "Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.",
+            "fields": [],
+            "legacy": true,
+            "completion": "submitted",
+            "timeoutMs": 120000
+          },
+          {
+            "id": "aja-kumo.direct-route",
+            "label": "direct route",
+            "description": "Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.",
+            "fields": [],
+            "legacy": true,
+            "completion": "submitted",
+            "timeoutMs": 120000
+          },
+          {
+            "id": "aja-kumo.refresh-names",
+            "label": "refresh names",
+            "description": "Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.",
+            "fields": [],
+            "legacy": true,
+            "completion": "submitted",
+            "timeoutMs": 120000
+          },
+          {
+            "id": "aja-kumo.recall-salvo",
+            "label": "recall salvo",
+            "description": "Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.",
+            "fields": [],
+            "legacy": true,
+            "completion": "submitted",
+            "timeoutMs": 120000
+          }
+        ],
+        "feedback": []
+      },
+      "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-aja-kumo-v1.0.0/hubble-aja-kumo-1.0.0.hubble-module",
+      "bytes": 319898,
+      "notes": "Initial independent 1.0.0 release for Hubble Module API 1. Existing saved action and feedback identities remain supported. Source, tests, protocol implementations, and authoring documentation are available in the versioned public repository. Requires a Hubble host with the capabilities declared in the manifest.\n",
+      "channel": "stable",
+      "publishedAt": "2026-10-25T23:07:18.441Z",
+      "status": "active"
+    },
+    {
+      "identity": {
+        "moduleId": "hubble-blackmagic-videohub",
+        "version": "1.0.0",
+        "digest": "010c5a2cf08a10b8d8e00806c4d60939e2c3687bc075ab66e9ca34c740b135c0"
+      },
+      "manifest": {
+        "formatVersion": 1,
+        "id": "hubble-blackmagic-videohub",
+        "name": "Blackmagic Videohub",
+        "version": "1.0.0",
+        "apiVersion": 1,
+        "host": {
+          "minimumVersion": "2.0.0",
+          "requiredFeatures": [
+            "host-services-v1"
+          ]
+        },
+        "configVersion": 1,
+        "entry": "module.mjs",
+        "files": [
+          "module.mjs",
+          "THIRD-PARTY-NOTICES.txt"
+        ],
+        "capabilities": [
+          "persistent-connection",
+          "state-feedback",
+          "host.router-groups",
+          "service.refreshNames",
+          "service.setDestinationLock",
+          "service.recallSalvo",
+          "service.routeCrosspoints",
+          "service.interrogateRouteTargets",
+          "service.selectDestination",
+          "service.selectSource",
+          "service.submitSelectSource",
+          "service.take",
+          "service.submitTake",
+          "service.directRoute",
+          "service.submitDirectRoute",
+          "service.submitDirectRouteTracked",
+          "service.watch",
+          "service.unwatch"
+        ],
+        "settings": [],
+        "actions": [
+          {
+            "id": "blackmagic-videohub.select-source",
+            "label": "select source",
+            "description": "Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.",
+            "fields": [],
+            "legacy": true,
+            "completion": "submitted",
+            "timeoutMs": 120000
+          },
+          {
+            "id": "blackmagic-videohub.select-destination",
+            "label": "select destination",
+            "description": "Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.",
+            "fields": [],
+            "legacy": true,
+            "completion": "submitted",
+            "timeoutMs": 120000
+          },
+          {
+            "id": "blackmagic-videohub.take",
+            "label": "take",
+            "description": "Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.",
+            "fields": [],
+            "legacy": true,
+            "completion": "submitted",
+            "timeoutMs": 120000
+          },
+          {
+            "id": "blackmagic-videohub.toggle-group-enabled",
+            "label": "toggle group enabled",
+            "description": "Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.",
+            "fields": [],
+            "legacy": true,
+            "completion": "submitted",
+            "timeoutMs": 120000
+          },
+          {
+            "id": "blackmagic-videohub.direct-route",
+            "label": "direct route",
+            "description": "Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.",
+            "fields": [],
+            "legacy": true,
+            "completion": "submitted",
+            "timeoutMs": 120000
+          },
+          {
+            "id": "blackmagic-videohub.refresh-names",
+            "label": "refresh names",
+            "description": "Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.",
+            "fields": [],
+            "legacy": true,
+            "completion": "submitted",
+            "timeoutMs": 120000
+          }
+        ],
+        "feedback": []
+      },
+      "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-blackmagic-videohub-v1.0.0/hubble-blackmagic-videohub-1.0.0.hubble-module",
+      "bytes": 329423,
+      "notes": "Initial independent 1.0.0 release for Hubble Module API 1. Existing saved action and feedback identities remain supported. Source, tests, protocol implementations, and authoring documentation are available in the versioned public repository. Requires a Hubble host with the capabilities declared in the manifest.\n",
+      "channel": "stable",
+      "publishedAt": "2026-10-25T23:07:20.785Z",
+      "status": "active"
+    },
+    {
+      "identity": {
+        "moduleId": "hubble-ccc",
+        "version": "1.0.0",
+        "digest": "f36c10277ffb0550733a8740d827d58d6898a2f1122c456773d85b97844ab3c2"
+      },
+      "manifest": {
+        "formatVersion": 1,
+        "id": "hubble-ccc",
+        "name": "CCC",
+        "version": "1.0.0",
+        "apiVersion": 1,
+        "host": {
+          "minimumVersion": "2.0.0",
+          "requiredFeatures": [
+            "host-services-v1"
+          ]
+        },
+        "configVersion": 1,
+        "entry": "module.mjs",
+        "files": [
+          "module.mjs",
+          "THIRD-PARTY-NOTICES.txt"
+        ],
+        "capabilities": [
+          "state-feedback",
+          "host.ccc-store",
+          "service.activate",
+          "service.mutate",
+          "service.command"
+        ],
+        "settings": [],
+        "actions": [
+          {
+            "id": "ccc.command",
+            "label": "ccc.command",
+            "description": "Preserves the saved action contract and reports only observed completion.",
+            "fields": [],
+            "legacy": true,
+            "completion": "response",
+            "completionAlternatives": [
+              "state-confirmed",
+              "local"
+            ],
+            "timeoutMs": 120000
+          }
+        ],
+        "feedback": []
+      },
+      "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-ccc-v1.0.0/hubble-ccc-1.0.0.hubble-module",
+      "bytes": 293538,
+      "notes": "Initial independent 1.0.0 release for Hubble Module API 1. Existing saved action and feedback identities remain supported. Source, tests, protocol implementations, and authoring documentation are available in the versioned public repository. Requires a Hubble host with the capabilities declared in the manifest.\n",
+      "channel": "stable",
+      "publishedAt": "2026-10-25T23:07:23.307Z",
+      "status": "active"
+    },
+    {
+      "identity": {
+        "moduleId": "hubble-cyanview-rcp",
+        "version": "1.0.0",
+        "digest": "95bc60bf9393e8f6b0da29a7ec062963820301c20312432c17fbbb5e128cb150"
+      },
+      "manifest": {
+        "formatVersion": 1,
+        "id": "hubble-cyanview-rcp",
+        "name": "CyanView RCP",
+        "version": "1.0.0",
+        "apiVersion": 1,
+        "host": {
+          "minimumVersion": "2.0.0",
+          "requiredFeatures": [
+            "host-services-v1"
+          ]
+        },
+        "configVersion": 1,
+        "entry": "module.mjs",
+        "files": [
+          "module.mjs",
+          "THIRD-PARTY-NOTICES.txt"
+        ],
+        "capabilities": [
+          "persistent-connection",
+          "state-feedback",
+          "service.selectCamera",
+          "service.recordCamera",
+          "service.recordGroupAll"
+        ],
+        "settings": [],
+        "actions": [
+          {
+            "id": "cyanview-rcp.select-camera",
+            "label": "select camera",
+            "description": "Preserves the existing saved action contract and protocol completion boundary.",
+            "fields": [],
+            "legacy": true,
+            "completion": "response",
+            "timeoutMs": 30000
+          },
+          {
+            "id": "cyanview-rcp.record-camera",
+            "label": "record camera",
+            "description": "Preserves the existing saved action contract and protocol completion boundary.",
+            "fields": [],
+            "legacy": true,
+            "completion": "response",
+            "timeoutMs": 30000
+          },
+          {
+            "id": "cyanview-rcp.record-group-all",
+            "label": "record group all",
+            "description": "Preserves the existing saved action contract and protocol completion boundary.",
+            "fields": [],
+            "legacy": true,
+            "completion": "response",
+            "timeoutMs": 30000
+          }
+        ],
+        "feedback": []
+      },
+      "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-cyanview-rcp-v1.0.0/hubble-cyanview-rcp-1.0.0.hubble-module",
+      "bytes": 291478,
+      "notes": "Initial independent 1.0.0 release for Hubble Module API 1. Existing saved action and feedback identities remain supported. Source, tests, protocol implementations, and authoring documentation are available in the versioned public repository. Requires a Hubble host with the capabilities declared in the manifest.\n",
+      "channel": "stable",
+      "publishedAt": "2026-10-25T23:07:25.579Z",
+      "status": "active"
+    },
+    {
+      "identity": {
+        "moduleId": "hubble-cyanview-studio",
+        "version": "1.0.0",
+        "digest": "8eee5b3efc1f741c601cc4652dc48699a06ccc94c18177b76f3b1dbe7bcf9002"
+      },
+      "manifest": {
+        "formatVersion": 1,
+        "id": "hubble-cyanview-studio",
+        "name": "CyanView Studio",
+        "version": "1.0.0",
+        "apiVersion": 1,
+        "host": {
+          "minimumVersion": "2.0.0",
+          "requiredFeatures": [
+            "host-services-v1"
+          ]
+        },
+        "configVersion": 1,
+        "entry": "module.mjs",
+        "files": [
+          "module.mjs",
+          "THIRD-PARTY-NOTICES.txt"
+        ],
+        "capabilities": [
+          "persistent-connection",
+          "state-feedback",
+          "service.selectFeed",
+          "service.selectFeedByFeedId",
+          "service.selectFeedByNumber"
+        ],
+        "settings": [],
+        "actions": [
+          {
+            "id": "cyanview-studio.select-feed",
+            "label": "select feed",
+            "description": "Preserves the existing saved action contract and protocol completion boundary.",
+            "fields": [],
+            "legacy": true,
+            "completion": "response",
+            "timeoutMs": 30000
+          },
+          {
+            "id": "cyanview-studio.select-feed-id",
+            "label": "select feed id",
+            "description": "Preserves the existing saved action contract and protocol completion boundary.",
+            "fields": [],
+            "legacy": true,
+            "completion": "response",
+            "timeoutMs": 30000
+          },
+          {
+            "id": "cyanview-studio.select-feed-number",
+            "label": "select feed number",
+            "description": "Preserves the existing saved action contract and protocol completion boundary.",
+            "fields": [],
+            "legacy": true,
+            "completion": "response",
+            "timeoutMs": 30000
+          }
+        ],
+        "feedback": []
+      },
+      "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-cyanview-studio-v1.0.0/hubble-cyanview-studio-1.0.0.hubble-module",
+      "bytes": 290204,
+      "notes": "Initial independent 1.0.0 release for Hubble Module API 1. Existing saved action and feedback identities remain supported. Source, tests, protocol implementations, and authoring documentation are available in the versioned public repository. Requires a Hubble host with the capabilities declared in the manifest.\n",
+      "channel": "stable",
+      "publishedAt": "2026-10-25T23:07:27.822Z",
+      "status": "active"
+    },
+    {
+      "identity": {
+        "moduleId": "hubble-dit-browse",
+        "version": "1.0.0",
+        "digest": "00b842b21586163a53291013c05784cc24e6ca03a7c4fb13cb5ff966a61ec5da"
+      },
+      "manifest": {
+        "formatVersion": 1,
+        "id": "hubble-dit-browse",
+        "name": "DIT Browse",
+        "version": "1.0.0",
+        "apiVersion": 1,
+        "host": {
+          "minimumVersion": "2.0.0"
+        },
+        "configVersion": 1,
+        "entry": "module.mjs",
+        "files": [
+          "module.mjs",
+          "THIRD-PARTY-NOTICES.txt"
+        ],
+        "capabilities": [
+          "persistent-connection",
+          "state-feedback",
+          "dynamic-choices"
+        ],
+        "settings": [
+          {
+            "id": "port",
+            "label": "Port",
+            "required": true,
+            "type": "number",
+            "default": 52780,
+            "min": 1,
+            "max": 65535
+          },
+          {
+            "id": "requestTimeoutMs",
+            "label": "Request timeout (ms)",
+            "required": true,
+            "type": "number",
+            "default": 3500,
+            "min": 100,
+            "max": 4000
+          }
+        ],
+        "actions": [
+          {
+            "id": "dit-browse.focus-camera",
+            "label": "Focus Camera",
+            "description": "Focus Camera and confirm the resulting DIT Browse state.",
+            "fields": [
+              {
+                "id": "cameraNumber",
+                "label": "Camera number",
+                "required": true,
+                "type": "number",
+                "default": 1,
+                "min": 1,
+                "max": 999999
+              }
+            ],
+            "legacy": true,
+            "completion": "state-confirmed",
+            "timeoutMs": 12000
+          },
+          {
+            "id": "dit-browse.switch-workspace",
+            "label": "Switch Workspace",
+            "description": "Switch Workspace and confirm the resulting DIT Browse state.",
+            "fields": [
+              {
+                "id": "workspaceNumber",
+                "label": "Workspace number",
+                "required": true,
+                "type": "number",
+                "default": 1,
+                "min": 1,
+                "max": 9007199254740991
+              }
+            ],
+            "legacy": true,
+            "completion": "state-confirmed",
+            "timeoutMs": 12000
+          },
+          {
+            "id": "dit-browse.show-grid",
+            "label": "Show Grid",
+            "description": "Show Grid and confirm the resulting DIT Browse state.",
+            "fields": [],
+            "legacy": true,
+            "completion": "state-confirmed",
+            "timeoutMs": 12000
+          },
+          {
+            "id": "dit-browse.cycle-workspaces",
+            "label": "Cycle Workspaces",
+            "description": "Cycle Workspaces and confirm the resulting DIT Browse state.",
+            "fields": [],
+            "legacy": true,
+            "completion": "state-confirmed",
+            "timeoutMs": 12000
+          },
+          {
+            "id": "dit-browse.set-grid-lock",
+            "label": "Set Grid Lock",
+            "description": "Set Grid Lock and confirm the resulting DIT Browse state.",
+            "fields": [
+              {
+                "id": "locked",
+                "label": "Locked",
+                "required": true,
+                "type": "boolean",
+                "default": true
+              },
+              {
+                "id": "drivesTally",
+                "label": "Drive tally",
+                "required": true,
+                "type": "boolean",
+                "default": false
+              }
+            ],
+            "legacy": true,
+            "completion": "state-confirmed",
+            "timeoutMs": 12000
+          },
+          {
+            "id": "dit-browse.toggle-grid-lock",
+            "label": "Toggle Grid Lock",
+            "description": "Toggle Grid Lock and confirm the resulting DIT Browse state.",
+            "fields": [
+              {
+                "id": "drivesTally",
+                "label": "Drive tally",
+                "required": true,
+                "type": "boolean",
+                "default": false
+              }
+            ],
+            "legacy": true,
+            "completion": "state-confirmed",
+            "timeoutMs": 12000
+          }
+        ],
+        "feedback": [
+          {
+            "id": "grid-locked",
+            "label": "Grid Locked",
+            "description": "Reported DIT Browse expansion state.",
+            "fields": []
+          }
+        ]
+      },
+      "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-dit-browse-v1.0.0/hubble-dit-browse-1.0.0.hubble-module",
+      "bytes": 333561,
+      "notes": "Initial independent 1.0.0 release for Hubble Module API 1. Existing saved action and feedback identities remain supported. Source, tests, protocol implementations, and authoring documentation are available in the versioned public repository. Requires a Hubble host with the capabilities declared in the manifest.\n",
+      "channel": "stable",
+      "publishedAt": "2026-10-25T23:07:29.950Z",
+      "status": "active"
+    },
+    {
+      "identity": {
+        "moduleId": "hubble-evertz-quartz",
+        "version": "1.0.0",
+        "digest": "d839f116a25c9ebff5b7339193c69e7b162e305bb12e58472b7481be1dcebaa6"
+      },
+      "manifest": {
+        "formatVersion": 1,
+        "id": "hubble-evertz-quartz",
+        "name": "Evertz Quartz",
+        "version": "1.0.0",
+        "apiVersion": 1,
+        "host": {
+          "minimumVersion": "2.0.0",
+          "requiredFeatures": [
+            "host-services-v1"
+          ]
+        },
+        "configVersion": 1,
+        "entry": "module.mjs",
+        "files": [
+          "module.mjs",
+          "THIRD-PARTY-NOTICES.txt"
+        ],
+        "capabilities": [
+          "persistent-connection",
+          "state-feedback",
+          "host.router-groups",
+          "service.refreshNames",
+          "service.setDestinationLock",
+          "service.recallSalvo",
+          "service.routeCrosspoints",
+          "service.interrogateRouteTargets",
+          "service.selectDestination",
+          "service.selectSource",
+          "service.submitSelectSource",
+          "service.take",
+          "service.submitTake",
+          "service.directRoute",
+          "service.submitDirectRoute",
+          "service.submitDirectRouteTracked",
+          "service.watch",
+          "service.unwatch"
+        ],
+        "settings": [],
+        "actions": [
+          {
+            "id": "ross-swp08.select-source",
+            "label": "select source",
+            "description": "Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.",
+            "fields": [],
+            "legacy": true,
+            "completion": "submitted",
+            "timeoutMs": 120000
+          },
+          {
+            "id": "ross-swp08.select-destination",
+            "label": "select destination",
+            "description": "Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.",
+            "fields": [],
+            "legacy": true,
+            "completion": "submitted",
+            "timeoutMs": 120000
+          },
+          {
+            "id": "ross-swp08.take",
+            "label": "take",
+            "description": "Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.",
+            "fields": [],
+            "legacy": true,
+            "completion": "submitted",
+            "timeoutMs": 120000
+          },
+          {
+            "id": "ross-swp08.toggle-group-enabled",
+            "label": "toggle group enabled",
+            "description": "Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.",
+            "fields": [],
+            "legacy": true,
+            "completion": "submitted",
+            "timeoutMs": 120000
+          },
+          {
+            "id": "ross-swp08.direct-route",
+            "label": "direct route",
+            "description": "Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.",
+            "fields": [],
+            "legacy": true,
+            "completion": "submitted",
+            "timeoutMs": 120000
+          },
+          {
+            "id": "ross-swp08.refresh-names",
+            "label": "refresh names",
+            "description": "Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.",
+            "fields": [],
+            "legacy": true,
+            "completion": "submitted",
+            "timeoutMs": 120000
+          },
+          {
+            "id": "evertz-quartz.lock-destination",
+            "label": "lock destination",
+            "description": "Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.",
+            "fields": [],
+            "legacy": true,
+            "completion": "submitted",
+            "timeoutMs": 120000
+          },
+          {
+            "id": "evertz-quartz.unlock-destination",
+            "label": "unlock destination",
+            "description": "Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.",
+            "fields": [],
+            "legacy": true,
+            "completion": "submitted",
+            "timeoutMs": 120000
+          },
+          {
+            "id": "evertz-quartz.recall-salvo",
+            "label": "recall salvo",
+            "description": "Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.",
+            "fields": [],
+            "legacy": true,
+            "completion": "submitted",
+            "timeoutMs": 120000
+          }
+        ],
+        "feedback": []
+      },
+      "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-evertz-quartz-v1.0.0/hubble-evertz-quartz-1.0.0.hubble-module",
+      "bytes": 319633,
+      "notes": "Initial independent 1.0.0 release for Hubble Module API 1. Existing saved action and feedback identities remain supported. Source, tests, protocol implementations, and authoring documentation are available in the versioned public repository. Requires a Hubble host with the capabilities declared in the manifest.\n",
+      "channel": "stable",
+      "publishedAt": "2026-10-25T23:07:31.993Z",
+      "status": "active"
+    },
+    {
+      "identity": {
+        "moduleId": "hubble-lightencode",
+        "version": "1.0.0",
+        "digest": "7526df28e98d7457ea3e44a5dd7428578b4181e38d173aa0fa7eefd4bd9e29a1"
+      },
+      "manifest": {
+        "formatVersion": 1,
+        "id": "hubble-lightencode",
+        "name": "Light Encode",
+        "version": "1.0.0",
+        "apiVersion": 1,
+        "host": {
+          "minimumVersion": "2.0.0",
+          "requiredFeatures": [
+            "host-services-v1"
+          ]
+        },
+        "configVersion": 1,
+        "entry": "module.mjs",
+        "files": [
+          "module.mjs",
+          "THIRD-PARTY-NOTICES.txt"
+        ],
+        "capabilities": [
+          "persistent-connection",
+          "state-feedback",
+          "service.toggleAll",
+          "service.toggleSlot",
+          "service.toggleTimer",
+          "service.setTimerMinutes"
+        ],
+        "settings": [],
+        "actions": [
+          {
+            "id": "lightencode.record-toggle-all",
+            "label": "record toggle all",
+            "description": "Preserves the existing saved action contract and protocol completion boundary.",
+            "fields": [],
+            "legacy": true,
+            "completion": "state-confirmed",
+            "timeoutMs": 30000
+          },
+          {
+            "id": "lightencode.record-toggle-slot",
+            "label": "record toggle slot",
+            "description": "Preserves the existing saved action contract and protocol completion boundary.",
+            "fields": [],
+            "legacy": true,
+            "completion": "state-confirmed",
+            "timeoutMs": 30000
+          },
+          {
+            "id": "lightencode.timer-toggle",
+            "label": "timer toggle",
+            "description": "Preserves the existing saved action contract and protocol completion boundary.",
+            "fields": [],
+            "legacy": true,
+            "completion": "state-confirmed",
+            "timeoutMs": 30000
+          },
+          {
+            "id": "lightencode.timer-set-minutes",
+            "label": "timer set minutes",
+            "description": "Preserves the existing saved action contract and protocol completion boundary.",
+            "fields": [],
+            "legacy": true,
+            "completion": "state-confirmed",
+            "timeoutMs": 30000
+          }
+        ],
+        "feedback": []
+      },
+      "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-lightencode-v1.0.0/hubble-lightencode-1.0.0.hubble-module",
+      "bytes": 297224,
+      "notes": "Initial independent 1.0.0 release for Hubble Module API 1. Existing saved action and feedback identities remain supported. Source, tests, protocol implementations, and authoring documentation are available in the versioned public repository. Requires a Hubble host with the capabilities declared in the manifest.\n",
+      "channel": "stable",
+      "publishedAt": "2026-10-25T23:07:34.474Z",
+      "status": "active"
+    },
+    {
+      "identity": {
+        "moduleId": "hubble-livegrade",
+        "version": "1.0.0",
+        "digest": "a246997a974354465c38e168c3027879ed043da3d9834c064f2f6712286b8c3c"
+      },
+      "manifest": {
+        "formatVersion": 1,
+        "id": "hubble-livegrade",
+        "name": "LiveGrade",
+        "version": "1.0.0",
+        "apiVersion": 1,
+        "host": {
+          "minimumVersion": "2.0.0",
+          "requiredFeatures": [
+            "host-services-v1"
+          ]
+        },
+        "configVersion": 1,
+        "entry": "module.mjs",
+        "files": [
+          "module.mjs",
+          "THIRD-PARTY-NOTICES.txt"
+        ],
+        "capabilities": [
+          "state-feedback",
+          "host.livegrade",
+          "service.selectSlot",
+          "service.requestAccessibilityPermission"
+        ],
+        "settings": [],
+        "actions": [
+          {
+            "id": "livegrade.select-slot",
+            "label": "Select Slot",
+            "description": "Select a slot using the existing signed native helper and verify its reported selection.",
+            "fields": [],
+            "legacy": true,
+            "completion": "state-confirmed",
+            "timeoutMs": 30000
+          }
+        ],
+        "feedback": []
+      },
+      "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-livegrade-v1.0.0/hubble-livegrade-1.0.0.hubble-module",
+      "bytes": 290533,
+      "notes": "Initial independent 1.0.0 release for Hubble Module API 1. Existing saved action and feedback identities remain supported. Source, tests, protocol implementations, and authoring documentation are available in the versioned public repository. Requires a Hubble host with the capabilities declared in the manifest.\n",
+      "channel": "stable",
+      "publishedAt": "2026-10-25T23:07:36.584Z",
+      "status": "active"
+    },
+    {
+      "identity": {
+        "moduleId": "hubble-mock",
+        "version": "1.0.0",
+        "digest": "dd0bd40968fbd00364d1579f59bc46e589755b76e3b25e7df49a20876cf7a897"
+      },
+      "manifest": {
+        "formatVersion": 1,
+        "id": "hubble-mock",
+        "name": "Mock",
+        "version": "1.0.0",
+        "apiVersion": 1,
+        "host": {
+          "minimumVersion": "2.0.0"
+        },
+        "configVersion": 1,
+        "entry": "module.mjs",
+        "files": [
+          "module.mjs",
+          "THIRD-PARTY-NOTICES.txt"
+        ],
+        "capabilities": [],
+        "settings": [],
+        "actions": [
+          {
+            "id": "mock",
+            "label": "mock",
+            "description": "Preserves the saved action contract and reports only observed completion.",
+            "fields": [],
+            "legacy": true,
+            "completion": "local",
+            "timeoutMs": 120000
+          }
+        ],
+        "feedback": []
+      },
+      "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-mock-v1.0.0/hubble-mock-1.0.0.hubble-module",
+      "bytes": 141135,
+      "notes": "Initial independent 1.0.0 release for Hubble Module API 1. Existing saved action and feedback identities remain supported. Source, tests, protocol implementations, and authoring documentation are available in the versioned public repository. Requires a Hubble host with the capabilities declared in the manifest.\n",
+      "channel": "stable",
+      "publishedAt": "2026-10-25T23:07:38.607Z",
+      "status": "active"
+    },
+    {
+      "identity": {
+        "moduleId": "hubble-ross-ultrix-ogp",
+        "version": "1.0.0",
+        "digest": "8dfe57302d334f9c8f051b8e133653b62621a0882c01c02b54846d315428263a"
+      },
+      "manifest": {
+        "formatVersion": 1,
+        "id": "hubble-ross-ultrix-ogp",
+        "name": "Ross Ultrix OGP",
+        "version": "1.0.0",
+        "apiVersion": 1,
+        "host": {
+          "minimumVersion": "2.0.0",
+          "requiredFeatures": [
+            "host-services-v1"
+          ]
+        },
+        "configVersion": 1,
+        "entry": "module.mjs",
+        "files": [
+          "module.mjs",
+          "THIRD-PARTY-NOTICES.txt"
+        ],
+        "capabilities": [
+          "persistent-connection",
+          "state-feedback",
+          "host.router-groups",
+          "service.refreshNames",
+          "service.setDestinationLock",
+          "service.recallSalvo",
+          "service.routeCrosspoints",
+          "service.interrogateRouteTargets",
+          "service.selectDestination",
+          "service.selectSource",
+          "service.submitSelectSource",
+          "service.take",
+          "service.submitTake",
+          "service.directRoute",
+          "service.submitDirectRoute",
+          "service.submitDirectRouteTracked",
+          "service.watch",
+          "service.unwatch"
+        ],
+        "settings": [],
+        "actions": [
+          {
+            "id": "ross-swp08.select-source",
+            "label": "select source",
+            "description": "Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.",
+            "fields": [],
+            "legacy": true,
+            "completion": "submitted",
+            "timeoutMs": 120000
+          },
+          {
+            "id": "ross-swp08.select-destination",
+            "label": "select destination",
+            "description": "Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.",
+            "fields": [],
+            "legacy": true,
+            "completion": "submitted",
+            "timeoutMs": 120000
+          },
+          {
+            "id": "ross-swp08.take",
+            "label": "take",
+            "description": "Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.",
+            "fields": [],
+            "legacy": true,
+            "completion": "submitted",
+            "timeoutMs": 120000
+          },
+          {
+            "id": "ross-swp08.toggle-group-enabled",
+            "label": "toggle group enabled",
+            "description": "Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.",
+            "fields": [],
+            "legacy": true,
+            "completion": "submitted",
+            "timeoutMs": 120000
+          },
+          {
+            "id": "ross-swp08.direct-route",
+            "label": "direct route",
+            "description": "Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.",
+            "fields": [],
+            "legacy": true,
+            "completion": "submitted",
+            "timeoutMs": 120000
+          },
+          {
+            "id": "ross-swp08.refresh-names",
+            "label": "refresh names",
+            "description": "Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.",
+            "fields": [],
+            "legacy": true,
+            "completion": "submitted",
+            "timeoutMs": 120000
+          }
+        ],
+        "feedback": []
+      },
+      "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-ross-ultrix-ogp-v1.0.0/hubble-ross-ultrix-ogp-1.0.0.hubble-module",
+      "bytes": 328462,
+      "notes": "Initial independent 1.0.0 release for Hubble Module API 1. Existing saved action and feedback identities remain supported. Source, tests, protocol implementations, and authoring documentation are available in the versioned public repository. Requires a Hubble host with the capabilities declared in the manifest.\n",
+      "channel": "stable",
+      "publishedAt": "2026-10-25T23:07:40.680Z",
+      "status": "active"
+    },
+    {
+      "identity": {
+        "moduleId": "hubble-system-actions",
+        "version": "1.0.0",
+        "digest": "89f0041539889f23a5dc48e9338f1330a6aa612038ea356ace635870a8f7345a"
+      },
+      "manifest": {
+        "formatVersion": 1,
+        "id": "hubble-system-actions",
+        "name": "System Actions",
+        "version": "1.0.0",
+        "apiVersion": 1,
+        "host": {
+          "minimumVersion": "2.0.0",
+          "requiredFeatures": [
+            "host-services-v1"
+          ]
+        },
+        "configVersion": 1,
+        "entry": "module.mjs",
+        "files": [
+          "module.mjs",
+          "THIRD-PARTY-NOTICES.txt"
+        ],
+        "capabilities": [
+          "host.keyboard"
+        ],
+        "settings": [],
+        "actions": [
+          {
+            "id": "keyboard.send-shortcut",
+            "label": "keyboard.send shortcut",
+            "description": "Preserves the saved action contract and reports only observed completion.",
+            "fields": [],
+            "legacy": true,
+            "completion": "response",
+            "timeoutMs": 120000
+          },
+          {
+            "id": "system.activate-application",
+            "label": "system.activate application",
+            "description": "Preserves the saved action contract and reports only observed completion.",
+            "fields": [],
+            "legacy": true,
+            "completion": "response",
+            "timeoutMs": 120000
+          },
+          {
+            "id": "system.open-application",
+            "label": "system.open application",
+            "description": "Preserves the saved action contract and reports only observed completion.",
+            "fields": [],
+            "legacy": true,
+            "completion": "response",
+            "timeoutMs": 120000
+          },
+          {
+            "id": "system.select-menu-item",
+            "label": "system.select menu item",
+            "description": "Preserves the saved action contract and reports only observed completion.",
+            "fields": [],
+            "legacy": true,
+            "completion": "response",
+            "timeoutMs": 120000
+          }
+        ],
+        "feedback": []
+      },
+      "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-system-actions-v1.0.0/hubble-system-actions-1.0.0.hubble-module",
+      "bytes": 282625,
+      "notes": "Initial independent 1.0.0 release for Hubble Module API 1. Existing saved action and feedback identities remain supported. Source, tests, protocol implementations, and authoring documentation are available in the versioned public repository. Requires a Hubble host with the capabilities declared in the manifest.\n",
+      "channel": "stable",
+      "publishedAt": "2026-10-25T23:07:42.784Z",
+      "status": "active"
+    },
+    {
+      "identity": {
+        "moduleId": "hubble-tsl",
+        "version": "1.0.0",
+        "digest": "27443d0661beef2ce8da37475af7fde55453e622844a2dd05e80d1649c40fb37"
+      },
+      "manifest": {
+        "formatVersion": 1,
+        "id": "hubble-tsl",
+        "name": "TSL UMD",
+        "version": "1.0.0",
+        "apiVersion": 1,
+        "host": {
+          "minimumVersion": "2.0.0",
+          "requiredFeatures": [
+            "host-services-v1"
+          ]
+        },
+        "configVersion": 1,
+        "entry": "module.mjs",
+        "files": [
+          "module.mjs",
+          "THIRD-PARTY-NOTICES.txt"
+        ],
+        "capabilities": [
+          "persistent-listener",
+          "state-feedback",
+          "host.tsl"
+        ],
+        "settings": [],
+        "actions": [
+          {
+            "id": "tsl.tally-feedback",
+            "label": "tsl.tally feedback",
+            "description": "Preserves the saved action contract and reports only observed completion.",
+            "fields": [],
+            "legacy": true,
+            "completion": "local",
+            "timeoutMs": 120000
+          },
+          {
+            "id": "tsl.set-indication",
+            "label": "tsl.set indication",
+            "description": "Preserves the saved action contract and reports only observed completion.",
+            "fields": [],
+            "legacy": true,
+            "completion": "local",
+            "timeoutMs": 120000
+          },
+          {
+            "id": "tsl.tally-switch",
+            "label": "tsl.tally switch",
+            "description": "Preserves the saved action contract and reports only observed completion.",
+            "fields": [],
+            "legacy": true,
+            "completion": "local",
+            "timeoutMs": 120000
+          },
+          {
+            "id": "tsl.follow",
+            "label": "tsl.follow",
+            "description": "Preserves the saved action contract and reports only observed completion.",
+            "fields": [],
+            "legacy": true,
+            "completion": "local",
+            "timeoutMs": 120000
+          }
+        ],
+        "feedback": []
+      },
+      "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-tsl-v1.0.0/hubble-tsl-1.0.0.hubble-module",
+      "bytes": 286555,
+      "notes": "Initial independent 1.0.0 release for Hubble Module API 1. Existing saved action and feedback identities remain supported. Source, tests, protocol implementations, and authoring documentation are available in the versioned public repository. Requires a Hubble host with the capabilities declared in the manifest.\n",
+      "channel": "stable",
+      "publishedAt": "2026-10-25T23:07:44.856Z",
+      "status": "active"
+    }
+  ]
+}
