@@ -6,7 +6,7 @@ const file = process.argv[2];
 if (
   !file ||
   path.isAbsolute(file) ||
-  !/^[a-zA-Z0-9_/-]+\.json$/.test(file) ||
+  !/^[a-zA-Z0-9_./-]+\.json$/.test(file) ||
   file.split("/").includes("..")
 )
   throw Error("Expected a committed reviewed pin-list path");

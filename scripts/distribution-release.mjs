@@ -84,6 +84,13 @@ export async function distributionRelease(mode, pinPath, reviewPath) {
     throw Error(
       "Usage: distribution-release.mjs stage|verify|publish PIN_JSON [REVIEWED_OUTPUT_JSON]",
     );
+  if (
+    mode !== "stage" &&
+    (!/^[a-zA-Z0-9_./-]+\.json$/.test(pinPath) ||
+      path.isAbsolute(pinPath) ||
+      pinPath.split("/").includes(".."))
+  )
+    throw Error("Publish requires a repository-relative reviewed pin");
   const pin = JSON.parse(await readFile(pinPath, "utf8"));
   const { tag } = distributionIdentity(pin);
   if (mode === "stage") {
@@ -137,12 +144,6 @@ export async function distributionRelease(mode, pinPath, reviewPath) {
     await writeFile(reviewPath, JSON.stringify(pin, null, 2) + "\n");
     return { status: "staged-for-review", tag, reviewPath };
   }
-  if (
-    !/^[a-zA-Z0-9_/-]+\.json$/.test(pinPath) ||
-    path.isAbsolute(pinPath) ||
-    pinPath.split("/").includes("..")
-  )
-    throw Error("Publish requires a repository-relative reviewed pin");
   execFileSync("git", ["ls-files", "--error-unmatch", "--", pinPath], {
     stdio: "pipe",
   });

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
   distributionIdentity,
+  distributionRelease,
   verifyDistribution,
 } from "../scripts/distribution-release.mjs";
 test("standalone distributions require exact versioned repository URL, size and digest", () => {
@@ -31,4 +32,18 @@ test("standalone distributions require exact versioned repository URL, size and 
     () => distributionIdentity({ ...pin, file: "../escape.tgz" }),
     /pin/,
   );
+});
+
+test("reviewed pin paths still reject absolute paths and parent traversal", async () => {
+  for (const file of [
+    "/tmp/developer-kit.lock.json",
+    "../developer-kit.lock.json",
+    "release-review/../developer-kit.lock.json",
+    "C:\\review\\developer-kit.lock.json",
+  ]) {
+    await assert.rejects(
+      distributionRelease("verify", file),
+      /repository-relative reviewed pin/,
+    );
+  }
 });

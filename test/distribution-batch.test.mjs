@@ -10,12 +10,13 @@ const script = fileURLToPath(
   new URL("../scripts/distribution-batch.mjs", import.meta.url),
 );
 for (const corrupt of [false, true])
-  test(`initial distribution batch preflights every pin before publication: corrupt=${corrupt}`, async () => {
+  test(`initial distribution batch accepts nested .lock.json review pins and preflights all bytes: corrupt=${corrupt}`, async () => {
     const root = await mkdtemp(
       path.join(tmpdir(), "hubble-distribution-batch-"),
     );
     try {
       await mkdir(path.join(root, "bin"));
+      await mkdir(path.join(root, "release-review"));
       const fixtures = {};
       for (const name of ["sdk", "tools"]) {
         const bytes = Buffer.from(`${name} reviewed bytes`),
@@ -29,7 +30,7 @@ for (const corrupt of [false, true])
           ).toString("base64"),
         };
         await writeFile(
-          path.join(root, `${name}.json`),
+          path.join(root, "release-review", `${name}.lock.json`),
           JSON.stringify({
             version: "1.0.0",
             file,
@@ -40,8 +41,11 @@ for (const corrupt of [false, true])
         );
       }
       await writeFile(
-        path.join(root, "pins.json"),
-        JSON.stringify({ formatVersion: 1, pins: ["sdk.json", "tools.json"] }),
+        path.join(root, "release-review", "pins.lock.json"),
+        JSON.stringify({
+          formatVersion: 1,
+          pins: ["release-review/sdk.lock.json", "release-review/tools.lock.json"],
+        }),
       );
       await writeFile(
         path.join(root, "fixtures.json"),
@@ -75,7 +79,7 @@ else if(args[1]==='edit')fs.writeFileSync(args[2]+'.published','yes');else throw
         { cwd: root },
       );
       const run = () =>
-        spawnSync(process.execPath, [script, "pins.json"], {
+        spawnSync(process.execPath, [script, "release-review/pins.lock.json"], {
           cwd: root,
           encoding: "utf8",
           env: { ...process.env, PATH: `${root}/bin:${process.env.PATH}` },
