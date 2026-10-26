@@ -1,4 +1,4 @@
-export const sourceBranch = "codex/independent-modules";
+export const sourceBranch = "main";
 export const catalogBranch =
   process.env.MODULE_CATALOG_BRANCH ?? "module-catalog";
 if (

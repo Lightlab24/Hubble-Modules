@@ -5,12 +5,13 @@ module API versions and settings schema versions are separate. Node 22 or newer 
 required. No Hubble application checkout or application rebuild is needed.
 
 ```sh
-node /path/to/kit/module-tool.mjs create ./example example-device
-node /path/to/kit/module-tool.mjs build ./example
-node /path/to/kit/module-tool.mjs test ./example
-node /path/to/kit/module-tool.mjs validate ./example
-node /path/to/kit/module-tool.mjs pack ./example example-device-1.0.0.hubble-module
-node /path/to/kit/module-tool.mjs inspect example-device-1.0.0.hubble-module
+cd -P /path/to/kit
+node ./module-tool.mjs create ./example example-device
+node ./module-tool.mjs build ./example
+node ./module-tool.mjs test ./example
+node ./module-tool.mjs validate ./example
+node ./module-tool.mjs pack ./example example-device-1.0.0.hubble-module
+node ./module-tool.mjs inspect example-device-1.0.0.hubble-module
 ```
 
 The portable CLI includes its compiler runtime. For editor types and extra project
@@ -41,8 +42,13 @@ stale feedback, accurate completion evidence and secret-free diagnostics/errors.
 Keep non-default previous-version fixtures and test settings migration/rollback.
 Package only declared runtime files, preserving dependency license notices.
 
-Use `service-client.mjs --url http://127.0.0.1:42841 describe` for an isolated
-Hubble2 service. Import/download never selects a version. Link a built source
+Run the published 1.0.0 kit from its canonical directory as shown above. Its direct
+entry guard can silently skip an absolute path containing a macOS directory alias
+such as `/var` instead of `/private/var`.
+
+Use `node ./service-client.mjs --url http://127.0.0.1:42838 describe` for Hubble's
+default browser/service API, or use the saved browser port. An isolated Hubble2
+development service defaults to port 42841. Import/download never selects a version. Link a built source
 project and explicitly reload to test it; automatic updates, when enabled, apply
 only at the next service startup. Device commands require an authorized test target.
 Workers provide failure isolation, not an operating-system sandbox.

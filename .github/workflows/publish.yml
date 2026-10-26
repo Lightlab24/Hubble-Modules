@@ -28,7 +28,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   publish:
-    if: github.ref == 'refs/heads/codex/independent-modules'
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: module-publication
     permissions:

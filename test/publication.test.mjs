@@ -153,7 +153,7 @@ else throw Error('Unexpected request '+args);
           ...process.env,
           PATH: `${root}/bin:${process.env.PATH}`,
           GITHUB_REPOSITORY: "Lightlab24/Hubble-Modules",
-          GITHUB_REF: "refs/heads/codex/independent-modules",
+          GITHUB_REF: "refs/heads/main",
           GH_TOKEN: "test-token",
           MODULE_SIGNING_KEY_ID: "test",
           MODULE_SIGNING_PRIVATE_KEY: pem,
@@ -207,15 +207,21 @@ else throw Error('Unexpected request '+args);
   });
 }
 
-test("publication rejects main before any catalog or release action", () => {
-  const result = spawnSync(process.execPath, [script], {
-    encoding: "utf8",
-    env: {
-      ...process.env,
-      GITHUB_REPOSITORY: "Lightlab24/Hubble-Modules",
-      GITHUB_REF: "refs/heads/main",
-    },
+for (const ref of [
+  "refs/heads/codex/independent-modules",
+  "refs/pull/1/merge",
+  "refs/tags/module-example-v1.0.0",
+]) {
+  test(`publication rejects ${ref} before any catalog or release action`, () => {
+    const result = spawnSync(process.execPath, [script], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_REPOSITORY: "Lightlab24/Hubble-Modules",
+        GITHUB_REF: ref,
+      },
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /reviewed distribution source branch/);
   });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /reviewed distribution source branch/);
-});
+}

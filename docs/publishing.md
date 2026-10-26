@@ -15,12 +15,12 @@ bytes; these steps do not build Electron or publish anything.
    Run `node scripts/stage-candidate.mjs ARCHIVE NOTES_FILE beta catalog-candidate.json`
    to inspect the archive, stage the draft, and prepare the next catalog input.
    Use `stable` only after the module meets the stable qualification requirements.
-3. Prepare and review `catalog-input.json` on `codex/independent-modules`. Retain historical entries,
+3. Prepare and review `catalog-input.json` on `main`. Retain historical entries,
    use formatVersion 2, increase `sequence`, set fresh ISO `issuedAt`/`expiresAt`, and add the exact
    inspected manifest, digest, archive length, immutable download URL, notes,
    publication time, and `stable` or `beta` channel. Withdraw rather than delete
    old entries. A metadata-only renewal uses the same process without new assets.
-4. Run **Publish reviewed module catalog** from `codex/independent-modules` with that input path.
+4. Run **Publish reviewed module catalog** from `main` with that input path.
    The `module-publication` environment requires maintainer approval. It holds
    the dedicated Ed25519 signing key; the job uses GitHub's short-lived token
    scoped to this repository. It has no access to the private application source.
@@ -29,7 +29,7 @@ bytes; these steps do not build Electron or publish anything.
    advances the signed catalog using the previous content SHA. If publication
    succeeds but catalog advancement fails, inspect the state and rerun the same
    input; do not rebuild or replace existing assets.
-6. Check the feed in Hubble2. Discovery and download must not reload a module.
+6. Check the feed in an isolated Hubble test profile. Discovery and download must not reload a module.
    Activate only the intended connection/version using Apply and reload.
 
 The catalog URL is
@@ -74,7 +74,7 @@ For a kit or bridge, run `node scripts/distribution-release.mjs stage PIN_JSON
 releases/REVIEWED_PIN.json` after its source commit is pushed. This verifies local
 bytes, stages a draft asset, downloads it for exact verification, and writes the
 reviewable pin. Commit that pin, then run **Publish reviewed module catalog** with mode `distribution`
-from `codex/independent-modules`. This protected job downloads/verifies the asset before publishing; it
+from `main`. This protected job downloads/verifies the asset before publishing; it
 does not build or execute artifact code. Never reuse a version for different bytes.
 
 Catalog GETs and compare-and-swap PUTs explicitly target `module-catalog` (override

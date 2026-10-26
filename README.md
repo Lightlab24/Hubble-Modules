@@ -5,8 +5,10 @@ reviewed downloads live here. All 14 initial official modules, including Evertz
 Quartz, start at version **1.0.0**. Each module has its own version and release tag;
 Hubble application releases remain in [Hubble-Releases](https://github.com/Lightlab24/Hubble-Releases).
 
-The module platform is being qualified in isolated Hubble2. This repository does
-not announce a production Hubble 2 app release or enable modules in Hubble 1.x.
+Independent modules require Hubble 2.0 or a compatible newer host. Hubble 2.0
+updates the existing Hubble installation and retains its Companion protocol and
+connection settings. The Hubble2 application name and separate ports are for
+isolated development only. Application availability is listed in Hubble-Releases.
 
 ## Build and develop
 
@@ -32,7 +34,7 @@ See [the developer guide](docs/developer-kit.md).
 
 ## Installation and versions
 
-Import a `.hubble-module` archive through Module Library, or link a built project
+Import a `.hubble-module` archive through Add module, or link a built project
 using the kit's service client. Download/import does not activate it. Manual
 selection reloads the chosen scope. Modules are stored by exact version and digest.
 
