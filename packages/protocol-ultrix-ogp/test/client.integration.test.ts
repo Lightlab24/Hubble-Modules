@@ -332,6 +332,10 @@ async function startFakeUltrix(options: {
     sockets.add(socket)
     const decoder = new OgpNetstringDecoder()
     socket.on('close', () => sockets.delete(socket))
+    socket.on('error', (error: NodeJS.ErrnoException) => {
+      // Cancelling synchronization can reset a socket with unread fixture replies.
+      if (error.code !== 'ECONNRESET') throw error
+    })
     socket.on('data', (chunk) => {
       for (const frame of decoder.push(chunk)) {
         const decoded = decodeOgpFrame(frame)
