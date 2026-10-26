@@ -111,6 +111,62 @@ const FieldsSchema = z
       }
     })
   })
+/** Declarative screens: the host renders controls; packages never supply renderer code. */
+export const ModulePageTableSchema = z.strictObject({
+  type: z.literal('table'),
+  id: ModuleIdentifierSchema,
+  label: LabelSchema,
+  description: DescriptionSchema.optional(),
+  source: z.enum(['settings', 'state']),
+  columns: FieldsSchema.refine(
+    (fields) => fields.length > 0 && fields.length <= 32,
+    'Expected 1–32 columns',
+  ),
+  maxRows: z.int().min(1).max(512),
+})
+export const ModulePageSchema = z.strictObject({
+  id: ModuleIdentifierSchema,
+  label: LabelSchema,
+  description: DescriptionSchema.optional(),
+  sections: z
+    .array(
+      z.discriminatedUnion('type', [
+        z.strictObject({
+          type: z.literal('settings'),
+          id: ModuleIdentifierSchema,
+          label: LabelSchema,
+          fields: z.array(ModuleIdentifierSchema).min(1).max(128),
+        }),
+        ModulePageTableSchema,
+        z.strictObject({
+          type: z.literal('status'),
+          id: ModuleIdentifierSchema,
+          label: LabelSchema,
+          fields: z
+            .array(z.strictObject({ id: ModuleIdentifierSchema, label: LabelSchema }))
+            .max(32),
+        }),
+      ]),
+    )
+    .min(1)
+    .max(16),
+})
+export const ModuleTableRowsSchema = z
+  .array(
+    z.strictObject({
+      id: ModuleIdentifierSchema,
+      values: z.record(ModuleIdentifierSchema, z.json()),
+    }),
+  )
+  .max(512)
+  .superRefine((rows, ctx) => {
+    if (new Set(rows.map((row) => row.id)).size !== rows.length)
+      ctx.addIssue({ code: 'custom', message: 'Duplicate table row ID' })
+  })
+export type ModulePage = z.infer<typeof ModulePageSchema>
+export type ModulePageTable = z.infer<typeof ModulePageTableSchema>
+export type ModuleTableRow = z.infer<typeof ModuleTableRowsSchema>[number]
+
 export const ModuleCompletionSchema = z.enum(['local', 'submitted', 'response', 'state-confirmed'])
 export const ModuleActionSchema = z.strictObject({
   id: ModuleIdentifierSchema,
@@ -148,6 +204,7 @@ export const ModuleManifestSchema = z
     settings: FieldsSchema,
     actions: z.array(ModuleActionSchema).max(256),
     feedback: z.array(ModuleFeedbackDefinitionSchema).max(256),
+    pages: z.array(ModulePageSchema).max(16).optional(),
   })
   .superRefine((manifest, ctx) => {
     if (!manifest.files.includes(manifest.entry))
@@ -157,6 +214,72 @@ export const ModuleManifestSchema = z
       const normalized = key === 'files' ? values.map((value) => value.toLowerCase()) : values
       if (new Set(normalized).size !== normalized.length)
         ctx.addIssue({ code: 'custom', path: [key], message: 'Duplicate identity' })
+    }
+    if (manifest.pages?.length) {
+      if (
+        !('requiredFeatures' in manifest.host) ||
+        !manifest.host.requiredFeatures?.includes('module-pages-v1')
+      )
+        ctx.addIssue({ code: 'custom', path: ['host'], message: 'Pages require module-pages-v1' })
+      const pageIds = new Set<string>()
+      const tableIds = new Set<string>()
+      const settings = new Set(manifest.settings.map((field) => field.id))
+      manifest.pages.forEach((page, pageIndex) => {
+        if (pageIds.has(page.id))
+          ctx.addIssue({
+            code: 'custom',
+            path: ['pages', pageIndex, 'id'],
+            message: 'Duplicate page ID',
+          })
+        pageIds.add(page.id)
+        const sectionIds = new Set<string>()
+        page.sections.forEach((section, sectionIndex) => {
+          const path = ['pages', pageIndex, 'sections', sectionIndex]
+          if (sectionIds.has(section.id))
+            ctx.addIssue({ code: 'custom', path, message: 'Duplicate section ID' })
+          sectionIds.add(section.id)
+          if (
+            section.type === 'settings' &&
+            (new Set(section.fields).size !== section.fields.length ||
+              section.fields.some((id) => !settings.has(id)))
+          )
+            ctx.addIssue({
+              code: 'custom',
+              path,
+              message: 'Settings sections must reference unique declared fields',
+            })
+          if (section.type === 'table') {
+            const key = `${section.source}:${section.id}`
+            if (tableIds.has(key) || (section.source === 'settings' && settings.has(section.id)))
+              ctx.addIssue({
+                code: 'custom',
+                path,
+                message: 'Table storage keys must be unique and separate from settings fields',
+              })
+            tableIds.add(key)
+            if (section.columns.some((field) => field.type === 'text' && field.secret))
+              ctx.addIssue({
+                code: 'custom',
+                path,
+                message: 'Secret fields belong in settings forms, not spreadsheet cells',
+              })
+            if (section.source === 'settings') {
+              try {
+                validateModuleFields(
+                  section.columns,
+                  Object.fromEntries(section.columns.map((field) => [field.id, field.default])),
+                )
+              } catch {
+                ctx.addIssue({
+                  code: 'custom',
+                  path,
+                  message: 'Editable table columns need valid defaults for new rows',
+                })
+              }
+            }
+          }
+        })
+      })
     }
   })
 
@@ -314,4 +437,21 @@ export function validateModuleFields(
     )
       throw new Error(`Invalid choice for ${field.label}`)
   }
+}
+
+/** The same validation applies to edits, migrations, selection and automatic updates. */
+export function validateModuleSettings(manifest: ModuleManifest, values: ModuleValues): void {
+  validateModuleFields(manifest.settings, values)
+  for (const page of manifest.pages ?? [])
+    for (const section of page.sections) {
+      if (
+        section.type !== 'table' ||
+        section.source !== 'settings' ||
+        values[section.id] === undefined
+      )
+        continue
+      const rows = ModuleTableRowsSchema.parse(values[section.id])
+      if (rows.length > section.maxRows) throw new Error(`Too many rows in ${section.label}`)
+      for (const row of rows) validateModuleFields(section.columns, row.values)
+    }
 }

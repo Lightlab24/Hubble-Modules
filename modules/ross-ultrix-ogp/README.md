@@ -1,7 +1,16 @@
 # Ross Ultrix OGP
 
-Official module `hubble-ross-ultrix-ogp`, version **1.0.0**, using stable Hubble module API **1**.
+Official module `hubble-ross-ultrix-ogp`, version **1.0.1**, using stable Hubble module API **1**.
 Ross Ultrix OGP JSON subscriptions and confirmed crosspoints.
+
+## Action grouping
+
+Action descriptors provide API `group` labels for Select Source, Select Destination,
+Take, Group On/Off, Route, and Refresh Names. The labels are presentation metadata;
+saved action IDs, field values, settings, and protocol behavior are unchanged.
+Version 1.0.1 requires the `module-presentation-v1` host feature (Hubble 2.0.1).
+The workbook and Advanced routing dropdowns read these labels from the selected
+package. Later regrouping changes only this module; it needs no Hubble rebuild.
 
 ## Source ownership
 

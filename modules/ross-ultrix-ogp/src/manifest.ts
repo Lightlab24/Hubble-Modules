@@ -5,7 +5,7 @@ export default defineModuleManifest({
   apiVersion: 1,
   host: {
     minimumVersion: '2.0.0',
-    requiredFeatures: ['host-services-v1'],
+    requiredFeatures: ['host-services-v1', 'module-presentation-v1'],
   },
   configVersion: 1,
   capabilities: [
@@ -33,6 +33,7 @@ export default defineModuleManifest({
     {
       id: 'ross-swp08.select-source',
       label: 'select source',
+      group: 'Select Source',
       description:
         'Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.',
       completion: 'submitted',
@@ -43,6 +44,7 @@ export default defineModuleManifest({
     {
       id: 'ross-swp08.select-destination',
       label: 'select destination',
+      group: 'Select Destination',
       description:
         'Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.',
       completion: 'submitted',
@@ -53,6 +55,7 @@ export default defineModuleManifest({
     {
       id: 'ross-swp08.take',
       label: 'take',
+      group: 'Take',
       description:
         'Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.',
       completion: 'submitted',
@@ -63,6 +66,7 @@ export default defineModuleManifest({
     {
       id: 'ross-swp08.toggle-group-enabled',
       label: 'toggle group enabled',
+      group: 'Group On/Off',
       description:
         'Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.',
       completion: 'submitted',
@@ -73,6 +77,7 @@ export default defineModuleManifest({
     {
       id: 'ross-swp08.direct-route',
       label: 'direct route',
+      group: 'Route',
       description:
         'Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.',
       completion: 'submitted',
@@ -83,6 +88,7 @@ export default defineModuleManifest({
     {
       id: 'ross-swp08.refresh-names',
       label: 'refresh names',
+      group: 'Refresh Names',
       description:
         'Preserves saved IDs, grouped selections, level behavior and protocol completion boundaries.',
       completion: 'submitted',

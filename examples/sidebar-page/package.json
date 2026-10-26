@@ -1,0 +1,22 @@
+{
+  "name": "@hubble-module/example-sidebar",
+  "version": "1.0.1",
+  "private": true,
+  "type": "module",
+  "hubble": {
+    "id": "example-sidebar",
+    "name": "Sidebar example"
+  },
+  "scripts": {
+    "build": "hubble-module build .",
+    "test": "hubble-module test .",
+    "validate": "hubble-module validate .",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@hubble/module-sdk": "https://github.com/Lightlab24/Hubble-Modules/releases/download/sdk-v1.1.0/hubble-module-sdk-1.1.0.tgz",
+    "@hubble/module-tools": "https://github.com/Lightlab24/Hubble-Modules/releases/download/tools-v1.1.0/hubble-module-tools-1.1.0.tgz",
+    "@types/node": "22.19.17",
+    "typescript": "6.0.3"
+  }
+}

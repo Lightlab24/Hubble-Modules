@@ -50,7 +50,11 @@ node <client> request <operation.json>
 Pass `--url` on every command when targeting an origin other than Hubble2.
 Protected services accept `--password-file PATH`; do not put passwords into logs.
 `request` accepts the API's JSON operations, including `select`, `rollback`,
-`download`, `check-updates`, `choices`, and `cleanup`. Inspect `describe` first.
+`download`, `check-updates`, `choices`, `host-choices`, and `cleanup`. Inspect
+`describe` first. `choices` takes `workspaceId`, `connectionId`, and `provider`;
+`host-choices` takes `workspaceId`, `capabilityId`, and `provider`. Both are read-only
+and require a running instance. Hubble 2.0.1 advertises `module-settings-choices-v1`
+for settings providers in both scopes.
 Select includes workspaceId, connectionId, exact identity (moduleId,version,digest),
 pinned and expectedDraftRevision. Rollback includes the same scope and revision.
 Download includes only the exact identity. Neither import nor download activates.

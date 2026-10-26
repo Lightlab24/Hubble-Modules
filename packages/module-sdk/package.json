@@ -1,17 +1,50 @@
 {
-  "name": "@hubble/module-sdk", "version": "1.0.0", "type": "module",
+  "name": "@hubble/module-sdk",
+  "version": "1.1.0",
+  "type": "module",
   "description": "Hubble module author contracts, descriptors, packaging and conformance helpers",
-  "engines": { "node": ">=22" },
-  "exports": {
-    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
-    "./authoring": { "types": "./dist/authoring.d.ts", "import": "./dist/authoring.js" },
-    "./testing": { "types": "./dist/testing.d.ts", "import": "./dist/testing.js" },
-    "./package": { "types": "./dist/package.d.ts", "import": "./dist/package.js" },
-    "./project": { "types": "./dist/project.d.ts", "import": "./dist/project.js" },
-    "./catalog-schema": { "types": "./dist/catalog-schema.d.ts", "import": "./dist/catalog-schema.js" }
+  "engines": {
+    "node": ">=22"
   },
-  "files": ["dist", "README.md"],
-  "scripts": { "build": "tsc -p tsconfig.json", "typecheck": "tsc -p tsconfig.json --noEmit" },
-  "dependencies": { "zod": "4.4.3" },
-  "devDependencies": { "typescript": "6.0.3", "@types/node": "22.19.17" }
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./authoring": {
+      "types": "./dist/authoring.d.ts",
+      "import": "./dist/authoring.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js"
+    },
+    "./package": {
+      "types": "./dist/package.d.ts",
+      "import": "./dist/package.js"
+    },
+    "./project": {
+      "types": "./dist/project.d.ts",
+      "import": "./dist/project.js"
+    },
+    "./catalog-schema": {
+      "types": "./dist/catalog-schema.d.ts",
+      "import": "./dist/catalog-schema.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3",
+    "@types/node": "22.19.17"
+  }
 }

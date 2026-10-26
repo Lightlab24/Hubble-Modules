@@ -41,6 +41,24 @@ try {
     path.join(root, "docs/developer-kit.md"),
     path.join(kit, "README.md"),
   );
+  await cp(path.join(root, "docs"), path.join(kit, "docs"), {
+    recursive: true,
+  });
+  await cp(
+    path.join(root, "docs/sidebar-pages.md"),
+    path.join(kit, "sidebar-pages.md"),
+  );
+  await cp(
+    path.join(root, "examples/sidebar-page"),
+    path.join(kit, "examples/sidebar-page"),
+    {
+      recursive: true,
+      filter: (source) =>
+        !source
+          .split(path.sep)
+          .some((part) => part === "node_modules" || part === "dist"),
+    },
+  );
   for (const dependency of ["esbuild-wasm", "zod"]) {
     const packageRoot = path.dirname(
       require.resolve(dependency + "/package.json"),
@@ -78,6 +96,17 @@ try {
       [path.join(kit, "module-tool.mjs"), ...args],
       { cwd: temporary, timeout: 60_000, stdio: "pipe" },
     );
+  for (const command of ["build", "test", "validate"]) {
+    execFileSync(
+      process.execPath,
+      [
+        path.join(kit, "module-tool.mjs"),
+        command,
+        path.join(kit, "examples/sidebar-page"),
+      ],
+      { cwd: temporary, timeout: 60_000, stdio: "pipe" },
+    );
+  }
   await mkdir(path.dirname(output), { recursive: true });
   execFileSync("/usr/bin/tar", [
     "-czf",

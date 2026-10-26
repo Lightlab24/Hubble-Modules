@@ -26,6 +26,6 @@
     "typescript": "6.0.3",
     "vitest": "4.1.10",
     "zod": "4.4.3",
-    "@hubble/module-sdk": "workspace:1.0.0"
+    "@hubble/module-sdk": "workspace:1.1.0"
   }
 }

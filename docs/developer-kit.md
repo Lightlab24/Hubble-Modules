@@ -71,3 +71,10 @@ dependency URLs and its own compiler/test configuration. Run `pnpm install`, the
 `pnpm build`, `pnpm test`, and `pnpm typecheck` in that project. Choose your own
 module ID/version before publishing a separate fork. Shared package tarballs expose
 compiled JavaScript and declarations; no workspace paths remain in their dependencies.
+
+## Sidebar screens
+
+SDK/tools/kit 1.1.0 adds [declarative sidebar pages](sidebar-pages.md) for Hubble
+2.0.2 (`module-pages-v1`). The kit includes `examples/sidebar-page`, a local simulator
+with settings, a typed spreadsheet and live status. Module-only changes can add pages,
+sections and columns on a compatible host.

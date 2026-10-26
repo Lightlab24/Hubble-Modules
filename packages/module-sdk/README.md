@@ -7,3 +7,8 @@ use `@hubble/module-sdk/testing` with module-owned fake transports. SDK package
 versions are independent of API 1 and independently released module versions.
 
 See the developer kit guide and `skills/hubble-module-author` in Hubble-Modules.
+
+Version 1.1.0 adds `ModulePageSchema`, `ModulePageTableSchema`,
+`ModuleTableRowsSchema` and `validateModuleSettings`. See `docs/sidebar-pages.md`
+and `examples/sidebar-page` in Hubble-Modules. Hosts advertise `module-pages-v1`;
+API version remains 1.

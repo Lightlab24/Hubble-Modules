@@ -14,9 +14,15 @@ features belong in a host implementation change, not guessed manifest fields.
   for an ungrouped entry. Labels are trimmed, nonempty plain text of at most 160
   characters; nested groups are unsupported. Group labels are presentation only:
   never encode them in IDs, saved field values, feedback keys, or execution logic.
-  Regrouping needs no configuration migration. Use a matching updated host/kit;
-  older Hubble2 validators reject this optional metadata. Declare the corresponding
-  minimum host/features; never put incompatible manifests in the legacy catalog.
+  Regrouping needs no configuration migration. Require `module-presentation-v1`
+  when depending on groups in the workbook and Advanced legacy action pickers
+  (Hubble 2.0.1). Earlier API 1 hosts can accept the metadata without displaying it
+  in those pickers. New actions on an existing connection use its “Module actions”
+  entry and the generic action/feedback editor; do not extend host-owned legacy
+  command enums. Static and live choice groups use the same presentation rules.
+  Settings `choiceProvider` support, including workspace host modules, requires
+  `module-settings-choices-v1`. Providers observe the current running instance;
+  uncommitted form values are not passed to `choices(provider)`.
 - Actions declare their stable ID, fields, timeout, and completion criterion:
   local change, transport submission, response, or observed state confirmation.
   `completionAlternatives` explicitly lists other possible evidence when one saved
@@ -43,7 +49,7 @@ features belong in a host implementation change, not guessed manifest fields.
 - Publish `unavailable` for unknown/stale feedback. Do not turn a disconnected
   device's unknown state into confirmed `inactive`.
 - Module code describes fields and behavior; the host owns UI composition and
-  persistence. Arbitrary UI panels, presets, and live variables are outside this
+  persistence. Arbitrary executable UI panels, presets, and live variables are outside this
   initial contract.
 
 For edits, capture representative saved settings and action fields before making
@@ -94,3 +100,14 @@ an automatic upper app-major limit. Test the oldest declared host and a current
 host against representative saved settings/actions. Settings migrations are pure
 data transformations; they do not migrate saved action fields or feedback rules.
 Retain compatibility handlers where those contracts cannot be migrated.
+
+## Declarative sidebar pages
+
+SDK/tools/kit 1.1.0 supports optional `manifest.pages` on Hubble 2.0.2 with the
+required feature `module-pages-v1`. See the [page contract](../../../docs/sidebar-pages.md)
+and `examples/sidebar-page`. Pages contain settings forms, editable settings-backed
+tables, read-only state tables and status fields. Table rows use stable IDs and
+existing portable binding settings; publish transient status through `state.values`.
+Use valid row defaults, preserve IDs, test immediate editing before saves resolve
+and failure recovery, and cover non-default export/import values. Do not expose
+module JavaScript in the renderer or bypass existing scope/command validation.

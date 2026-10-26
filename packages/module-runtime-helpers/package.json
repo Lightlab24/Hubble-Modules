@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "zod": "4.4.3",
-    "@hubble/module-sdk": "workspace:1.0.0",
+    "@hubble/module-sdk": "workspace:1.1.0",
     "@hubble/module-contracts": "workspace:1.0.0"
   }
 }
