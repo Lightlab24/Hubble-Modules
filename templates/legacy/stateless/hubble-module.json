@@ -1,0 +1,35 @@
+{
+  "formatVersion": 1,
+  "id": "example-stateless",
+  "name": "Stateless status request",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "host": {
+    "minMajor": 2,
+    "maxMajor": 2
+  },
+  "configVersion": 1,
+  "entry": "module.mjs",
+  "files": ["module.mjs"],
+  "capabilities": ["http"],
+  "settings": [
+    {
+      "id": "baseUrl",
+      "label": "Base URL",
+      "type": "text",
+      "required": true,
+      "default": "http://127.0.0.1:9999"
+    }
+  ],
+  "actions": [
+    {
+      "id": "get-status",
+      "label": "Get status",
+      "description": "Observes an HTTP response; does not confirm a device operation.",
+      "fields": [],
+      "completion": "response",
+      "timeoutMs": 5000
+    }
+  ],
+  "feedback": []
+}

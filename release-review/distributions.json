@@ -1,0 +1,17 @@
+{
+  "formatVersion": 1,
+  "pins": [
+    "release-review/developer-kit.lock.json",
+    "release-review/dit-browse-client.lock.json",
+    "release-review/lightencode-client.lock.json",
+    "release-review/module-contracts.lock.json",
+    "release-review/module-runtime-helpers.lock.json",
+    "release-review/module-sdk.lock.json",
+    "release-review/module-tools.lock.json",
+    "release-review/official-module-runtime.lock.json",
+    "release-review/protocol-cyanview-rcp.lock.json",
+    "release-review/protocol-ultrix-ogp.lock.json",
+    "release-review/protocol-videohub.lock.json",
+    "release-review/router-runtime.lock.json"
+  ]
+}

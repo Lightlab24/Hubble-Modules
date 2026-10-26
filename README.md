@@ -1,52 +1,60 @@
 # Hubble Modules
 
-The public home for Hubble module downloads, developer tools, and community
-submissions. Hubble's application source remains in its private repository;
-application downloads remain in [Hubble-Releases](https://github.com/Lightlab24/Hubble-Releases).
+Official Hubble module source, reusable protocol packages, public author SDK and
+reviewed downloads live here. All 14 initial official modules, including Evertz
+Quartz, start at version **1.0.0**. Each module has its own version and release tag;
+Hubble application releases remain in [Hubble-Releases](https://github.com/Lightlab24/Hubble-Releases).
 
-The module platform is currently being tested in **Hubble2**. It requires the
-Hubble 2 host/API 1 and does not add module loading to Hubble 1.5.1. No production
-Hubble 2 application release is announced here. The initial catalog is empty;
-device modules enter it only after maintainer qualification.
+Independent modules require Hubble 2.0 or a compatible newer host. Hubble 2.0
+updates the existing Hubble installation and retains its Companion protocol and
+connection settings. The Hubble2 application name and separate ports are for
+isolated development only. Application availability is listed in Hubble-Releases.
 
-## Develop and test locally
+## Build and develop
 
-Download the [developer kit](https://github.com/Lightlab24/Hubble-Modules/releases/tag/developer-kit-api1-preview.1),
-extract it, and give `skills/hubble-module-author/SKILL.md` to your coding assistant.
-The kit includes the SDK contracts, a simulator, an HTTP example, tests, packaging
-tools, and a CLI that can import and reload a module while Hubble2 stays running.
-Node.js 22 or newer is required; the kit does not need access to private source.
+Use Node 22.22.2 and pnpm 11.0.8:
 
-Edit a project under your Documents folder. Import its `.hubble-module` package
-through **Module Connections → Module Library**, or link the project using the
-kit's CLI. An explicit reload activates changed code. Building or editing files
-does not silently replace a running module.
+```sh
+pnpm install --frozen-lockfile
+pnpm build
+pnpm build:modules
+pnpm typecheck
+pnpm test
+pnpm test:protocols
+pnpm package:modules
+pnpm kit
+```
 
-## Submit a module
+`node scripts/modules.mjs package http-requests` qualifies one module independently.
+Authors edit split TypeScript source, never generated `dist/module.mjs` bundles.
+Protocol libraries and narrow host-service contracts are shared public packages;
+no private Hubble checkout is required to build a module. The developer kit includes
+its compiler, SDK types, multi-file starter, conformance helpers and author skill.
+See [the developer guide](docs/developer-kit.md).
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md). Submit a project under
-`submissions/<module-id>/` with its manifest, implementation, and tests, or open a
-module submission issue linking your source repository. Maintainers review
-compatibility, observed completion/feedback, cleanup, reload, and saved action IDs.
-Submission does not automatically publish a module or include it in an app release.
+## Installation and versions
 
-Publishing is restricted to approved maintainers. Public access allows reading,
-downloading, and proposing contributions; it does not grant write access. The
-catalog-signing workflow also requires approval from `Lightlab24`. Hubble accepts
-an official update only when its exact archive digest appears in the signed catalog.
+Import a `.hubble-module` archive through Add module, or link a built project
+using the kit's service client. Download/import does not activate it. Manual
+selection reloads the chosen scope. Modules are stored by exact version and digest.
 
-## Updates and versions
+Automatic installation is off by default. Bindings may inherit the installation
+setting or override it on/off; a pin wins. Opted-in compatible active stable
+updates download in the background and apply only at the next service startup.
+Beta versions remain a separate manual choice. Opening a page, changing workspaces
+or importing a workspace does not trigger automatic application.
 
-`catalog.json` is a signed version catalog. Hubble checks metadata in the
-background and on request; it downloads only versions the user chooses. Applying
-a version reloads affected module instances, while the service continues running.
-Existing selections remain pinned to exact package identities. Previous versions
-remain available for rollback unless explicitly withdrawn from new installations.
+`catalog-v2.json` is signed discovery metadata, including requirements and channels.
+`catalog.json` remains a compatible subset for older readers. Unknown future APIs
+are visible but unavailable. Module requirements declare a full minimum app version
+and needed host features; SDK/tool versions are independent. Existing API 1 modules
+remain supported by compatible newer hosts. Previous archives and settings snapshots
+support rollback subject to configuration compatibility.
 
-Approved packages use independent `module-<id>-v<version>` release tags. The
-catalog identifies the exact archive digest, host/API compatibility, release
-notes, and stable/beta channel. The application release and module release
-histories are separate.
+## Contributions and publication
 
-See [Publishing](docs/publishing.md) for the maintainer workflow. The public key is
-in `keys/catalog.json`; signing credentials are never shipped in a package or kit.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) and [Publishing](docs/publishing.md).
+PR checks and candidate builds have no publication credentials. Maintainers review
+exact archive bytes before immutable release publication and catalog signing.
+The app's curated offline bundle lock separately pins URL, size and digest; app
+packaging downloads/caches those bytes instead of compiling module source.

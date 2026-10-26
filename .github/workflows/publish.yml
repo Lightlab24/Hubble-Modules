@@ -2,11 +2,25 @@ name: Publish reviewed module catalog
 on:
   workflow_dispatch:
     inputs:
-      catalog:
-        description: Committed, reviewed catalog input path
+      mode:
+        description: Publish signed catalog or a reviewed standalone distribution
+        type: choice
+        options: [catalog, distribution, initial-release]
+        default: catalog
         required: true
+      catalog:
+        description: Committed, reviewed catalog input path (catalog mode)
+        required: false
         default: catalog-input.json
         type: string
+      pin:
+        description: Committed reviewed SDK, tools, contracts, kit or runtime pin (distribution mode)
+        type: string
+        required: false
+      pins:
+        description: Committed reviewed distribution pin-list JSON (initial-release mode)
+        type: string
+        required: false
 permissions:
   contents: read
 concurrency:
@@ -26,11 +40,32 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22.22.2
+      - uses: pnpm/action-setup@v4
+        if: inputs.mode != 'distribution'
+        with: { version: 11.0.8 }
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+        if: inputs.mode != 'distribution'
+      - run: pnpm --filter @hubble/module-sdk build
+        if: inputs.mode != 'distribution'
       - run: node --test test/*.test.mjs
+        if: inputs.mode != 'distribution'
+      - name: Verify all standalone distributions before publishing the reviewed batch
+        if: inputs.mode == 'initial-release'
+        env:
+          REVIEWED_PINS: ${{ inputs.pins }}
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/distribution-batch.mjs "$REVIEWED_PINS"
       - name: Verify exact packages, publish, and sign catalog
+        if: inputs.mode != 'distribution'
         env:
           CATALOG_INPUT: ${{ inputs.catalog }}
           MODULE_SIGNING_KEY_ID: ${{ vars.HUBBLE_MODULE_SIGNING_KEY_ID }}
           MODULE_SIGNING_PRIVATE_KEY: ${{ secrets.HUBBLE_MODULE_SIGNING_PRIVATE_KEY }}
           GH_TOKEN: ${{ github.token }}
         run: node scripts/publish.mjs
+      - name: Verify exact reviewed distribution and publish draft
+        if: inputs.mode == 'distribution'
+        env:
+          REVIEWED_PIN: ${{ inputs.pin }}
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/distribution-release.mjs publish "$REVIEWED_PIN"

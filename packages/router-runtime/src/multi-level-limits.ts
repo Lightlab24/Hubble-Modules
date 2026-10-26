@@ -1,0 +1,1 @@
+export const MAX_PENDING_LEGACY_ROUTES = 32

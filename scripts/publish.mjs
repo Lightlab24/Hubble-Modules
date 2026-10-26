@@ -1,8 +1,15 @@
+import {
+  sourceBranch,
+  catalogBranch,
+  catalogReadArgs,
+} from "./publication-targets.mjs";
 // This job inspects archives as data. It never imports or executes submitted module code.
 import { execFileSync } from "node:child_process";
 import { readFile, writeFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
+import { legacyCatalogSubset } from "./legacy-catalog.mjs";
 import {
   repository,
   releaseAsset,
@@ -14,9 +21,9 @@ import { verifyModuleCatalog } from "./sdk-validation.mjs";
 
 if (
   process.env.GITHUB_REPOSITORY !== repository ||
-  process.env.GITHUB_REF !== "refs/heads/main"
+  process.env.GITHUB_REF !== `refs/heads/${sourceBranch}`
 )
-  throw Error("Publish only from the distribution repository main branch");
+  throw Error("Publish only from the reviewed distribution source branch");
 if (!process.env.GH_TOKEN || !process.env.MODULE_SIGNING_PRIVATE_KEY)
   throw Error("Missing protected publication credentials");
 const input = process.env.CATALOG_INPUT ?? "catalog-input.json";
@@ -33,9 +40,21 @@ const gh = (args) =>
     stdio: ["ignore", "pipe", "pipe"],
   });
 const keys = JSON.parse(await readFile("keys/catalog.json", "utf8"));
-const current = JSON.parse(
-  gh(["api", `repos/${repository}/contents/catalog.json`]),
-);
+const desired = JSON.parse(await readFile(input, "utf8"));
+const catalogFile =
+  desired.formatVersion === 2 ? "catalog-v2.json" : "catalog.json";
+let current;
+try {
+  current = JSON.parse(gh(catalogReadArgs(repository, catalogFile)));
+} catch (error) {
+  if (
+    catalogFile !== "catalog-v2.json" ||
+    !/404|Not Found/.test(String(error.stderr))
+  )
+    throw error;
+  current = JSON.parse(gh(catalogReadArgs(repository, "catalog.json")));
+  current = { ...current, sha: undefined };
+}
 const envelope = JSON.parse(
   Buffer.from(current.content, "base64").toString("utf8"),
 );
@@ -43,10 +62,9 @@ const oldIssuedAt = JSON.parse(
   Buffer.from(envelope.payload, "base64").toString("utf8"),
 ).issuedAt;
 const previous = verifyModuleCatalog(envelope, keys, Date.parse(oldIssuedAt));
-const catalog = validateUpdate(
-  JSON.parse(await readFile(input, "utf8")),
-  previous,
-);
+// Idempotent recovery if v2 was committed before updating the legacy subset.
+const alreadyPublished = isDeepStrictEqual(desired, previous);
+const catalog = alreadyPublished ? desired : validateUpdate(desired, previous);
 const signed = signCatalog(
   catalog,
   process.env.MODULE_SIGNING_KEY_ID,
@@ -116,17 +134,48 @@ try {
     JSON.stringify({
       message: `Publish module catalog ${catalog.sequence}`,
       sha: current.sha,
+      branch: catalogBranch,
       content: Buffer.from(JSON.stringify(signed) + "\n").toString("base64"),
     }),
   );
-  gh([
-    "api",
-    "--method",
-    "PUT",
-    `repos/${repository}/contents/catalog.json`,
-    "--input",
-    request,
-  ]);
+  if (!alreadyPublished)
+    gh([
+      "api",
+      "--method",
+      "PUT",
+      `repos/${repository}/contents/${catalogFile}`,
+      "--input",
+      request,
+    ]);
+  if (catalogFile === "catalog-v2.json") {
+    const oldLegacy = JSON.parse(
+      gh(catalogReadArgs(repository, "catalog.json")),
+    );
+    const legacy = signCatalog(
+      legacyCatalogSubset(catalog),
+      process.env.MODULE_SIGNING_KEY_ID,
+      process.env.MODULE_SIGNING_PRIVATE_KEY,
+      keys,
+    );
+    const legacyRequest = path.join(temporary, "legacy-catalog-update.json");
+    await writeFile(
+      legacyRequest,
+      JSON.stringify({
+        message: `Publish legacy module catalog ${catalog.sequence}`,
+        sha: oldLegacy.sha,
+        branch: catalogBranch,
+        content: Buffer.from(JSON.stringify(legacy) + "\n").toString("base64"),
+      }),
+    );
+    gh([
+      "api",
+      "--method",
+      "PUT",
+      `repos/${repository}/contents/catalog.json`,
+      "--input",
+      legacyRequest,
+    ]);
+  }
   console.log(
     JSON.stringify({
       status: "published",

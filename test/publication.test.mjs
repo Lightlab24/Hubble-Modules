@@ -22,7 +22,13 @@ const template = JSON.parse(
     "utf8",
   ),
 );
-for (const scenario of ["draft", "already-published", "corrupt"]) {
+for (const scenario of [
+  "draft",
+  "already-published",
+  "corrupt",
+  "v2-draft",
+  "v2-recovery",
+]) {
   test(`publication ${scenario}: exact bytes, ordered publication, and recovery`, async () => {
     const root = await mkdtemp(path.join(tmpdir(), "hubble-publication-test-"));
     try {
@@ -43,8 +49,11 @@ for (const scenario of ["draft", "already-published", "corrupt"]) {
         releases: [],
       };
       const current = signCatalog(before, "test", pem, keys);
+      const selectedManifest = scenario.startsWith("v2")
+        ? { ...template, host: { minimumVersion: "2.0.0" } }
+        : template;
       const bytes = createModulePackage(
-        template,
+        selectedManifest,
         new Map([
           [
             "module.mjs",
@@ -57,6 +66,7 @@ for (const scenario of ["draft", "already-published", "corrupt"]) {
       const filename = `${template.id}-${template.version}.hubble-module`;
       const next = {
         ...before,
+        formatVersion: scenario.startsWith("v2") ? 2 : 1,
         sequence: 1,
         releases: [
           {
@@ -92,7 +102,13 @@ for (const scenario of ["draft", "already-published", "corrupt"]) {
           length: bytes.length,
           current: {
             sha: "previous-content-sha",
-            content: Buffer.from(JSON.stringify(current)).toString("base64"),
+            content: Buffer.from(
+              JSON.stringify(
+                scenario === "v2-recovery"
+                  ? signCatalog(next, "test", pem, keys)
+                  : current,
+              ),
+            ).toString("base64"),
           },
         }),
       );
@@ -104,10 +120,11 @@ for (const scenario of ["draft", "already-published", "corrupt"]) {
 import {readFileSync,appendFileSync,writeFileSync} from 'node:fs';
 const args=process.argv.slice(2),f=JSON.parse(readFileSync('fixture.json'));
 appendFileSync('operations.jsonl',JSON.stringify(args)+'\\n');
-if(args.includes('PUT')) { const input=JSON.parse(readFileSync(args[args.indexOf('--input')+1])); if(input.sha!=='previous-content-sha')throw Error('Missing compare-and-swap'); writeFileSync('published.json',Buffer.from(input.content,'base64')); console.log('{}'); }
+if(args.includes('PUT')) { const input=JSON.parse(readFileSync(args[args.indexOf('--input')+1])); if(input.branch!=='module-catalog')throw Error('Catalog must never write main'); if(!args.some(a=>a.endsWith('/catalog-v2.json'))&&input.sha!=='previous-content-sha')throw Error('Missing compare-and-swap'); writeFileSync(args.some(a=>a.endsWith('/catalog-v2.json'))?'published-v2.json':'published.json',Buffer.from(input.content,'base64')); console.log('{}'); }
 else if(args[0]==='release'&&args[1]==='edit')console.log('{}');
 else if(args[0]==='release'&&args[1]==='view')console.log(JSON.stringify({apiUrl:'https://api.github.com/repos/Lightlab24/Hubble-Modules/releases/123'}));
-else if(args[1]?.endsWith('/contents/catalog.json'))console.log(JSON.stringify(f.current));
+else if(args[1]?.endsWith('/contents/catalog-v2.json')){if(!args.includes('ref=module-catalog'))throw Error('Missing catalog ref');if(f.scenario==='v2-recovery')console.log(JSON.stringify(f.current));else{console.error('HTTP 404 Not Found');process.exit(1)}}
+else if(args[1]?.endsWith('/contents/catalog.json')){if(!args.includes('ref=module-catalog'))throw Error('Missing catalog ref');console.log(JSON.stringify(f.current));}
 else if(args[1]?.endsWith('/releases/123'))console.log(JSON.stringify({draft:f.scenario!=='already-published',assets:[{name:f.filename,id:42,size:f.length,state:'uploaded'}]}));
 else if(args[1]?.endsWith('/releases/assets/42'))process.stdout.write(readFileSync('archive'));
 else throw Error('Unexpected request '+args);
@@ -158,19 +175,53 @@ else throw Error('Unexpected request '+args);
         assert.equal(puts.length, 0);
       } else {
         assert.equal(result.status, 0, result.stderr);
-        assert.equal(edits.length, scenario === "draft" ? 1 : 0);
-        assert.equal(puts.length, 1);
+        assert.equal(
+          edits.length,
+          ["draft", "v2-draft"].includes(scenario) ? 1 : 0,
+        );
+        assert.equal(puts.length, scenario === "v2-draft" ? 2 : 1);
         assert(operations.at(-1).includes("PUT"));
         const published = JSON.parse(
           await readFile(path.join(root, "published.json"), "utf8"),
         );
-        assert.equal(
-          verifyModuleCatalog(published, keys).releases[0].identity.digest,
-          inspected.digest,
-        );
+        if (scenario.startsWith("v2")) {
+          assert.equal(verifyModuleCatalog(published, keys).releases.length, 0);
+          if (scenario === "v2-draft") {
+            const v2 = JSON.parse(
+              await readFile(path.join(root, "published-v2.json"), "utf8"),
+            );
+            assert.equal(
+              verifyModuleCatalog(v2, keys).releases[0].identity.digest,
+              inspected.digest,
+            );
+          }
+        } else
+          assert.equal(
+            verifyModuleCatalog(published, keys).releases[0].identity.digest,
+            inspected.digest,
+          );
       }
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+}
+
+for (const ref of [
+  "refs/heads/codex/independent-modules",
+  "refs/pull/1/merge",
+  "refs/tags/module-example-v1.0.0",
+]) {
+  test(`publication rejects ${ref} before any catalog or release action`, () => {
+    const result = spawnSync(process.execPath, [script], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_REPOSITORY: "Lightlab24/Hubble-Modules",
+        GITHUB_REF: ref,
+      },
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /reviewed distribution source branch/);
   });
 }
