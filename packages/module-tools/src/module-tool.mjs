@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { readFile, writeFile, lstat } from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -68,7 +69,7 @@ function summary(inspected) {
 }
 if (
   process.argv[1] &&
-  pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url
+  pathToFileURL(realpathSync(process.argv[1])).href === import.meta.url
 ) {
   runModuleTool(process.argv.slice(2)).then(
     (value) => console.log(JSON.stringify(value, null, 2)),

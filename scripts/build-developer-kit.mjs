@@ -12,6 +12,7 @@ import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { runKitCommand } from "./kit-self-test.mjs";
 const root = path.resolve(import.meta.dirname, "..");
 const require = createRequire(
   path.join(root, "packages/module-tools/package.json"),
@@ -23,7 +24,9 @@ const file = `hubble-module-developer-kit-${version}.tar.gz`;
 const output = path.resolve(
   process.argv[2] ?? path.join(root, "artifacts", file),
 );
-const temporary = await mkdtemp(path.join(tmpdir(), "hubble-module-kit-"));
+const temporary = await realpath(
+  await mkdtemp(path.join(tmpdir(), "hubble-module-kit-")),
+);
 try {
   const kit = path.join(temporary, "hubble-module-developer-kit");
   await mkdir(kit);
@@ -98,11 +101,7 @@ try {
     ["pack", project, path.join(temporary, "test.hubble-module")],
     ["inspect", path.join(temporary, "test.hubble-module")],
   ])
-    execFileSync(
-      process.execPath,
-      [path.join(kit, "module-tool.mjs"), ...args],
-      { cwd: temporary, timeout: 60_000, stdio: "pipe" },
-    );
+    runKitCommand(path.join(kit, "module-tool.mjs"), args, temporary);
   for (const example of [
     "sidebar-page",
     "independent-api",
@@ -110,14 +109,10 @@ try {
     "exchange-consumer",
   ])
     for (const command of ["build", "test", "validate"]) {
-      execFileSync(
-        process.execPath,
-        [
-          path.join(kit, "module-tool.mjs"),
-          command,
-          path.join(kit, `examples/${example}`),
-        ],
-        { cwd: temporary, timeout: 60_000, stdio: "pipe" },
+      runKitCommand(
+        path.join(kit, "module-tool.mjs"),
+        [command, path.join(kit, `examples/${example}`)],
+        temporary,
       );
     }
   await mkdir(path.dirname(output), { recursive: true });

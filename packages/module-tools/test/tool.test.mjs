@@ -1,9 +1,32 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile, rm, cp } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile, rm, cp, symlink } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { runModuleTool } from "../dist/module-tool.mjs";
+
+test("the portable CLI executes through a symlinked entry path", async () => {
+  const temporary = await mkdtemp(path.join(tmpdir(), "hubble-cli-alias-"));
+  try {
+    const alias = path.join(temporary, "module-tool.mjs");
+    const project = path.join(temporary, "project");
+    await symlink(new URL("../dist/module-tool.mjs", import.meta.url), alias);
+    const result = JSON.parse(
+      execFileSync(process.execPath, [alias, "create", project, "test-cli-alias"], {
+        encoding: "utf8",
+        timeout: 60_000,
+      }),
+    );
+    assert.equal(result.status, "created");
+    assert.equal(
+      JSON.parse(await readFile(path.join(project, "package.json"), "utf8")).hubble.id,
+      "test-cli-alias",
+    );
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
+});
 
 test("portable TypeScript source builds, passes conformance and packages without a private checkout", async () => {
   const temporary = await mkdtemp(path.join(tmpdir(), "hubble-author-test-"));

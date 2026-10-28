@@ -45,6 +45,8 @@ Package only declared runtime files, preserving dependency license notices.
 Run the published 1.0.0 kit from its canonical directory as shown above. Its direct
 entry guard can silently skip an absolute path containing a macOS directory alias
 such as `/var` instead of `/private/var`.
+Version 1.2.0 resolves the CLI entry through symlinks, and kit qualification checks
+each command's result so a skipped invocation cannot count as a passing test.
 
 Use `node ./service-client.mjs --url http://127.0.0.1:42838 describe` for Hubble's
 default browser/service API, or use the saved browser port. An isolated Hubble2

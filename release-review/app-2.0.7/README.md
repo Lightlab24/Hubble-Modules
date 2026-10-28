@@ -13,21 +13,19 @@ The four module release tags must target source commit `56876a3f9e73b0a4f805751d
 
 All four archives were rebuilt byte for byte against their exact reviewed Hubble pins using Node 22.22.2 and pnpm 11.0.8. The module build used the source commit's SDK contract snapshot, before optional hostEnabled and dataAccess fields were added. No module behavior source differs from the following SDK/kit commit.
 
-The SDK, tools, and kit release tags target this following commit, which adds those two optional SDK schema fields:
+The SDK release `sdk-v1.2.0` targets e98a9bbf6af97935179aa4dfd73ffb61bb225fcf. It adds optional hostEnabled and dataAccess SDK schema fields after the module source snapshot. The SDK archive is unchanged by the later kit repair.
 
-- sdk-v1.2.0
-- tools-v1.2.0
-- developer-kit-v1.2.0
+The `tools-v1.2.0` and `developer-kit-v1.2.0` release tags target the repair commit containing this review update. The tool CLI resolves symlinked entry paths correctly. The independent API example supplies required action and feedback descriptions, and kit qualification requires each of its 18 commands to return the expected successful JSON result.
 
-SDK and tools were freshly packaged from that exact source. Their dependencies are published npm packages; no additional unpublished Hubble assets are needed. All 843 regular files emitted by the rebuilt developer kit match the pinned kit byte for byte. The pinned kit additionally contains a generated pnpm esbuild shim with the build machine's NODE_PATH; the portable CLI does not use it. Tar metadata and this generated shim prevent byte-identical kit repacking, so the original reviewed kit archive is preserved exactly.
+The earlier unpublished kit candidate was invalid: its example omitted descriptions, and the macOS builder silently skipped CLI calls through /var aliases. Clean Linux CI exposed the defect before publication. The tools and kit drafts must be replaced with the newly reviewed hashes; no published release is changed. SDK and the four module archives retain their original reviewed bytes. SDK/tools runtime dependencies are published npm packages, so no further Hubble distribution is required.
 
 ## Qualification
 
 - Node 22.22.2, pnpm 11.0.8; frozen installation.
 - SDK/tools build and all production module builds passed.
-- Current SDK/kit source: 688 tests across 56 files, 28 author/tooling tests, and TypeScript passed.
+- Current SDK/kit source: 688 tests across 56 files, 31 author/tooling tests, and TypeScript passed.
 - Earlier module source: 688 tests across 56 files and TypeScript passed; all four module archives matched their exact pinned bytes and SHA-256.
-- Author distribution packaging and the portable kit's isolated starter/examples build/test/validate checks passed.
+- Author distribution packaging and all 18 portable kit starter/example commands passed with command-specific result validation. CLI symlink execution and rejection of silent/wrong-status self-tests have focused regressions.
 - Catalog signature was verified against the committed public key; the proposed update passes immutable-history and archive validation.
 - No live hardware, installed applications, production profiles, or database was used.
 

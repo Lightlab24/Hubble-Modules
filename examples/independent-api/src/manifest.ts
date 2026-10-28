@@ -84,6 +84,7 @@ export default defineModuleManifest({
     {
       id: "set-active",
       label: "Set active",
+      description: "Update the example's local active state.",
       fields: [
         {
           id: "active",
@@ -97,7 +98,14 @@ export default defineModuleManifest({
       timeoutMs: 1000,
     },
   ],
-  feedback: [{ id: "active", label: "Active", fields: [] }],
+  feedback: [
+    {
+      id: "active",
+      label: "Active",
+      description: "Reports the example's current local active state.",
+      fields: [],
+    },
+  ],
   pages: [
     {
       id: "setup",
