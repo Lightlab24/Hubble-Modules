@@ -32,6 +32,7 @@ export async function broker() {
   const controls = {
     acknowledge: true,
     feedback: true,
+    feedbackDelay: 0,
     retainedFeedback: false,
     ignoredCamera: "",
     ackDelay: 0,
@@ -169,10 +170,15 @@ export async function broker() {
               ? "1"
               : "0";
           recordings.set(recordingTopic, recording);
-          if (controls.feedback)
-            socket.write(
-              publish(recordingTopic, recording, controls.retainedFeedback),
-            );
+          if (controls.feedback) {
+            const feedback = () =>
+              socket.write(
+                publish(recordingTopic, recording, controls.retainedFeedback),
+              );
+            if (controls.feedbackDelay)
+              timers.push(setTimeout(feedback, controls.feedbackDelay));
+            else feedback();
+          }
         } else if (header === 0xc0) socket.write(Buffer.from([0xd0, 0]));
       }
     });

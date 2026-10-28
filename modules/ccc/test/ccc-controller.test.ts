@@ -58,7 +58,9 @@ async function setup(
         return Promise.resolve(config);
       },
     },
-    40,
+    // Real TCP confirmations use the production budget. Deadline-only behavior
+    // is covered by the coordinator tests without socket scheduling races.
+    undefined,
     (definition, changed) => {
       if (definition.host !== "127.0.0.1")
         throw new Error("Only loopback is allowed in this test");
@@ -285,12 +287,15 @@ describe("CCC provider against a loopback MQTT simulator", () => {
       "Rec",
       "RecToggle",
     ]);
+    // Confirmation remains required when feedback arrives after a normal TCP
+    // scheduling delay, beyond the old 40 ms fixture deadline.
+    network.controls.feedbackDelay = 60;
     const toggle = await provider.cameraCommand(
       connection.connectionId,
       "record-camera",
       101,
     );
-    expect(toggle.outcome).toBe("success");
+    expect(toggle.outcome, JSON.stringify(toggle.targets)).toBe("success");
     expect(network.commands[2]).toMatchObject({
       topic: "unit/a/camhead/action/set/keyboard",
       value: "Stop",
