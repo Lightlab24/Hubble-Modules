@@ -41,11 +41,22 @@ export const ModulePeerBindingSchema = z.strictObject({
   allowActions: z.boolean(),
   unresolved: z.boolean().optional(),
 })
+/** One workspace-scoped approval to read all current and future peers' public data. */
+export const ModuleDataAccessSchema = z.strictObject({
+  consumer: ModulePeerSchema,
+  allowData: z.boolean(),
+  unresolved: z.boolean().optional(),
+})
+export type ModuleDataAccess = z.infer<typeof ModuleDataAccessSchema>
 export const ModuleExchangeConfigurationSchema = z
   .strictObject({
     bindings: z.array(ModulePeerBindingSchema).max(1024),
+    dataAccess: z.array(ModuleDataAccessSchema).max(1024).optional(),
   })
   .superRefine((value, context) => {
+    const consumers = (value.dataAccess ?? []).map((item) => modulePeerKey(item.consumer))
+    if (new Set(consumers).size !== consumers.length)
+      context.addIssue({ code: 'custom', message: 'Duplicate module data access permission' })
     const pairs = value.bindings.map((item) =>
       JSON.stringify([modulePeerKey(item.consumer), modulePeerKey(item.target)]),
     )

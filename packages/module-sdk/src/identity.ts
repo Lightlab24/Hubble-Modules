@@ -62,6 +62,8 @@ export const ModuleBindingSchema = z.strictObject({
   configVersion: z.int().min(1).max(65_535),
   savedActionVersion: z.int().min(1).max(65_535).optional(),
   pinned: z.boolean(),
+  /** Workspace host modules default to on; device connections use connection.enabled. */
+  hostEnabled: z.boolean().optional(),
   autoUpdate: z.enum(["inherit", "on", "off"]).optional(),
   settings: ModuleSavedSettingsSchema.optional(),
 });
