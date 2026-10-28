@@ -1,3 +1,5 @@
+> Test fixture only. This package is excluded from production module inventories, catalog visibility, and workspace activation.
+
 # Mock
 
 Official module `hubble-mock`, version **1.0.0**, using stable Hubble module API **1**.

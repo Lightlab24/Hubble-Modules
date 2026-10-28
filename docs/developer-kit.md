@@ -78,3 +78,18 @@ SDK/tools/kit 1.1.0 adds [declarative sidebar pages](sidebar-pages.md) for Hubbl
 2.0.2 (`module-pages-v1`). The kit includes `examples/sidebar-page`, a local simulator
 with settings, a typed spreadsheet and live status. Module-only changes can add pages,
 sections and columns on a compatible host.
+
+## SDK 1.2.0 candidate
+
+The isolated 1.2.0 kit includes [the independence API](independence-api.md) and an
+`examples/independent-api` project. It demonstrates richer forms, contextual choices,
+service descriptions and pure action/feedback migration using local simulator state.
+The SDK and tooling versions remain independent of a module's version. These candidate
+artifacts have not been published; use the locally generated kit for offline checks.
+
+## Module exchange examples
+
+The kit includes `examples/exchange-provider` and `examples/exchange-consumer`.
+They use an inert counter to demonstrate [routed data and approved actions](module-exchange.md),
+including module-owned automatic reactions and subscription cleanup. These examples
+are not production catalog modules.

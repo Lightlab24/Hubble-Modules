@@ -11,7 +11,10 @@ if (!["build", "test", "package"].includes(operation))
 const names = (
   await readdir(path.join(root, "modules"), { withFileTypes: true })
 )
-  .filter((item) => item.isDirectory() && !item.name.startsWith("."))
+  .filter(
+    (item) =>
+      item.isDirectory() && !item.name.startsWith(".") && item.name !== "mock",
+  )
   .map((item) => item.name)
   .sort();
 if (selected && !names.includes(selected))

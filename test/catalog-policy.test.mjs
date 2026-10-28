@@ -128,3 +128,28 @@ test("bootstrapped public feed is valid and contains no unqualified releases", a
   for (const release of value.releases)
     assert(["stable", "beta"].includes(release.channel));
 });
+
+test("Mock cannot enter a beta or stable release", () => {
+  for (const channel of ["beta", "stable"]) {
+    const id = "hubble-mock";
+    const mockManifest = { ...manifest, id };
+    const archive = createModulePackage(
+      mockManifest,
+      new Map([["module.mjs", Buffer.from("export default {}")]]),
+    );
+    const inspected = inspectModulePackage(archive);
+    const mock = {
+      ...entry,
+      identity: { ...entry.identity, moduleId: id, digest: inspected.digest },
+      manifest: inspected.manifest,
+      bytes: archive.length,
+      channel,
+      url: `https://github.com/Lightlab24/Hubble-Modules/releases/download/module-${id}-v${manifest.version}/${id}-${manifest.version}.hubble-module`,
+    };
+    assert.throws(
+      () => validateUpdate({ ...next(), releases: [mock] }),
+      /Mock/,
+    );
+    assert.throws(() => validateArchive(mock, archive), /Mock/);
+  }
+});

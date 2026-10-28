@@ -1,7 +1,19 @@
+export * from './exchange.js'
+import {
+  ModuleExchangeDefinitionSchema,
+  type ModuleExchange,
+  type ModuleDataQuery,
+} from './exchange-contracts.js'
 import { z } from 'zod'
 import { ModuleVersionSchema, type ModuleInstanceScope } from './identity.js'
 import { ModuleHostRequirementsSchema } from './compatibility.js'
 export * from './identity.js'
+export * from './choices.js'
+export * from './saved-actions.js'
+export * from './host-services.js'
+import type { ModuleHostServices } from './host-services.js'
+import type { ModuleSavedActions } from './saved-actions.js'
+import type { ModuleChoiceQuery, ModuleChoicePage } from './choices.js'
 export * from './compatibility.js'
 export * from './release-metadata.js'
 
@@ -46,71 +58,15 @@ export const ModuleFilePathSchema = z
   )
 const LabelSchema = z.string().trim().min(1).max(160)
 const DescriptionSchema = z.string().trim().min(1).max(1_000)
-/** Presentation only. Group labels never form part of a saved choice identity. */
-export const ModuleChoiceSchema = z.strictObject({
-  id: z.string().max(160),
-  label: z.string().max(160),
-  group: LabelSchema.optional(),
-})
-export type ModuleChoice = z.infer<typeof ModuleChoiceSchema>
-const FieldBase = {
-  id: ModuleIdentifierSchema,
-  label: LabelSchema,
-  required: z.boolean(),
-  description: DescriptionSchema.optional(),
-}
-export const ModuleFieldSchema = z.discriminatedUnion('type', [
-  z.strictObject({
-    ...FieldBase,
-    type: z.literal('text'),
-    default: z.string().max(16_384),
-    secret: z.boolean().optional(),
-  }),
-  z.strictObject({
-    ...FieldBase,
-    type: z.literal('number'),
-    default: z.number(),
-    min: z.number().optional(),
-    max: z.number().optional(),
-  }),
-  z.strictObject({ ...FieldBase, type: z.literal('boolean'), default: z.boolean() }),
-  z.strictObject({
-    ...FieldBase,
-    type: z.literal('choice'),
-    default: z.string().max(160),
-    choices: z
-      .array(ModuleChoiceSchema.extend({ id: z.string().min(1).max(160), label: LabelSchema }))
-      .max(1_024),
-    choiceProvider: ModuleIdentifierSchema.optional(),
-  }),
-])
-const FieldsSchema = z
-  .array(ModuleFieldSchema)
-  .max(128)
-  .superRefine((fields, ctx) => {
-    const ids = new Set<string>()
-    fields.forEach((field, index) => {
-      if (ids.has(field.id))
-        ctx.addIssue({ code: 'custom', path: [index, 'id'], message: 'Duplicate field ID' })
-      ids.add(field.id)
-      if (
-        field.type === 'number' &&
-        ((field.min !== undefined && field.default < field.min) ||
-          (field.max !== undefined && field.default > field.max) ||
-          (field.min !== undefined && field.max !== undefined && field.min > field.max))
-      ) {
-        ctx.addIssue({ code: 'custom', path: [index], message: 'Number default/bounds conflict' })
-      }
-      if (field.type === 'choice') {
-        if (new Set(field.choices.map((item) => item.id)).size !== field.choices.length) {
-          ctx.addIssue({ code: 'custom', path: [index], message: 'Duplicate choice ID' })
-        }
-        if (!field.choiceProvider && !field.choices.some((choice) => choice.id === field.default)) {
-          ctx.addIssue({ code: 'custom', path: [index], message: 'Choice default is missing' })
-        }
-      }
-    })
-  })
+export * from './fields.js'
+import {
+  ModuleFieldsSchema as FieldsSchema,
+  moduleFieldsRequireV2,
+  moduleFieldDefault,
+  moduleFieldsContainSecrets,
+  validateModuleFields,
+  type ModuleChoice,
+} from './fields.js'
 /** Declarative screens: the host renders controls; packages never supply renderer code. */
 export const ModulePageTableSchema = z.strictObject({
   type: z.literal('table'),
@@ -195,6 +151,7 @@ export const ModuleManifestSchema = z
     apiVersion: z.literal(MODULE_API_VERSION),
     host: ModuleHostRequirementsSchema,
     configVersion: z.int().min(1).max(65_535),
+    savedActionVersion: z.int().min(1).max(65_535).optional(),
     entry: ModuleFilePathSchema.refine(
       (value) => value.endsWith('.mjs'),
       'Entry must be bundled ESM (.mjs)',
@@ -205,8 +162,50 @@ export const ModuleManifestSchema = z
     actions: z.array(ModuleActionSchema).max(256),
     feedback: z.array(ModuleFeedbackDefinitionSchema).max(256),
     pages: z.array(ModulePageSchema).max(16).optional(),
+    exchange: ModuleExchangeDefinitionSchema.optional(),
   })
   .superRefine((manifest, ctx) => {
+    if (
+      manifest.exchange &&
+      !(
+        'requiredFeatures' in manifest.host &&
+        manifest.host.requiredFeatures?.includes('module-exchange-v1')
+      )
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['host'],
+        message: 'Module exchange requires module-exchange-v1',
+      })
+    if (
+      manifest.savedActionVersion !== undefined &&
+      (!('requiredFeatures' in manifest.host) ||
+        !manifest.host.requiredFeatures?.includes('module-saved-actions-v1'))
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['host'],
+        message: 'Saved action migrations require module-saved-actions-v1',
+      })
+    const fieldSets = [
+      manifest.settings,
+      ...manifest.actions.map((action) => action.fields),
+      ...manifest.feedback.map((feedback) => feedback.fields),
+      ...(manifest.pages ?? []).flatMap((page) =>
+        page.sections.flatMap((section) => (section.type === 'table' ? [section.columns] : [])),
+      ),
+    ]
+    if (
+      fieldSets.some(moduleFieldsRequireV2) &&
+      (!('requiredFeatures' in manifest.host) ||
+        !manifest.host.requiredFeatures?.includes('module-fields-v2'))
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['host'],
+        message: 'Rich fields require module-fields-v2',
+      })
+
     if (!manifest.files.includes(manifest.entry))
       ctx.addIssue({ code: 'custom', path: ['entry'], message: 'Entry is not listed in files' })
     for (const key of ['files', 'capabilities', 'actions', 'feedback'] as const) {
@@ -257,7 +256,7 @@ export const ModuleManifestSchema = z
                 message: 'Table storage keys must be unique and separate from settings fields',
               })
             tableIds.add(key)
-            if (section.columns.some((field) => field.type === 'text' && field.secret))
+            if (moduleFieldsContainSecrets(section.columns))
               ctx.addIssue({
                 code: 'custom',
                 path,
@@ -267,7 +266,9 @@ export const ModuleManifestSchema = z
               try {
                 validateModuleFields(
                   section.columns,
-                  Object.fromEntries(section.columns.map((field) => [field.id, field.default])),
+                  Object.fromEntries(
+                    section.columns.map((field) => [field.id, moduleFieldDefault(field)]),
+                  ),
                 )
               } catch {
                 ctx.addIssue({
@@ -354,6 +355,13 @@ export interface ModuleTrace {
   readonly message: string
 }
 export interface ModuleContext {
+  /** Local, instance-scoped runtime state across package versions. Never included in workspace exports. Access only after start. */
+  readonly runtimeDirectory?: string
+
+  /** Module communication routed and authorized by Hubble. Requires module-exchange-v1. */
+  readonly modules?: ModuleExchange
+  /** Requires host-service-registry-v1; available after start, with the same scope and origin grants as requestHost. */
+  readonly services?: ModuleHostServices
   readonly instanceId: string
   readonly scope: ModuleInstanceScope
   readonly settings: ModuleValues
@@ -378,6 +386,11 @@ export interface ModuleExecutionContext {
   log(trace: ModuleTrace): void
 }
 export interface ModuleInstance {
+  /** Read-only public data query. Never execute controls from this callback. */
+  queryData?(
+    query: ModuleDataQuery,
+    context: { readonly signal: AbortSignal },
+  ): Promise<ModuleJsonValue> | ModuleJsonValue
   /** Connect/subscribe/observe only; never issue a control action on startup. */
   start(): Promise<void> | void
   execute(
@@ -394,8 +407,19 @@ export interface ModuleInstance {
     context: Pick<ModuleExecutionContext, 'signal' | 'log'>,
   ): Promise<ModuleJsonValue> | ModuleJsonValue
   choices?(provider: string): readonly ModuleChoice[] | Promise<readonly ModuleChoice[]>
+  /** Read-only discovery. Draft values never become settings or execute a command. */
+  discoverChoices?(
+    query: ModuleChoiceQuery,
+    context: { readonly signal: AbortSignal },
+  ): ModuleChoicePage | Promise<ModuleChoicePage>
 }
 export interface HubbleModule {
+  /** Pure migration of this instance's saved action/feedback expressions. Stable keys must remain unchanged. */
+  migrateSavedActions?(
+    actions: Readonly<ModuleSavedActions>,
+    fromVersion: number,
+    toVersion: number,
+  ): ModuleSavedActions | Promise<ModuleSavedActions>
   createInstance(context: ModuleContext): ModuleInstance
   /** Pure data migration. No network calls or device commands; input is never mutated. */
   migrateConfig?(
@@ -403,40 +427,6 @@ export interface HubbleModule {
     fromVersion: number,
     toVersion: number,
   ): Promise<ModuleValues> | ModuleValues
-}
-
-export function validateModuleFields(
-  fields: ModuleManifest['settings'],
-  values: ModuleValues,
-): void {
-  for (const field of fields) {
-    const value = values[field.id]
-    if (value === undefined) {
-      if (field.required) throw new Error(`Missing module field: ${field.label}`)
-      continue
-    }
-    if (field.type === 'boolean' && typeof value !== 'boolean')
-      throw new Error(`Expected a boolean for ${field.label}`)
-    if (
-      field.type === 'number' &&
-      (typeof value !== 'number' ||
-        !Number.isFinite(value) ||
-        (field.min !== undefined && value < field.min) ||
-        (field.max !== undefined && value > field.max))
-    )
-      throw new Error(`Invalid number for ${field.label}`)
-    if (
-      field.type === 'text' &&
-      (typeof value !== 'string' || value.length > 16_384 || (field.required && !value.trim()))
-    )
-      throw new Error(`Invalid text for ${field.label}`)
-    if (
-      field.type === 'choice' &&
-      (typeof value !== 'string' ||
-        (!field.choiceProvider && !field.choices.some((choice) => choice.id === value)))
-    )
-      throw new Error(`Invalid choice for ${field.label}`)
-  }
 }
 
 /** The same validation applies to edits, migrations, selection and automatic updates. */

@@ -13,12 +13,12 @@
     "package": "hubble-module build . && hubble-module test . && hubble-module pack . ../../artifacts/hubble-livegrade-1.0.0.hubble-module"
   },
   "dependencies": {
-    "@hubble/module-sdk": "workspace:1.1.0",
+    "@hubble/module-sdk": "workspace:1.2.0",
     "@hubble/module-contracts": "workspace:1.0.0",
     "@hubble/module-runtime-helpers": "workspace:1.0.0",
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@hubble/module-tools": "workspace:1.1.0"
+    "@hubble/module-tools": "workspace:1.2.0"
   }
 }

@@ -10,6 +10,8 @@ export const repository = "Lightlab24/Hubble-Modules";
 
 export function releaseAsset(entry) {
   const { moduleId, version } = entry.identity;
+  if (moduleId === "hubble-mock" && entry.status !== "withdrawn")
+    throw Error("Mock modules cannot be released on any channel");
   const tag = `module-${moduleId}-v${version}`;
   const filename = `${moduleId}-${version}.hubble-module`;
   const url = `https://github.com/${repository}/releases/download/${tag}/${filename}`;
@@ -41,6 +43,8 @@ export function validateUpdate(raw, previous) {
 
 export function validateArchive(entry, bytes) {
   const actual = inspectModulePackage(bytes);
+  if (actual.manifest.id === "hubble-mock")
+    throw Error("Mock module archives cannot be published");
   if (
     bytes.length !== entry.bytes ||
     actual.digest !== entry.identity.digest ||
