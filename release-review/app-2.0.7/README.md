@@ -36,6 +36,8 @@ After source review, push these commits and merge them onto main. Stage all seve
 Use the existing Publish reviewed module catalog workflow from main in `initial-release` mode with:
 
 - pins: release-review/app-2.0.7/distributions.json
-- catalog: release-review/app-2.0.7/catalog-input.json
+- catalog: release-review/app-2-0-7-catalog.json
 
 This existing batch verifies all three standalone distributions, publishes them, then verifies all new module archives before publishing and signing catalog sequence 4. The module-publication environment restricts deployment to main and requires the Lightlab24 reviewer. Preserve that approval policy. No publication credential or signing key is stored in this review directory.
+
+The catalog input uses a hyphenated version in its path because the protected publisher accepts dots only in the `.json` suffix. The content is unchanged from the reviewed sequence-4 input.
