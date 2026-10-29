@@ -1,6 +1,16 @@
 import { CCC_COMMAND_OPTIONS } from "./config.js";
 import { defineModuleManifest } from "@hubble/module-sdk/authoring";
 
+const cameraField = {
+  id: "cameraId",
+  label: "Camera",
+  type: "choice" as const,
+  required: true,
+  default: "",
+  choices: [],
+  choiceProvider: "cameras",
+};
+
 export default defineModuleManifest({
   formatVersion: 1,
   apiVersion: 1,
@@ -39,20 +49,7 @@ export default defineModuleManifest({
           : "response") as "local" | "state-confirmed" | "response",
       completionAlternatives: [],
       timeoutMs: 120000,
-      fields:
-        value === "toggle-camera-enabled"
-          ? [
-              {
-                id: "cameraId",
-                label: "Camera",
-                type: "choice" as const,
-                required: true,
-                default: "",
-                choices: [],
-                choiceProvider: "cameras",
-              },
-            ]
-          : [],
+      fields: value === "toggle-camera-enabled" ? [cameraField] : [],
     })),
     {
       id: "record-rcp",
@@ -111,6 +108,7 @@ export default defineModuleManifest({
   ],
   feedback: CCC_COMMAND_OPTIONS.filter(({ value }) =>
     [
+      "toggle-camera-enabled",
       "single-switch",
       "enable-all-cameras",
       "roll-enabled-cameras",
@@ -120,7 +118,10 @@ export default defineModuleManifest({
   ).map(({ value, label }) => ({
     id: value,
     label,
-    description: "Observed CCC selection or camera recording state.",
-    fields: [],
+    description:
+      value === "toggle-camera-enabled"
+        ? "Active when this camera is enabled in CCC, including while its RCP or camera is offline."
+        : "Observed CCC selection or camera recording state.",
+    fields: value === "toggle-camera-enabled" ? [cameraField] : [],
   })),
 });

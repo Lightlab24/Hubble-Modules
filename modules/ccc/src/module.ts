@@ -63,13 +63,46 @@ export function createCccModule(
       let savedCheckpoint = "";
       let scheduled: ReturnType<typeof setImmediate> | undefined;
       let stopped = false;
+      let publishedSnapshot: string | undefined;
+      let publishedStatus: string | undefined;
       const feedbackStates = new Map<string, boolean | null | undefined>();
+      const cameraFeedbackStates = new Map<
+        string,
+        boolean | null | undefined
+      >();
       let unsubscribe = () => {};
       const emit = () => {
         if (!context.publishEvent)
           throw new Error("CCC observation support unavailable");
         const state = controller.state();
         const feedback = controller.feedback();
+        const cameraIds = new Set(state.config.rows.map((row) => row.rowId));
+        for (const cameraId of cameraFeedbackStates.keys()) {
+          if (cameraIds.has(cameraId)) continue;
+          context.publishFeedback({
+            id: "toggle-camera-enabled",
+            fields: { cameraId },
+            state: "unavailable",
+            observedAt: null,
+          });
+          cameraFeedbackStates.delete(cameraId);
+        }
+        for (const cameraId of cameraIds) {
+          const value = feedback[`toggle-camera-enabled/${cameraId}`];
+          if (
+            cameraFeedbackStates.has(cameraId) &&
+            cameraFeedbackStates.get(cameraId) === value
+          )
+            continue;
+          cameraFeedbackStates.set(cameraId, value);
+          context.publishFeedback({
+            id: "toggle-camera-enabled",
+            fields: { cameraId },
+            state:
+              value == null ? "unavailable" : value ? "active" : "inactive",
+            observedAt: value == null ? null : new Date().toISOString(),
+          });
+        }
         for (const id of [
           "single-switch",
           "enable-all-cameras",
@@ -88,29 +121,44 @@ export function createCccModule(
             observedAt: value == null ? null : new Date().toISOString(),
           });
         }
-        publishModuleData(
-          context.publishEvent.bind(context),
-          "host.ccc",
-          state,
-        );
+        // Peer refreshes and repeated device observations can leave the visible
+        // state unchanged. Do not fan those out through every host subscriber.
+        const snapshot = JSON.stringify(state);
+        if (snapshot !== publishedSnapshot) {
+          publishModuleData(
+            context.publishEvent.bind(context),
+            "host.ccc",
+            state,
+          );
+          publishedSnapshot = snapshot;
+        }
         const selected = new Set(
           state.config.rows
             .filter((row) => row.enabled)
             .map((row) => row.rowId),
         );
-        const unavailable = state.rows.find(
+        const unavailable = state.rows.filter(
           (row) => selected.has(row.rowId) && row.connection !== "online",
         );
-        context.publishState({
-          phase: unavailable
-            ? unavailable.connection === "connecting"
-              ? "connecting"
-              : "unavailable"
-            : "ready",
-          message: unavailable?.message ?? null,
-          observedAt: new Date().toISOString(),
-          values: {},
-        });
+        const status = {
+          // Selection is a local workspace operation. Camera availability is
+          // reported per row and must not disable selection feedback.
+          phase: "ready" as const,
+          message: unavailable[0]?.message ?? null,
+          values: {
+            enabledCameraCount: selected.size,
+            unavailableCameraCount: unavailable.length,
+          },
+        };
+        // observedAt timestamps a status change, not a periodic heartbeat.
+        const statusSignature = JSON.stringify(status);
+        if (statusSignature !== publishedStatus) {
+          context.publishState({
+            ...status,
+            observedAt: new Date().toISOString(),
+          });
+          publishedStatus = statusSignature;
+        }
       };
       return {
         async start() {
@@ -143,12 +191,10 @@ export function createCccModule(
         choices(provider) {
           if (provider === "rcps") return peers.choices();
           if (provider === "cameras")
-            return controller
-              .state()
-              .config.rows.map((row) => ({
-                id: row.rowId,
-                label: `${row.cameraNumber ?? "?"} — ${row.rcpIp || "Unconfigured"}`,
-              }));
+            return controller.state().config.rows.map((row) => ({
+              id: row.rowId,
+              label: `${row.cameraNumber ?? "?"} — ${row.rcpIp || "Unconfigured"}`,
+            }));
           return [];
         },
         async execute(id, fields, execution) {

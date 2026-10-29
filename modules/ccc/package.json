@@ -1,6 +1,6 @@
 {
   "name": "@hubble-module/ccc",
-  "version": "1.1.0",
+  "version": "1.1.2",
   "private": true,
   "type": "module",
   "hubble": {
@@ -10,7 +10,7 @@
   "scripts": {
     "build": "hubble-module build .",
     "test": "hubble-module test .",
-    "package": "hubble-module build . && hubble-module test . && hubble-module pack . ../../artifacts/hubble-ccc-1.1.0.hubble-module"
+    "package": "hubble-module build . && hubble-module test . && hubble-module pack . ../../artifacts/hubble-ccc-1.1.2.hubble-module"
   },
   "dependencies": {
     "@hubble/module-sdk": "workspace:1.2.0",

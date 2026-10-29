@@ -654,6 +654,17 @@ export class RcpSession {
           recording: payload === "1" ? true : payload === "0" ? false : null,
           recordingSequence: (header & 1) === 0 ? ++this.#sequence : 0,
         };
+      // The broad status subscription also carries lens/parameter traffic CCC
+      // does not use. Only observable changes should wake recording and UI
+      // consumers. Live recording reports keep their fresh sequence even when
+      // the recording value is unchanged, so command confirmation still wakes.
+      if (
+        next === prior ||
+        (Object.keys(next) as (keyof CyanViewCameraObservation)[]).every(
+          (field) => next[field] === prior[field],
+        )
+      )
+        return;
       this.#feedback.set(key, next);
       this.changed();
       if (field !== "number") return;

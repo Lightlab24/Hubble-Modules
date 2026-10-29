@@ -137,15 +137,16 @@ it("routes approved CyanView and CCC controls through one recording queue and pr
       return JSON.parse(JSON.stringify(config)) as ModuleJsonValue;
     },
   };
-  const module = createCccModule(
-    (store) =>
-      new CccController(
-        store,
-        60,
-        (definition, changed) =>
-          new RcpSession({ ...definition, port: network.port }, changed),
-      ),
-  );
+  let controller!: CccController;
+  const module = createCccModule((store) => {
+    controller = new CccController(
+      store,
+      60,
+      (definition, changed) =>
+        new RcpSession({ ...definition, port: network.port }, changed),
+    );
+    return controller;
+  });
   ccc = module.createInstance(context);
   cleanups.push(async () => ccc.dispose());
   const rcp = rcpModule.createInstance({
@@ -159,7 +160,7 @@ it("routes approved CyanView and CCC controls through one recording queue and pr
   await ccc.start();
   await expect
     .poll(() =>
-      base.publishState.mock.calls.some(([state]) => state.phase === "ready"),
+      controller.state().rows.every((row) => row.connection === "online"),
     )
     .toBe(true);
   const denied = await rcp.execute(

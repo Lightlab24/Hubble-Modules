@@ -122,12 +122,12 @@ export function canonicalCccCommand(command: string): string {
     : command;
 }
 export const CCC_COMMAND_OPTIONS = Object.freeze([
-  { value: "toggle-camera-enabled", label: "Enable / Disable" },
-  { value: "enable-all-cameras", label: "Enable All / Disable All" },
+  { value: "toggle-camera-enabled", label: "Enable / Disable Camera" },
+  { value: "enable-all-cameras", label: "Enable / Disable All Cameras" },
   { value: "single-switch", label: "Single switch" },
-  { value: "roll-enabled-cameras", label: "Start Enabled Cameras" },
-  { value: "stop-enabled-cameras", label: "Stop Enabled Cameras" },
-  { value: "roll-toggle-enabled-cameras", label: "Toggle Enabled Cameras" },
+  { value: "roll-enabled-cameras", label: "Start Recording" },
+  { value: "stop-enabled-cameras", label: "Stop Recording" },
+  { value: "roll-toggle-enabled-cameras", label: "Toggle Recording" },
   { value: "nd-up-enabled-cameras", label: "ND Up" },
   { value: "nd-down-enabled-cameras", label: "ND Down" },
   { value: "iso-up-enabled-cameras", label: "ISO Up" },
