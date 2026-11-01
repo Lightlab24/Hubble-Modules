@@ -58,6 +58,7 @@ export default defineModuleManifest({
     minimumVersion: "2.0.11",
     requiredFeatures: [
       "module-matrix-v1",
+      "module-fields-v2",
       "module-feedback-observers-v1",
       "module-matrix-collections-v1",
       "module-choice-bindings-v1",

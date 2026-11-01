@@ -1,9 +1,10 @@
-import { expect, it, vi } from "vitest";
+import assert from "node:assert/strict";
+import { it, mock } from "node:test";
 import { createModuleHarness } from "@hubble/module-sdk/testing";
 import { createModuleHostServices } from "@hubble/module-sdk";
 import module from "../src/index.js";
 it("discovers without executing and uses only the injected native API for an explicit action", async () => {
-  const request = vi.fn(async (_method: string, _input: unknown) => ({
+  const request = mock.fn(async (_method: string, _input: unknown) => ({
     available: true,
     permissionGranted: true,
     applications: [
@@ -26,19 +27,27 @@ it("discovers without executing and uses only the injected native API for an exp
     },
   );
   await harness.instance.start();
-  expect(request).not.toHaveBeenCalled();
+  assert.equal(request.mock.callCount(), 0);
   const execution = harness.execution();
   await harness.instance.subscribeFeedback!(
     [{ id: "matrix", fields: { values: { "module.chord": "KeyK" } } }],
     { signal: execution.signal },
   );
-  expect(harness.feedback).toEqual([
-    expect.objectContaining({
+  assert.equal(harness.feedback.length, 1);
+  assert.partialDeepStrictEqual(harness.feedback, [
+    {
       state: "inactive",
-      observedAt: expect.any(String),
-    }),
+    },
   ]);
-  expect(request).not.toHaveBeenCalled();
+  assert.equal(
+    typeof (
+      harness.feedback[0] as {
+        observedAt: string;
+      }
+    ).observedAt,
+    "string",
+  );
+  assert.equal(request.mock.callCount(), 0);
   const choices = await harness.instance.discoverChoices!(
     {
       version: 2,
@@ -51,11 +60,11 @@ it("discovers without executing and uses only the injected native API for an exp
     },
     { signal: execution.signal },
   );
-  expect(choices.choices[0]?.label).toBe("Inert fixture");
-  expect(request.mock.calls[0]?.[1]).toMatchObject({
+  assert.equal(choices.choices[0]?.label, "Inert fixture");
+  assert.partialDeepStrictEqual(request.mock.calls[0]?.arguments?.[1], {
     input: { operation: "list-applications" },
   });
-  expect(
+  assert.partialDeepStrictEqual(
     await harness.instance.execute(
       "send",
       {
@@ -67,8 +76,9 @@ it("discovers without executing and uses only the injected native API for an exp
       },
       execution,
     ),
-  ).toMatchObject({ status: "success", evidence: { kind: "response" } });
-  expect(request.mock.calls[1]?.[1]).toMatchObject({
+    { status: "success", evidence: { kind: "response" } },
+  );
+  assert.partialDeepStrictEqual(request.mock.calls[1]?.arguments?.[1], {
     input: {
       operation: "send-shortcut",
       key: "KeyK",

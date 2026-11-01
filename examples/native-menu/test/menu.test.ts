@@ -1,4 +1,5 @@
-import { expect, it, vi } from "vitest";
+import assert from "node:assert/strict";
+import { it, mock } from "node:test";
 import { createModuleHarness } from "@hubble/module-sdk/testing";
 import {
   createModuleHostServices,
@@ -7,12 +8,12 @@ import {
 import module from "../src/index.js";
 it("pages through the generic API and invokes once with the discovered process precondition", async () => {
   const cursor = "12345678-1234-1234-1234-123456789abc:1";
-  const request = vi.fn(async (_method: string, value: unknown) => {
+  const request = mock.fn(async (_method: string, value: unknown) => {
     const { service, input } = value as {
       service: string;
       input: NativeMenuRequest;
     };
-    expect(service).toBe("native-menus");
+    assert.equal(service, "native-menus");
     return {
       available: true,
       permissionGranted: true,
@@ -47,19 +48,20 @@ it("pages through the generic API and invokes once with the discovered process p
     { services: createModuleHostServices(request) },
   );
   await harness.instance.start();
-  expect(request).not.toHaveBeenCalled();
-  await expect(
-    harness.instance.execute(
+  assert.equal(request.mock.callCount(), 0);
+  assert.partialDeepStrictEqual(
+    await harness.instance.execute(
       "choose-view",
       { title: "Camera A" },
       harness.execution(),
     ),
-  ).resolves.toMatchObject({
-    status: "success",
-    evidence: { kind: "response" },
-  });
-  expect(request).toHaveBeenCalledTimes(3);
-  expect(request.mock.calls[2]?.[1]).toMatchObject({
+    {
+      status: "success",
+      evidence: { kind: "response" },
+    },
+  );
+  assert.equal(request.mock.callCount(), 3);
+  assert.partialDeepStrictEqual(request.mock.calls[2]?.arguments?.[1], {
     input: {
       method: "select",
       expectedProcessId: 42,

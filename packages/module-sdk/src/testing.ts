@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
   ModuleActionResultSchema,
+  createModuleHostServices,
+  MODULE_HOST_SERVICE_DEFINITIONS,
+  ModuleSavedActionsSchema,
+  ModuleSavedActionMigrationSchema,
+  type ModuleSavedActions,
   ModuleFeedbackSchema,
   ModuleStateSchema,
   type ModuleContext,
@@ -25,6 +30,9 @@ export function createModuleHarness(
   const controls: unknown[] = [];
   const context: ModuleContext = {
     connectionEnabled: true,
+    services: createModuleHostServices((method, value, signal) =>
+      context.requestHost!(method, value, signal),
+    ),
     scope: {
       kind: "connection",
       workspaceId: randomUUID(),
@@ -41,7 +49,25 @@ export function createModuleHarness(
     publishState: (value) => {
       states.push(ModuleStateSchema.parse(value));
     },
-    requestHost: async (_method, value) => {
+    requestHost: async (method, value) => {
+      if (method === "describe-host-services")
+        return {
+          scope: context.scope,
+          identity: {
+            moduleId: "example-fixture",
+            version: "1.0.0",
+            digest: "0".repeat(64),
+          },
+          services: MODULE_HOST_SERVICE_DEFINITIONS.map(
+            ({ service, version }) => ({
+              service,
+              version,
+              declared: false,
+              granted: false,
+              available: false,
+            }),
+          ),
+        };
       controls.push(value);
       throw new Error("Host service not provided by this fixture");
     },
@@ -122,4 +148,28 @@ export async function assertModuleConformance(options: {
     await second.instance.dispose();
     await options.assertReleased?.();
   }
+}
+
+/** A migration receives only owned source expressions and cannot remove or replace their identities. */
+export async function assertSavedActionMigration(
+  module: HubbleModule,
+  actions: ModuleSavedActions,
+  from: number,
+  to: number,
+) {
+  if (!module.migrateSavedActions)
+    throw new Error("No saved-action migration hook");
+  const before = ModuleSavedActionsSchema.parse(actions);
+  const frozen = Object.freeze(
+    before.map((item) =>
+      Object.freeze({
+        ...item,
+        actionId: Object.freeze(item.actionId),
+        actionFields: Object.freeze(item.actionFields),
+        feedback: Object.freeze(item.feedback),
+      }),
+    ),
+  );
+  const after = await module.migrateSavedActions(frozen, from, to);
+  return ModuleSavedActionMigrationSchema.parse({ before, after });
 }

@@ -8,10 +8,17 @@ if (!["build", "test", "package"].includes(operation))
   throw new Error(
     "Usage: modules.mjs build|test|package [module-directory-name]",
   );
+if (selected === "mock")
+  throw new Error(
+    "Mock is a test fixture and cannot be packaged for distribution",
+  );
 const names = (
   await readdir(path.join(root, "modules"), { withFileTypes: true })
 )
-  .filter((item) => item.isDirectory() && !item.name.startsWith("."))
+  .filter(
+    (item) =>
+      item.isDirectory() && !item.name.startsWith(".") && item.name !== "mock",
+  )
   .map((item) => item.name)
   .sort();
 if (selected && !names.includes(selected))
@@ -19,10 +26,6 @@ if (selected && !names.includes(selected))
 await mkdir(path.join(root, "artifacts"), { recursive: true });
 const inventory = [];
 for (const name of selected ? [selected] : names) {
-  if (operation === "package" && name === "mock") {
-    if (selected) throw new Error("Mock is a test fixture and cannot be packaged for distribution");
-    continue;
-  }
   const project = path.join(root, "modules", name);
   if (operation !== "test") await runModuleTool(["build", project]);
   if (operation === "test" || operation === "package")
@@ -32,7 +35,9 @@ for (const name of selected ? [selected] : names) {
       await readFile(path.join(project, "dist/hubble-module.json"), "utf8"),
     );
     if (manifest.id === "hubble-mock")
-      throw new Error("Mock is a test fixture and cannot be packaged for distribution");
+      throw new Error(
+        "Mock is a test fixture and cannot be packaged for distribution",
+      );
     const file = `${manifest.id}-${manifest.version}.hubble-module`;
     const output = path.join(root, "artifacts", file);
     // Published version bytes are immutable; pack fails if this path exists.

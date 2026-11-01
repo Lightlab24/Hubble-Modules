@@ -1,0 +1,1 @@
+CCC owns camera selection, recording coordination, shared CyanView recording commands, and camera controls through the public module exchange API. Preserves existing saved action identities and requires explicit cross-module permission.

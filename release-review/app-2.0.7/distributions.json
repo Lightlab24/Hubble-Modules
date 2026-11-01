@@ -1,0 +1,8 @@
+{
+  "formatVersion": 1,
+  "pins": [
+    "release-review/app-2.0.7/module-sdk.lock.json",
+    "release-review/app-2.0.7/module-tools.lock.json",
+    "release-review/app-2.0.7/developer-kit.lock.json"
+  ]
+}

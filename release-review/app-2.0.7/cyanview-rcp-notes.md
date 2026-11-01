@@ -1,0 +1,1 @@
+CyanView recording commands use the approved CCC module exchange and shared recording queue. Existing RCP controls and saved action identities are preserved; enabling the connection does not automatically grant cross-module control.

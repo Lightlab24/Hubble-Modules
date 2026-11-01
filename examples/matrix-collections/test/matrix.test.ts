@@ -1,11 +1,10 @@
-import { expect, it } from "vitest";
+import assert from "node:assert/strict";
+import { it } from "node:test";
 import { createModuleHarness } from "@hubble/module-sdk/testing";
 import { formatModuleColorPalette } from "@hubble/module-sdk";
 import module from "../src/index.js";
-
-it.each([true, false])(
-  "publishes ordered choices and preserves palette positions with connectionEnabled=%s",
-  async (connectionEnabled) => {
+for (const connectionEnabled of [true, false])
+  it(`publishes ordered choices and preserves palette positions with connectionEnabled=${connectionEnabled}`, async () => {
     const harness = createModuleHarness(
       module,
       { offset: null },
@@ -28,7 +27,7 @@ it.each([true, false])(
       { ...query, cursor: first.nextCursor },
       { signal: new AbortController().signal },
     );
-    expect(second.choices[0]).toMatchObject({
+    assert.partialDeepStrictEqual(second.choices[0], {
       id: "reverse",
       values: { "module.cues": "2, 1" },
     });
@@ -44,29 +43,30 @@ it.each([true, false])(
         ]),
       },
     };
-    expect(
+    assert.partialDeepStrictEqual(
       await harness.instance.execute("apply", fields, harness.execution()),
-    ).toMatchObject({ status: "success" });
-    expect(harness.states.at(-1)).toMatchObject({
+      { status: "success" },
+    );
+    assert.partialDeepStrictEqual(harness.states.at(-1), {
       values: { cues: [2, 1], offset: null },
     });
     await harness.instance.subscribeFeedback!([{ id: "selected", fields }], {
       signal: new AbortController().signal,
     });
-    expect(harness.feedback.at(-1)).toMatchObject({
+    assert.partialDeepStrictEqual(harness.feedback.at(-1), {
       appearance: { backgroundColor: "#112233" },
     });
     fields.values["module.cues"] = "2";
     await harness.instance.subscribeFeedback!([{ id: "selected", fields }], {
       signal: new AbortController().signal,
     });
-    expect(harness.feedback.at(-1)).toMatchObject({
+    assert.partialDeepStrictEqual(harness.feedback.at(-1), {
       appearance: { backgroundColor: "#ABCDEF" },
     });
     fields.values["module.cues"] = "2, 2";
-    expect(
+    assert.partialDeepStrictEqual(
       await harness.instance.execute("apply", fields, harness.execution()),
-    ).toMatchObject({ status: "failure" });
+      { status: "failure" },
+    );
     await harness.instance.dispose();
-  },
-);
+  });

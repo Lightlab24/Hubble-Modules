@@ -15,23 +15,29 @@ const previous = JSON.parse(
     "utf8",
   ),
 );
-if (lock.modules.length !== 14)
+if (lock.modules.some((item) => item.moduleId === "hubble-mock"))
+  throw new Error("Mock modules are forbidden in app release locks");
+if (lock.modules.length !== 13)
   throw new Error(
-    "Qualify all 14 official modules before exporting the app lock",
+    "Qualify all 13 production modules before exporting the app lock",
   );
 const identity = ({ moduleId, version, digest }) => ({
   moduleId,
   version,
   digest,
 });
-const transitions = previous.modules.map((old) => {
-  const next = lock.modules.find((item) => item.moduleId === old.moduleId);
-  if (!next || next.version !== "1.0.0")
-    throw new Error(
-      "Initial official transition must select its matching 1.0.0 archive",
-    );
-  return { previous: identity(old), next: identity(next) };
-});
+// This tool performs the initial private-to-public 1.0.0 transition only.
+// Retired test archives must not acquire a production transition.
+const transitions = previous.modules
+  .filter((item) => item.moduleId !== "hubble-mock")
+  .map((old) => {
+    const next = lock.modules.find((item) => item.moduleId === old.moduleId);
+    if (!next || next.version !== "1.0.0")
+      throw new Error(
+        "Initial official transition must select its matching 1.0.0 archive",
+      );
+    return { previous: identity(old), next: identity(next) };
+  });
 const cache = path.join(target, "artifacts/module-cache");
 await mkdir(cache, { recursive: true });
 for (const item of lock.modules)

@@ -5,7 +5,6 @@ export default defineConfig({
       "modules/**/test/**/*.test.ts",
       "test/fixtures/**/test/**/*.test.ts",
       "packages/**/test/**/*.test.ts",
-      "examples/matrix-feedback/test/**/*.test.ts",
     ],
     exclude: [
       "packages/module-tools/**",

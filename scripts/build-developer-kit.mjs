@@ -13,6 +13,7 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { ModuleVersionSchema } from "../packages/module-sdk/dist/index.js";
+import { runKitCommand } from "./kit-self-test.mjs";
 const root = path.resolve(import.meta.dirname, "..");
 const require = createRequire(
   path.join(root, "packages/module-tools/package.json"),
@@ -32,7 +33,23 @@ const file = `hubble-module-developer-kit-${version}.tar.gz`;
 const output = path.resolve(
   process.argv[2] ?? path.join(root, "artifacts", file),
 );
-const temporary = await mkdtemp(path.join(tmpdir(), "hubble-module-kit-"));
+const temporary = await realpath(
+  await mkdtemp(path.join(tmpdir(), "hubble-module-kit-")),
+);
+const examples = [
+  "sidebar-page",
+  "native-workbook",
+  "matrix-feedback",
+  "matrix-row-fields",
+  "matrix-collections",
+  "native-controls",
+  "native-menu",
+  "custom-canvas",
+  "prepared-document",
+  "independent-api",
+  "exchange-provider",
+  "exchange-consumer",
+];
 try {
   const kit = path.join(temporary, "hubble-module-developer-kit");
   await mkdir(kit);
@@ -57,105 +74,19 @@ try {
     path.join(root, "docs/sidebar-pages.md"),
     path.join(kit, "sidebar-pages.md"),
   );
-  await cp(
-    path.join(root, "examples/sidebar-page"),
-    path.join(kit, "examples/sidebar-page"),
-    {
-      recursive: true,
-      filter: (source) =>
-        !source
-          .split(path.sep)
-          .some((part) => part === "node_modules" || part === "dist"),
-    },
-  );
-  await cp(
-    path.join(root, "examples/native-workbook"),
-    path.join(kit, "examples/native-workbook"),
-    {
-      recursive: true,
-      filter: (source) =>
-        !source
-          .split(path.sep)
-          .some((part) => part === "node_modules" || part === "dist"),
-    },
-  );
-  await cp(
-    path.join(root, "examples/matrix-feedback"),
-    path.join(kit, "examples/matrix-feedback"),
-    {
-      recursive: true,
-      filter: (source) =>
-        !source
-          .split(path.sep)
-          .some((part) => part === "node_modules" || part === "dist"),
-    },
-  );
-  await cp(
-    path.join(root, "examples/matrix-row-fields"),
-    path.join(kit, "examples/matrix-row-fields"),
-    {
-      recursive: true,
-      filter: (source) =>
-        !source
-          .split(path.sep)
-          .some((part) => part === "node_modules" || part === "dist"),
-    },
-  );
-  await cp(
-    path.join(root, "examples/matrix-collections"),
-    path.join(kit, "examples/matrix-collections"),
-    {
-      recursive: true,
-      filter: (source) =>
-        !source
-          .split(path.sep)
-          .some((part) => part === "node_modules" || part === "dist"),
-    },
-  );
-  await cp(
-    path.join(root, "examples/custom-canvas"),
-    path.join(kit, "examples/custom-canvas"),
-    {
-      recursive: true,
-      filter: (source) =>
-        !source
-          .split(path.sep)
-          .some((part) => part === "node_modules" || part === "dist"),
-    },
-  );
-  await cp(
-    path.join(root, "examples/prepared-document"),
-    path.join(kit, "examples/prepared-document"),
-    {
-      recursive: true,
-      filter: (source) =>
-        !source
-          .split(path.sep)
-          .some((part) => part === "node_modules" || part === "dist"),
-    },
-  );
-  await cp(
-    path.join(root, "examples/native-controls"),
-    path.join(kit, "examples/native-controls"),
-    {
-      recursive: true,
-      filter: (source) =>
-        !source
-          .split(path.sep)
-          .some((part) => part === "node_modules" || part === "dist"),
-    },
-  );
-  await cp(
-    path.join(root, "examples/native-menu"),
-    path.join(kit, "examples/native-menu"),
-    {
-      recursive: true,
-      filter: (source) =>
-        !source
-          .split(path.sep)
-          .some((part) => part === "node_modules" || part === "dist"),
-    },
-  );
+  for (const example of examples) {
+    await cp(
+      path.join(root, "examples", example),
+      path.join(kit, "examples", example),
+      {
+        recursive: true,
+        filter: (source) =>
+          !source
+            .split(path.sep)
+            .some((part) => part === "node_modules" || part === "dist"),
+      },
+    );
+  }
   for (const required of [
     "examples/native-menu/src/manifest.ts",
     "examples/native-menu/src/index.ts",
@@ -235,37 +166,14 @@ try {
     ["pack", project, path.join(temporary, "test.hubble-module")],
     ["inspect", path.join(temporary, "test.hubble-module")],
   ])
-    execFileSync(
-      process.execPath,
-      [path.join(kit, "module-tool.mjs"), ...args],
-      {
-        cwd: temporary,
-        timeout: 60_000,
-        stdio: "pipe",
-      },
-    );
-  for (const example of [
-    "sidebar-page",
-    "native-workbook",
-    "matrix-feedback",
-    "matrix-row-fields",
-    "matrix-collections",
-    "native-controls",
-    "native-menu",
-    "custom-canvas",
-    "prepared-document",
-  ])
-    for (const command of ["build", "test", "validate"]) {
-      execFileSync(
-        process.execPath,
-        [
-          path.join(kit, "module-tool.mjs"),
-          command,
-          path.join(kit, "examples", example),
-        ],
-        { cwd: temporary, timeout: 60_000, stdio: "pipe" },
+    runKitCommand(path.join(kit, "module-tool.mjs"), args, temporary);
+  for (const example of examples)
+    for (const command of ["build", "test", "validate"])
+      runKitCommand(
+        path.join(kit, "module-tool.mjs"),
+        [command, path.join(kit, "examples", example)],
+        temporary,
       );
-    }
   await mkdir(path.dirname(output), { recursive: true });
   execFileSync("/usr/bin/tar", [
     "-czf",

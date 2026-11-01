@@ -1,4 +1,5 @@
-import { expect, it, vi } from "vitest";
+import assert from "node:assert/strict";
+import { it, mock } from "node:test";
 import {
   ModuleMatrixSchema,
   resolveModuleMatrixField,
@@ -6,27 +7,27 @@ import {
 } from "@hubble/module-sdk";
 import manifest from "../src/manifest.js";
 import module from "../src/index.js";
-
 it("declares action-dependent fill through the public API in an unrelated package", () => {
   const level = ModuleMatrixSchema.parse(manifest.matrix).fields.find(
     (field) => field.id === "module.level",
   )!;
-  expect(
+  assert.equal(
     resolveModuleMatrixField(level, {
       actionType: "observe;colors=#123456|#654321",
     }).fill,
-  ).toBe("copy");
-  expect(
+    "copy",
+  );
+  assert.equal(
     resolveModuleMatrixField(level, { actionType: "level-series" }).fill,
-  ).toBe("series");
-  expect(manifest.host).toMatchObject({
-    requiredFeatures: expect.arrayContaining(["module-matrix-fill-rules-v1"]),
-  });
+    "series",
+  );
+  assert.ok(
+    manifest.host.requiredFeatures.includes("module-matrix-fill-rules-v1"),
+  );
 });
-
 it("drives generic cell, background and glow presentation without Tally or a host call", () => {
-  const publishFeedback = vi.fn(),
-    requestHost = vi.fn();
+  const publishFeedback = mock.fn(),
+    requestHost = mock.fn();
   const instance = module.createInstance({
     publishFeedback,
     requestHost,
@@ -46,17 +47,21 @@ it("drives generic cell, background and glow presentation without Tally or a hos
       },
     },
   ]);
-  expect(publishFeedback).toHaveBeenCalledWith(
-    expect.objectContaining({
-      state: "active",
-      appearance: {
-        backgroundColor: "#123456",
-        glow: { color: "#FFFFFF", cycleMs: 1500 },
-        cells: {
-          "module.level": { label: "75%", inputSource: "75", color: null },
+  assert.partialDeepStrictEqual(publishFeedback.mock.calls, [
+    {
+      arguments: [
+        {
+          state: "active",
+          appearance: {
+            backgroundColor: "#123456",
+            glow: { color: "#FFFFFF", cycleMs: 1500 },
+            cells: {
+              "module.level": { label: "75%", inputSource: "75", color: null },
+            },
+          },
         },
-      },
-    }),
-  );
-  expect(requestHost).not.toHaveBeenCalled();
+      ],
+    },
+  ]);
+  assert.equal(requestHost.mock.callCount(), 0);
 });

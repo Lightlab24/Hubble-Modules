@@ -105,6 +105,8 @@ Package only declared runtime files, preserving dependency license notices.
 Run the published 1.0.0 kit from its canonical directory as shown above. Its direct
 entry guard can silently skip an absolute path containing a macOS directory alias
 such as `/var` instead of `/private/var`.
+Version 1.2.0 resolves the CLI entry through symlinks, and kit qualification checks
+each command's result so a skipped invocation cannot count as a passing test.
 
 Use `node ./service-client.mjs --url http://127.0.0.1:42838 describe` for Hubble's
 default browser/service API, or use the saved browser port. An isolated Hubble2
@@ -178,3 +180,18 @@ requires Hubble 2.0.13 and `module-action-authoring-v1`; API 1 remains unchanged
 The sidebar-page example demonstrates this policy. Module Tools 1.5.0 rejects
 Mock package creation and distribution. Mock is only a test fixture, not a module
 users can install or choose.
+
+## SDK 1.2.0 candidate
+
+The isolated 1.2.0 kit includes [the independence API](independence-api.md) and an
+`examples/independent-api` project. It demonstrates richer forms, contextual choices,
+service descriptions and pure action/feedback migration using local simulator state.
+The SDK and tooling versions remain independent of a module's version. These candidate
+artifacts have not been published; use the locally generated kit for offline checks.
+
+## Module exchange examples
+
+The kit includes `examples/exchange-provider` and `examples/exchange-consumer`.
+They use an inert counter to demonstrate [routed data and approved actions](module-exchange.md),
+including module-owned automatic reactions and subscription cleanup. These examples
+are not production catalog modules.
