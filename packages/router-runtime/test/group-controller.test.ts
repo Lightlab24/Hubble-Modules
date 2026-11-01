@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { setImmediate as nextTurn } from "node:timers/promises";
 import { afterEach, expect, it, vi } from "vitest";
 import type {
   ModuleContext,
@@ -341,5 +342,157 @@ it("rejects ordinary deleted groups and removes a deleted alias without discardi
   expect(f.controller.runtime.snapshots()).toHaveLength(1);
   expect(f.controller.runtime.snapshots()[0]).toMatchObject({
     selectedDestination: 17,
+  });
+});
+
+it("submits successive routes without waiting for another host settings read", async () => {
+  const f = await fixture();
+  await f.controller.dispatch("selectDestination", {
+    ...f.action(),
+    destination: 9,
+  });
+  await f.controller.edit(
+    f.action().moduleConnectionId,
+    (settings) => ({
+      ...settings,
+      automaticTake: true,
+    }),
+    new AbortController().signal,
+  );
+  const request = vi.mocked(f.services.request);
+  const original = request.getMockImplementation()!;
+  let release = () => {};
+  const heldRead = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  request.mockClear();
+  request.mockImplementation(async (...args) => {
+    if ((args[2] as { method: string }).method === "read") await heldRead;
+    return original(...args);
+  });
+  const first = f.controller.dispatch("selectSource", {
+    ...f.action(),
+    source: 2,
+    levels: [1],
+  });
+  const second = f.controller.dispatch("selectSource", {
+    ...f.action(),
+    source: 3,
+    levels: [1],
+  });
+  try {
+    await nextTurn();
+    expect(f.manager.submitDirectRouteTracked).toHaveBeenCalledTimes(2);
+    expect(request).not.toHaveBeenCalled();
+  } finally {
+    release();
+    await Promise.all([first, second]);
+  }
+});
+
+it("applies an already queued configuration update before the next route", async () => {
+  const f = await fixture();
+  await f.controller.dispatch("selectDestination", {
+    ...f.action(),
+    destination: 9,
+  });
+  await f.controller.edit(
+    f.action().moduleConnectionId,
+    (settings) => ({
+      ...settings,
+      automaticTake: true,
+    }),
+    new AbortController().signal,
+  );
+  f.document.value = {
+    contexts: [
+      { reference: f.contexts[0]!.reference, automaticTake: false, groups: [] },
+    ],
+  };
+  const request = vi.mocked(f.services.request);
+  const original = request.getMockImplementation()!;
+  let release = () => {};
+  const heldRead = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  request.mockImplementation(async (...args) => {
+    if ((args[2] as { method: string }).method === "read") await heldRead;
+    return original(...args);
+  });
+  const refresh = f.controller.refresh();
+  const route = f.controller.dispatch("selectSource", {
+    ...f.action(),
+    source: 2,
+    levels: [1],
+  });
+  try {
+    await nextTurn();
+    expect(f.manager.submitDirectRouteTracked).not.toHaveBeenCalled();
+  } finally {
+    release();
+    await Promise.all([refresh, route]);
+  }
+  expect(f.manager.submitDirectRouteTracked).not.toHaveBeenCalled();
+  expect(
+    f.controller.runtime
+      .snapshots()
+      .find(
+        (item) => item.moduleConnectionId === f.action().moduleConnectionId,
+      ),
+  ).toMatchObject({
+    automaticTake: false,
+    stagedSource: 2,
+  });
+});
+
+it("rereads authoritative settings before routing while a configuration watch is failing", async () => {
+  const f = await fixture();
+  await f.controller.dispatch("selectDestination", {
+    ...f.action(),
+    destination: 9,
+  });
+  await f.controller.edit(
+    f.action().moduleConnectionId,
+    (settings) => ({
+      ...settings,
+      automaticTake: true,
+    }),
+    new AbortController().signal,
+  );
+  const request = vi.mocked(f.services.request);
+  const original = request.getMockImplementation()!;
+  request.mockImplementation(async (...args) => {
+    if (
+      args[0] === "contexts" &&
+      (args[2] as { method: string }).method === "watch"
+    )
+      throw new Error("Watch unavailable");
+    return original(...args);
+  });
+  await f.controller.start();
+  await nextTurn();
+  expect(f.context.log).toHaveBeenCalledWith(
+    expect.objectContaining({ stage: "router-groups-watch" }),
+  );
+  f.document.value = {
+    contexts: [
+      { reference: f.contexts[0]!.reference, automaticTake: false, groups: [] },
+    ],
+  };
+  await f.controller.dispatch("selectSource", {
+    ...f.action(),
+    source: 2,
+    levels: [1],
+  });
+  expect(f.manager.submitDirectRouteTracked).not.toHaveBeenCalled();
+  expect(
+    f.controller.runtime
+      .snapshots()
+      .find(
+        (item) => item.moduleConnectionId === f.action().moduleConnectionId,
+      ),
+  ).toMatchObject({
+    automaticTake: false,
+    stagedSource: 2,
   });
 });

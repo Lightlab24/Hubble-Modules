@@ -258,6 +258,43 @@ async function readyManager(
 }
 
 describe('RossUltrixOgpConnectionManager', () => {
+  it('applies confirmed level deltas without rebuilding the full router table or mutating earlier observations', async () => {
+    const { client, manager } = await readyManager()
+    client.externalRoute(22, 2, 1)
+    const before = manager.snapshots()[0]!.routes
+    const snapshot = vi.spyOn(client, 'snapshot')
+    snapshot.mockClear()
+    for (let level = 1; level <= 17; level++) client.externalRoute(27, 1, level)
+    const after = manager.snapshots()[0]!.routes
+    expect(snapshot).not.toHaveBeenCalled()
+    expect([...after.routes.get(1)!.values()]).toEqual(Array(17).fill(27))
+    expect([...before.routes.get(1)!.values()]).toEqual(Array(17).fill(18))
+    expect(after.routes.get(2)).toBe(before.routes.get(2))
+    expect(after.revision).toBe(before.revision + 17)
+    expect(manager.routeState(CONNECTION_ID).version.revision).toBe(after.revision)
+
+    client.staleRouteEvent(99, 1, 1)
+    expect(snapshot).toHaveBeenCalled()
+    expect([...manager.snapshots()[0]!.routes.routes.get(1)!.values()]).toEqual(Array(17).fill(27))
+  })
+
+  it('does not rebuild full router snapshots for unchanged route observations', async () => {
+    const { client, manager } = await readyManager()
+    const snapshot = vi.spyOn(client, 'snapshot')
+    const listener = vi.fn()
+    const unsubscribe = manager.subscribe(listener)
+    snapshot.mockClear()
+    listener.mockClear()
+    for (let destination = 1; destination <= 100; destination++) {
+      for (let level = 1; level <= 17; level++) {
+        client.observeRoute(18, destination, level)
+      }
+    }
+    expect(snapshot).not.toHaveBeenCalled()
+    expect(listener).not.toHaveBeenCalled()
+    unsubscribe()
+  })
+
   it('replaces the transport immediately on an IP change and ignores the old client', async () => {
     const clients: FakeClient[] = []
     const createClient = vi.fn<(definition: RossUltrixOgpConnectionDefinition) => FakeClient>(

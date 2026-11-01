@@ -79,6 +79,26 @@ export function boundedRouteSnapshot(
   return Object.freeze({ revision: snapshot.revision, routes })
 }
 
+/** Keep prior observations stable while copying only destinations changed by this delta. */
+export function updateRouteSnapshot(
+  previous: Swp08RouteMapSnapshot,
+  crosspoints: readonly Swp08Crosspoint[],
+  revision: number,
+): Swp08RouteMapSnapshot {
+  const routes = new Map(previous.routes)
+  const changed = new Map<number, Map<number, number>>()
+  for (const { destination, level, source } of crosspoints) {
+    let levels = changed.get(destination)
+    if (!levels) {
+      levels = new Map(routes.get(destination) ?? [])
+      changed.set(destination, levels)
+      routes.set(destination, levels)
+    }
+    levels.set(level, source)
+  }
+  return Object.freeze({ revision, routes })
+}
+
 export function emptyRouteSnapshot(): Swp08RouteMapSnapshot {
   return Object.freeze({ revision: 0, routes: new Map() })
 }

@@ -47,7 +47,6 @@ import {
   snapshotRouteRequest,
 } from './multi-level-requests.js'
 import {
-  boundedRouteSnapshot,
   emptyRouteSnapshot,
   errorMessage,
   managedSnapshot,
@@ -55,6 +54,7 @@ import {
   ogpCrosspointToSwp08,
   representableCrosspoint,
   requiresNewClient,
+  updateRouteSnapshot,
 } from './multi-level-snapshot.js'
 import {
   type ConfirmedRouteWatch,
@@ -525,6 +525,10 @@ export class MultiLevelRouterConnectionManager implements RouterConnectionManage
     entry: ManagedEntry,
     event: MultiLevelRouterClientEvent,
   ): void {
+    // Unchanged observations have already settled protocol confirmations. In
+    // particular a full Ultrix status response can contain thousands of them;
+    // do not materialize and sort the full client snapshot for each one.
+    if (event.type === 'route-observation') return
     try {
       if (entry.retryDisconnectInProgress) {
         if (event.type === 'phase' && event.phase === 'disconnected') {
@@ -555,7 +559,9 @@ export class MultiLevelRouterConnectionManager implements RouterConnectionManage
         return
       }
 
-      if (entry.client.snapshot().phase !== 'connected') return
+      // Phase events already maintain this gate. Reading a client snapshot here
+      // sorts and copies the entire crosspoint table for every single-level update.
+      if (entry.phase !== 'connected') return
       switch (event.type) {
         case 'locks':
           break
@@ -578,19 +584,16 @@ export class MultiLevelRouterConnectionManager implements RouterConnectionManage
             this.publishConfirmedRouteWatchesFromRoutes(entry)
             break
           }
+          const bounded = crosspoints.map(ogpCrosspointToSwp08)
           entry.routing.apply({
             previousRevision: event.previousRevision,
             revision: event.revision,
-            crosspoints: crosspoints.map(ogpCrosspointToSwp08),
+            crosspoints: bounded,
           })
-          entry.routes = boundedRouteSnapshot(entry.definition, entry.client.snapshot())
+          entry.routes = updateRouteSnapshot(entry.routes, bounded, event.revision)
           this.publishConfirmedRouteWatchesFromRoutes(entry)
           break
         }
-        case 'route-observation':
-          // The OGP client has already used this unchanged value to settle any pending
-          // command confirmation. Only route/routes events change authoritative state.
-          return
         case 'control-ready':
           if (event.ready && entry.client.snapshot().subscriptions.length > 0) {
             entry.routing.markReady()

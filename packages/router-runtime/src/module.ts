@@ -12,8 +12,9 @@ import type {
   HubbleModule,
   ModuleJsonValue,
   ModuleValues,
-  ModuleFeedbackSubscription,
+  ModuleFeedback,
 } from "@hubble/module-sdk";
+import { createRouterFeedbackPublisher } from "./feedback-publisher.js";
 import { RouterPageRuntime } from "./page-runtime.js";
 import { localRouterManager } from "./local-connection-manager.js";
 import { connectionView } from "./frontend/connection-view.js";
@@ -66,14 +67,10 @@ export function routerModule(
         ? createManager()
         : localRouterManager();
       const feedbackColumn = randomUUID();
-      let feedbackSubscriptions: readonly ModuleFeedbackSubscription[] = [];
-      let feedbackQueued = false;
-      const emitFeedback = () => {
-        if (feedbackQueued) return;
-        feedbackQueued = true;
-        queueMicrotask(() => {
-          feedbackQueued = false;
-          for (const subscription of feedbackSubscriptions) {
+      const feedbackPublisher = createRouterFeedbackPublisher(
+        (subscriptions) => {
+          const snapshots = manager.snapshots();
+          return subscriptions.map((subscription): ModuleFeedback => {
             try {
               const fields = subscription.fields;
               const mapped = routerMatrixAction(type, fields, context.settings);
@@ -89,26 +86,28 @@ export function routerModule(
                 enabled: (fields.values as ModuleValues)?.enabled !== false,
                 interaction: "press",
               });
-              context.publishFeedback({
+              return {
                 ...subscription,
                 ...routerMatrixFeedback(
                   context.scope.workspaceId,
                   action,
                   groupController,
-                  manager.snapshots(),
+                  snapshots,
                 ),
-              });
+              };
             } catch {
-              context.publishFeedback({
+              return {
                 ...subscription,
                 state: "unavailable",
                 observedAt: new Date().toISOString(),
                 appearance: { backgroundColor: null, glow: null },
-              });
+              };
             }
-          }
-        });
-      };
+          });
+        },
+        (feedback) => context.publishFeedback(feedback),
+      );
+      const emitFeedback = feedbackPublisher.invalidate;
       const pageRuntime =
         context.scope.kind === "connection"
           ? new RouterPageRuntime(manager, context.scope.connectionId)
@@ -515,10 +514,9 @@ export function routerModule(
           );
         },
         subscribeFeedback(subscriptions) {
-          feedbackSubscriptions = subscriptions.filter(
-            (item) => item.id === "matrix",
+          feedbackPublisher.subscribe(
+            subscriptions.filter((item) => item.id === "matrix"),
           );
-          emitFeedback();
         },
         async call(method, value, execution) {
           if (method === "page.routing") {
@@ -607,7 +605,7 @@ export function routerModule(
         },
         async dispose() {
           started = false;
-          feedbackSubscriptions = [];
+          feedbackPublisher.close();
           unsubscribeGroups();
           unsubscribePublic();
           unsubscribeFeedback();

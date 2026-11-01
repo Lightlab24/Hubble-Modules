@@ -61,6 +61,7 @@ export class RouterGroupController {
   #document: ModuleDocumentSnapshot | undefined;
   #value: RouterGroupDocument = { contexts: [] };
   #watches: Promise<void>[] = [];
+  readonly #failedWatches = new Set<"documents" | "contexts">();
   #stopped = false;
 
   constructor(
@@ -254,14 +255,19 @@ export class RouterGroupController {
   }
   async start() {
     await this.refresh();
-    const observe = async (watch: () => Promise<void>) => {
+    const observe = async (
+      name: "documents" | "contexts",
+      watch: () => Promise<void>,
+    ) => {
       let backoff = 250;
       while (!this.#abort.signal.aborted) {
         try {
           await watch();
+          if (!this.#abort.signal.aborted) this.#failedWatches.add(name);
           backoff = 250;
         } catch (error) {
           if (this.#abort.signal.aborted) return;
+          this.#failedWatches.add(name);
           this.context.log({
             level: "error",
             stage: "router-groups-watch",
@@ -275,14 +281,16 @@ export class RouterGroupController {
       }
     };
     this.#watches = [
-      observe(async () => {
+      observe("documents", async () => {
         for await (const _ of this.#client.watch(
           "routing-groups",
           this.#abort.signal,
-        ))
+        )) {
           await this.refresh();
+          this.#failedWatches.delete("documents");
+        }
       }),
-      observe(async () => {
+      observe("contexts", async () => {
         let revision: string | null = null;
         while (!this.#abort.signal.aborted) {
           const next: ModuleContextsResponse =
@@ -295,6 +303,7 @@ export class RouterGroupController {
           if (next.revision !== revision) {
             revision = next.revision;
             await this.refresh();
+            this.#failedWatches.delete("contexts");
           }
         }
       }),
@@ -311,6 +320,9 @@ export class RouterGroupController {
   }
   private async requireScope(contextId: string) {
     await this.refreshNow();
+    return this.observedScope(contextId);
+  }
+  private observedScope(contextId: string) {
     const context = this.#contexts.find(
       (item) => item.reference.contextId === contextId,
     );
@@ -381,7 +393,19 @@ export class RouterGroupController {
         input.connectionId !== own.connectionId
       )
         throw new Error("Routing action scope changed");
-      const context = await this.requireScope(input.moduleConnectionId);
+      // start(), document/context watches and local edits reconcile this state
+      // through the same ordered queue. A button press must not reread and
+      // reconcile unchanged host configuration before sending its route.
+      if (
+        !this.#document ||
+        this.#journal?.pending ||
+        this.#failedWatches.size > 0 ||
+        !this.#contexts.some(
+          (item) => item.reference.contextId === input.moduleConnectionId,
+        )
+      )
+        await this.refreshNow();
+      const context = this.observedScope(input.moduleConnectionId);
       const groupId = resolveRouterGroup(
         contextSettings(this.#value, context),
         input.groupId,
