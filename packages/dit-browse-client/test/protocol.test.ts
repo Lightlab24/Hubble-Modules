@@ -68,6 +68,61 @@ describe('DIT Browse protocol', () => {
     })
   })
 
+  it('accepts additional version-one capabilities advertised by newer servers', () => {
+    const hello = {
+      type: 'hello',
+      protocol: 'ditbrowse.control',
+      protocolVersion: 1,
+      server: { name: 'DIT Browse', version: '1.2.6' },
+      capabilities: [
+        ...DIT_BROWSE_CAPABILITIES,
+        'getConfiguration',
+        'getSettings',
+        'updateSettings',
+        'listCameras',
+        'getCamera',
+        'createCamera',
+        'updateCamera',
+        'deleteCamera',
+        'reorderCameras',
+        'resizeCameras',
+        'setCameraCredentials',
+        'forgetCredentials',
+        'clearCache',
+        'listWorkspaces',
+        'createWorkspace',
+        'updateWorkspace',
+        'deleteWorkspace',
+        'futureCapability',
+      ],
+    }
+    expect(parseDitBrowseServerMessage(hello)).toEqual(hello)
+  })
+
+  it.each([
+    [...DIT_BROWSE_CAPABILITIES, 'status'],
+    [...DIT_BROWSE_CAPABILITIES, 'newCommand', 'newCommand'],
+    [...DIT_BROWSE_CAPABILITIES, ''],
+    [...DIT_BROWSE_CAPABILITIES, 'new\nCommand'],
+    [...DIT_BROWSE_CAPABILITIES, 'x'.repeat(129)],
+    [...DIT_BROWSE_CAPABILITIES, 123],
+    [...DIT_BROWSE_CAPABILITIES, ...Array.from({ length: 128 }, (_, i) => `extension${i}`)],
+    ['status', 'focusCamera', 'newCommand', 'anotherCommand', 'futureCommand'],
+  ])(
+    'rejects malformed, duplicate, excessive or incomplete capability lists: %j',
+    (...capabilities) => {
+      expect(() =>
+        parseDitBrowseServerMessage({
+          type: 'hello',
+          protocol: 'ditbrowse.control',
+          protocolVersion: 1,
+          server: { name: 'DIT Browse', version: '1.2.6' },
+          capabilities,
+        }),
+      ).toThrow('Invalid DIT Browse server message')
+    },
+  )
+
   it('rejects unknown hello fields, protocols, and incomplete capabilities', () => {
     const hello = {
       type: 'hello',

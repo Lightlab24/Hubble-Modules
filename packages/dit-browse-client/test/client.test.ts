@@ -3,14 +3,11 @@ import { EventEmitter } from 'node:events'
 import { describe, expect, it } from 'vitest'
 import WebSocket from 'ws'
 
-import {
-  DitBrowseClient,
-  DitBrowseCommandError,
-  type DitBrowseClientClock,
-} from '../src/client.js'
+import { DitBrowseClient, DitBrowseCommandError, type DitBrowseClientClock } from '../src/client.js'
 import {
   DIT_BROWSE_CAPABILITIES,
   DIT_BROWSE_REQUIRED_CAPABILITIES,
+  type DitBrowseCommand,
   type DitBrowseStatus,
 } from '../src/protocol.js'
 
@@ -336,6 +333,44 @@ describe('DitBrowseClient', () => {
     expect(fixture.client.snapshot.serverVersion).toBe('1.0.1')
   })
 
+  it('connects to a server with new capabilities without allowing unsupported commands', async () => {
+    const fixture = createFixture()
+    fixture.client.start()
+    const socket = fixture.sockets[0]!
+    socket.open()
+    socket.receive({
+      ...serverHello(),
+      server: { name: 'DIT Browse', version: '1.2.6' },
+      capabilities: [
+        ...DIT_BROWSE_CAPABILITIES,
+        'getConfiguration',
+        'createWorkspace',
+        'futureCapability',
+      ],
+    })
+    const refresh = socket.jsonSent().at(-1)
+    expect(refresh).toMatchObject({ command: { type: 'status' } })
+    if (!isCommand(refresh)) throw new Error('Expected status request')
+    socket.receive(success(refresh.requestId, status(3)))
+    await settleCommandQueue()
+    expect(fixture.client.snapshot).toMatchObject({
+      connected: true,
+      serverVersion: '1.2.6',
+      lastError: null,
+      status: { selectedCameraNumber: 3 },
+    })
+    const sent = socket.sent.length
+    await expect(
+      fixture.client.sendCommand({
+        type: 'createWorkspace',
+        workspaceNumber: 5,
+      } as unknown as DitBrowseCommand),
+    ).rejects.toMatchObject({ code: 'bad_request' })
+    expect(socket.sent).toHaveLength(sent)
+    expect(fixture.client.snapshot.connected).toBe(true)
+    fixture.client.stop()
+  })
+
   it('rejects sanitized server failures and command timeouts', async () => {
     const fixture = await createConnectedFixture()
     const socket = fixture.sockets[0]
@@ -622,10 +657,7 @@ describe('DitBrowseClient', () => {
 
     expect(socket.listenerCount('error')).toBe(1)
     expect(() => {
-      socket.emit(
-        'error',
-        new Error('WebSocket was closed before the connection was established'),
-      )
+      socket.emit('error', new Error('WebSocket was closed before the connection was established'))
     }).not.toThrow()
     expect(socket.listenerCount('error')).toBe(0)
   })

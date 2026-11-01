@@ -44,9 +44,11 @@ export const DitBrowseCameraNumberSchema = z.int().positive().max(DIT_BROWSE_MAX
 export const DitBrowseRequestIdSchema = oneLineString(128, true)
 export const DitBrowseCapabilitySchema = z.enum(DIT_BROWSE_CAPABILITIES)
 export const DitBrowseCapabilitiesSchema = z
-  .array(DitBrowseCapabilitySchema)
+  // Version-one servers can add capabilities without changing existing commands.
+  // Advertisement does not extend the separately validated outbound command schema.
+  .array(oneLineString(128, true))
   .min(DIT_BROWSE_REQUIRED_CAPABILITIES.length)
-  .max(DIT_BROWSE_CAPABILITIES.length)
+  .max(128)
   .superRefine((capabilities, context) => {
     const observed = new Set(capabilities)
     if (
@@ -55,7 +57,7 @@ export const DitBrowseCapabilitiesSchema = z
     ) {
       context.addIssue({
         code: 'custom',
-        message: 'DIT Browse capabilities must match protocol version 1',
+        message: 'DIT Browse capabilities must include version-one requirements without duplicates',
       })
     }
   })
