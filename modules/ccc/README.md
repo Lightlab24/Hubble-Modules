@@ -1,7 +1,13 @@
 # CCC
 
-Official module `hubble-ccc`, version **1.0.0**, using stable Hubble module API **1**.
-Camera controls using the shared RCP transport and a host persistence interface.
+Official module `hubble-ccc`, version **1.2.6**, using stable Hubble module API **1**.
+Camera controls using the shared RCP transport and scoped portable documents.
+
+Camera-selection feedback updates immediately while ordered document saves are pending.
+Success still means the selection was saved. A failed save rolls back dependent
+selections while preserving independent camera edits. Recording continues to use
+confirmed selections and device observations. Host refresh requests return the
+current snapshot without waiting for the selection-save queue.
 
 ## Source ownership
 

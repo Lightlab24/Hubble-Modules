@@ -20,7 +20,7 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-async function harness() {
+async function harness(beforeWrite?: () => Promise<void>) {
   const network = await broker();
   const directory = await mkdtemp(path.join(tmpdir(), "ccc-feedback-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
@@ -55,9 +55,14 @@ async function harness() {
     publishState: vi.fn(),
     publishFeedback: vi.fn(),
     publishEvent: vi.fn(),
-    services: documentServices(workspaceId, config, (next) => {
-      config = next;
-    }),
+    services: documentServices(
+      workspaceId,
+      config,
+      (next) => {
+        config = next;
+      },
+      beforeWrite,
+    ),
   };
   let controller!: CccController;
   const instance = createCccModule((store) => {
@@ -161,6 +166,122 @@ it("suppresses unchanged snapshots and status across separate controller notific
     feedback.mock.calls.length,
   ]).toEqual(initial);
   expect(status.mock.lastCall?.[0].observedAt).toBe(lastObservedAt);
+});
+
+it.each([false, true])(
+  "answers host refresh during a pending selection save (failure: %s)",
+  async (failFirstSave) => {
+    let release!: () => void;
+    let saving!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      saving = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let writes = 0;
+    const h = await harness(async () => {
+      if (++writes !== 1) return;
+      saving();
+      await held;
+      if (failFirstSave) throw new Error("Save failed");
+    });
+    const [first, second] = h.controller.state().config.rows;
+    const firstAction = h.instance.execute(
+      "toggle-camera-enabled",
+      { cameraId: first!.rowId },
+      h.execution(),
+    );
+    await entered;
+    let refreshed = false;
+    // Hubble reconciles the previous save while the next action is awaiting storage.
+    // Storage cannot proceed until this observation returns: it must not join the command queue.
+    const refresh = Promise.resolve(
+      h.instance.call!("activate", null, h.execution()),
+    ).then((state) => {
+      refreshed = true;
+      return state;
+    });
+    const secondAction = h.instance.execute(
+      "toggle-camera-enabled",
+      { cameraId: second!.rowId },
+      h.execution(),
+    );
+    try {
+      await expect.poll(() => refreshed, { timeout: 250 }).toBe(true);
+      expect(await refresh).toMatchObject({
+        config: {
+          rows: [
+            expect.objectContaining({ enabled: false }),
+            expect.objectContaining({ enabled: false }),
+          ],
+        },
+      });
+      await expect
+        .poll(() => [
+          h.cameraState(first!.rowId)?.state,
+          h.cameraState(second!.rowId)?.state,
+        ])
+        .toEqual(["inactive", "active"]);
+      expect(writes).toBe(1);
+    } finally {
+      release();
+    }
+    expect(await firstAction).toMatchObject({
+      status: failFirstSave ? "failure" : "success",
+    });
+    expect(await secondAction).toMatchObject({ status: "success" });
+    await expect
+      .poll(() => [
+        h.cameraState(first!.rowId)?.state,
+        h.cameraState(second!.rowId)?.state,
+      ])
+      .toEqual([failFirstSave ? "active" : "inactive", "active"]);
+    expect(h.network.commands).toHaveLength(0);
+  },
+);
+
+it("rolls back failed selection dependents while saving a different camera", async () => {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let writes = 0;
+  const h = await harness(async () => {
+    if (++writes === 1) {
+      await held;
+      throw new Error("Save failed");
+    }
+  });
+  const [first, second] = h.controller.state().config.rows;
+  const select = (cameraId: string) =>
+    h.instance.execute("toggle-camera-enabled", { cameraId }, h.execution());
+  const failed = select(first!.rowId);
+  const dependent = select(first!.rowId);
+  const independent = select(second!.rowId);
+  try {
+    await expect
+      .poll(() => [
+        h.cameraState(first!.rowId)?.state,
+        h.cameraState(second!.rowId)?.state,
+      ])
+      .toEqual(["active", "active"]);
+    expect(writes).toBe(1);
+  } finally {
+    release();
+  }
+  expect(await failed).toMatchObject({ status: "failure" });
+  expect(await dependent).toMatchObject({
+    status: "failure",
+    message: expect.stringContaining("earlier selection"),
+  });
+  expect(await independent).toMatchObject({ status: "success" });
+  expect(writes).toBe(2);
+  expect(h.controller.state().config.rows.map((row) => row.enabled)).toEqual([
+    true,
+    true,
+  ]);
+  expect(h.network.commands).toHaveLength(0);
 });
 
 it("owns Matrix camera choices, local selection and observed recording colours", async () => {

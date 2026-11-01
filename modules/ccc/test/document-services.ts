@@ -16,6 +16,7 @@ export function documentServices(
   workspaceId: string,
   initial: CccConfig,
   changed: (config: CccConfig) => void,
+  beforeWrite?: () => Promise<void>,
 ) {
   let document: ModuleDocumentSnapshot = {
     workspaceId,
@@ -67,6 +68,7 @@ export function documentServices(
         if (signal?.aborted) abort();
       });
     if (input.method === "write") {
+      await beforeWrite?.();
       if (input.expectedRevision !== document.revision)
         return { status: "conflict", document };
       document = {

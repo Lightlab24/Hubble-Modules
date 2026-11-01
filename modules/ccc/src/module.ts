@@ -12,7 +12,10 @@ import {
   feedbackCommands,
 } from "./matrix.js";
 import type { HubbleModule, ModuleJsonValue } from "@hubble/module-sdk";
-import { CccController } from "./ccc-controller.js";
+import {
+  CccController,
+  cccCommandControlsSelection,
+} from "./ccc-controller.js";
 import {
   createCccDocumentStore,
   documentId,
@@ -291,8 +294,8 @@ export function createCccModule(
         },
         async execute(id, fields, execution) {
           try {
-            await controller.activate(workspaceId);
             if (id === "record-rcp") {
+              await controller.activate(workspaceId);
               const request = z
                 .strictObject({
                   connectionId: z.uuid(),
@@ -329,6 +332,8 @@ export function createCccModule(
                     )?.rowId,
                   }),
             });
+            if (!cccCommandControlsSelection(action.command))
+              await controller.activate(workspaceId);
             const batch = await controller.command(
               {
                 workspaceId,
@@ -358,7 +363,6 @@ export function createCccModule(
                 commandId: z.enum(["single-switch", "enable-all-cameras"]),
               })
               .parse(value);
-            await controller.activate(workspaceId);
             await controller.command(
               { workspaceId, command: input.commandId },
               execution.signal,
@@ -371,7 +375,10 @@ export function createCccModule(
             };
           }
           if (method === "activate") {
-            await controller.activate(workspaceId);
+            // Startup and the document watcher own configuration adoption. The host
+            // requests this snapshot while reconciling saved documents, possibly
+            // while an action is waiting for the host's next storage transaction.
+            // Joining the controller's command queue here would deadlock both.
             return json(controller.state());
           }
           if (method === "mutate")
@@ -382,13 +389,13 @@ export function createCccModule(
               }),
             );
           if (method === "command") {
-            await controller.activate(workspaceId);
-            return json(
-              await controller.command(
-                { ...CccCommandRequestSchema.parse(value), workspaceId },
-                execution.signal,
-              ),
-            );
+            const request = {
+              ...CccCommandRequestSchema.parse(value),
+              workspaceId,
+            };
+            if (!cccCommandControlsSelection(request.command))
+              await controller.activate(workspaceId);
+            return json(await controller.command(request, execution.signal));
           }
           throw new Error("Unsupported CCC service");
         },

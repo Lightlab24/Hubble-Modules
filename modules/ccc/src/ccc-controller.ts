@@ -5,11 +5,13 @@ import {
   cccTargetKey,
   cccCommandNeedsCamera,
   cccCommandControlsRecording,
+  applyCccMutation,
   type CccCommand,
   type CccBatchResult,
   type CccCommandRequest,
   type CccConfig,
   type CccMutationRequest,
+  type CccMutation,
   type CccResult,
   type CccRow,
   type CccState,
@@ -61,6 +63,21 @@ interface CapturedTarget {
   readonly error?: string;
 }
 
+interface PendingSelection {
+  readonly request: CccCommandRequest;
+  readonly key: string | null;
+  readonly dependencies: readonly PendingSelection[];
+  cancelled: boolean;
+}
+
+export function cccCommandControlsSelection(command: CccCommand): boolean {
+  return (
+    cccCommandNeedsCamera(command) ||
+    command === "enable-all-cameras" ||
+    command === "single-switch"
+  );
+}
+
 /** One selection authority for the spreadsheet, matrix, Companion and Stream Deck. */
 export class CccController {
   private workspaceId = "";
@@ -69,6 +86,7 @@ export class CccController {
   private readonly results = new Map<string, CccResult>();
   private readonly listeners = new Set<() => void>();
   private acceptance: Promise<unknown> = Promise.resolve();
+  private readonly pendingSelections: PendingSelection[] = [];
   private stopped = false;
   private nextEpoch = 0;
   private readonly epochs = new Map<string, number>();
@@ -117,10 +135,11 @@ export class CccController {
   }
 
   state(): CccState {
+    const config = this.visibleConfig();
     return {
       workspaceId: this.workspaceId,
-      config: this.config,
-      rows: this.config.rows.map((row) => {
+      config,
+      rows: config.rows.map((row) => {
         const base = {
           rowId: row.rowId,
           name: "",
@@ -196,46 +215,48 @@ export class CccController {
     request: CccCommandRequest,
     signal?: AbortSignal,
   ): Promise<CccBatchResult & { moduleResult: ModuleActionResult }> {
+    this.requireWorkspace(request.workspaceId);
+    if (!this.connectorEnabled)
+      throw new Error("The CCC connector is missing or disabled");
+    let selection: PendingSelection | undefined;
+    if (cccCommandControlsSelection(request.command)) {
+      const visible = this.visibleConfig();
+      // Validate before showing the change. Selection is local; persistence must
+      // not delay feedback or prevent accepting a second selection.
+      applyCccMutation(visible, this.selectionMutation(request, visible));
+      const key =
+        cccCommandNeedsCamera(request.command) && !visible.singleSwitch
+          ? (request.rowId ?? null)
+          : null;
+      selection = {
+        request,
+        key,
+        cancelled: false,
+        dependencies: this.pendingSelections.filter(
+          (pending) =>
+            !pending.cancelled &&
+            (key === null || pending.key === null || pending.key === key),
+        ),
+      };
+      this.pendingSelections.push(selection);
+      this.emit();
+    }
     const accepted = await this.serialize(async () => {
       this.requireWorkspace(request.workspaceId);
       if (!this.connectorEnabled)
         throw new Error("The CCC connector is missing or disabled");
       const batchId = randomUUID();
-      if (
-        cccCommandNeedsCamera(request.command) ||
-        request.command === "enable-all-cameras" ||
-        request.command === "single-switch"
-      ) {
-        const enableAll = !this.config.rows
-          .filter((row) => cccTargetKey(row) !== null)
-          .every((row) => row.enabled);
-        const mutation =
-          request.command === "single-switch"
-            ? { kind: "single-switch" as const, enabled: "toggle" as const }
-            : request.command === "enable-all-cameras"
-              ? {
-                  kind: "replace" as const,
-                  expectedRevision: this.config.revision,
-                  rows: this.config.rows.map((row) =>
-                    cccTargetKey(row) === null
-                      ? row
-                      : { ...row, enabled: enableAll },
-                  ),
-                  ...(enableAll && this.config.singleSwitch
-                    ? { singleSwitch: false }
-                    : {}),
-                }
-              : {
-                  kind: "enabled" as const,
-                  rowId: request.rowId ?? "",
-                  enabled: "toggle" as const,
-                };
-        this.adopt(
-          await this.store.mutate({
-            workspaceId: request.workspaceId,
-            mutation,
-          }),
-        );
+      if (selection) {
+        if (selection.cancelled)
+          throw new Error(
+            "Selection cancelled because an earlier selection could not be saved",
+          );
+        const saved = await this.store.mutate({
+          workspaceId: request.workspaceId,
+          mutation: this.selectionMutation(request, this.config),
+        });
+        this.removeSelection(selection);
+        this.adopt(saved);
         return {
           completion: Promise.resolve({
             batchId,
@@ -251,6 +272,16 @@ export class CccController {
       return {
         completion: this.publishBatch(request, batchId, targets, signal),
       };
+    }).catch((error: unknown) => {
+      if (selection) {
+        selection.cancelled = true;
+        for (const pending of this.pendingSelections)
+          if (pending.dependencies.some((dependency) => dependency.cancelled))
+            pending.cancelled = true;
+        this.removeSelection(selection);
+        this.emit();
+      }
+      throw error;
     });
     return accepted.completion;
   }
@@ -505,14 +536,15 @@ export class CccController {
 
   /** Feedback decisions are module-owned; the host only applies the chosen presentation colors. */
   feedback(): Record<string, boolean | null> {
+    const config = this.visibleConfig();
     const result: Record<string, boolean | null> = {};
-    const enabled = this.config.rows.filter(
+    const enabled = config.rows.filter(
       (row) => row.enabled && cccTargetKey(row) !== null,
     );
     const live = this.state().rows.filter((row) =>
       enabled.some((saved) => saved.rowId === row.rowId),
     );
-    for (const row of this.config.rows)
+    for (const row of config.rows)
       for (const command of [
         "enable-camera",
         "disable-camera",
@@ -521,12 +553,10 @@ export class CccController {
         result[`${command}/${row.rowId}`] = this.connectorEnabled
           ? row.enabled
           : null;
-    const complete = this.config.rows.filter(
-      (row) => cccTargetKey(row) !== null,
-    );
+    const complete = config.rows.filter((row) => cccTargetKey(row) !== null);
     result["enable-all-cameras/"] =
       complete.length > 0 && complete.every((row) => row.enabled);
-    result["single-switch/"] = Boolean(this.config.singleSwitch);
+    result["single-switch/"] = Boolean(config.singleSwitch);
     const ready =
       live.length > 0 &&
       live.every(
@@ -680,6 +710,44 @@ export class CccController {
   private requireWorkspace(workspaceId: string): void {
     if (this.stopped || workspaceId !== this.workspaceId)
       throw new Error("CCC workspace is unavailable");
+  }
+  private selectionMutation(
+    request: CccCommandRequest,
+    config: CccConfig,
+  ): CccMutation {
+    if (request.command === "single-switch")
+      return { kind: "single-switch", enabled: "toggle" };
+    if (request.command === "enable-all-cameras") {
+      const enableAll = !config.rows
+        .filter((row) => cccTargetKey(row) !== null)
+        .every((row) => row.enabled);
+      return {
+        kind: "replace",
+        expectedRevision: config.revision,
+        rows: config.rows.map((row) =>
+          cccTargetKey(row) === null ? row : { ...row, enabled: enableAll },
+        ),
+        ...(enableAll && config.singleSwitch ? { singleSwitch: false } : {}),
+      };
+    }
+    return { kind: "enabled", rowId: request.rowId ?? "", enabled: "toggle" };
+  }
+  private visibleConfig(): CccConfig {
+    return this.pendingSelections.reduce((config, pending) => {
+      if (pending.cancelled) return config;
+      try {
+        return applyCccMutation(
+          config,
+          this.selectionMutation(pending.request, config),
+        );
+      } catch {
+        return config;
+      } // A concurrent editor can remove a queued camera.
+    }, this.config);
+  }
+  private removeSelection(selection: PendingSelection): void {
+    const index = this.pendingSelections.indexOf(selection);
+    if (index >= 0) this.pendingSelections.splice(index, 1);
   }
   private serialize<T>(operation: () => T | Promise<T>): Promise<T> {
     const result = this.acceptance.then(operation, operation);
