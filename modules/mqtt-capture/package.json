@@ -1,0 +1,21 @@
+{
+  "name": "@hubble-module/hubble-mqtt-capture",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "hubble": {
+    "id": "hubble-mqtt-capture",
+    "name": "MQTT Capture"
+  },
+  "scripts": {
+    "build": "hubble-module build .",
+    "test": "hubble-module test .",
+    "validate": "hubble-module validate ."
+  },
+  "devDependencies": {
+    "@hubble/module-sdk": "workspace:1.7.0",
+    "@hubble/module-tools": "workspace:1.5.0",
+    "@types/node": "22.19.17",
+    "typescript": "6.0.3"
+  }
+}

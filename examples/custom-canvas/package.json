@@ -1,0 +1,19 @@
+{
+  "name": "hubble-custom-canvas-example",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "hubble": {
+    "id": "example-custom-canvas",
+    "name": "Custom canvas example",
+    "assets": [
+      "ui/index.html"
+    ],
+    "frontend": {
+      "ui/app.js": "src/frontend.ts"
+    },
+    "helpers": {
+      "helpers/renderer.mjs": "src/helper.ts"
+    }
+  }
+}

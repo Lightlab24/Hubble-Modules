@@ -1,0 +1,10 @@
+{
+  "name": "hubble-prepared-document-example",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "hubble": {
+    "id": "example-prepared-document",
+    "name": "Prepared document example"
+  }
+}

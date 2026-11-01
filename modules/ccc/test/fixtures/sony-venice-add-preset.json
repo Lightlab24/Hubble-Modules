@@ -1,0 +1,12 @@
+[
+  {
+    "topic": "{host}/{camera}/camhead/action/set/keyboard",
+    "payload": "addWB",
+    "retained": false
+  },
+  {
+    "topic": "{host}/{camera}/camhead/action/set/keyboard",
+    "payload": "addWB",
+    "retained": false
+  }
+]

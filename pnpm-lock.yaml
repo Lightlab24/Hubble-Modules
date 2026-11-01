@@ -8,8 +8,14 @@ importers:
 
   .:
     devDependencies:
+      '@hubble/module-contracts':
+        specifier: workspace:1.0.0
+        version: link:packages/module-contracts
+      '@hubble/module-runtime-helpers':
+        specifier: workspace:1.0.0
+        version: link:packages/module-runtime-helpers
       '@hubble/module-sdk':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.7.0
         version: link:packages/module-sdk
       '@types/node':
         specifier: 22.19.17
@@ -39,7 +45,7 @@ importers:
         specifier: workspace:1.0.0
         version: link:../../packages/module-runtime-helpers
       '@hubble/module-sdk':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.7.0
         version: link:../../packages/module-sdk
       '@hubble/protocol-videohub':
         specifier: workspace:1.0.0
@@ -52,7 +58,7 @@ importers:
         version: 4.4.3
     devDependencies:
       '@hubble/module-tools':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.5.0
         version: link:../../packages/module-tools
 
   modules/blackmagic-videohub:
@@ -64,7 +70,7 @@ importers:
         specifier: workspace:1.0.0
         version: link:../../packages/module-runtime-helpers
       '@hubble/module-sdk':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.7.0
         version: link:../../packages/module-sdk
       '@hubble/protocol-videohub':
         specifier: workspace:1.0.0
@@ -77,7 +83,7 @@ importers:
         version: 4.4.3
     devDependencies:
       '@hubble/module-tools':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.5.0
         version: link:../../packages/module-tools
 
   modules/ccc:
@@ -89,7 +95,7 @@ importers:
         specifier: workspace:1.0.0
         version: link:../../packages/module-runtime-helpers
       '@hubble/module-sdk':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.7.0
         version: link:../../packages/module-sdk
       '@hubble/protocol-cyanview-rcp':
         specifier: workspace:1.0.0
@@ -99,7 +105,7 @@ importers:
         version: 4.4.3
     devDependencies:
       '@hubble/module-tools':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.5.0
         version: link:../../packages/module-tools
 
   modules/cyanview-rcp:
@@ -111,7 +117,7 @@ importers:
         specifier: workspace:1.0.0
         version: link:../../packages/module-runtime-helpers
       '@hubble/module-sdk':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.7.0
         version: link:../../packages/module-sdk
       '@hubble/protocol-cyanview-rcp':
         specifier: workspace:1.0.0
@@ -121,7 +127,7 @@ importers:
         version: 4.4.3
     devDependencies:
       '@hubble/module-tools':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.5.0
         version: link:../../packages/module-tools
 
   modules/cyanview-studio:
@@ -133,14 +139,14 @@ importers:
         specifier: workspace:1.0.0
         version: link:../../packages/module-runtime-helpers
       '@hubble/module-sdk':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.7.0
         version: link:../../packages/module-sdk
       zod:
         specifier: 4.4.3
         version: 4.4.3
     devDependencies:
       '@hubble/module-tools':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.5.0
         version: link:../../packages/module-tools
 
   modules/dit-browse:
@@ -155,14 +161,14 @@ importers:
         specifier: workspace:1.0.0
         version: link:../../packages/module-runtime-helpers
       '@hubble/module-sdk':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.7.0
         version: link:../../packages/module-sdk
       zod:
         specifier: 4.4.3
         version: 4.4.3
     devDependencies:
       '@hubble/module-tools':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.5.0
         version: link:../../packages/module-tools
 
   modules/evertz-quartz:
@@ -174,7 +180,7 @@ importers:
         specifier: workspace:1.0.0
         version: link:../../packages/module-runtime-helpers
       '@hubble/module-sdk':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.7.0
         version: link:../../packages/module-sdk
       '@hubble/protocol-ultrix-ogp':
         specifier: workspace:1.0.0
@@ -187,7 +193,7 @@ importers:
         version: 4.4.3
     devDependencies:
       '@hubble/module-tools':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.5.0
         version: link:../../packages/module-tools
 
   modules/http-requests:
@@ -199,7 +205,7 @@ importers:
         specifier: workspace:1.0.0
         version: link:../../packages/module-runtime-helpers
       '@hubble/module-sdk':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.7.0
         version: link:../../packages/module-sdk
       got:
         specifier: 15.1.0
@@ -212,7 +218,7 @@ importers:
         version: 4.4.3
     devDependencies:
       '@hubble/module-tools':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.5.0
         version: link:../../packages/module-tools
 
   modules/lightencode:
@@ -227,14 +233,14 @@ importers:
         specifier: workspace:1.0.0
         version: link:../../packages/module-runtime-helpers
       '@hubble/module-sdk':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.7.0
         version: link:../../packages/module-sdk
       zod:
         specifier: 4.4.3
         version: 4.4.3
     devDependencies:
       '@hubble/module-tools':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.5.0
         version: link:../../packages/module-tools
 
   modules/livegrade:
@@ -246,34 +252,30 @@ importers:
         specifier: workspace:1.0.0
         version: link:../../packages/module-runtime-helpers
       '@hubble/module-sdk':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.7.0
         version: link:../../packages/module-sdk
       zod:
         specifier: 4.4.3
         version: 4.4.3
     devDependencies:
       '@hubble/module-tools':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.5.0
         version: link:../../packages/module-tools
 
-  modules/mock:
-    dependencies:
-      '@hubble/module-contracts':
-        specifier: workspace:1.0.0
-        version: link:../../packages/module-contracts
-      '@hubble/module-runtime-helpers':
-        specifier: workspace:1.0.0
-        version: link:../../packages/module-runtime-helpers
-      '@hubble/module-sdk':
-        specifier: workspace:1.1.0
-        version: link:../../packages/module-sdk
-      zod:
-        specifier: 4.4.3
-        version: 4.4.3
+  modules/mqtt-capture:
     devDependencies:
+      '@hubble/module-sdk':
+        specifier: workspace:1.7.0
+        version: link:../../packages/module-sdk
       '@hubble/module-tools':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.5.0
         version: link:../../packages/module-tools
+      '@types/node':
+        specifier: 22.19.17
+        version: 22.19.17
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
 
   modules/ross-ultrix-ogp:
     dependencies:
@@ -284,7 +286,7 @@ importers:
         specifier: workspace:1.0.0
         version: link:../../packages/module-runtime-helpers
       '@hubble/module-sdk':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.7.0
         version: link:../../packages/module-sdk
       '@hubble/protocol-ultrix-ogp':
         specifier: workspace:1.0.0
@@ -297,7 +299,7 @@ importers:
         version: 4.4.3
     devDependencies:
       '@hubble/module-tools':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.5.0
         version: link:../../packages/module-tools
 
   modules/system-actions:
@@ -309,14 +311,27 @@ importers:
         specifier: workspace:1.0.0
         version: link:../../packages/module-runtime-helpers
       '@hubble/module-sdk':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.7.0
         version: link:../../packages/module-sdk
       zod:
         specifier: 4.4.3
         version: 4.4.3
     devDependencies:
       '@hubble/module-tools':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.5.0
+        version: link:../../packages/module-tools
+
+  modules/tally-switch:
+    dependencies:
+      '@hubble/module-sdk':
+        specifier: workspace:1.7.0
+        version: link:../../packages/module-sdk
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@hubble/module-tools':
+        specifier: workspace:1.5.0
         version: link:../../packages/module-tools
 
   modules/tsl:
@@ -328,14 +343,14 @@ importers:
         specifier: workspace:1.0.0
         version: link:../../packages/module-runtime-helpers
       '@hubble/module-sdk':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.7.0
         version: link:../../packages/module-sdk
       zod:
         specifier: 4.4.3
         version: 4.4.3
     devDependencies:
       '@hubble/module-tools':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.5.0
         version: link:../../packages/module-tools
 
   packages/dit-browse-client:
@@ -360,7 +375,7 @@ importers:
   packages/module-contracts:
     dependencies:
       '@hubble/module-sdk':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.7.0
         version: link:../module-sdk
       zod:
         specifier: 4.4.3
@@ -372,7 +387,7 @@ importers:
         specifier: workspace:1.0.0
         version: link:../module-contracts
       '@hubble/module-sdk':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.7.0
         version: link:../module-sdk
       zod:
         specifier: 4.4.3
@@ -404,7 +419,7 @@ importers:
         version: 4.4.3
     devDependencies:
       '@hubble/module-sdk':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.7.0
         version: link:../module-sdk
 
   packages/official-module-runtime:
@@ -419,7 +434,7 @@ importers:
         specifier: workspace:1.0.0
         version: link:../module-contracts
       '@hubble/module-sdk':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.7.0
         version: link:../module-sdk
       zod:
         specifier: 4.4.3
@@ -438,7 +453,7 @@ importers:
         specifier: workspace:1.0.0
         version: link:../module-runtime-helpers
       '@hubble/module-sdk':
-        specifier: workspace:1.1.0
+        specifier: workspace:1.7.0
         version: link:../module-sdk
       '@hubble/protocol-ultrix-ogp':
         specifier: workspace:1.0.0
@@ -446,9 +461,25 @@ importers:
       '@hubble/protocol-videohub':
         specifier: workspace:1.0.0
         version: link:../protocol-videohub
+      lucide-react:
+        specifier: 1.24.0
+        version: 1.24.0(react@19.2.7)
+      react:
+        specifier: 19.2.7
+        version: 19.2.7
+      react-dom:
+        specifier: 19.2.7
+        version: 19.2.7(react@19.2.7)
       zod:
         specifier: 4.4.3
         version: 4.4.3
+    devDependencies:
+      '@types/react':
+        specifier: 19.2.17
+        version: 19.2.17
+      '@types/react-dom':
+        specifier: 19.2.3
+        version: 19.2.3(@types/react@19.2.17)
 
 packages:
 
@@ -897,6 +928,14 @@ packages:
   '@types/node@22.19.17':
     resolution: {integrity: sha512-wGdMcf+vPYM6jikpS/qhg6WiqSV/OhG+jeeHT/KlVqxYfD40iYJf9/AE1uQxVWFvU7MipKRkRv8NSHiCGgPr8Q==}
 
+  '@types/react-dom@19.2.3':
+    resolution: {integrity: sha512-jp2L/eY6fn+KgVVQAOqYItbF0VY/YApe5Mz2F0aykSO8gx31bYCZyvSeYxCHKvzHG5eZjc+zyaS5BrBWya2+kQ==}
+    peerDependencies:
+      '@types/react': ^19.2.0
+
+  '@types/react@19.2.17':
+    resolution: {integrity: sha512-MXfmqaVPEVgkBT/aY0aGCkRWWtByiYQXo3xdQ8r5RzuFrPiRn8Gar2tQdXSUQ2GKV3bkXckek89V8wQBY2Q/Aw==}
+
   '@types/ws@8.18.1':
     resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
 
@@ -955,6 +994,9 @@ packages:
 
   convert-source-map@2.0.0:
     resolution: {integrity: sha512-Kvp459HrV2FEJ1CAsi1Ku+MY3kasH19TFykTz2xWmMeq6bk2NU3XXvfJ+Q61m0xktWwt+1HSYf3JZsTms3aRJg==}
+
+  csstype@3.2.3:
+    resolution: {integrity: sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==}
 
   decompress-response@10.0.0:
     resolution: {integrity: sha512-oj7KWToJuuxlPr7VV0vabvxEIiqNMo+q0NueIiL3XhtwC6FVOX7Hr1c0C4eD0bmf7Zr+S/dSf2xvkH3Ad6sU3Q==}
@@ -1111,6 +1153,11 @@ packages:
     resolution: {integrity: sha512-wI9Nui/L8VfADa/cr/7NQruaASk1k23/Uh1khQ02BCVYiiy8F4AhOGnQzJy3Fl/c44GnYSbZHv8g7EcG3kJ1Qg==}
     engines: {node: '>=20'}
 
+  lucide-react@1.24.0:
+    resolution: {integrity: sha512-YT6mBD8lGKkg4nM39enlm94/sfJIiW0YKUT60fBy4YK8tai31ylg1VhGNWxkpSKHo9UagfnZqwIff3HTDQwXeA==}
+    peerDependencies:
+      react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
+
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
 
@@ -1149,6 +1196,15 @@ packages:
     resolution: {integrity: sha512-WuyALRjWPDGtt/wzJiadO5AXY+8hZ80hVpe6MyivgraREW751X3SbhRvG3eLKOYN+8VEvqLcf3wdnt44Z4S4SA==}
     engines: {node: '>=10'}
 
+  react-dom@19.2.7:
+    resolution: {integrity: sha512-t0BRVXvbiE/o20Hfw669rLbMCDWtYZLvmJigy2f0MxsXF+71pxhR3xOkspmsO8h3ZlNzyibAmtCa3l4lYKk6gQ==}
+    peerDependencies:
+      react: ^19.2.7
+
+  react@19.2.7:
+    resolution: {integrity: sha512-HNe9WslTbXmFK8o8cmwgAeJFSBvt1bPdHCVKtaaV+WlAN36mpT4hcRpwbf3fY56ar2oIXzsBpOAiIRHAdY0OlQ==}
+    engines: {node: '>=0.10.0'}
+
   resolve-alpn@1.2.1:
     resolution: {integrity: sha512-0a1F4l73/ZFZOakJnQ3FvkJ2+gSTQWz/r2KE5OdDY0TxPm5h4GkqkWWfM47T7HsbnOtcJVEF4epCVy6u7Q3K+g==}
 
@@ -1160,6 +1216,9 @@ packages:
     resolution: {integrity: sha512-6odND+fel5zVw3I4Yc2e69gvguDnX0CAAGiNDZSq4ik5WUcaLrkD2GLuog0XcODbor31hZ5ayEMgVDno+KPV5g==}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
+
+  scheduler@0.27.0:
+    resolution: {integrity: sha512-eNv+WrVbKu1f3vbYJT/xtiF5syA5HPIMtf9IgY/nKg0sWqzAUEvqY/xm7OcZc/qafLx/iO9FgOmeSAp4v5ti/Q==}
 
   siginfo@2.0.0:
     resolution: {integrity: sha512-ybx0WO1/8bSBLEWXZvEd7gMW3Sn3JFlW3TvX1nREbDLRNQNaeNN8WK0meBwPdAaOI7TtRRRJn/Es1zhrrCHu7g==}
@@ -1550,6 +1609,14 @@ snapshots:
     dependencies:
       undici-types: 6.21.0
 
+  '@types/react-dom@19.2.3(@types/react@19.2.17)':
+    dependencies:
+      '@types/react': 19.2.17
+
+  '@types/react@19.2.17':
+    dependencies:
+      csstype: 3.2.3
+
   '@types/ws@8.18.1':
     dependencies:
       '@types/node': 22.19.17
@@ -1616,6 +1683,8 @@ snapshots:
   chunk-data@0.1.0: {}
 
   convert-source-map@2.0.0: {}
+
+  csstype@3.2.3: {}
 
   decompress-response@10.0.0:
     dependencies:
@@ -1786,6 +1855,10 @@ snapshots:
 
   lowercase-keys@4.0.1: {}
 
+  lucide-react@1.24.0(react@19.2.7):
+    dependencies:
+      react: 19.2.7
+
   magic-string@0.30.21:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.6.0
@@ -1811,6 +1884,13 @@ snapshots:
       source-map-js: 1.2.2
 
   quick-lru@5.1.1: {}
+
+  react-dom@19.2.7(react@19.2.7):
+    dependencies:
+      react: 19.2.7
+      scheduler: 0.27.0
+
+  react@19.2.7: {}
 
   resolve-alpn@1.2.1: {}
 
@@ -1838,6 +1918,8 @@ snapshots:
       '@rolldown/binding-openharmony-arm64': 1.2.15
       '@rolldown/binding-win32-arm64-msvc': 1.2.15
       '@rolldown/binding-win32-x64-msvc': 1.2.15
+
+  scheduler@0.27.0: {}
 
   siginfo@2.0.0: {}
 

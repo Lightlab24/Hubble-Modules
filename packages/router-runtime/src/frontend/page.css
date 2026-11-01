@@ -1,0 +1,162 @@
+@import "./ui-tokens.css";
+:root {
+  /* Match the shared workbook palette used by canvas-rendered matrices. */
+  --base-lift: var(--ui-base);
+  --base-lift-raised: #262626;
+  --window: var(--ui-window);
+  --chrome: var(--ui-chrome);
+  --surface: var(--ui-surface);
+  --surface-hover: var(--ui-hover);
+  --surface-selected: var(--ui-selected);
+  --surface-0: var(--ui-window);
+  --surface-1: var(--ui-chrome);
+  --surface-2: var(--ui-chrome);
+  --surface-3: var(--ui-surface);
+  --surface-4: var(--ui-hover);
+  --line-soft: var(--ui-line-soft);
+  --line: var(--ui-line);
+  --line-strong: var(--ui-line-strong);
+  --text-strong: var(--ui-text-strong);
+  --quiet: var(--ui-text-secondary);
+  --canvas: var(--ui-window);
+  --panel: var(--ui-chrome);
+  --raised: var(--ui-surface);
+  --active: var(--ui-selected);
+  --rule: var(--ui-line);
+  --text: var(--ui-text);
+  --secondary: var(--ui-text-secondary);
+  --secondary-aa: var(--ui-text-secondary);
+  --muted: var(--ui-text-secondary);
+  --selection: var(--ui-focus);
+  --selection-ink: #111;
+  --healthy: #10a37f;
+  --warning: #d8c85b;
+  --failure: #e88c86;
+  --control: var(--ui-control);
+  --control-hover: var(--ui-hover);
+  --control-pressed: var(--ui-selected);
+  --control-border: transparent;
+  --control-primary: #e5e5e5;
+  --control-primary-hover: #fff;
+  --control-primary-ink: #111;
+  --focus-ring: var(--ui-focus);
+  --menu-surface: var(--ui-surface);
+  --menu-surface-raised: var(--ui-hover);
+  --menu-surface-hover: var(--ui-selected);
+  --menu-surface-selected: var(--ui-selected);
+  --menu-border: var(--ui-line-strong);
+  --menu-text: var(--ui-text-strong);
+  --menu-muted: var(--ui-text-secondary);
+  /* Workbook chrome is portaled to the document body so it can track the
+     canvas precisely. App popovers and dialogs must live above that entire
+     interaction plane instead of being sliced by merged action headers. */
+  --layer-workbook-header: 1197;
+  --layer-workbook-controls: 1198;
+  --layer-workbook-resize-guide: 1200;
+  --layer-workbook-drop-guide: 1201;
+  --layer-workbook-drag-preview: 1202;
+  --layer-popover: 1300;
+  --layer-popover-submenu: 1301;
+  --layer-tooltip: 1350;
+  --layer-modal-overlay: 1400;
+  --layer-modal-content: 1401;
+  color: var(--text);
+  background: var(--canvas);
+  color-scheme: dark;
+  font-family: var(--font-ui);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+button {
+  cursor: pointer;
+  padding: 5px 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+input,
+select {
+  background: var(--chrome);
+  border: 1px solid var(--line-strong);
+  padding: 5px 8px;
+  border-radius: 4px;
+}
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+h2,
+h3,
+p {
+  margin: 0;
+}
+.router-page {
+  display: grid;
+  height: 100%;
+  grid-template-rows: auto minmax(0, 1fr);
+  position: relative;
+}
+.router-groups {
+  padding: 10px;
+  border-bottom: 1px solid var(--line);
+  max-height: 250px;
+  overflow: auto;
+  font-size: 13px;
+}
+.router-groups summary {
+  cursor: pointer;
+}
+.router-groups label {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  margin: 8px 16px 8px 0;
+}
+.router-groups p {
+  margin: 4px 0 10px;
+  color: var(--secondary);
+}
+.router-group-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.router-group-row input {
+  min-width: 200px;
+}
+.router-failure {
+  position: absolute;
+  z-index: 20;
+  top: 8px;
+  right: 10px;
+  max-width: 500px;
+  padding: 12px;
+  border-radius: 6px;
+  color: var(--text);
+  background: #512820;
+  box-shadow: 0 4px 16px #0008;
+}

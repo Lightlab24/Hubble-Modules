@@ -5,6 +5,71 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { runModuleTool } from "../dist/module-tool.mjs";
 
+test("package frontend and helper build with the public SDK outside either checkout", async () => {
+  const temporary = await mkdtemp(
+    path.join(tmpdir(), "hubble-frontend-author-"),
+  );
+  try {
+    await cp(
+      new URL("../../../examples/custom-canvas/", import.meta.url),
+      temporary,
+      {
+        recursive: true,
+        filter: (source) => !source.split(path.sep).includes("dist"),
+      },
+    );
+    await runModuleTool(["build", temporary]);
+    const manifest = JSON.parse(
+      await readFile(path.join(temporary, "dist/hubble-module.json"), "utf8"),
+    );
+    assert.ok(manifest.files.includes("ui/index.html"));
+    assert.ok(manifest.files.includes("ui/app.js"));
+    assert.ok(manifest.files.includes("ui/app.css"));
+    assert.ok(manifest.files.includes("helpers/renderer.mjs"));
+    const helper = await readFile(
+      path.join(temporary, "dist/helpers/renderer.mjs"),
+      "utf8",
+    );
+    assert.match(helper, /serveModuleHelper/);
+    // esbuild source-location comments are not runtime imports.
+    assert.doesNotMatch(
+      helper
+        .split("\n")
+        .filter((line) => !line.trimStart().startsWith("//"))
+        .join("\n"),
+      /from ["']@hubble\/|Lightlab_Apps/,
+    );
+    const frontend = await readFile(
+      path.join(temporary, "dist/ui/app.js"),
+      "utf8",
+    );
+    assert.match(frontend, /hubble\.module\.frontend\.ready\.v1/);
+    assert.doesNotMatch(
+      frontend,
+      /node:module|node:fs|hubbleDesktop|Hubble\/apps/,
+    );
+    const packed = await runModuleTool([
+      "pack",
+      temporary,
+      path.join(temporary, "example.hubble-module"),
+    ]);
+    assert.equal(packed.moduleId, "example-custom-canvas");
+    const pkg = JSON.parse(
+      await readFile(path.join(temporary, "package.json"), "utf8"),
+    );
+    const helpers = pkg.hubble.helpers;
+    pkg.hubble.helpers = { "../escape.mjs": "src/helper.ts" };
+    await writeFile(path.join(temporary, "package.json"), JSON.stringify(pkg));
+    await assert.rejects(runModuleTool(["build", temporary]));
+    pkg.hubble.helpers = helpers;
+    pkg.hubble.frontend = { "../escape.js": "src/frontend.ts" };
+    await writeFile(path.join(temporary, "package.json"), JSON.stringify(pkg));
+    await assert.rejects(runModuleTool(["build", temporary]));
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
+});
+
 test("portable TypeScript source builds, passes conformance and packages without a private checkout", async () => {
   const temporary = await mkdtemp(path.join(tmpdir(), "hubble-author-test-"));
   try {
@@ -81,6 +146,38 @@ test("source descriptor execution is confined to the explicit build step", async
     );
     await runModuleTool(["validate", project]);
     await assert.rejects(runModuleTool(["build", project]), /unbuilt source/);
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
+});
+
+test("Mock cannot be created or packed through the standalone authoring tool", async () => {
+  const temporary = await mkdtemp(path.join(tmpdir(), "hubble-retired-mock-"));
+  try {
+    await assert.rejects(
+      runModuleTool(["create", path.join(temporary, "new"), "hubble-mock"]),
+      /test fixture/,
+    );
+    await cp(
+      new URL("../../../templates/legacy/simulator/", import.meta.url),
+      temporary,
+      { recursive: true },
+    );
+    const file = path.join(temporary, "hubble-module.json");
+    const manifest = JSON.parse(await readFile(file, "utf8"));
+    manifest.id = "hubble-mock";
+    await writeFile(file, JSON.stringify(manifest));
+    for (const operation of ["validate", "pack"])
+      await assert.rejects(
+        runModuleTool([
+          operation,
+          temporary,
+          ...(operation === "pack"
+            ? [path.join(temporary, "forbidden.hubble-module")]
+            : []),
+        ]),
+        /test fixture/,
+      );
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }

@@ -9,6 +9,7 @@ import {
 
 /** This module owns its supported action IDs and validation. */
 export const actionSchemas = {
+  matrix: z.object({ type: z.literal('matrix'), values: z.record(z.string(), z.json()) }),
   'generic-http.get': GenericHttpGetActionDefinitionSchema,
   'generic-http.post': GenericHttpPostActionDefinitionSchema,
   'generic-http.put': GenericHttpPutActionDefinitionSchema,

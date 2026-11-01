@@ -3,6 +3,8 @@ import { once } from 'node:events'
 import { createServer, type Socket } from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CyanViewRcpConnectionDefinitionSchema } from '../src/config.js'
+import rcpModule from '../src/module.js'
+import type { ModuleFeedback, ModuleExchange, ModuleState } from '@hubble/module-sdk'
 
 const ID = '11111111-1111-4111-8111-111111111111'
 const cleanups: (() => Promise<void> | void)[] = []
@@ -124,6 +126,82 @@ async function ready(manager: CyanViewRcpConnectionManager) {
 }
 
 describe('CyanView RCP MQTT control', () => {
+  it('uses package-owned Matrix dispatch and feedback with the real MQTT client', async () => {
+    const fake = await broker()
+    const feedback: ModuleFeedback[] = []
+    let state: ModuleState | undefined
+    const modules: ModuleExchange = {
+      discover: async () => [],
+      bindings: async () => [],
+      publish: async () => {},
+      query: async () => null,
+      reportAction: async () => {},
+      subscribe: async () => async () => {},
+      execute: async () => {
+        throw new Error('Selection must not execute another module')
+      },
+    }
+    const instance = rcpModule.createInstance({
+      instanceId: 'rcp-matrix',
+      scope: { kind: 'connection', workspaceId: ID, connectionId: ID },
+      settings: { host: '127.0.0.1', port: fake.port, requestTimeoutMs: 300 },
+      modules,
+      log() {},
+      publishState(value) {
+        state = value
+      },
+      publishEvent() {},
+      publishFeedback(value) {
+        feedback.push(value)
+      },
+    })
+    cleanups.push(async () => instance.dispose())
+    await instance.start()
+    await expect.poll(() => state?.phase).toBe('ready')
+    const execution = {
+      executionId: 'selection',
+      gesture: 'press' as const,
+      wrap: true,
+      signal: new AbortController().signal,
+      log() {},
+    }
+    const values = {
+      enabled: true,
+      actionType: 'select-camera',
+      cameraNumber: 102,
+      drivesTally: true,
+      feedbackColor: '#123456',
+    }
+    await instance.subscribeFeedback?.([{ id: 'matrix', fields: { actionId: 'row', values } }], {
+      signal: execution.signal,
+    })
+    expect(feedback.at(-1)).toMatchObject({
+      state: 'inactive',
+      appearance: { backgroundColor: null },
+    })
+    expect(fake.commands).toHaveLength(0)
+    expect(await instance.execute('matrix', { values }, execution)).toMatchObject({
+      status: 'success',
+    })
+    expect(fake.commands).toEqual([
+      { topic: 'unit/RCP-1/rcp/action/set/active_camera_number', value: '102', header: 0x32 },
+    ])
+    expect(feedback.at(-1)?.state).toBe('inactive')
+    fake.send('unit/RCP-1/rcp/status/volatile/active_camera', 'camera-a')
+    await expect.poll(() => feedback.at(-1)?.state).toBe('active')
+    expect(feedback.at(-1)).toMatchObject({
+      appearance: { backgroundColor: '#123456' },
+      fields: { actionId: 'row' },
+    })
+    expect(
+      await instance.execute('matrix', { values: { ...values, cameraNumber: 0 } }, execution),
+    ).toMatchObject({ status: 'failure', category: 'invalid-config' })
+    fake.disconnect()
+    await expect.poll(() => feedback.at(-1)?.appearance?.backgroundColor).toBeNull()
+    expect(feedback.at(-1)?.state).toBe('unavailable')
+    expect(fake.commands).toHaveLength(1)
+  })
+
   it('clears feedback when the broker stops answering keepalive pings', async () => {
     const fake = await broker({ ping: false })
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
@@ -227,9 +305,9 @@ describe('CyanView RCP MQTT control', () => {
     const { manager: connections } = manager(fake.port)
     await ready(connections)
     const controller = new AbortController()
-    const aborted = expect(
-      connections.selectCamera(ID, 102, controller.signal),
-    ).rejects.toThrow('cancelled')
+    const aborted = expect(connections.selectCamera(ID, 102, controller.signal)).rejects.toThrow(
+      'cancelled',
+    )
     controller.abort()
     await aborted
     const pending = Array.from({ length: 16 }, () =>
@@ -325,9 +403,7 @@ describe('CyanView RCP recording commands', () => {
     await expect(connections.recordCamera(ID, 102, AbortSignal.abort())).rejects.toThrow(
       'cancelled',
     )
-    await expect(connections.recordGroupAll(ID, AbortSignal.abort())).rejects.toThrow(
-      'cancelled',
-    )
+    await expect(connections.recordGroupAll(ID, AbortSignal.abort())).rejects.toThrow('cancelled')
     fake.send('unit/duplicate/camhead/status/persist/number', '102')
     await new Promise((resolve) => setTimeout(resolve, 150))
     await expect(connections.recordCamera(ID, 102)).rejects.toThrow('More than one camera')

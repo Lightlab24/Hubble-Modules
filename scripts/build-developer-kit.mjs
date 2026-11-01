@@ -12,13 +12,22 @@ import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { ModuleVersionSchema } from "../packages/module-sdk/dist/index.js";
 const root = path.resolve(import.meta.dirname, "..");
 const require = createRequire(
   path.join(root, "packages/module-tools/package.json"),
 );
-const version = JSON.parse(
-  await readFile(path.join(root, "packages/module-tools/package.json"), "utf8"),
-).version;
+// Guidance-only kit revisions can advance without changing SDK/tool contracts.
+// Usage: node scripts/build-developer-kit.mjs [output.tar.gz] [kit-version]
+const version = ModuleVersionSchema.parse(
+  process.argv[3] ??
+    JSON.parse(
+      await readFile(
+        path.join(root, "packages/module-tools/package.json"),
+        "utf8",
+      ),
+    ).version,
+);
 const file = `hubble-module-developer-kit-${version}.tar.gz`;
 const output = path.resolve(
   process.argv[2] ?? path.join(root, "artifacts", file),
@@ -59,6 +68,138 @@ try {
           .some((part) => part === "node_modules" || part === "dist"),
     },
   );
+  await cp(
+    path.join(root, "examples/native-workbook"),
+    path.join(kit, "examples/native-workbook"),
+    {
+      recursive: true,
+      filter: (source) =>
+        !source
+          .split(path.sep)
+          .some((part) => part === "node_modules" || part === "dist"),
+    },
+  );
+  await cp(
+    path.join(root, "examples/matrix-feedback"),
+    path.join(kit, "examples/matrix-feedback"),
+    {
+      recursive: true,
+      filter: (source) =>
+        !source
+          .split(path.sep)
+          .some((part) => part === "node_modules" || part === "dist"),
+    },
+  );
+  await cp(
+    path.join(root, "examples/matrix-row-fields"),
+    path.join(kit, "examples/matrix-row-fields"),
+    {
+      recursive: true,
+      filter: (source) =>
+        !source
+          .split(path.sep)
+          .some((part) => part === "node_modules" || part === "dist"),
+    },
+  );
+  await cp(
+    path.join(root, "examples/matrix-collections"),
+    path.join(kit, "examples/matrix-collections"),
+    {
+      recursive: true,
+      filter: (source) =>
+        !source
+          .split(path.sep)
+          .some((part) => part === "node_modules" || part === "dist"),
+    },
+  );
+  await cp(
+    path.join(root, "examples/custom-canvas"),
+    path.join(kit, "examples/custom-canvas"),
+    {
+      recursive: true,
+      filter: (source) =>
+        !source
+          .split(path.sep)
+          .some((part) => part === "node_modules" || part === "dist"),
+    },
+  );
+  await cp(
+    path.join(root, "examples/prepared-document"),
+    path.join(kit, "examples/prepared-document"),
+    {
+      recursive: true,
+      filter: (source) =>
+        !source
+          .split(path.sep)
+          .some((part) => part === "node_modules" || part === "dist"),
+    },
+  );
+  await cp(
+    path.join(root, "examples/native-controls"),
+    path.join(kit, "examples/native-controls"),
+    {
+      recursive: true,
+      filter: (source) =>
+        !source
+          .split(path.sep)
+          .some((part) => part === "node_modules" || part === "dist"),
+    },
+  );
+  await cp(
+    path.join(root, "examples/native-menu"),
+    path.join(kit, "examples/native-menu"),
+    {
+      recursive: true,
+      filter: (source) =>
+        !source
+          .split(path.sep)
+          .some((part) => part === "node_modules" || part === "dist"),
+    },
+  );
+  for (const required of [
+    "examples/native-menu/src/manifest.ts",
+    "examples/native-menu/src/index.ts",
+    "examples/native-menu/test/menu.test.ts",
+    "skills/hubble-module-author/references/native-controls.md",
+    "examples/native-controls/src/manifest.ts",
+    "examples/native-controls/src/index.ts",
+    "examples/native-controls/test/native.test.ts",
+    "examples/prepared-document/src/manifest.ts",
+    "examples/prepared-document/src/index.ts",
+    "examples/prepared-document/test/document.test.ts",
+    "examples/custom-canvas/src/manifest.ts",
+    "examples/custom-canvas/src/index.ts",
+    "examples/custom-canvas/src/frontend.ts",
+    "examples/custom-canvas/src/helper.ts",
+    "examples/custom-canvas/src/render-label.ts",
+    "examples/custom-canvas/ui/index.html",
+    "skills/hubble-module-author/references/custom-pages.md",
+    "skills/hubble-module-author/references/documents.md",
+    "skills/hubble-module-author/references/datasets.md",
+    "skills/hubble-module-author/references/helpers.md",
+    "skills/hubble-module-author/references/workspace-instances.md",
+    "examples/matrix-feedback/src/manifest.ts",
+    "skills/hubble-module-author/references/matrix.md",
+    "skills/hubble-module-author/references/contexts-and-local-state.md",
+    "examples/matrix-collections/src/manifest.ts",
+    "examples/matrix-collections/src/index.ts",
+    "examples/matrix-collections/test/matrix.test.ts",
+    "skills/hubble-module-author/references/ownership.md",
+    "skills/hubble-module-author/references/extension-model.md",
+    "skills/hubble-module-author/references/contract.md",
+    "skills/hubble-module-author/references/workflows.md",
+    "skills/hubble-module-author/SKILL.md",
+    "skills/hubble-module-author/references/native-workbooks.md",
+    "examples/native-workbook/src/manifest.ts",
+    "examples/matrix-row-fields/src/manifest.ts",
+    "examples/matrix-row-fields/src/index.ts",
+    "examples/matrix-row-fields/test/matrix.test.ts",
+  ]) {
+    const exported = await readFile(path.join(kit, required));
+    const source = await readFile(path.join(root, required));
+    if (!exported.equals(source))
+      throw new Error(`Developer kit does not match its source: ${required}`);
+  }
   for (const dependency of ["esbuild-wasm", "zod"]) {
     const packageRoot = path.dirname(
       require.resolve(dependency + "/package.json"),
@@ -66,7 +207,10 @@ try {
     await cp(
       await realpath(packageRoot),
       path.join(kit, "node_modules", dependency),
-      { recursive: true, dereference: true },
+      {
+        recursive: true,
+        dereference: true,
+      },
     );
   }
   await writeFile(
@@ -94,19 +238,34 @@ try {
     execFileSync(
       process.execPath,
       [path.join(kit, "module-tool.mjs"), ...args],
-      { cwd: temporary, timeout: 60_000, stdio: "pipe" },
+      {
+        cwd: temporary,
+        timeout: 60_000,
+        stdio: "pipe",
+      },
     );
-  for (const command of ["build", "test", "validate"]) {
-    execFileSync(
-      process.execPath,
-      [
-        path.join(kit, "module-tool.mjs"),
-        command,
-        path.join(kit, "examples/sidebar-page"),
-      ],
-      { cwd: temporary, timeout: 60_000, stdio: "pipe" },
-    );
-  }
+  for (const example of [
+    "sidebar-page",
+    "native-workbook",
+    "matrix-feedback",
+    "matrix-row-fields",
+    "matrix-collections",
+    "native-controls",
+    "native-menu",
+    "custom-canvas",
+    "prepared-document",
+  ])
+    for (const command of ["build", "test", "validate"]) {
+      execFileSync(
+        process.execPath,
+        [
+          path.join(kit, "module-tool.mjs"),
+          command,
+          path.join(kit, "examples", example),
+        ],
+        { cwd: temporary, timeout: 60_000, stdio: "pipe" },
+      );
+    }
   await mkdir(path.dirname(output), { recursive: true });
   execFileSync("/usr/bin/tar", [
     "-czf",

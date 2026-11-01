@@ -1,0 +1,42 @@
+/* Shared interface appearance. Workbook cell colors, type sizes, and zoom are
+   owned by the workbook renderer and deliberately do not use these tokens. */
+:root {
+  --font-ui:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial,
+    sans-serif;
+  --font-size-ui: 13px;
+  --font-size-small: 12px;
+  --font-size-heading: 15px;
+  --ui-base: #111;
+  --ui-window: var(--ui-base);
+  --ui-chrome: var(--ui-base);
+  --ui-sidebar: var(--ui-base);
+  --control-height: 26px;
+  --control-font-size: 11px;
+  --control-font-weight: 400;
+  --ui-control: transparent;
+  --ui-surface: #222;
+  --ui-hover: #303030;
+  --ui-selected: #373737;
+  --ui-selected-hover: #404040;
+  --ui-line-soft: #292929;
+  --ui-line: #3b3b3b;
+  --ui-line-strong: #555;
+  --ui-text: #dedede;
+  --ui-text-strong: #f4f4f4;
+  --ui-text-secondary: #b2b2b2;
+  --ui-text-disabled: #7a7a7a;
+  --ui-focus: #cecece;
+  --ui-control-transition:
+    background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+  --radius-control: 7px;
+  --radius-surface: 8px;
+  --radius-menu-item: 4px;
+  --shadow-floating: 0 8px 24px rgb(0 0 0 / 32%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --ui-control-transition: none;
+  }
+}

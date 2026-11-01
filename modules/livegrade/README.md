@@ -1,7 +1,8 @@
 # LiveGrade
 
-Official module `hubble-livegrade`, version **1.0.0**, using stable Hubble module API **1**.
-LiveGrade slot selection through the host native helper.
+Official module `hubble-livegrade`, version **1.1.0**, using stable Hubble module API **1**.
+LiveGrade slot selection through the generic public `native-menus@1` service.
+Candidate minimum host: Hubble 2.0.11; API major remains 1.
 
 ## Source ownership
 
@@ -11,7 +12,23 @@ LiveGrade slot selection through the host native helper.
 - Device clients own connection lifecycle and observed device state. Transport, command queues and confirmation helpers are separate where those responsibilities exist. Reusable protocols live in public `packages/`.
 - `test/` covers action behavior and/or a local device simulator. The manifest/registry test prevents advertising actions without a local validator.
 
-Existing saved IDs and completion evidence are preserved. Legacy descriptors keep Hubble's existing editors during migration; new actions can declare their own fields and handlers through the public SDK without editing host enums. Host persistence and native application access are requested through named capabilities.
+Saved IDs, formula sources, Studio letter positions and 7/Frontier query rules are
+preserved. The package owns settings, Matrix/Advanced fields, dynamic slot choices,
+edition identities, menu roots, validation, catalog interpretation and labels.
+Hubble supplies shared controls, ordered persistence and generic native access.
+Completion is correctly reported as native **response** evidence; an accepted menu
+command does not prove observed selected state.
+
+`src/native-menu-client.ts` resolves all four editions through package profiles,
+reads bounded paginated catalogs, retains raw paths and requires the same process
+and slot identity before invocation. Commands are never automatically retried.
+`src/matrix.ts` owns presentation and legacy field normalization. An older package
+can still use Hubble's legacy compatibility path; the new package never requests
+`host.livegrade` or the specialized LiveGrade service.
+
+Offline fixtures inject native responses and do not control macOS applications.
+Actual Accessibility, edition menus and background focus still need installed-app
+acceptance before any live-verification claim.
 
 ## Develop
 

@@ -1,4 +1,4 @@
-import { readdir, readFile, mkdir, rm, writeFile } from "node:fs/promises";
+import { readdir, readFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { runModuleTool } from "../packages/module-tools/dist/module-tool.mjs";
 const root = path.resolve(import.meta.dirname, "..");
@@ -19,6 +19,10 @@ if (selected && !names.includes(selected))
 await mkdir(path.join(root, "artifacts"), { recursive: true });
 const inventory = [];
 for (const name of selected ? [selected] : names) {
+  if (operation === "package" && name === "mock") {
+    if (selected) throw new Error("Mock is a test fixture and cannot be packaged for distribution");
+    continue;
+  }
   const project = path.join(root, "modules", name);
   if (operation !== "test") await runModuleTool(["build", project]);
   if (operation === "test" || operation === "package")
@@ -27,9 +31,11 @@ for (const name of selected ? [selected] : names) {
     const manifest = JSON.parse(
       await readFile(path.join(project, "dist/hubble-module.json"), "utf8"),
     );
+    if (manifest.id === "hubble-mock")
+      throw new Error("Mock is a test fixture and cannot be packaged for distribution");
     const file = `${manifest.id}-${manifest.version}.hubble-module`;
     const output = path.join(root, "artifacts", file);
-    await rm(output, { force: true });
+    // Published version bytes are immutable; pack fails if this path exists.
     const result = await runModuleTool(["pack", project, output]);
     inventory.push({
       moduleId: manifest.id,

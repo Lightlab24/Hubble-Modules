@@ -41,3 +41,13 @@ test("sidebar tables reach the worker as module-owned settings without sending c
   );
   await harness.instance.dispose();
 });
+
+import manifest from "../src/manifest.js";
+test("page-owned workflow keeps peer actions without a Matrix authoring entry", () => {
+  assert.equal(manifest.actionUi, false);
+  assert.ok(
+    manifest.host.requiredFeatures?.includes("module-action-authoring-v1"),
+  );
+  assert.ok(manifest.actions.some((action) => action.id === "set-state"));
+  assert.ok(manifest.pages?.length);
+});

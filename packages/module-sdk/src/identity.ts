@@ -1,3 +1,4 @@
+import { ModuleMatrixSchema } from './matrix.js'
 import { z } from 'zod'
 
 const IdentifierSchema = z
@@ -50,14 +51,28 @@ export const ModuleSavedSettingsSchema = z
   .refine((value) => JSON.stringify(value).length <= 262_144, 'Module settings exceed size limit')
 
 /** Portable selection and module-owned settings; local source paths and generations stay local. */
-export const ModuleBindingSchema = z.strictObject({
+const BindingDefinitionSchema = z.strictObject({
+  /** Verified descriptor snapshot for offline editing and workspace transfer. */
+  matrix: ModuleMatrixSchema.optional(),
+  /** Verified package policy for offering new actions; omission preserves older packages. */
+  actionUi: z.boolean().optional(),
   package: ModulePackageIdentitySchema,
   configVersion: z.int().min(1).max(65_535),
+  savedActionVersion: z.int().min(1).max(65_535).optional(),
   pinned: z.boolean(),
+  /** Workspace host modules default to on; device connections use connection.enabled. */
+  hostEnabled: z.boolean().optional(),
   autoUpdate: z.enum(['inherit', 'on', 'off']).optional(),
   settings: ModuleSavedSettingsSchema.optional(),
 })
-export type ModuleBinding = z.infer<typeof ModuleBindingSchema>
+// Named boundary keeps downstream generated declarations within TypeScript serialization limits.
+export interface ModuleBinding extends z.infer<typeof BindingDefinitionSchema> {
+  package: ModulePackageIdentity
+}
+export const ModuleBindingSchema: z.ZodType<ModuleBinding> = BindingDefinitionSchema.refine(
+  (value) => JSON.stringify(value).length <= 270336,
+  'Module binding exceeds storage capacity',
+)
 
 export function modulePackageKey(value: ModulePackageIdentity): string {
   const identity = ModulePackageIdentitySchema.parse(value)

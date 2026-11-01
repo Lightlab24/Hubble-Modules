@@ -14,12 +14,17 @@ import {
 export function createModuleHarness(
   module: HubbleModule,
   settings: ModuleValues = {},
+  services: Pick<
+    Partial<ModuleContext>,
+    "modules" | "requestHost" | "services" | "scope" | "connectionEnabled"
+  > = {},
 ) {
   const traces: unknown[] = [],
     feedback: unknown[] = [],
     states: unknown[] = [];
   const controls: unknown[] = [];
   const context: ModuleContext = {
+    connectionEnabled: true,
     scope: {
       kind: "connection",
       workspaceId: randomUUID(),
@@ -40,6 +45,7 @@ export function createModuleHarness(
       controls.push(value);
       throw new Error("Host service not provided by this fixture");
     },
+    ...services,
   };
   const instance = module.createInstance(context);
   const execution = (

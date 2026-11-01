@@ -1,0 +1,10 @@
+{
+  "name": "hubble-native-workbook-example",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "hubble": {
+    "id": "example-native-workbook",
+    "name": "Native workbook example"
+  }
+}

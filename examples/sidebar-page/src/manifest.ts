@@ -5,10 +5,14 @@ import { feedback } from "./feedback.js";
 export default defineModuleManifest({
   formatVersion: 1,
   apiVersion: 1,
-  host: { minimumVersion: "2.0.2", requiredFeatures: ["module-pages-v1"] },
+  host: {
+    minimumVersion: "2.0.13",
+    requiredFeatures: ["module-pages-v1", "module-action-authoring-v1"],
+  },
   configVersion: 1,
   capabilities: [],
   settings,
+  actionUi: false,
   actions: [...actions],
   feedback,
   pages: [

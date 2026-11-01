@@ -1,7 +1,9 @@
 import { legacyExecution, managedModule } from '@hubble/module-runtime-helpers/managed'
+import { withModuleMatrix } from '@hubble/module-runtime-helpers/matrix'
 import type { HubbleModule } from '@hubble/module-sdk'
 import { z } from 'zod'
-import { actionSchemas, type ActionDefinition } from './actions.js'
+import { legacyActionSchemas, type ActionDefinition } from './actions.js'
+import { matrix, matrixAction } from './matrix.js'
 import { ConnectionDefinitionSchema, type ConnectionDefinition } from './config.js'
 import { CyanViewStudioActionExecutor } from './cyanview-studio-action-executor.js'
 import { CyanViewStudioConnectionManager } from './cyanview-studio-connection-manager.js'
@@ -22,15 +24,9 @@ const module: HubbleModule = managedModule<ConnectionDefinition, ActionDefinitio
       call(method, value, signal) {
         if (signal.aborted) throw new Error('Cancelled before dispatch')
         if (method === 'selectFeed')
-          return manager.selectFeed(
-            definition.connectionId,
-            z.string().min(1).max(64).parse(value),
-          )
+          return manager.selectFeed(definition.connectionId, z.string().min(1).max(64).parse(value))
         if (method === 'selectFeedByNumber')
-          return manager.selectFeedByNumber(
-            definition.connectionId,
-            z.int().min(1).parse(value),
-          )
+          return manager.selectFeedByNumber(definition.connectionId, z.int().min(1).parse(value))
         if (method === 'selectFeedByFeedId')
           return manager.selectFeedByFeedId(definition.connectionId, z.int().parse(value))
         throw new Error('Unsupported module service')
@@ -47,7 +43,7 @@ const module: HubbleModule = managedModule<ConnectionDefinition, ActionDefinitio
     }
   },
   { kind: 'response', summary: 'CyanView Studio returned a successful command response' },
-  { connection: ConnectionDefinitionSchema, actions: actionSchemas },
+  { connection: ConnectionDefinitionSchema, actions: legacyActionSchemas },
 )
 
-export default module
+export default withModuleMatrix(module, matrix, matrixAction)

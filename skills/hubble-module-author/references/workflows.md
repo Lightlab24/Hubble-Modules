@@ -32,29 +32,27 @@ tests, validate and package the changed build. Keep prior packages for compariso
 and eventual rollback. For someone else's finished package, `inspect` can verify
 contents and descriptors without running it.
 
+The client requires an explicit `--url`; it never chooses Hubble or Hubble2 by default. The example below targets the main Hubble service; use the operator-designated origin for a different installation.
+
 Use the shipped `service-client.mjs` (source checkout: `packages/module-tools/dist/service-client.mjs`):
 
 ```text
-node <client> --url http://127.0.0.1:42841 describe
+node <client> --url http://127.0.0.1:42838 describe
 node <client> import <project-folder-or-package>
 node <client> link <workspace-uuid> <connection-uuid> <project-folder>
 node <client> reload <workspace-uuid> <connection-uuid>
 node <client> logs <workspace-uuid> <connection-uuid>
-node <client> host-link <workspace-uuid> <ccc|system-actions|mock> <project-folder>
-node <client> host-reload <workspace-uuid> <ccc|system-actions|mock>
-node <client> host-logs <workspace-uuid> <ccc|system-actions|mock>
+node <client> host-link <workspace-uuid> <ccc|system-actions> <project-folder>
+node <client> host-reload <workspace-uuid> <ccc|system-actions>
+node <client> host-logs <workspace-uuid> <ccc|system-actions>
 node <client> reload-all <workspace-uuid>
 node <client> request <operation.json>
 ```
 
-Pass `--url` on every command when targeting an origin other than Hubble2.
+Pass `--url` on every command, including Hubble and Hubble2.
 Protected services accept `--password-file PATH`; do not put passwords into logs.
 `request` accepts the API's JSON operations, including `select`, `rollback`,
-`download`, `check-updates`, `choices`, `host-choices`, and `cleanup`. Inspect
-`describe` first. `choices` takes `workspaceId`, `connectionId`, and `provider`;
-`host-choices` takes `workspaceId`, `capabilityId`, and `provider`. Both are read-only
-and require a running instance. Hubble 2.0.1 advertises `module-settings-choices-v1`
-for settings providers in both scopes.
+`download`, `check-updates`, `choices`, and `cleanup`. Inspect `describe` first.
 Select includes workspaceId, connectionId, exact identity (moduleId,version,digest),
 pinned and expectedDraftRevision. Rollback includes the same scope and revision.
 Download includes only the exact identity. Neither import nor download activates.

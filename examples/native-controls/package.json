@@ -1,0 +1,10 @@
+{
+  "name": "hubble-native-controls-example",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "hubble": {
+    "id": "example-native-controls",
+    "name": "Native shortcut example"
+  }
+}

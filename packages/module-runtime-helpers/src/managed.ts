@@ -1,7 +1,5 @@
-import {
-  ActionAbortedError,
-  type AdapterActionResult,
-} from '@hubble/module-contracts/execution'
+import { randomUUID } from 'node:crypto'
+import { ActionAbortedError, type AdapterActionResult } from '@hubble/module-contracts/execution'
 import { createModuleDataPublisher } from '@hubble/module-contracts/observations'
 import type {
   HubbleModule,
@@ -41,6 +39,7 @@ export function managedModule<TDefinition extends ModuleConnection, TAction>(
         throw new Error('Module requires a physical connection scope')
       const definition = schemas.connection.parse({
         ...context.settings,
+        name: context.settings.name ?? type,
         type,
         connectionId: context.scope.connectionId,
         enabled: true,
@@ -60,8 +59,7 @@ export function managedModule<TDefinition extends ModuleConnection, TAction>(
           started = true
           unsubscribe = driver.subscribe((snapshots) => {
             if (!started) return
-            if (!context.publishEvent)
-              throw new Error('Host does not support module observations')
+            if (!context.publishEvent) throw new Error('Host does not support module observations')
             publisher.publish('driver.snapshots', snapshots)
             const snapshot = snapshots[0] as
               | {
@@ -116,6 +114,9 @@ export function managedModule<TDefinition extends ModuleConnection, TAction>(
               message: 'Unknown module action',
             }
           const parsed = schema.safeParse({
+            actionId: randomUUID(),
+            actionColumnId: randomUUID(),
+            enabled: true,
             ...fields,
             type: id,
             connectionId: definition.connectionId,

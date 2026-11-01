@@ -1,7 +1,44 @@
+import type { ModuleDocumentMigrationInput } from './documents.js'
+import { ModuleFrontendSectionSchema } from './frontend.js'
+import { ModuleHelperDefinitionSchema } from './helpers.js'
+export * from './helpers.js'
+import { ModuleDocumentDefinitionSchema, ModuleDocumentValueSchema } from './documents.js'
+export * from './documents.js'
+export * from './datasets.js'
+export * from './contexts.js'
+export * from './native-menus.js'
+export * from './collections.js'
+export * from './document-client.js'
+export * from './frontend.js'
+export { parseModuleMatrixValue } from './matrix.js'
+import {
+  ModuleMatrixSchema,
+  ModuleFeedbackAppearanceSchema,
+  type ModuleFeedbackSubscription,
+} from './matrix.js'
+export * from './matrix.js'
+import { ModulePageControlsSchema } from './page-controls.js'
+export * from './page-controls.js'
+import { ModuleTableWorkbookSchema, moduleTableViewState } from './table-workbook.js'
+export * from './table-workbook.js'
+import type { DiagnosticError } from './diagnostics.js'
+export * from './exchange.js'
+import {
+  ModuleExchangeDefinitionSchema,
+  type ModuleExchange,
+  type ModuleDataQuery,
+} from './exchange-contracts.js'
 import { z } from 'zod'
 import { ModuleVersionSchema, type ModuleInstanceScope } from './identity.js'
 import { ModuleHostRequirementsSchema } from './compatibility.js'
 export * from './identity.js'
+export * from './diagnostics.js'
+export * from './choices.js'
+export * from './saved-actions.js'
+export * from './host-services.js'
+import type { ModuleHostServices } from './host-services.js'
+import type { ModuleSavedActions } from './saved-actions.js'
+import type { ModuleChoiceQuery, ModuleChoicePage } from './choices.js'
 export * from './compatibility.js'
 export * from './release-metadata.js'
 
@@ -46,78 +83,43 @@ export const ModuleFilePathSchema = z
   )
 const LabelSchema = z.string().trim().min(1).max(160)
 const DescriptionSchema = z.string().trim().min(1).max(1_000)
-/** Presentation only. Group labels never form part of a saved choice identity. */
-export const ModuleChoiceSchema = z.strictObject({
-  id: z.string().max(160),
-  label: z.string().max(160),
-  group: LabelSchema.optional(),
-})
-export type ModuleChoice = z.infer<typeof ModuleChoiceSchema>
-const FieldBase = {
-  id: ModuleIdentifierSchema,
-  label: LabelSchema,
-  required: z.boolean(),
-  description: DescriptionSchema.optional(),
-}
-export const ModuleFieldSchema = z.discriminatedUnion('type', [
-  z.strictObject({
-    ...FieldBase,
-    type: z.literal('text'),
-    default: z.string().max(16_384),
-    secret: z.boolean().optional(),
-  }),
-  z.strictObject({
-    ...FieldBase,
-    type: z.literal('number'),
-    default: z.number(),
-    min: z.number().optional(),
-    max: z.number().optional(),
-  }),
-  z.strictObject({ ...FieldBase, type: z.literal('boolean'), default: z.boolean() }),
-  z.strictObject({
-    ...FieldBase,
-    type: z.literal('choice'),
-    default: z.string().max(160),
-    choices: z
-      .array(ModuleChoiceSchema.extend({ id: z.string().min(1).max(160), label: LabelSchema }))
-      .max(1_024),
-    choiceProvider: ModuleIdentifierSchema.optional(),
-  }),
-])
-const FieldsSchema = z
-  .array(ModuleFieldSchema)
-  .max(128)
-  .superRefine((fields, ctx) => {
-    const ids = new Set<string>()
-    fields.forEach((field, index) => {
-      if (ids.has(field.id))
-        ctx.addIssue({ code: 'custom', path: [index, 'id'], message: 'Duplicate field ID' })
-      ids.add(field.id)
-      if (
-        field.type === 'number' &&
-        ((field.min !== undefined && field.default < field.min) ||
-          (field.max !== undefined && field.default > field.max) ||
-          (field.min !== undefined && field.max !== undefined && field.min > field.max))
-      ) {
-        ctx.addIssue({ code: 'custom', path: [index], message: 'Number default/bounds conflict' })
-      }
-      if (field.type === 'choice') {
-        if (new Set(field.choices.map((item) => item.id)).size !== field.choices.length) {
-          ctx.addIssue({ code: 'custom', path: [index], message: 'Duplicate choice ID' })
-        }
-        if (!field.choiceProvider && !field.choices.some((choice) => choice.id === field.default)) {
-          ctx.addIssue({ code: 'custom', path: [index], message: 'Choice default is missing' })
-        }
-      }
-    })
-  })
-/** Declarative screens: the host renders controls; packages never supply renderer code. */
+export * from './fields.js'
+import {
+  ModuleFieldsSchema as FieldsSchema,
+  moduleFieldsRequireV2,
+  moduleFieldsAllowEmptyNumbers,
+  moduleFieldDefault,
+  moduleFieldsContainSecrets,
+  validateModuleFields,
+  type ModuleChoice,
+  type ModuleField,
+} from './fields.js'
+/** Shared controls and isolated package frontends compose module-owned screens. */
 export const ModulePageTableSchema = z.strictObject({
   type: z.literal('table'),
   id: ModuleIdentifierSchema,
   label: LabelSchema,
   description: DescriptionSchema.optional(),
-  source: z.enum(['settings', 'state']),
+  source: z.enum(['settings', 'state', 'document']),
+  documentId: ModuleIdentifierSchema.optional(),
+  dataset: z
+    .strictObject({ id: ModuleIdentifierSchema, version: z.int().min(1).max(65535) })
+    .optional(),
+  workbook: ModuleTableWorkbookSchema.optional(),
+  selectionHighlight: z.enum(['cell', 'row']).optional(),
+  computed: z
+    .strictObject({
+      source: ModuleIdentifierSchema,
+      columns: z.array(ModuleIdentifierSchema).min(1).max(32),
+      preview: z
+        .strictObject({ id: ModuleIdentifierSchema, version: z.int().positive() })
+        .optional(),
+    })
+    .optional(),
+  choiceDependencies: z
+    .record(ModuleIdentifierSchema, z.array(ModuleIdentifierSchema).max(32))
+    .optional(),
+  autoNumber: ModuleIdentifierSchema.optional(),
   columns: FieldsSchema.refine(
     (fields) => fields.length > 0 && fields.length <= 32,
     'Expected 1–32 columns',
@@ -125,6 +127,12 @@ export const ModulePageTableSchema = z.strictObject({
   maxRows: z.int().min(1).max(512),
 })
 export const ModulePageSchema = z.strictObject({
+  navigation: z
+    .strictObject({
+      replaces: z.enum(['tally-switch', 'ccc', 'router']).optional(),
+      relatedCapabilities: z.array(ModuleIdentifierSchema).max(8).optional(),
+    })
+    .optional(),
   id: ModuleIdentifierSchema,
   label: LabelSchema,
   description: DescriptionSchema.optional(),
@@ -138,6 +146,8 @@ export const ModulePageSchema = z.strictObject({
           fields: z.array(ModuleIdentifierSchema).min(1).max(128),
         }),
         ModulePageTableSchema,
+        ModuleFrontendSectionSchema,
+        ModulePageControlsSchema,
         z.strictObject({
           type: z.literal('status'),
           id: ModuleIdentifierSchema,
@@ -153,10 +163,21 @@ export const ModulePageSchema = z.strictObject({
 })
 export const ModuleTableRowsSchema = z
   .array(
-    z.strictObject({
-      id: ModuleIdentifierSchema,
-      values: z.record(ModuleIdentifierSchema, z.json()),
-    }),
+    z
+      .strictObject({
+        id: ModuleIdentifierSchema,
+        values: z.record(ModuleIdentifierSchema, z.json()),
+        formulas: z
+          .record(ModuleIdentifierSchema, z.string().min(2).max(4096).startsWith('='))
+          .optional(),
+      })
+      .transform(
+        (row): ModuleTableRow => ({
+          id: row.id,
+          values: row.values,
+          ...(row.formulas ? { formulas: row.formulas } : {}),
+        }),
+      ),
   )
   .max(512)
   .superRefine((rows, ctx) => {
@@ -165,7 +186,15 @@ export const ModuleTableRowsSchema = z
   })
 export type ModulePage = z.infer<typeof ModulePageSchema>
 export type ModulePageTable = z.infer<typeof ModulePageTableSchema>
-export type ModuleTableRow = z.infer<typeof ModuleTableRowsSchema>[number]
+export type ModuleTableRow = {
+  id: string
+  values: Record<string, z.infer<ReturnType<typeof z.json>>>
+  formulas?: Record<string, string>
+}
+/** Computed values are observations, never editable or portable settings. */
+export function moduleTableInputColumns(table: ModulePageTable) {
+  return table.columns.filter((field) => !table.computed?.columns.includes(field.id))
+}
 
 export const ModuleCompletionSchema = z.enum(['local', 'submitted', 'response', 'state-confirmed'])
 export const ModuleActionSchema = z.strictObject({
@@ -195,6 +224,7 @@ export const ModuleManifestSchema = z
     apiVersion: z.literal(MODULE_API_VERSION),
     host: ModuleHostRequirementsSchema,
     configVersion: z.int().min(1).max(65_535),
+    savedActionVersion: z.int().min(1).max(65_535).optional(),
     entry: ModuleFilePathSchema.refine(
       (value) => value.endsWith('.mjs'),
       'Entry must be bundled ESM (.mjs)',
@@ -202,11 +232,382 @@ export const ModuleManifestSchema = z
     files: z.array(ModuleFilePathSchema).min(1).max(128),
     capabilities: z.array(ModuleIdentifierSchema).max(128),
     settings: FieldsSchema,
+    settingsUpdate: z.literal('live').optional(),
     actions: z.array(ModuleActionSchema).max(256),
+    /** False keeps actions available to peers and saved documents, but hides new Matrix/Advanced authoring. */
+    actionUi: z.boolean().optional(),
     feedback: z.array(ModuleFeedbackDefinitionSchema).max(256),
     pages: z.array(ModulePageSchema).max(16).optional(),
+    matrix: ModuleMatrixSchema.optional(),
+    exchange: ModuleExchangeDefinitionSchema.optional(),
+    documents: z.array(ModuleDocumentDefinitionSchema).max(64).optional(),
+    helpers: z.array(ModuleHelperDefinitionSchema).max(8).optional(),
+    /** Workspace packages use one stable instance per module ID in each workspace. */
+    instanceScope: z.enum(['connection', 'workspace']).optional(),
+    /** Keep local settings/state available while physical I/O is disabled. The module must honor context.connectionEnabled. */
+    lifecycle: z.strictObject({ runWhenDisabled: z.literal(true) }).optional(),
   })
   .superRefine((manifest, ctx) => {
+    const features =
+      'requiredFeatures' in manifest.host ? (manifest.host.requiredFeatures ?? []) : []
+    if (manifest.actionUi !== undefined && !features.includes('module-action-authoring-v1'))
+      ctx.addIssue({
+        code: 'custom',
+        path: ['host'],
+        message: 'Action authoring visibility requires module-action-authoring-v1',
+      })
+    const hasShortcut = (fields: ModuleField[]): boolean =>
+      fields.some(
+        (field) =>
+          !!field.shortcut ||
+          (field.type === 'object' && hasShortcut(field.fields)) ||
+          (field.type === 'array' && hasShortcut([field.item])),
+      )
+    if (
+      (manifest.matrix?.fields.some((field) => field.shortcut) ||
+        hasShortcut([
+          ...manifest.settings,
+          ...manifest.actions.flatMap((action) => action.fields),
+          ...manifest.feedback.flatMap((feedback) => feedback.fields),
+          ...(manifest.matrix?.columnSettings ?? []),
+        ])) &&
+      !features.includes('module-shortcut-editor-v1')
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['host'],
+        message: 'Shortcut editors require module-shortcut-editor-v1',
+      })
+    if (
+      features.includes('module-native-controls-v1') &&
+      (!features.includes('host-service-registry-v1') ||
+        !manifest.capabilities.includes('host.keyboard'))
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['host'],
+        message: 'Native controls require host-service-registry-v1 and host.keyboard',
+      })
+    if (
+      (features.includes('module-native-menus-v1') ||
+        manifest.capabilities.includes('host.native-menus')) &&
+      (!features.includes('module-native-menus-v1') ||
+        !features.includes('host-service-registry-v1') ||
+        !manifest.capabilities.includes('host.native-menus'))
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['host'],
+        message:
+          'Native menu access requires module-native-menus-v1, host-service-registry-v1 and host.native-menus',
+      })
+    if (manifest.matrix?.availableWhenDisabled && !manifest.lifecycle?.runWhenDisabled)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['matrix', 'availableWhenDisabled'],
+        message: 'Local Matrix actions require the disabled connection lifecycle',
+      })
+    if (
+      manifest.lifecycle &&
+      (manifest.instanceScope === 'workspace' || !features.includes('module-disabled-state-v1'))
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['lifecycle'],
+        message: 'Disabled connection state requires connection scope and module-disabled-state-v1',
+      })
+    if (
+      manifest.documents?.some((document) => document.migrate || document.legacyImport) &&
+      !features.includes('module-document-migrations-v1')
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['documents'],
+        message: 'Document migrations require module-document-migrations-v1',
+      })
+    for (const document of manifest.documents ?? [])
+      if (document.legacyImport && !document.migrate)
+        ctx.addIssue({
+          code: 'custom',
+          path: ['documents'],
+          message: 'Legacy document imports require a package migration',
+        })
+    for (const document of manifest.documents ?? [])
+      if (
+        document.prepare &&
+        !manifest.exchange?.data.some(
+          (data) =>
+            data.id === document.prepare?.id &&
+            data.version === document.prepare.version &&
+            data.query,
+        )
+      )
+        ctx.addIssue({
+          code: 'custom',
+          path: ['documents'],
+          message: 'Document preparation must reference a declared read-only data query',
+        })
+    if (
+      manifest.documents?.some((document) => document.prepare) &&
+      !features.includes('module-document-preparation-v1')
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['documents'],
+        message: 'Document preparation requires module-document-preparation-v1',
+      })
+    if (
+      manifest.instanceScope === 'workspace' &&
+      !features.includes('module-workspace-instances-v1')
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['instanceScope'],
+        message: 'Workspace instances require module-workspace-instances-v1',
+      })
+    if (manifest.helpers?.length) {
+      if (
+        !features.includes('module-helpers-v1') ||
+        !manifest.capabilities.includes('host.helpers')
+      )
+        ctx.addIssue({
+          code: 'custom',
+          path: ['helpers'],
+          message: 'Helpers require module-helpers-v1 and host.helpers',
+        })
+      if (new Set(manifest.helpers.map((helper) => helper.id)).size !== manifest.helpers.length)
+        ctx.addIssue({ code: 'custom', path: ['helpers'], message: 'Duplicate helper identity' })
+      for (const helper of manifest.helpers)
+        for (const variant of helper.variants)
+          if (!manifest.files.includes(variant.entry))
+            ctx.addIssue({
+              code: 'custom',
+              path: ['helpers'],
+              message: 'Helper entry must be a declared package file',
+            })
+    }
+    if (manifest.capabilities.includes('host.contexts') && !features.includes('module-contexts-v1'))
+      ctx.addIssue({
+        code: 'custom',
+        path: ['capabilities'],
+        message: 'Context access requires module-contexts-v1',
+      })
+    if (manifest.capabilities.includes('host.datasets') && !features.includes('module-datasets-v1'))
+      ctx.addIssue({
+        code: 'custom',
+        path: ['host'],
+        message: 'Dataset access requires module-datasets-v1',
+      })
+    if (manifest.documents?.length) {
+      if (
+        !features.includes('module-documents-v1') ||
+        !manifest.capabilities.includes('host.documents')
+      )
+        ctx.addIssue({
+          code: 'custom',
+          path: ['documents'],
+          message: 'Documents require module-documents-v1 and host.documents',
+        })
+      if (
+        new Set(manifest.documents.map((document) => document.id)).size !==
+        manifest.documents.length
+      )
+        ctx.addIssue({
+          code: 'custom',
+          path: ['documents'],
+          message: 'Duplicate module document declaration',
+        })
+    }
+    if (
+      manifest.capabilities.includes('host.resources') &&
+      !['host-service-registry-v1', 'module-resource-limits-v1'].every((feature) =>
+        features.includes(feature),
+      )
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['host'],
+        message: 'Resource leases require host-service-registry-v1 and module-resource-limits-v1',
+      })
+    if (
+      manifest.matrix &&
+      (!('requiredFeatures' in manifest.host) ||
+        !manifest.host.requiredFeatures?.includes('module-matrix-v1') ||
+        !manifest.host.requiredFeatures.includes('module-feedback-observers-v1'))
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['matrix'],
+        message: 'Module Matrix requires module-matrix-v1 and module-feedback-observers-v1',
+      })
+    if (manifest.matrix?.context && !features.includes('module-contexts-v1'))
+      ctx.addIssue({
+        code: 'custom',
+        path: ['matrix'],
+        message: 'Logical Matrix context requires module-contexts-v1',
+      })
+    if (
+      manifest.matrix?.workspaceContextTypes &&
+      (manifest.instanceScope !== 'workspace' || !features.includes('module-workspace-contexts-v1'))
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['matrix'],
+        message:
+          'Workspace connection contexts require workspace scope and module-workspace-contexts-v1',
+      })
+    if (
+      manifest.matrix?.fields.some((field) =>
+        [field, ...(field.rules ?? []).map((rule) => rule.set)].some(
+          (value) => value.orderedNumbers || value.colorMode === 'palette',
+        ),
+      ) &&
+      !features.includes('module-matrix-collections-v1')
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['matrix'],
+        message: 'Ordered lists and colour palettes require module-matrix-collections-v1',
+      })
+    if (
+      manifest.matrix?.fields.some((field) => field.choiceFields) &&
+      !features.includes('module-choice-bindings-v1')
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['matrix'],
+        message: 'Atomic choice bindings require module-choice-bindings-v1',
+      })
+    if (
+      manifest.matrix &&
+      (manifest.matrix.legacy?.normalize ||
+        manifest.matrix.variants.some((variant) =>
+          variant.when.some((condition) => condition.field === 'column.commandId'),
+        )) &&
+      (!('requiredFeatures' in manifest.host) ||
+        !manifest.host.requiredFeatures?.includes('module-matrix-context-v1'))
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['matrix'],
+        message: 'Matrix column context and legacy normalization require module-matrix-context-v1',
+      })
+    if (
+      manifest.matrix &&
+      (manifest.savedActionVersion ?? 1) > 1 &&
+      !features.includes('module-matrix-migrations-v1')
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['matrix'],
+        message: 'Native Matrix source migrations require module-matrix-migrations-v1',
+      })
+    if (
+      manifest.matrix?.fields.some((field) =>
+        field.rules?.some((rule) => rule.set.fill !== undefined),
+      ) &&
+      !features.includes('module-matrix-fill-rules-v1')
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['matrix'],
+        message: 'Dependent Matrix fill policies require module-matrix-fill-rules-v1',
+      })
+    if (manifest.matrix?.fields.some((field) => [field, ...(field.rules ?? []).map((rule) => rule.set)]
+      .some((candidate) => candidate.choices?.some((choice) => choice.textColor !== undefined))) &&
+      !features.includes('module-matrix-choice-presentation-v1')) {
+      ctx.addIssue({ code: 'custom', path: ['host', 'requiredFeatures'],
+        message: 'Matrix choice text colors require module-matrix-choice-presentation-v1' })
+    }
+    if (
+      manifest.matrix?.fields.some((field) => field.rules?.length || field.colorMode === 'pair') &&
+      !features.includes('module-matrix-row-fields-v1')
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['matrix'],
+        message: 'Dependent Matrix fields require module-matrix-row-fields-v1',
+      })
+    if (
+      manifest.matrix &&
+      (!manifest.actions.some((action) => action.id === manifest.matrix?.actionId) ||
+        !manifest.feedback.some((feedback) => feedback.id === manifest.matrix?.feedbackId))
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['matrix'],
+        message: 'Matrix action and feedback IDs must be declared',
+      })
+    if (
+      manifest.settingsUpdate &&
+      (!('requiredFeatures' in manifest.host) ||
+        !manifest.host.requiredFeatures?.includes('module-live-settings-v1') ||
+        manifest.capabilities.length ||
+        moduleFieldsContainSecrets(manifest.settings))
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['settingsUpdate'],
+        message:
+          'Live settings require module-live-settings-v1 and an observational module without privileged capabilities or secrets',
+      })
+    if (
+      manifest.exchange &&
+      !(
+        'requiredFeatures' in manifest.host &&
+        manifest.host.requiredFeatures?.includes('module-exchange-v1')
+      )
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['host'],
+        message: 'Module exchange requires module-exchange-v1',
+      })
+    if (
+      manifest.savedActionVersion !== undefined &&
+      (!('requiredFeatures' in manifest.host) ||
+        !manifest.host.requiredFeatures?.includes('module-saved-actions-v1'))
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['host'],
+        message: 'Saved action migrations require module-saved-actions-v1',
+      })
+    const fieldSets = [
+      manifest.settings,
+      ...(manifest.matrix ? [manifest.matrix.columnSettings] : []),
+      ...manifest.actions.map((action) => action.fields),
+      ...manifest.feedback.map((feedback) => feedback.fields),
+      ...(manifest.pages ?? []).flatMap((page) =>
+        page.sections.flatMap((section) =>
+          section.type === 'table'
+            ? [section.columns]
+            : section.type === 'controls'
+              ? [section.fields]
+              : [],
+        ),
+      ),
+    ]
+    if (
+      fieldSets.some(moduleFieldsAllowEmptyNumbers) &&
+      !features.includes('module-optional-numbers-v1')
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['host'],
+        message: 'Optional empty numbers require module-optional-numbers-v1',
+      })
+    if (
+      fieldSets.some(moduleFieldsRequireV2) &&
+      (!('requiredFeatures' in manifest.host) ||
+        !manifest.host.requiredFeatures?.includes('module-fields-v2'))
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['host'],
+        message: 'Rich fields require module-fields-v2',
+      })
+
     if (!manifest.files.includes(manifest.entry))
       ctx.addIssue({ code: 'custom', path: ['entry'], message: 'Entry is not listed in files' })
     for (const key of ['files', 'capabilities', 'actions', 'feedback'] as const) {
@@ -215,6 +616,8 @@ export const ModuleManifestSchema = z
       if (new Set(normalized).size !== normalized.length)
         ctx.addIssue({ code: 'custom', path: [key], message: 'Duplicate identity' })
     }
+
+
     if (manifest.pages?.length) {
       if (
         !('requiredFeatures' in manifest.host) ||
@@ -223,8 +626,19 @@ export const ModuleManifestSchema = z
         ctx.addIssue({ code: 'custom', path: ['host'], message: 'Pages require module-pages-v1' })
       const pageIds = new Set<string>()
       const tableIds = new Set<string>()
+      const datasetIds = new Set<string>()
       const settings = new Set(manifest.settings.map((field) => field.id))
       manifest.pages.forEach((page, pageIndex) => {
+        if (
+          page.navigation &&
+          (!('requiredFeatures' in manifest.host) ||
+            !manifest.host.requiredFeatures?.includes('module-page-navigation-v1'))
+        )
+          ctx.addIssue({
+            code: 'custom',
+            path: ['pages', pageIndex, 'navigation'],
+            message: 'Page composition requires module-page-navigation-v1',
+          })
         if (pageIds.has(page.id))
           ctx.addIssue({
             code: 'custom',
@@ -238,6 +652,39 @@ export const ModuleManifestSchema = z
           if (sectionIds.has(section.id))
             ctx.addIssue({ code: 'custom', path, message: 'Duplicate section ID' })
           sectionIds.add(section.id)
+          if (section.type === 'custom') {
+            if (
+              !features.includes('module-custom-pages-v1') ||
+              !manifest.capabilities.includes(`service.page.${page.id}`)
+            )
+              ctx.addIssue({
+                code: 'custom',
+                path,
+                message:
+                  'Custom pages require module-custom-pages-v1 and their declared page service',
+              })
+            if (
+              !ModuleFilePathSchema.safeParse(section.entry).success ||
+              !manifest.files.includes(section.entry)
+            )
+              ctx.addIssue({
+                code: 'custom',
+                path,
+                message: 'Custom page entry must be a declared portable package file',
+              })
+          }
+          if (
+            section.type === 'controls' &&
+            (!('requiredFeatures' in manifest.host) ||
+              !manifest.host.requiredFeatures?.includes('module-page-controls-v1') ||
+              !manifest.capabilities.includes(`service.page.${page.id}`))
+          )
+            ctx.addIssue({
+              code: 'custom',
+              path,
+              message:
+                'Page controls require module-page-controls-v1 and their page service capability',
+            })
           if (
             section.type === 'settings' &&
             (new Set(section.fields).size !== section.fields.length ||
@@ -249,7 +696,193 @@ export const ModuleManifestSchema = z
               message: 'Settings sections must reference unique declared fields',
             })
           if (section.type === 'table') {
-            const key = `${section.source}:${section.id}`
+            if (
+              Object.values(section.workbook?.columns ?? {}).some((column) => column.duplicate) &&
+              !features.includes('module-table-duplicate-policy-v1')
+            )
+              ctx.addIssue({
+                code: 'custom',
+                path,
+                message: 'Duplicate policies require module-table-duplicate-policy-v1',
+              })
+            if (section.dataset) {
+              if (
+                !features.includes('module-datasets-v1') ||
+                datasetIds.has(section.dataset.id) ||
+                moduleFieldsContainSecrets(section.columns)
+              )
+                ctx.addIssue({
+                  code: 'custom',
+                  path,
+                  message:
+                    'Shared datasets require module-datasets-v1, unique identities and public fields',
+                })
+              datasetIds.add(section.dataset.id)
+            }
+            if (section.source === 'document') {
+              const document = manifest.documents?.find((item) => item.id === section.documentId)
+              if (
+                !document ||
+                !section.workbook ||
+                document.defaultValue === null ||
+                typeof document.defaultValue !== 'object' ||
+                Array.isArray(document.defaultValue)
+              )
+                ctx.addIssue({
+                  code: 'custom',
+                  path,
+                  message:
+                    'Document tables require a declared object document and native workbook controls',
+                })
+              else {
+                try {
+                  validateTableStorage(section, document.defaultValue)
+                } catch {
+                  ctx.addIssue({
+                    code: 'custom',
+                    path,
+                    message: 'Invalid workbook document defaults',
+                  })
+                }
+              }
+            } else if (section.documentId)
+              ctx.addIssue({
+                code: 'custom',
+                path,
+                message: 'Only document tables declare documentId',
+              })
+            if (section.workbook) {
+              if (
+                !('requiredFeatures' in manifest.host) ||
+                !manifest.host.requiredFeatures?.includes('module-table-workbook-v1')
+              )
+                ctx.addIssue({
+                  code: 'custom',
+                  path,
+                  message: 'Native workbook controls require module-table-workbook-v1',
+                })
+              const stateKey = section.workbook.stateKey
+              if (
+                settings.has(stateKey) ||
+                manifest.pages?.some((candidate) =>
+                  candidate.sections.some(
+                    (item) =>
+                      item.type === 'table' &&
+                      (item.id === stateKey ||
+                        (item !== section && item.workbook?.stateKey === stateKey)),
+                  ),
+                )
+              )
+                ctx.addIssue({
+                  code: 'custom',
+                  path,
+                  message:
+                    'Workbook state keys must be unique and separate from table and setting IDs',
+                })
+              for (const [id, options] of Object.entries(section.workbook.columns ?? {})) {
+                const field = section.columns.find((field) => field.id === id)
+                if (
+                  !field ||
+                  (options.editor === 'color' && field.type !== 'text') ||
+                  (options.duplicate &&
+                    (section.source === 'state' || section.computed?.columns.includes(id))) ||
+                  (options.formula &&
+                    (section.source === 'state' ||
+                      section.computed?.columns.includes(id) ||
+                      !['text', 'number', 'boolean'].includes(field.type))) ||
+                  (options.fill === 'series' && !['text', 'number'].includes(field.type))
+                )
+                  ctx.addIssue({
+                    code: 'custom',
+                    path,
+                    message: 'Workbook column options must match declared editable scalar columns',
+                  })
+              }
+              if ((section.workbook.defaults?.frozenColumns ?? 0) > section.columns.length)
+                ctx.addIssue({
+                  code: 'custom',
+                  path,
+                  message: 'Frozen column count exceeds the table width',
+                })
+            }
+            if (section.computed?.preview) {
+              const preview = section.computed.preview
+              if (
+                !('requiredFeatures' in manifest.host) ||
+                !manifest.host.requiredFeatures?.includes('module-table-preview-v1') ||
+                !manifest.exchange?.data.some(
+                  (data) =>
+                    data.id === preview.id && data.version === preview.version && data.query,
+                )
+              )
+                ctx.addIssue({
+                  code: 'custom',
+                  path,
+                  message:
+                    'Table previews require module-table-preview-v1 and a declared read-only data query',
+                })
+            }
+            if (
+              section.autoNumber &&
+              !moduleTableInputColumns(section).some(
+                (field) =>
+                  field.id === section.autoNumber &&
+                  (field.type === 'text' || field.type === 'number'),
+              )
+            )
+              ctx.addIssue({
+                code: 'custom',
+                path,
+                message: 'Automatic numbering must reference an editable text or numeric column',
+              })
+            if (section.computed || section.choiceDependencies) {
+              if (
+                section.source === 'state' ||
+                !('requiredFeatures' in manifest.host) ||
+                !manifest.host.requiredFeatures?.includes('module-table-spreadsheet-v1')
+              )
+                ctx.addIssue({
+                  code: 'custom',
+                  path,
+                  message:
+                    'Spreadsheet columns require an editable table and module-table-spreadsheet-v1',
+                })
+              const inputs = new Set(moduleTableInputColumns(section).map((field) => field.id))
+              if (
+                section.computed &&
+                (new Set(section.computed.columns).size !== section.computed.columns.length ||
+                  section.computed.columns.some(
+                    (id) => !section.columns.some((field) => field.id === id),
+                  ))
+              )
+                ctx.addIssue({
+                  code: 'custom',
+                  path,
+                  message: 'Computed columns must reference unique declared columns',
+                })
+              for (const [id, dependencies] of Object.entries(section.choiceDependencies ?? {}))
+                if (
+                  !inputs.has(id) ||
+                  new Set(dependencies).size !== dependencies.length ||
+                  dependencies.some((dependency) => !inputs.has(dependency) || dependency === id)
+                )
+                  ctx.addIssue({
+                    code: 'custom',
+                    path,
+                    message: 'Choice dependencies must reference other editable columns',
+                  })
+            }
+            if (
+              section.selectionHighlight !== undefined &&
+              (!('requiredFeatures' in manifest.host) ||
+                !manifest.host.requiredFeatures?.includes('module-table-selection-v1'))
+            )
+              ctx.addIssue({
+                code: 'custom',
+                path,
+                message: 'Table selection options require module-table-selection-v1',
+              })
+            const key = `${section.source}:${section.documentId ?? ''}:${section.id}`
             if (tableIds.has(key) || (section.source === 'settings' && settings.has(section.id)))
               ctx.addIssue({
                 code: 'custom',
@@ -257,17 +890,19 @@ export const ModuleManifestSchema = z
                 message: 'Table storage keys must be unique and separate from settings fields',
               })
             tableIds.add(key)
-            if (section.columns.some((field) => field.type === 'text' && field.secret))
+            if (moduleFieldsContainSecrets(section.columns))
               ctx.addIssue({
                 code: 'custom',
                 path,
                 message: 'Secret fields belong in settings forms, not spreadsheet cells',
               })
-            if (section.source === 'settings') {
+            if (section.source !== 'state') {
               try {
                 validateModuleFields(
-                  section.columns,
-                  Object.fromEntries(section.columns.map((field) => [field.id, field.default])),
+                  moduleTableInputColumns(section),
+                  Object.fromEntries(
+                    section.columns.map((field) => [field.id, moduleFieldDefault(field)]),
+                  ),
                 )
               } catch {
                 ctx.addIssue({
@@ -308,6 +943,7 @@ export const ModuleFeedbackSchema = z
     id: ModuleIdentifierSchema,
     state: z.enum(['active', 'inactive', 'unavailable']),
     observedAt: z.iso.datetime().nullable(),
+    appearance: ModuleFeedbackAppearanceSchema.optional(),
     fields: z.record(z.string().max(96), z.json()).optional(),
   })
   .refine(
@@ -352,8 +988,18 @@ export interface ModuleTrace {
   readonly level: 'debug' | 'info' | 'error'
   readonly stage: string
   readonly message: string
+  readonly error?: DiagnosticError
 }
 export interface ModuleContext {
+  /** Physical connection enablement. Available with module-disabled-state-v1; false permits local state only, never device I/O. */
+  readonly connectionEnabled?: boolean
+  /** Local, instance-scoped runtime state across package versions. Never included in workspace exports. Access only after start. */
+  readonly runtimeDirectory?: string
+
+  /** Module communication routed and authorized by Hubble. Requires module-exchange-v1. */
+  readonly modules?: ModuleExchange
+  /** Requires host-service-registry-v1; available after start, with the same scope and origin grants as requestHost. */
+  readonly services?: ModuleHostServices
   readonly instanceId: string
   readonly scope: ModuleInstanceScope
   readonly settings: ModuleValues
@@ -378,6 +1024,22 @@ export interface ModuleExecutionContext {
   log(trace: ModuleTrace): void
 }
 export interface ModuleInstance {
+  /** Replace the observed feedback set without reconnecting. Observational: never issue controls here. */
+  subscribeFeedback?(
+    subscriptions: readonly ModuleFeedbackSubscription[],
+    context: { readonly signal: AbortSignal },
+  ): void | Promise<void>
+
+  /** Opt-in observational update. Return false without changing state when a restart is needed. */
+  updateSettings?(
+    settings: ModuleValues,
+    context: { readonly signal: AbortSignal },
+  ): boolean | Promise<boolean>
+  /** Read-only public data query. Never execute controls from this callback. */
+  queryData?(
+    query: ModuleDataQuery,
+    context: { readonly signal: AbortSignal },
+  ): Promise<ModuleJsonValue> | ModuleJsonValue
   /** Connect/subscribe/observe only; never issue a control action on startup. */
   start(): Promise<void> | void
   execute(
@@ -394,8 +1056,21 @@ export interface ModuleInstance {
     context: Pick<ModuleExecutionContext, 'signal' | 'log'>,
   ): Promise<ModuleJsonValue> | ModuleJsonValue
   choices?(provider: string): readonly ModuleChoice[] | Promise<readonly ModuleChoice[]>
+  /** Read-only discovery. Draft values never become settings or execute a command. */
+  discoverChoices?(
+    query: ModuleChoiceQuery,
+    context: { readonly signal: AbortSignal },
+  ): ModuleChoicePage | Promise<ModuleChoicePage>
 }
 export interface HubbleModule {
+  /** Pure migration; no instance is created and host services are unavailable. */
+  migrateDocument?(input: ModuleDocumentMigrationInput): ModuleJsonValue | Promise<ModuleJsonValue>
+  /** Pure migration of this instance's saved action/feedback expressions. Stable keys must remain unchanged. */
+  migrateSavedActions?(
+    actions: Readonly<ModuleSavedActions>,
+    fromVersion: number,
+    toVersion: number,
+  ): ModuleSavedActions | Promise<ModuleSavedActions>
   createInstance(context: ModuleContext): ModuleInstance
   /** Pure data migration. No network calls or device commands; input is never mutated. */
   migrateConfig?(
@@ -405,53 +1080,50 @@ export interface HubbleModule {
   ): Promise<ModuleValues> | ModuleValues
 }
 
-export function validateModuleFields(
-  fields: ModuleManifest['settings'],
-  values: ModuleValues,
-): void {
-  for (const field of fields) {
-    const value = values[field.id]
-    if (value === undefined) {
-      if (field.required) throw new Error(`Missing module field: ${field.label}`)
-      continue
-    }
-    if (field.type === 'boolean' && typeof value !== 'boolean')
-      throw new Error(`Expected a boolean for ${field.label}`)
-    if (
-      field.type === 'number' &&
-      (typeof value !== 'number' ||
-        !Number.isFinite(value) ||
-        (field.min !== undefined && value < field.min) ||
-        (field.max !== undefined && value > field.max))
-    )
-      throw new Error(`Invalid number for ${field.label}`)
-    if (
-      field.type === 'text' &&
-      (typeof value !== 'string' || value.length > 16_384 || (field.required && !value.trim()))
-    )
-      throw new Error(`Invalid text for ${field.label}`)
-    if (
-      field.type === 'choice' &&
-      (typeof value !== 'string' ||
-        (!field.choiceProvider && !field.choices.some((choice) => choice.id === value)))
-    )
-      throw new Error(`Invalid choice for ${field.label}`)
-  }
-}
-
 /** The same validation applies to edits, migrations, selection and automatic updates. */
 export function validateModuleSettings(manifest: ModuleManifest, values: ModuleValues): void {
   validateModuleFields(manifest.settings, values)
   for (const page of manifest.pages ?? [])
-    for (const section of page.sections) {
-      if (
-        section.type !== 'table' ||
-        section.source !== 'settings' ||
-        values[section.id] === undefined
-      )
-        continue
-      const rows = ModuleTableRowsSchema.parse(values[section.id])
-      if (rows.length > section.maxRows) throw new Error(`Too many rows in ${section.label}`)
-      for (const row of rows) validateModuleFields(section.columns, row.values)
-    }
+    for (const section of page.sections)
+      if (section.type === 'table' && section.source !== 'document')
+        validateTableStorage(section, values)
+}
+
+/** Document tables use the same field/layout contract as settings-backed workbooks. */
+export function validateModuleDocument(
+  manifest: ModuleManifest,
+  id: string,
+  value: ModuleJsonValue,
+): void {
+  ModuleDocumentValueSchema.parse(value)
+  if (!manifest.documents?.some((item) => item.id === id))
+    throw new Error('Undeclared module document')
+  for (const section of manifest.pages?.flatMap((page) => page.sections) ?? []) {
+    if (section.type !== 'table' || section.source !== 'document' || section.documentId !== id)
+      continue
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+      throw new Error('Workbook documents require an object')
+    validateTableStorage(section, value as ModuleValues)
+  }
+}
+function validateTableStorage(section: ModulePageTable, values: ModuleValues): void {
+  if (section.workbook) {
+    const view = moduleTableViewState(section.workbook, values)
+    const ids = new Set(section.columns.map((field) => field.id))
+    if (
+      [...view.columnOrder, ...view.hiddenColumns, ...Object.keys(view.columnWidths)].some(
+        (id) => !ids.has(id),
+      ) ||
+      view.frozenColumns > ids.size
+    )
+      throw new Error(`Invalid column layout in ${section.label}`)
+  }
+  if (section.source === 'state' || values[section.id] === undefined) return
+  const rows = ModuleTableRowsSchema.parse(values[section.id])
+  if (rows.length > section.maxRows) throw new Error(`Too many rows in ${section.label}`)
+  for (const row of rows) {
+    validateModuleFields(moduleTableInputColumns(section), row.values)
+    if (Object.keys(row.formulas ?? {}).some((id) => !section.workbook?.columns?.[id]?.formula))
+      throw new Error(`Undeclared formula column in ${section.label}`)
+  }
 }

@@ -5,17 +5,25 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./*": "./src/*.ts"
+    "./*": "./src/*.ts",
+    "./public-api": "./src/public-api.ts"
   },
   "scripts": {
     "test": "vitest run"
   },
   "dependencies": {
     "zod": "4.4.3",
-    "@hubble/module-sdk": "workspace:1.1.0",
+    "@hubble/module-sdk": "workspace:1.7.0",
     "@hubble/module-contracts": "workspace:1.0.0",
     "@hubble/module-runtime-helpers": "workspace:1.0.0",
     "@hubble/protocol-ultrix-ogp": "workspace:1.0.0",
-    "@hubble/protocol-videohub": "workspace:1.0.0"
+    "@hubble/protocol-videohub": "workspace:1.0.0",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "lucide-react": "1.24.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3"
   }
 }

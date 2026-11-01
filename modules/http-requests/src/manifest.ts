@@ -1,13 +1,22 @@
 import { defineModuleManifest } from '@hubble/module-sdk/authoring'
+import { matrix } from './matrix.js'
 
 export default defineModuleManifest({
   formatVersion: 1,
   apiVersion: 1,
   host: {
-    minimumVersion: '2.0.0',
+    minimumVersion: '2.0.11',
+    requiredFeatures: [
+      'module-matrix-v1',
+      'module-feedback-observers-v1',
+      'module-matrix-context-v1',
+      'host-service-registry-v1',
+      'module-resource-limits-v1',
+    ],
   },
   configVersion: 1,
-  capabilities: ['request-response'],
+  matrix,
+  capabilities: ['request-response', 'host.resources'],
   settings: [
     {
       id: 'baseUrl',
@@ -71,6 +80,15 @@ export default defineModuleManifest({
   ],
   actions: [
     {
+      id: 'matrix',
+      label: 'HTTP request',
+      description: 'Execute this row using the selected HTTP method.',
+      completion: 'response',
+      timeoutMs: 12000,
+      fields: [],
+      legacy: true,
+    },
+    {
       id: 'generic-http.get',
       label: 'GET',
       description: 'Send an HTTP GET request and wait for its response.',
@@ -93,7 +111,6 @@ export default defineModuleManifest({
           secret: true,
         },
       ],
-      legacy: true,
     },
     {
       id: 'generic-http.post',
@@ -133,7 +150,6 @@ export default defineModuleManifest({
           default: 'application/json',
         },
       ],
-      legacy: true,
     },
     {
       id: 'generic-http.put',
@@ -173,7 +189,6 @@ export default defineModuleManifest({
           default: 'application/json',
         },
       ],
-      legacy: true,
     },
     {
       id: 'generic-http.patch',
@@ -213,7 +228,6 @@ export default defineModuleManifest({
           default: 'application/json',
         },
       ],
-      legacy: true,
     },
     {
       id: 'generic-http.delete',
@@ -246,8 +260,14 @@ export default defineModuleManifest({
           secret: true,
         },
       ],
-      legacy: true,
     },
   ],
-  feedback: [],
+  feedback: [
+    {
+      id: 'matrix',
+      label: 'Request status',
+      description: 'HTTP requests do not imply persistent device state.',
+      fields: [],
+    },
+  ],
 })

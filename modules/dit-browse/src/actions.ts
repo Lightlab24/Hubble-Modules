@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { matrixActionSchema } from '@hubble/module-runtime-helpers/matrix'
 import {
   DitBrowseCycleWorkspacesActionDefinitionSchema,
   DitBrowseFocusCameraActionDefinitionSchema,
@@ -9,7 +10,7 @@ import {
 } from './schema/actions.js'
 
 /** This module owns its supported action IDs and validation. */
-export const actionSchemas = {
+export const legacyActionSchemas = {
   'dit-browse.focus-camera': DitBrowseFocusCameraActionDefinitionSchema,
   'dit-browse.switch-workspace': DitBrowseSwitchWorkspaceActionDefinitionSchema,
   'dit-browse.show-grid': DitBrowseShowGridActionDefinitionSchema,
@@ -17,6 +18,7 @@ export const actionSchemas = {
   'dit-browse.set-grid-lock': DitBrowseSetGridLockActionDefinitionSchema,
   'dit-browse.toggle-grid-lock': DitBrowseToggleGridLockActionDefinitionSchema,
 } as const
+export const actionSchemas = { ...legacyActionSchemas, matrix: matrixActionSchema }
 export const ActionDefinitionSchema = z.union([
   DitBrowseFocusCameraActionDefinitionSchema,
   DitBrowseSwitchWorkspaceActionDefinitionSchema,

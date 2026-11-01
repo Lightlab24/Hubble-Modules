@@ -17,6 +17,8 @@ const usage =
 export async function runModuleTool(args) {
   const [command, input, output] = args;
   if (!input) throw new Error(usage);
+  if (command === "create" && args[2] === "hubble-mock")
+    throw new Error("Mock is a test fixture, not an authorable Hubble module");
   if (command === "create" && args.length === 3)
     return createProject(input, output);
   if (command === "build" && args.length === 2) return buildProject(input);
@@ -36,6 +38,10 @@ export async function runModuleTool(args) {
     (command === "pack" && args.length === 3)
   ) {
     const { manifest, files } = await readModuleProject(input);
+    if (manifest.id === "hubble-mock")
+      throw new Error(
+        "Mock is a test fixture and cannot be packaged for distribution",
+      );
     const archive = createModulePackage(manifest, files);
     if (command === "pack") {
       if (!output.endsWith(".hubble-module"))

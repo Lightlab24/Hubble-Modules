@@ -96,7 +96,7 @@ paste, row inspectors, add, duplicate, delete and reorder. Row and cell edits ap
 before persistence completes. Ordered background saves reconcile by row identity;
 failed row creation removes edits that depend on that row and preserves unrelated
 settings/row edits. Save failures use the existing fading toast. Navigation does not
-cancel queued saves. Grid undo/redo is local to the current mounted table session.
+cancel queued saves. Grid undo/redo belongs to its workbook and survives page navigation during the application session.
 
 Table settings, IDs, values and row order travel in the existing generic module
 binding. They survive full workspace export/import, replacement, restart and
@@ -128,3 +128,14 @@ without a host binary update. Do not change an archive under an existing identit
 Existing specialized host screens, including CCC, remain available. This API
 provides common settings/table/status screens; additional widget types or privileged
 host services need a new negotiated capability before modules can use them.
+
+## Candidate custom pages and portable documents
+
+The 1.5.0-dev.6 kit adds package-bundled frontend sections and document-backed
+workbooks, requiring the corresponding Hubble 2.0.11 host features. Read
+[custom pages](skills/hubble-module-author/references/custom-pages.md) and
+[portable documents](skills/hubble-module-author/references/documents.md). A
+document table uses `source: 'document'`, `documentId`, and `workbook`; a custom
+canvas and its backend actions can share that same saved document. These document
+records have new workspace storage and transfer coverage. The earlier settings-
+table storage description above continues to apply to `source: 'settings'`.

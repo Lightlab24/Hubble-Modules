@@ -1,0 +1,10 @@
+{
+  "name": "hubble-matrix-row-fields-example",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "hubble": {
+    "id": "example-local-counter",
+    "name": "Local counter"
+  }
+}

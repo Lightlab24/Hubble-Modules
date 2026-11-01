@@ -7,8 +7,12 @@ import WebSocket from "ws";
 
 export async function moduleRequest(
   request,
-  { url = "http://127.0.0.1:42841", passwordFile, timeoutMs = 30_000 } = {},
+  { url, passwordFile, timeoutMs = 30_000 } = {},
 ) {
+  if (!url)
+    throw new Error(
+      "Choose an explicit Hubble service origin with --url; no app or product profile is selected by default",
+    );
   const origin = new URL(url);
   if (
     !["http:", "https:"].includes(origin.protocol) ||
@@ -163,7 +167,7 @@ export async function runServiceTool(args) {
     };
   else
     throw new Error(
-      "Usage: service-client.mjs [--url ORIGIN] [--password-file PATH] describe|list|check-updates|inspect PATH|import PATH|reload WORKSPACE CONNECTION|reload-all WORKSPACE|logs WORKSPACE CONNECTION|link WORKSPACE CONNECTION PATH|unlink WORKSPACE CONNECTION|host-reload WORKSPACE CAPABILITY|host-logs WORKSPACE CAPABILITY|host-link WORKSPACE CAPABILITY PATH|host-unlink WORKSPACE CAPABILITY|request JSON_FILE",
+      "Usage: service-client.mjs --url ORIGIN [--password-file PATH] describe|list|check-updates|inspect PATH|import PATH|reload WORKSPACE CONNECTION|reload-all WORKSPACE|logs WORKSPACE CONNECTION|link WORKSPACE CONNECTION PATH|unlink WORKSPACE CONNECTION|host-reload WORKSPACE CAPABILITY|host-logs WORKSPACE CAPABILITY|host-link WORKSPACE CAPABILITY PATH|host-unlink WORKSPACE CAPABILITY|request JSON_FILE",
     );
   return moduleRequest(request, options);
 }

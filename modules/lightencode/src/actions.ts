@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { matrixActionSchema } from '@hubble/module-runtime-helpers/matrix'
 import {
   LightEncodeRecordToggleAllActionDefinitionSchema,
   LightEncodeRecordToggleSlotActionDefinitionSchema,
@@ -7,12 +8,13 @@ import {
 } from './schema/actions.js'
 
 /** This module owns its supported action IDs and validation. */
-export const actionSchemas = {
+export const legacyActionSchemas = {
   'lightencode.record-toggle-all': LightEncodeRecordToggleAllActionDefinitionSchema,
   'lightencode.record-toggle-slot': LightEncodeRecordToggleSlotActionDefinitionSchema,
   'lightencode.timer-toggle': LightEncodeTimerToggleActionDefinitionSchema,
   'lightencode.timer-set-minutes': LightEncodeTimerSetMinutesActionDefinitionSchema,
 } as const
+export const actionSchemas = { ...legacyActionSchemas, matrix: matrixActionSchema }
 export const ActionDefinitionSchema = z.union([
   LightEncodeRecordToggleAllActionDefinitionSchema,
   LightEncodeRecordToggleSlotActionDefinitionSchema,

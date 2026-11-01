@@ -14,15 +14,9 @@ features belong in a host implementation change, not guessed manifest fields.
   for an ungrouped entry. Labels are trimmed, nonempty plain text of at most 160
   characters; nested groups are unsupported. Group labels are presentation only:
   never encode them in IDs, saved field values, feedback keys, or execution logic.
-  Regrouping needs no configuration migration. Require `module-presentation-v1`
-  when depending on groups in the workbook and Advanced legacy action pickers
-  (Hubble 2.0.1). Earlier API 1 hosts can accept the metadata without displaying it
-  in those pickers. New actions on an existing connection use its “Module actions”
-  entry and the generic action/feedback editor; do not extend host-owned legacy
-  command enums. Static and live choice groups use the same presentation rules.
-  Settings `choiceProvider` support, including workspace host modules, requires
-  `module-settings-choices-v1`. Providers observe the current running instance;
-  uncommitted form values are not passed to `choices(provider)`.
+  Regrouping needs no configuration migration. Use a matching updated host/kit;
+  older Hubble2 validators reject this optional metadata. Declare the corresponding
+  minimum host/features; never put incompatible manifests in the legacy catalog.
 - Actions declare their stable ID, fields, timeout, and completion criterion:
   local change, transport submission, response, or observed state confirmation.
   `completionAlternatives` explicitly lists other possible evidence when one saved
@@ -48,9 +42,13 @@ features belong in a host implementation change, not guessed manifest fields.
   downstream hop. Keep secrets and raw sensitive payloads out of logs.
 - Publish `unavailable` for unknown/stale feedback. Do not turn a disconnected
   device's unknown state into confirmed `inactive`.
-- Module code describes fields and behavior; the host owns UI composition and
-  persistence. Arbitrary executable UI panels, presets, and live variables are outside this
-  initial contract.
+- Module code owns UI composition, custom frontends, calculations and device
+  behavior. Hubble renders shared controls and persists the user's data. The
+  existing page API supplies declarative sections; the required custom frontend
+  model uses an isolated container and public scoped bridge, not injection into
+  Hubble's privileged renderer. See [the extension model](extension-model.md) for
+  current gaps. Do not confuse the current API's limits with the intended ownership
+  boundary or claim an unsupported frontend capability is already available.
 
 For edits, capture representative saved settings and action fields before making
 changes. Test non-default values, all supported actions, cancellation, failed
@@ -65,8 +63,13 @@ look identical.
 
 The host keys device instances by (workspaceId, connectionId), never connectionId
 alone. Workspace capabilities use (workspaceId, capabilityId), where built-in IDs
-are `ccc`, `system-actions`, and `mock`. They have portable version selections and
+include `ccc` and `system-actions`. They have portable version selections and
 separate local source links; do not invent a physical connection to host them.
+The candidate [workspace instance contract](workspace-instances.md) extends this
+to unknown packages declaring `instanceScope: 'workspace'`, using their stable
+module ID as the scope ID. It provides one instance per module per workspace.
+The historical `mock` scope is inert test compatibility only. Never package,
+activate or bypass the production prohibition on Mock modules.
 Each context supplies scope, settings, publishState, publishFeedback, and log.
 Feedback with parameters includes `fields` matching its declared descriptor;
 the action's feedback rule selects the same ID and values. Invalid or stale
@@ -81,11 +84,14 @@ service user's operating-system permissions. Never describe them as sandboxed.
 Built-in integrations can expose optional `call(method, value, execution)` services
 and publish bounded JSON observations with `publishEvent(channel, value)`. Declare
 `service.<method>` for every service. `requestHost(method, value, signal)` requires
-`host.<method>` and an explicitly supported host capability. Shared router groups,
-TSL persistence, CCC storage and signed native bridges stay in the host; their
-module-owned protocol or command logic can reload independently. These privileges
-are restricted to their built-in identities/scopes. Custom device modules own their
-protocol clients and use the standard action/feedback API.
+`host.<method>` and an explicitly supported host capability. Hubble owns generic
+storage and the signed native access mechanism. Router selection/Take workflows,
+CCC camera decisions and application-specific native profiles belong in packages.
+The older `ccc-store`, `router-groups` and `livegrade` services still have legacy
+identity/scope restrictions in existing hosts; their availability is a compatibility
+fact, not the target ownership architecture. Do not add module-specific behavior
+behind these names or claim complete extraction while a package depends on it.
+Replace a missing shared operation with an explicitly negotiated generic API.
 
 A host call may call back into the same worker; do not hold a global worker lock
 across it. Cancellation does not free an outstanding operation until it settles.
@@ -101,13 +107,15 @@ host against representative saved settings/actions. Settings migrations are pure
 data transformations; they do not migrate saved action fields or feedback rules.
 Retain compatibility handlers where those contracts cannot be migrated.
 
-## Declarative sidebar pages
+For sidebar tables and Button Matrix UI parity, use the [native workbook contract](native-workbooks.md). It includes the feature map, schema, formulas, persistence and qualification requirements.
 
-SDK/tools/kit 1.1.0 supports optional `manifest.pages` on Hubble 2.0.2 with the
-required feature `module-pages-v1`. See the [page contract](../../../docs/sidebar-pages.md)
-and `examples/sidebar-page`. Pages contain settings forms, editable settings-backed
-tables, read-only state tables and status fields. Table rows use stable IDs and
-existing portable binding settings; publish transient status through `state.values`.
-Use valid row defaults, preserve IDs, test immediate editing before saves resolve
-and failure recovery, and cover non-default export/import values. Do not expose
-module JavaScript in the renderer or bypass existing scope/command validation.
+## Feedback editor ownership
+
+Module descriptors own their Matrix forms and feedback rules through
+[the Matrix API](matrix.md). Hubble owns generic rendering and animation.
+Tally Feedback declares each row's active/off colours, feedback enablement and
+glow; Follow, Unfollow and Toggle are immediate choices. Preserve old source
+strings through the module's codec and compatibility declarations. Do not move
+row preferences to column-wide defaults without a product decision. The module
+owns protocol interpretation, following state and peer actions. No Tally UI
+change using these APIs requires rebuilding the host.
