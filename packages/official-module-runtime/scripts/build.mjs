@@ -47,7 +47,7 @@ async function files(directory) {
       item.name !== 'test'
     )
       result.push(...(await files(file)))
-    else if (item.isFile() && item.name.endsWith('.ts') && !item.name.endsWith('.d.ts'))
+    else if (item.isFile() && /\.tsx?$/.test(item.name))
       result.push(file)
   }
   return result
@@ -69,6 +69,8 @@ const program = ts.createProgram(paths, {
   skipLibCheck: true,
   resolveJsonModule: true,
   esModuleInterop: true,
+  jsx: ts.JsxEmit.ReactJSX,
+  lib: ['lib.es2022.d.ts', 'lib.dom.d.ts', 'lib.dom.iterable.d.ts'],
   declaration: true,
   emitDeclarationOnly: true,
   rootDir: root,
