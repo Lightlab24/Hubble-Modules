@@ -27,3 +27,12 @@ the private host checkout. The first local kit candidate exposed AppleDouble
 sidecars on extraction and was rejected; final packaging excludes those sidecars.
 Final kit SHA-256:
 `375f08840e7120235caaae1283679c049d3b643a6c6ab4e264c8f90d6dcc4608`.
+
+The signed matching host was installed and CCC 1.2.7 selected through its public
+module API. The installed page shows all 16 camera rows and reports ready; host
+hashes remained unchanged by the module import/selection. A separate isolated
+service using the exact packaged host proved the 1.2.6-to-1.2.7 page declaration
+and behavior update against unchanged app bytes. Its first live observation took
+14 ms, and 32 queued selections completed without a worker restart. Production
+workbook data and button configuration were preserved. Operator acceptance of
+the page's perceived responsiveness is pending.
