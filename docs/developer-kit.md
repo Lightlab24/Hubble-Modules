@@ -4,7 +4,7 @@ This kit builds independent module releases. SDK/tool versions, module versions,
 module API versions and settings schema versions are separate. Node 22 or newer is
 required. No Hubble application checkout or application rebuild is needed.
 
-Candidate kit **1.7.0-dev.6** contains SDK **1.7.0**, module tools **1.5.0**,
+Developer kit **1.7.0** contains SDK **1.7.0**, module tools **1.5.0**,
 and module API **1**. It adds `module-matrix-fill-rules-v1` (Hubble 2.0.15):
 modules declare copy/increment per field and may override that policy by action
 through `rules[].set.fill`. See the Matrix skill reference and the exported

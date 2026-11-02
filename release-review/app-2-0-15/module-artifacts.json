@@ -1,0 +1,167 @@
+[
+  {
+    "identity": {
+      "moduleId": "hubble-dit-browse",
+      "version": "1.1.3",
+      "digest": "31be5448ae172472e28d4f07e7f64fb514ed272012f0bc8cce90e6385dc76ece"
+    },
+    "bytes": 366749,
+    "file": "hubble-dit-browse-1.1.3.hubble-module",
+    "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-dit-browse-v1.1.3/hubble-dit-browse-1.1.3.hubble-module",
+    "matchesInstalledRuntime": true
+  },
+  {
+    "identity": {
+      "moduleId": "hubble-livegrade",
+      "version": "1.1.2",
+      "digest": "9b308223eeb0600f34532a0b43b332ab72299cf4ebe40f7c57f8b4479334e99f"
+    },
+    "bytes": 325515,
+    "file": "hubble-livegrade-1.1.2.hubble-module",
+    "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-livegrade-v1.1.2/hubble-livegrade-1.1.2.hubble-module",
+    "matchesInstalledRuntime": true
+  },
+  {
+    "identity": {
+      "moduleId": "hubble-ross-ultrix-ogp",
+      "version": "1.2.8",
+      "digest": "e3cb08d45844ca56e6446d2a1d967d7d1d9c350b9fdf5150281c9fd905c5ef77"
+    },
+    "bytes": 1085217,
+    "file": "hubble-ross-ultrix-ogp-1.2.8.hubble-module",
+    "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-ross-ultrix-ogp-v1.2.8/hubble-ross-ultrix-ogp-1.2.8.hubble-module",
+    "matchesInstalledRuntime": true
+  },
+  {
+    "identity": {
+      "moduleId": "hubble-cyanview-studio",
+      "version": "1.1.3",
+      "digest": "98234ed4e45bbd6878e5fad2a9fd94a76580efd28ccee75e64fbca6c47ae99c6"
+    },
+    "bytes": 320407,
+    "file": "hubble-cyanview-studio-1.1.3.hubble-module",
+    "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-cyanview-studio-v1.1.3/hubble-cyanview-studio-1.1.3.hubble-module",
+    "matchesInstalledRuntime": true
+  },
+  {
+    "identity": {
+      "moduleId": "hubble-http-requests",
+      "version": "1.2.2",
+      "digest": "bc36eb35ca3a38db0ab0c41ab7da3b5d3d2e8979b4ab45b7840173f0e85d77c0"
+    },
+    "bytes": 456077,
+    "file": "hubble-http-requests-1.2.2.hubble-module",
+    "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-http-requests-v1.2.2/hubble-http-requests-1.2.2.hubble-module",
+    "matchesInstalledRuntime": true
+  },
+  {
+    "identity": {
+      "moduleId": "hubble-aja-kumo",
+      "version": "1.1.3",
+      "digest": "f25248e8db5e97c56d4ec476b73e94b02c31cb115710051e46abd2dd4989585b"
+    },
+    "bytes": 1076359,
+    "file": "hubble-aja-kumo-1.1.3.hubble-module",
+    "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-aja-kumo-v1.1.3/hubble-aja-kumo-1.1.3.hubble-module",
+    "matchesInstalledRuntime": true
+  },
+  {
+    "identity": {
+      "moduleId": "hubble-tsl",
+      "version": "1.2.2",
+      "digest": "e17ef499daa1174f9c36da17ec2faee2556be77769db627d7c475d4b3d2b9199"
+    },
+    "bytes": 326525,
+    "file": "hubble-tsl-1.2.2.hubble-module",
+    "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-tsl-v1.2.2/hubble-tsl-1.2.2.hubble-module",
+    "matchesInstalledRuntime": true
+  },
+  {
+    "identity": {
+      "moduleId": "hubble-blackmagic-videohub",
+      "version": "1.1.3",
+      "digest": "9416e6fbade2e2881cf68ad9de6370d87f95e5ae335ca3032eef98561920f3ae"
+    },
+    "bytes": 1086621,
+    "file": "hubble-blackmagic-videohub-1.1.3.hubble-module",
+    "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-blackmagic-videohub-v1.1.3/hubble-blackmagic-videohub-1.1.3.hubble-module",
+    "matchesInstalledRuntime": true
+  },
+  {
+    "identity": {
+      "moduleId": "hubble-lightencode",
+      "version": "1.1.2",
+      "digest": "b058efe086c2ba2c49ea3ceb0138ff817c27ca0176cafcc145ce5c0d6adc42b5"
+    },
+    "bytes": 328186,
+    "file": "hubble-lightencode-1.1.2.hubble-module",
+    "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-lightencode-v1.1.2/hubble-lightencode-1.1.2.hubble-module",
+    "matchesInstalledRuntime": true
+  },
+  {
+    "identity": {
+      "moduleId": "hubble-evertz-quartz",
+      "version": "1.1.3",
+      "digest": "ed6f73254c2f66923868a18863a9204c8f1ec3e8889942b805e9699543c0dd9f"
+    },
+    "bytes": 1076329,
+    "file": "hubble-evertz-quartz-1.1.3.hubble-module",
+    "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-evertz-quartz-v1.1.3/hubble-evertz-quartz-1.1.3.hubble-module",
+    "matchesInstalledRuntime": true
+  },
+  {
+    "identity": {
+      "moduleId": "hubble-cyanview-rcp",
+      "version": "1.2.2",
+      "digest": "e86a990304795ad3493445ec66a4035aabc5536db88565050d4168f92aca4ec7"
+    },
+    "bytes": 323418,
+    "file": "hubble-cyanview-rcp-1.2.2.hubble-module",
+    "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-cyanview-rcp-v1.2.2/hubble-cyanview-rcp-1.2.2.hubble-module",
+    "matchesInstalledRuntime": true
+  },
+  {
+    "identity": {
+      "moduleId": "hubble-mqtt-capture",
+      "version": "1.1.0",
+      "digest": "4907e67b85bebded67307b4b0342e5f4e72daa44033723016d7c82ad15dd496f"
+    },
+    "bytes": 314658,
+    "file": "hubble-mqtt-capture-1.1.0.hubble-module",
+    "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-mqtt-capture-v1.1.0/hubble-mqtt-capture-1.1.0.hubble-module",
+    "matchesInstalledRuntime": true
+  },
+  {
+    "identity": {
+      "moduleId": "hubble-tally-switch",
+      "version": "1.1.4",
+      "digest": "f8ac7ef6a0b0849dead759d2bdf8bb8b907ba1f9faee3e5e05a3ebe40feef10a"
+    },
+    "bytes": 310889,
+    "file": "hubble-tally-switch-1.1.4.hubble-module",
+    "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-tally-switch-v1.1.4/hubble-tally-switch-1.1.4.hubble-module",
+    "matchesInstalledRuntime": true
+  },
+  {
+    "identity": {
+      "moduleId": "hubble-ccc",
+      "version": "1.2.8",
+      "digest": "48c8a72efe4bcd3da7c9c319a3b2181c5eb7cea742f87f69f7627176386db857"
+    },
+    "bytes": 341722,
+    "file": "hubble-ccc-1.2.8.hubble-module",
+    "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-ccc-v1.2.8/hubble-ccc-1.2.8.hubble-module",
+    "matchesInstalledRuntime": true
+  },
+  {
+    "identity": {
+      "moduleId": "hubble-system-actions",
+      "version": "1.2.2",
+      "digest": "07118e2c5f7759e8945a8872641ff8d64555d12b00790f7c650af81c6573ec9b"
+    },
+    "bytes": 315509,
+    "file": "hubble-system-actions-1.2.2.hubble-module",
+    "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-system-actions-v1.2.2/hubble-system-actions-1.2.2.hubble-module",
+    "matchesInstalledRuntime": true
+  }
+]
