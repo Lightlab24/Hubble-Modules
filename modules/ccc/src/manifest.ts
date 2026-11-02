@@ -17,7 +17,7 @@ export default defineModuleManifest({
   formatVersion: 1,
   apiVersion: 1,
   host: {
-    minimumVersion: "2.0.11",
+    minimumVersion: "2.0.15",
     requiredFeatures: [
       "host-services-v1",
       "module-workspace-actions-v1",
@@ -43,6 +43,7 @@ export default defineModuleManifest({
       "module-page-navigation-v1",
       "module-table-selection-v1",
       "module-table-preview-v1",
+      "module-table-live-v1",
       "module-datasets-v1",
       "host-service-registry-v1",
     ],

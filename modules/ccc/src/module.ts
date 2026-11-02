@@ -174,6 +174,13 @@ export function createCccModule(
             unavailableCameraCount: unavailable.length,
             singleSwitch: state.config.singleSwitch ? "On" : "Off",
             cameraRows: cameraRows(store.value()),
+            cameraSelection: {
+              revision: store.revision() ?? null,
+              rows: state.config.rows.map((row) => ({
+                id: row.rowId,
+                values: { enabled: row.enabled },
+              })),
+            },
           },
         };
         // observedAt timestamps a status change, not a periodic heartbeat.

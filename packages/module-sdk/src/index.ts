@@ -107,6 +107,10 @@ export const ModulePageTableSchema = z.strictObject({
     .optional(),
   workbook: ModuleTableWorkbookSchema.optional(),
   selectionHighlight: z.enum(['cell', 'row']).optional(),
+  live: z.strictObject({
+    source: ModuleIdentifierSchema,
+    columns: z.array(ModuleIdentifierSchema).min(1).max(32),
+  }).optional(),
   computed: z
     .strictObject({
       source: ModuleIdentifierSchema,
@@ -805,6 +809,17 @@ export const ModuleManifestSchema = z
                   message: 'Frozen column count exceeds the table width',
                 })
             }
+            if (section.live && (
+              section.source !== 'document' ||
+              !('requiredFeatures' in manifest.host) ||
+              !manifest.host.requiredFeatures?.includes('module-table-live-v1') ||
+              new Set(section.live.columns).size !== section.live.columns.length ||
+              section.live.columns.some((id) =>
+                !moduleTableInputColumns(section).some((field) => field.id === id))
+            )) ctx.addIssue({
+              code: 'custom', path,
+              message: 'Live table values require module-table-live-v1 and editable document columns',
+            })
             if (section.computed?.preview) {
               const preview = section.computed.preview
               if (

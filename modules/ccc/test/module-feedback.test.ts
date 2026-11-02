@@ -224,6 +224,14 @@ it.each([false, true])(
         ])
         .toEqual(["inactive", "active"]);
       expect(writes).toBe(1);
+      await expect.poll(() => vi.mocked(h.context.publishState).mock.lastCall?.[0].values.cameraSelection)
+        .toMatchObject({
+          revision: expect.any(String),
+          rows: [
+            { id: first!.rowId, values: { enabled: false } },
+            { id: second!.rowId, values: { enabled: true } },
+          ],
+        });
     } finally {
       release();
     }
@@ -238,6 +246,11 @@ it.each([false, true])(
       ])
       .toEqual([failFirstSave ? "active" : "inactive", "active"]);
     expect(h.network.commands).toHaveLength(0);
+    await expect.poll(() => vi.mocked(h.context.publishState).mock.lastCall?.[0].values.cameraSelection)
+      .toMatchObject({ rows: [
+        { id: first!.rowId, values: { enabled: failFirstSave } },
+        { id: second!.rowId, values: { enabled: true } },
+      ] });
   },
 );
 

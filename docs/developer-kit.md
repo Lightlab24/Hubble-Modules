@@ -4,12 +4,18 @@ This kit builds independent module releases. SDK/tool versions, module versions,
 module API versions and settings schema versions are separate. Node 22 or newer is
 required. No Hubble application checkout or application rebuild is needed.
 
-Candidate kit **1.7.0-dev.1** contains SDK **1.7.0**, module tools **1.5.0**,
+Candidate kit **1.7.0-dev.4** contains SDK **1.7.0**, module tools **1.5.0**,
 and module API **1**. It adds `module-matrix-fill-rules-v1` (Hubble 2.0.15):
 modules declare copy/increment per field and may override that policy by action
 through `rules[].set.fill`. See the Matrix skill reference and the exported
 `matrix-feedback` example. Each editable Matrix/page-table field owns its policy;
 observed and computed tables remain read-only.
+
+It also adds `module-table-live-v1`: document tables may show module-owned live
+values in declared editable columns while ordered saves are pending. The shared
+host protects active edits and keeps transient observations out of persisted
+documents. Require the feature explicitly; this needs compatible host support,
+not just an updated SDK. See the native-workbooks skill reference.
 
 The kit also retains `module-matrix-input-source-v1` (Hubble 2.0.12):
 modules can supply an editable input separately from the resolved display of a

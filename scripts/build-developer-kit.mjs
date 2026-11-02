@@ -175,13 +175,13 @@ try {
         temporary,
       );
   await mkdir(path.dirname(output), { recursive: true });
-  execFileSync("/usr/bin/tar", [
-    "-czf",
-    output,
-    "-C",
-    temporary,
-    "hubble-module-developer-kit",
-  ]);
+  execFileSync(
+    "/usr/bin/tar",
+    ["-czf", output, "-C", temporary, "hubble-module-developer-kit"],
+    // macOS AppleDouble sidecars are not source files. Other extractors retain
+    // them as ._*.ts, which makes the exported example test discovery fail.
+    { env: { ...process.env, COPYFILE_DISABLE: "1" } },
+  );
   const bytes = await readFile(output);
   const pin = {
     version,

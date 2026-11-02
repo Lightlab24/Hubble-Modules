@@ -121,16 +121,19 @@ export function prepareCccDocument(raw: unknown): ModuleJsonValue {
 export function createCccDocumentStore(services: ModuleHostServices) {
   const client = createModuleDocumentClient(services);
   let value: ModuleJsonValue = { revision: 0, cameras: [] };
+  let revision: string | null = null;
   const readDocument = async () => {
     const document = await client.read(documentId);
     if (document.version !== 1)
       throw new Error("Update CCC to read this camera document");
     value = document.value;
+    revision = document.revision;
     return document;
   };
   return {
     client,
     value: () => value,
+    revision: () => revision,
     async read() {
       return cccDocumentConfig((await readDocument()).value);
     },
@@ -147,6 +150,7 @@ export function createCccDocumentStore(services: ModuleHostServices) {
             replaceCccDocument(document.value, next),
           );
           value = result.value;
+          revision = result.revision;
           return cccDocumentConfig(result.value);
         } catch (error) {
           if (

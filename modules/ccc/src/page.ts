@@ -43,6 +43,7 @@ export const cameraPage: ModulePage = {
       label: "Cameras",
       source: "document",
       documentId: "cameras",
+      live: { source: "cameraSelection", columns: ["enabled"] },
       maxRows: 512,
       selectionHighlight: "row",
       dataset: { id: "cameras", version: 1 },

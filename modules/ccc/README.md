@@ -1,6 +1,6 @@
 # CCC
 
-Official module `hubble-ccc`, version **1.2.6**, using stable Hubble module API **1**.
+Official module `hubble-ccc`, version **1.2.7**, using stable Hubble module API **1**.
 Camera controls using the shared RCP transport and scoped portable documents.
 
 Camera-selection feedback updates immediately while ordered document saves are pending.
@@ -8,6 +8,13 @@ Success still means the selection was saved. A failed save rolls back dependent
 selections while preserving independent camera edits. Recording continues to use
 confirmed selections and device observations. Host refresh requests return the
 current snapshot without waiting for the selection-save queue.
+
+The camera workbook also observes pending selection changes through the generic
+`module-table-live-v1` feature. Matrix and Stream Deck selections appear on the
+page while saves are pending; an explicit cell edit takes precedence. Observed
+values alone do not enter workbook history or portable documents. This version
+requires a host advertising that feature (minimum version 2.0.15); older hosts
+must keep CCC 1.2.6 until their host update is installed.
 
 ## Source ownership
 

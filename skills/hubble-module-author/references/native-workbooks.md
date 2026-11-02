@@ -171,6 +171,30 @@ contents, installed startup, and device observations need the later live handoff
 
 ## Document-backed workbooks
 
+With `module-table-live-v1` (candidate kit 1.7.0-dev.4, Hubble 2.0.15 plus
+the advertised feature), document tables may declare
+`live: { source: 'selection', columns: ['enabled'] }`. Publish that named state
+value as `{ revision: document.revision, rows: [{ id, values: { enabled: true } }] }`.
+The revision is the host document's opaque UUID, not a domain revision counter.
+Only existing row IDs and declared editable columns participate. Unknown, invalid,
+stale or replaced-generation observations cannot overwrite document cells.
+
+This projects local module state while ordered persistence is pending. The shared
+host grid remains editable; its own pending edits take precedence. A user can
+reverse a projected value before the earlier save completes. Failed edits roll
+back without losing unrelated feedback or later edits. A newer durable receipt
+wins over an observation based on an older document. Live observations do not
+create undo entries or enter an unrelated cell save, workspace export or full
+workbook clipboard as saved data; those use the document and explicit user edits. Test those boundaries
+with the first save held unresolved and a second edit before releasing it.
+
+The host obtains scoped runtime observations and current durable documents without
+reloading all module manifests on each refresh. Module page and Matrix controls
+may write documents without holding the host's save gate while awaiting completion.
+This is generic host support; selection rules and which columns follow live state
+remain package-owned. A host upgrade is required before installing packages that
+require this feature. It does not make durable saves instantaneous.
+
 The candidate `module-documents-v1` capability adds `source: 'document'` plus a
 `documentId` declared in the manifest. Rows and layout live in that document,
 shared with the package frontend/backend. See [portable documents](documents.md)
