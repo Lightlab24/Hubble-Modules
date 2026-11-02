@@ -135,23 +135,86 @@ it("preserves toggle colour ordering, level ranges, protocol-specific commands a
   ).toThrow("router action");
 });
 
-it.each(types)('%s preserves the established offline action labels and colors', (type) => {
-  const choices = routerMatrix(type).fields.find((field) => field.id === 'actionType')?.choices;
-  expect(choices).toEqual(expect.arrayContaining([
-    { value: 'select-source', label: 'Select SRC', textColor: '#159DDD' },
-    { value: 'select-destination', label: 'Select DST', textColor: '#8B5CE5' },
-    { value: 'toggle-group-enabled', label: 'Group On/Off', textColor: '#37A65B' },
-  ]));
-});
-it('keeps source/address labels with no router snapshot and an unresolved legacy group', () => {
+it.each(types)(
+  "%s preserves the established offline action labels and colors",
+  (type) => {
+    const choices = routerMatrix(type).fields.find(
+      (field) => field.id === "actionType",
+    )?.choices;
+    expect(choices).toEqual(
+      expect.arrayContaining([
+        { value: "select-source", label: "Select SRC", textColor: "#159DDD" },
+        {
+          value: "select-destination",
+          label: "Select DST",
+          textColor: "#8B5CE5",
+        },
+        {
+          value: "toggle-group-enabled",
+          label: "Group On/Off",
+          textColor: "#37A65B",
+        },
+      ]),
+    );
+  },
+);
+it("keeps source/address labels with no router snapshot and an unresolved legacy group", () => {
   const contextId = randomUUID();
-  const action = { type: 'ross-swp08.select-source', moduleConnectionId: contextId,
-    connectionId: randomUUID(), source: 12, groupId: null, enabled: true, drivesTally: true } as Parameters<typeof routerMatrixFeedback>[1];
-  const groups = { snapshot: () => ({ contexts: [{ reference: { contextId },
-    settings: { groups: [{ id: randomUUID(), name: 'New group' }], groupAliases: {} },
-  }] }) } as unknown as Parameters<typeof routerMatrixFeedback>[2];
+  const action = {
+    type: "ross-swp08.select-source",
+    moduleConnectionId: contextId,
+    connectionId: randomUUID(),
+    source: 12,
+    groupId: null,
+    enabled: true,
+    drivesTally: true,
+  } as Parameters<typeof routerMatrixFeedback>[1];
+  const groups = {
+    snapshot: () => ({
+      contexts: [
+        {
+          reference: { contextId },
+          settings: {
+            groups: [{ id: randomUUID(), name: "New group" }],
+            groupAliases: {},
+          },
+        },
+      ],
+    }),
+  } as unknown as Parameters<typeof routerMatrixFeedback>[2];
   const feedback = routerMatrixFeedback(randomUUID(), action, groups, []);
-  expect(feedback.state).toBe('unavailable');
+  expect(feedback.state).toBe("unavailable");
   expect(feedback.appearance?.backgroundColor).toBeNull();
-  expect(feedback.appearance?.cells).toMatchObject({ actionType: { label: 'Select SRC' }, actionValue: { label: '12 — Unlabeled' } });
+  expect(feedback.appearance?.cells).toMatchObject({
+    actionType: { label: "Select SRC" },
+    actionValue: { label: "12 — Unlabeled" },
+  });
 });
+
+it.each(types)(
+  "%s declares offline SRC and DST value colors, including legacy aliases",
+  (type) => {
+    const field = routerMatrix(type).fields.find(
+      (item) => item.id === "actionValue",
+    )!;
+    for (const actionType of ["select-source", "select-src"])
+      expect(resolveModuleMatrixField(field, { actionType }).textColor).toBe(
+        "#159DDD",
+      );
+    for (const actionType of ["select-destination", "select-dst"])
+      expect(resolveModuleMatrixField(field, { actionType }).textColor).toBe(
+        "#8B5CE5",
+      );
+    for (const actionType of ["", "take", "lock-destination", "recall-salvo"])
+      expect(
+        resolveModuleMatrixField(field, { actionType }).textColor,
+      ).toBeUndefined();
+    expect(field.showIncompleteWarning).toBe(false);
+    expect(() =>
+      parseModuleMatrixValue(
+        resolveModuleMatrixField(field, { actionType: "select-source" }),
+        "",
+      ),
+    ).toThrow();
+  },
+);

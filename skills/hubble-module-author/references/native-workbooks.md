@@ -200,3 +200,19 @@ The candidate `module-documents-v1` capability adds `source: 'document'` plus a
 shared with the package frontend/backend. See [portable documents](documents.md)
 for versioning, conflict behavior, limits and transfer rules. Keep `source: 'state'`
 read-only and retain existing settings-backed descriptors for older hosts.
+
+## Live table presentation
+
+Hosts advertising `module-table-presentation-v1` support `computed.dependencies`
+and `rowHighlight`. Declare this feature explicitly. Computed dependencies contain
+`rowFields` and `settingsFields`; only changes to these inputs invalidate a result
+for the same stable row ID. For camera observations use the target address/number,
+not a selection checkbox or workbook view. Omit dependencies to retain full-draft
+invalidation. Empty arrays explicitly declare independence from that input set.
+Computed results still require matching original row IDs and never bind by position.
+
+A table can declare `rowHighlight: { field: "program", values: ["ON AIR"],
+color: "#602A2A" }`. The shared workbook applies the row background when the resolved
+input or computed field matches; missing/stale computed values clear the highlight.
+Selection preserves this feedback fill and active editors remain usable. These
+rules belong in the module descriptor; the host has no device-specific colour rules.

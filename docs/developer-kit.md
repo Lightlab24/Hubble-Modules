@@ -4,7 +4,7 @@ This kit builds independent module releases. SDK/tool versions, module versions,
 module API versions and settings schema versions are separate. Node 22 or newer is
 required. No Hubble application checkout or application rebuild is needed.
 
-Candidate kit **1.7.0-dev.4** contains SDK **1.7.0**, module tools **1.5.0**,
+Candidate kit **1.7.0-dev.6** contains SDK **1.7.0**, module tools **1.5.0**,
 and module API **1**. It adds `module-matrix-fill-rules-v1` (Hubble 2.0.15):
 modules declare copy/increment per field and may override that policy by action
 through `rules[].set.fill`. See the Matrix skill reference and the exported
@@ -16,6 +16,13 @@ values in declared editable columns while ordered saves are pending. The shared
 host protects active edits and keeps transient observations out of persisted
 documents. Require the feature explicitly; this needs compatible host support,
 not just an updated SDK. See the native-workbooks skill reference.
+
+The kit adds `module-matrix-field-presentation-v1`: a Matrix field or its row
+rules can declare an offline `textColor`. This covers numeric values and formulas;
+choice-specific colors take precedence. It requires an explicitly compatible host.
+The kit also retains the row highlights/computed dependencies and quiet incomplete
+draft declarations introduced in 1.7.0-dev.5. See the Matrix and native-workbook
+skill references for their required features.
 
 The kit also retains `module-matrix-input-source-v1` (Hubble 2.0.12):
 modules can supply an editable input separately from the resolved display of a

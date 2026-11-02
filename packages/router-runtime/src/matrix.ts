@@ -149,12 +149,18 @@ export function routerMatrix(type: RouterType) {
         type: "text",
         default: "",
         choiceProvider: "matrix-actions",
-        choices: [...routerActionNames(type), ...Object.keys(aliases)].map((value) => {
-          const canonical = routerActionName(value);
-          return { value, label: labels[canonical] ?? canonical,
-            ...(labelColors[canonical] ? { textColor: labelColors[canonical] } : {}),
-          };
-        }),
+        choices: [...routerActionNames(type), ...Object.keys(aliases)].map(
+          (value) => {
+            const canonical = routerActionName(value);
+            return {
+              value,
+              label: labels[canonical] ?? canonical,
+              ...(labelColors[canonical]
+                ? { textColor: labelColors[canonical] }
+                : {}),
+            };
+          },
+        ),
         choiceFields: ["actionGroup"],
         width: 280,
       },
@@ -171,6 +177,7 @@ export function routerMatrix(type: RouterType) {
       {
         fill: "copy",
         id: "actionValue",
+        showIncompleteWarning: false,
         label: "SRC / DST",
         type: "text",
         default: "",
@@ -185,6 +192,11 @@ export function routerMatrix(type: RouterType) {
           "recall-salvo",
         ),
         rules: [
+          { when: when("select-source"), set: { textColor: "#159DDD" } },
+          {
+            when: when("select-destination"),
+            set: { textColor: "#8B5CE5" },
+          },
           {
             when: when(
               "select-source",
@@ -551,8 +563,10 @@ export function routerMatrixFeedback(
   let groupId: string | null = null;
   let groupUnavailable = false;
   try {
-    groupId = context && "groupId" in action
-      ? resolveRouterGroup(context.settings, action.groupId) : null;
+    groupId =
+      context && "groupId" in action
+        ? resolveRouterGroup(context.settings, action.groupId)
+        : null;
   } catch {
     // A stale group must not erase the action/address presentation. Execution
     // continues to validate the group independently before any router command.

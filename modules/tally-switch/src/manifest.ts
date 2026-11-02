@@ -46,6 +46,7 @@ export default defineModuleManifest({
       "module-table-workbook-v1",
       "module-fields-v2",
       "module-table-selection-v1",
+      "module-table-presentation-v1",
       "module-table-spreadsheet-v1",
       "module-exchange-v1",
       "module-runtime-directory-v1",
@@ -156,8 +157,30 @@ export default defineModuleManifest({
             "Assign receiver and router permissions in module settings. Startup and reconnect hold the last route until fresh tally changes.",
           source: "settings",
           selectionHighlight: "row",
+          rowHighlight: {
+            field: "program",
+            values: ["ON AIR"],
+            color: "#602A2A",
+          },
           maxRows: 512,
-          computed: { source: "mappingStatus", columns: ["program", "status"] },
+          computed: {
+            source: "mappingStatus",
+            columns: ["program", "status"],
+            dependencies: {
+              rowFields: [
+                "enabled",
+                "receiver",
+                "screen",
+                "address",
+                "indicator",
+                "router",
+                "destination",
+                "source",
+                "level",
+              ],
+              settingsFields: [],
+            },
+          },
           columns: [
             text("name", "Camera", "Camera"),
             {

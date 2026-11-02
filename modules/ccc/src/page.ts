@@ -64,6 +64,10 @@ export const cameraPage: ModulePage = {
       },
       computed: {
         source: "cameraRows",
+        dependencies: {
+          rowFields: ["rcpIp", "cameraNumber"],
+          settingsFields: [],
+        },
         columns: ["name", "connection", "recording", "message"],
         preview: { id: "camera-preview", version: 1 },
       },

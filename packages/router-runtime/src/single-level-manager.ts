@@ -51,7 +51,6 @@ import {
   snapshotRouteRequest,
 } from './single-level-requests.js'
 import {
-  boundedRouteSnapshot,
   emptyRouteSnapshot,
   errorMessage,
   isUnsupportedDimensionsMessage,
@@ -61,6 +60,7 @@ import {
   requiresNewClient,
   toSwp08Crosspoint,
 } from './single-level-snapshot.js'
+import { updateRouteSnapshot } from './route-map-snapshot.js'
 import {
   type ConfirmedRouteWatch,
   type ManagedEntry,
@@ -539,6 +539,8 @@ export class SingleLevelRouterConnectionManager implements RouterConnectionManag
     entry: ManagedEntry,
     event: VideohubClientEvent,
   ): void {
+    // Unchanged readback has already settled protocol confirmations.
+    if (event.type === 'route-observation') return
     if (event.type === 'phase') {
       if (entry.suppressDisconnectEvent) return
       const previousPhase = entry.phase
@@ -583,7 +585,7 @@ export class SingleLevelRouterConnectionManager implements RouterConnectionManag
       this.emit()
       return
     }
-    if (entry.client.snapshot().phase !== 'connected') return
+    if (entry.phase !== 'connected') return
 
     try {
       switch (event.type) {
@@ -593,11 +595,13 @@ export class SingleLevelRouterConnectionManager implements RouterConnectionManag
           entry.routing.reset({ clientRevision: event.revision, phase: 'stale' })
           this.invalidateConfirmedRouteWatches(entry, 'Router readback is resynchronizing')
           break
-        case 'names':
-          this.applyCatalogSnapshot(entry, entry.client.snapshot())
-          this.applyLabelPhase(entry, entry.client.snapshot())
+        case 'names': {
+          const snapshot = entry.client.snapshot()
+          this.applyCatalogSnapshot(entry, snapshot)
+          this.applyLabelPhase(entry, snapshot)
           entry.catalogStale = false
           break
+        }
         case 'route':
         case 'routes': {
           const crosspoints = event.type === 'route' ? [event.crosspoint] : event.crosspoints
@@ -605,17 +609,16 @@ export class SingleLevelRouterConnectionManager implements RouterConnectionManag
             this.hydrateConnectedSnapshot(entry)
             break
           }
+          const bounded = crosspoints.map(toSwp08Crosspoint)
           entry.routing.apply({
             previousRevision: event.previousRevision,
             revision: event.revision,
-            crosspoints: crosspoints.map(toSwp08Crosspoint),
+            crosspoints: bounded,
           })
-          entry.routes = boundedRouteSnapshot(entry, entry.client.snapshot())
+          entry.routes = updateRouteSnapshot(entry.routes, bounded, event.revision)
           this.publishConfirmedRouteWatchesFromRoutes(entry)
           break
         }
-        case 'route-observation':
-          return
         case 'lock':
         case 'locks':
           this.applyDeviceMetadata(entry, entry.client.snapshot())

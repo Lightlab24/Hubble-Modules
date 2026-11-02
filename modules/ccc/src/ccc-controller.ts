@@ -30,6 +30,8 @@ import {
 import type { ModuleJsonValue as JsonValue } from "@hubble/module-sdk";
 import type { RecordingBatchResult as ModuleActionResult } from "./recording-result.js";
 
+export const CCC_RECORDING_FEEDBACK_TIMEOUT_MS = 15000;
+
 const PARAMETER_STEPS = new Map<CccCommand, CyanViewCameraParameterStep>([
   ["nd-up-enabled-cameras", { parameter: "nd_filter", direction: "next" }],
   ["nd-down-enabled-cameras", { parameter: "nd_filter", direction: "prev" }],
@@ -99,7 +101,7 @@ export class CccController {
 
   constructor(
     private readonly store: CccStore,
-    feedbackTimeoutMs = 1500,
+    feedbackTimeoutMs = CCC_RECORDING_FEEDBACK_TIMEOUT_MS,
     private readonly createSession = (
       definition: CyanViewRcpConnectionDefinition,
       changed: () => void,

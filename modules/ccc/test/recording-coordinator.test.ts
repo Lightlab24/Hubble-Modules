@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { CCC_RECORDING_FEEDBACK_TIMEOUT_MS } from "../src/ccc-controller.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseRecordMode } from "../src/recording-capabilities.js";
 import {
   RecordingCoordinator,
@@ -337,3 +338,44 @@ function requiredTestValue<T>(value: T | null | undefined): T {
     throw new Error("Missing test fixture value");
   return value;
 }
+
+it("allows slow Rec/Stop feedback across a large batch and sends queued Stops", async () => {
+  vi.useFakeTimers();
+  const owner = coordinator({
+    feedbackTimeoutMs: CCC_RECORDING_FEEDBACK_TIMEOUT_MS,
+  });
+  try {
+    const targets = Array.from({ length: 48 }, (_, index) =>
+      camera(owner, `slow-fr7-${index}`),
+    );
+    const starts = targets.map((target) =>
+      owner.record(target.capture(), "start"),
+    );
+    const stops = targets.map((target) =>
+      owner.record(target.capture(), "stop"),
+    );
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(targets.every((target) => target.commands.join() === "Rec")).toBe(
+      true,
+    );
+    for (const target of targets) target.status(true);
+    expect(
+      (await Promise.all(starts)).every(
+        (result) => result.evidence === "confirmed",
+      ),
+    ).toBe(true);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(
+      targets.every((target) => target.commands.join() === "Rec,Stop"),
+    ).toBe(true);
+    for (const target of targets) target.status(false);
+    expect(
+      (await Promise.all(stops)).every(
+        (result) => result.evidence === "confirmed",
+      ),
+    ).toBe(true);
+  } finally {
+    await owner.dispose();
+    vi.useRealTimers();
+  }
+});

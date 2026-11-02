@@ -72,6 +72,15 @@ supply a richer label; it does not erase the declared text color. These are
 presentation values, never replacement source values or execution feedback.
 Require the feature explicitly. Older hosts do not support choice text colors.
 
+With `module-matrix-field-presentation-v1`, a field can declare
+`textColor: '#RRGGBB'` directly or through `rules[].set.textColor`. This colors
+numeric, manual and formula-derived values even while the device is offline or a
+save is pending. The host resolves the rule from current row inputs. A declared
+choice's `textColor` takes precedence over the field color. Observation labels
+and background feedback remain independent; no live observation is required.
+Require this feature explicitly, including when a color is supplied by a variant.
+This affects presentation only and never changes saved values or device state.
+
 `choiceEditor` supplies choices and optional boolean/colour-pair parameters.
 Parameterized choices stay open until Apply; ordinary choices commit and close.
 Parameters may have `enabledWhen` rules. Use `decodeModuleChoice` and
@@ -262,3 +271,11 @@ addition and Advanced pickers against the real catalog, not a hand-filtered fixt
 See `examples/sidebar-page` for a package with a callable peer action and no new
 button authoring entry. Mock is not an authorable package and is never a release
 dependency; test fixtures must remain outside `modules/` and shipped runtime exports.
+
+## Quiet incomplete drafts
+
+A required Matrix field may declare `showIncompleteWarning: false` when the host
+advertises `module-matrix-quiet-incomplete-v1`. Require that feature. This hides the
+editing hint for a blank literal while preserving required-field validation:
+incomplete actions remain unpublished and cannot execute a previous action.
+Invalid values and formulas still show their errors. Omission keeps existing hints.

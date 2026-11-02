@@ -19,6 +19,7 @@ afterEach(async () => {
 async function setup(
   options: {
     enabled?: boolean;
+    feedbackTimeoutMs?: number;
     feedback?: boolean;
     capabilities?: boolean;
     initialRecording?: string;
@@ -60,7 +61,7 @@ async function setup(
     },
     // Real TCP confirmations use the production budget. Deadline-only behavior
     // is covered by the coordinator tests without socket scheduling races.
-    undefined,
+    options.feedbackTimeoutMs,
     (definition, changed) => {
       if (definition.host !== "127.0.0.1")
         throw new Error("Only loopback is allowed in this test");
@@ -413,6 +414,7 @@ describe("CCC provider against a loopback MQTT simulator", () => {
   it("blocks a later CyanView call after an unconfirmed CCC send until live feedback arrives", async () => {
     const { provider, workspaceId, connection, network } = await setup({
       feedback: false,
+      feedbackTimeoutMs: 100,
     });
     expect(
       (await provider.command({ workspaceId, command: "roll-enabled-cameras" }))

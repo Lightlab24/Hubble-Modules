@@ -166,6 +166,8 @@ export function withRouterInterface(
           "module-matrix-row-fields-v1",
           "module-matrix-fill-rules-v1",
           "module-matrix-choice-presentation-v1",
+          "module-matrix-field-presentation-v1",
+          "module-matrix-quiet-incomplete-v1",
           "module-matrix-collections-v1",
           "module-choice-bindings-v1",
           "module-pages-v1",

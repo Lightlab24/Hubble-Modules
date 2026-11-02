@@ -14,6 +14,8 @@ export default withRouterInterface(
         "module-exchange-v1",
         "module-fields-v2",
         "module-presentation-v1",
+        "module-matrix-field-presentation-v1",
+        "module-matrix-quiet-incomplete-v1",
       ],
     },
     configVersion: 1,

@@ -44,6 +44,7 @@ export default defineModuleManifest({
       "module-table-selection-v1",
       "module-table-preview-v1",
       "module-table-live-v1",
+      "module-table-presentation-v1",
       "module-datasets-v1",
       "host-service-registry-v1",
     ],
