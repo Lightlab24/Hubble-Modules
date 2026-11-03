@@ -301,10 +301,7 @@ export function routerMatrix(type: RouterType) {
           itemsField: "actionValue",
           itemLabel: "DST",
         },
-        enabledWhen: [
-          ...when(...feedbackActions),
-          { field: "drivesTally", values: [true] },
-        ],
+        enabledWhen: when(...feedbackActions),
         rules: [
           { when: when("select-destination"), set: { colorMode: "palette" } },
           { when: when("toggle-group-enabled"), set: { colorMode: "pair" } },

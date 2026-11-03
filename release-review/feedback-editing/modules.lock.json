@@ -1,0 +1,77 @@
+{
+  "formatVersion": 1,
+  "modules": [
+    {
+      "moduleId": "hubble-aja-kumo",
+      "version": "1.1.4",
+      "digest": "e6960aca7bdece1997b2ca815a14f7da7b6a44f7d48be78e829167412f0f0535",
+      "bytes": 1076346,
+      "file": "hubble-aja-kumo-1.1.4.hubble-module",
+      "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-aja-kumo-v1.1.4/hubble-aja-kumo-1.1.4.hubble-module"
+    },
+    {
+      "moduleId": "hubble-blackmagic-videohub",
+      "version": "1.1.4",
+      "digest": "61ceffc3d838018c23fd0aec327930341a71f05f2f05a1063f0aa03f7bb9ea72",
+      "bytes": 1086613,
+      "file": "hubble-blackmagic-videohub-1.1.4.hubble-module",
+      "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-blackmagic-videohub-v1.1.4/hubble-blackmagic-videohub-1.1.4.hubble-module"
+    },
+    {
+      "moduleId": "hubble-evertz-quartz",
+      "version": "1.1.4",
+      "digest": "4582a1c6f613c9cb5e6553b597d3c4412cad3caa199d4c5226408ce8aaada3ef",
+      "bytes": 1076318,
+      "file": "hubble-evertz-quartz-1.1.4.hubble-module",
+      "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-evertz-quartz-v1.1.4/hubble-evertz-quartz-1.1.4.hubble-module"
+    },
+    {
+      "moduleId": "hubble-ross-ultrix-ogp",
+      "version": "1.2.9",
+      "digest": "58513b6c1bbc2905cb82c318d7fbb849a8b3de2d0235285e1ca5efb7ea550b11",
+      "bytes": 1085224,
+      "file": "hubble-ross-ultrix-ogp-1.2.9.hubble-module",
+      "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-ross-ultrix-ogp-v1.2.9/hubble-ross-ultrix-ogp-1.2.9.hubble-module"
+    },
+    {
+      "moduleId": "hubble-ccc",
+      "version": "1.2.9",
+      "digest": "adacf625bdd346bf8a73af300e13e13c40c6fe708e8b9e845aedb1e7256c0989",
+      "bytes": 341868,
+      "file": "hubble-ccc-1.2.9.hubble-module",
+      "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-ccc-v1.2.9/hubble-ccc-1.2.9.hubble-module"
+    },
+    {
+      "moduleId": "hubble-cyanview-rcp",
+      "version": "1.2.3",
+      "digest": "db810226090e7d4e10a0e623a45396183ea577982ed445c0ebc3c1f3eb61c768",
+      "bytes": 324340,
+      "file": "hubble-cyanview-rcp-1.2.3.hubble-module",
+      "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-cyanview-rcp-v1.2.3/hubble-cyanview-rcp-1.2.3.hubble-module"
+    },
+    {
+      "moduleId": "hubble-dit-browse",
+      "version": "1.1.4",
+      "digest": "4606bae83980670be90791df9a7789dbd87d4c2bf0a7c01ccf7b97de6375f692",
+      "bytes": 367497,
+      "file": "hubble-dit-browse-1.1.4.hubble-module",
+      "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-dit-browse-v1.1.4/hubble-dit-browse-1.1.4.hubble-module"
+    },
+    {
+      "moduleId": "hubble-lightencode",
+      "version": "1.1.3",
+      "digest": "691bdded6cc4c1ad4ded31bbe919947d0d8195cbb6786ba9849fdfdbba582626",
+      "bytes": 329042,
+      "file": "hubble-lightencode-1.1.3.hubble-module",
+      "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-lightencode-v1.1.3/hubble-lightencode-1.1.3.hubble-module"
+    },
+    {
+      "moduleId": "hubble-tsl",
+      "version": "1.2.3",
+      "digest": "05508a360fccb0e2b5f380b21d7b2ca46466b2324d22233af91160ace94cc8d7",
+      "bytes": 327379,
+      "file": "hubble-tsl-1.2.3.hubble-module",
+      "url": "https://github.com/Lightlab24/Hubble-Modules/releases/download/module-hubble-tsl-v1.2.3/hubble-tsl-1.2.3.hubble-module"
+    }
+  ]
+}

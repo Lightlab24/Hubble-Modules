@@ -99,10 +99,7 @@ export const matrix = ModuleMatrixSchema.parse({
       default: "#37A65B",
       width: 150,
       colorMode: "pair",
-      enabledWhen: [
-        { field: "actionType", values: feedbackCommands },
-        { field: "drivesTally", values: [true] },
-      ],
+      enabledWhen: [{ field: "actionType", values: feedbackCommands }],
     },
   ],
 });

@@ -119,10 +119,7 @@ export const matrix = ModuleMatrixSchema.parse({
       type: "color",
       default: "#37A65B",
       width: 148,
-      enabledWhen: [
-        { field: "actionType", values: feedbackCommands },
-        { field: "feedback", values: [true] },
-      ],
+      enabledWhen: [{ field: "actionType", values: feedbackCommands }],
       rules: [
         {
           when: [{ field: "actionType", values: ["toggle-grid-lock"] }],

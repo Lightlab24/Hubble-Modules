@@ -83,7 +83,6 @@ export const matrix = ModuleMatrixSchema.parse({
       type: "color",
       default: "#37A65B",
       width: 148,
-      enabledWhen: [{ field: "feedback", values: [true] }],
     },
   ],
 });

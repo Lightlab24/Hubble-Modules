@@ -103,7 +103,6 @@ export const matrix = ModuleMatrixSchema.parse({
               {
                 id: "colors",
                 label: "Edit feedback colors",
-                enabledWhen: [{ field: "feedback", values: [true] }],
                 type: "color-pair",
                 default: ["#B91C1C", "#000000"],
                 labels: ["Active", "Off"],
@@ -111,7 +110,6 @@ export const matrix = ModuleMatrixSchema.parse({
               {
                 id: "glow",
                 label: "Glow when active",
-                enabledWhen: [{ field: "feedback", values: [true] }],
                 type: "boolean",
                 default: true,
               },
