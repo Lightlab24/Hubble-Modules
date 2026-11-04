@@ -263,6 +263,18 @@ export function withRouterInterface(
     exchange: {
       ...base.exchange,
       data: [
+        ...(!base.exchange?.data.some(
+          ({ id, version }) => id === "router" && version === 1,
+        )
+          ? [
+              {
+                id: "router",
+                label: "Router readiness",
+                version: 1,
+                query: true,
+              },
+            ]
+          : []),
         ...(base.exchange?.data ?? []),
         {
           id: "routing-groups",
