@@ -13,7 +13,7 @@
     "package": "hubble-module build . && hubble-module test . && hubble-module pack . ../../artifacts/hubble-tally-switch-1.1.4.hubble-module"
   },
   "dependencies": {
-    "@hubble/module-sdk": "workspace:1.7.0",
+    "@hubble/module-sdk": "workspace:1.8.0",
     "zod": "4.4.3"
   },
   "devDependencies": {

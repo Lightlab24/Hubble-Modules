@@ -4,8 +4,15 @@ This kit builds independent module releases. SDK/tool versions, module versions,
 module API versions and settings schema versions are separate. Node 22 or newer is
 required. No Hubble application checkout or application rebuild is needed.
 
-Developer kit **1.7.0** contains SDK **1.7.0**, module tools **1.5.0**,
-and module API **1**. It adds `module-matrix-fill-rules-v1` (Hubble 2.0.15):
+Developer kit **1.8.0** contains SDK **1.8.0**, module tools **1.6.0**,
+and module API **1**. Full-page package frontends use `pages[].layout: "full-page"`
+with one custom section and require `module-custom-pages-full-page-v1` / Hubble
+2.0.18+. No fixed pixel height is needed; the package owns its header, tabs, footer
+and internal scroll area. See `examples/full-page` and the custom-pages skill
+reference. Existing fixed-height sections and mixed/native pages retain their
+layout unless opted in.
+
+The kit retains `module-matrix-fill-rules-v1` (Hubble 2.0.15):
 modules declare copy/increment per field and may override that policy by action
 through `rules[].set.fill`. See the Matrix skill reference and the exported
 `matrix-feedback` example. Each editable Matrix/page-table field owns its policy;

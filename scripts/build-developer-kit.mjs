@@ -45,6 +45,7 @@ const examples = [
   "native-controls",
   "native-menu",
   "custom-canvas",
+  "full-page",
   "prepared-document",
   "independent-api",
   "exchange-provider",
@@ -88,6 +89,13 @@ try {
     );
   }
   for (const required of [
+    "examples/full-page/README.md",
+    "examples/full-page/src/manifest.ts",
+    "examples/full-page/src/index.ts",
+    "examples/full-page/src/frontend.ts",
+    "examples/full-page/src/frontend.css",
+    "examples/full-page/test/module.test.ts",
+    "examples/full-page/ui/index.html",
     "examples/native-menu/src/manifest.ts",
     "examples/native-menu/src/index.ts",
     "examples/native-menu/test/menu.test.ts",

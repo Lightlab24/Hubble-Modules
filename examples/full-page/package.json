@@ -1,0 +1,16 @@
+{
+  "name": "hubble-full-page-example",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "hubble": {
+    "id": "example-full-page",
+    "name": "Full page example",
+    "assets": [
+      "ui/index.html"
+    ],
+    "frontend": {
+      "ui/app.js": "src/frontend.ts"
+    }
+  }
+}

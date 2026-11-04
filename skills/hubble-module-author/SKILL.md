@@ -17,6 +17,10 @@ frontend and helper code in the module project; do not move them into Hubble or
 claim that a settings/table page supplies a custom frontend. The reference clearly
 separates required capabilities from currently implemented support.
 For package frontend implementation, read [custom pages](references/custom-pages.md).
+For a package-owned screen that fills the app area, opt in with `pages[].layout: "full-page"`,
+exactly one custom section, Hubble 2.0.18+ and `module-custom-pages-full-page-v1`.
+The package owns its header, tabs, footer and scrolling; keep mixed/native pages in section mode.
+See the kit 1.8.0 `full-page` example. Do not compensate with a fixed iframe height or host-specific screen.
 Use the public browser bridge and packaged assets; keep the actual Matrix surface
 in declared host-rendered workbook sections alongside the custom view.
 For saved canvas/workbook/backend data, read [portable documents](references/documents.md).

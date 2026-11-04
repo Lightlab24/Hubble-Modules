@@ -1,9 +1,59 @@
 # Package-owned custom pages
 
-Candidate contract: API 1, `module-custom-pages-v1`, intended minimum Hubble
-2.0.11. It is implemented and tested in source; installed 2.0.10 does not supply
-it. Check the actual service's `describe` response before selecting a package.
-Developer kit 1.5.0-dev.8 includes this contract and the `custom-canvas` example.
+API 1 custom frontends require `module-custom-pages-v1` and Hubble 2.0.11+.
+Developer kit 1.8.0 / SDK 1.8.0 also supports full-page layout on Hubble 2.0.18+.
+Use the actual service's `describe` response to verify the required features.
+
+## Full-page application layout
+
+Set `pages[].layout` to `"full-page"` and declare exactly one `custom` section.
+Add `module-custom-pages-full-page-v1` to the existing host requirements and set
+`host.minimumVersion` to at least `"2.0.18"`. Keep the page service capability and
+base page/frontend features:
+
+```ts
+host: {
+  minimumVersion: '2.0.18',
+  requiredFeatures: [
+    'module-pages-v1',
+    'module-custom-pages-v1',
+    'module-custom-pages-full-page-v1',
+  ],
+},
+capabilities: ['service.page.designer'],
+pages: [{
+  id: 'designer', label: 'Designer', layout: 'full-page',
+  sections: [{
+    type: 'custom', id: 'app', label: 'Designer application',
+    entry: 'ui/index.html',
+    commands: [{ id: 'render', label: 'Render preview' }],
+  }],
+}],
+```
+
+The iframe fills the bounded app content area beside Hubble's sidebar and resizes
+with its container. No pixel `height` is required; that section field is ignored
+in full-page mode. Hubble omits the page heading, description, autosave status,
+section heading and related-setup footer, and adds no padding. The module owns its
+header, tabs, footer and internal scrolling. The sidebar and app window controls
+remain host-owned. Disabled/error messages remain available when the frontend
+cannot run.
+
+Use `html, body, #root { height: 100%; margin: 0; }` and a bounded flex or grid
+layout with `min-height: 0` and `overflow: auto` on the intended internal scroll
+area. A height based on `100vh` inside the iframe also refers to that iframe's
+viewport, not the complete Hubble window. See `examples/full-page` for a working
+header/tabs/long-content/footer layout and scoped backend calls.
+
+Any explicit `layout` value requires Hubble 2.0.18+ and the new feature, including
+`"sections"`. Omit the field for compatibility with older hosts. Omitting `layout`,
+or specifying `"sections"` on a compatible host, retains the current host headings
+and fixed section `height` (default 560px). Mixed custom/native pages continue to
+use sections; see the unchanged `custom-canvas` example for composition with the
+actual shared Matrix workbook. Full-page layout does not add permissions or
+change `sandbox="allow-scripts"`, the scoped MessagePort bridge, session tokens,
+heartbeat, tab cleanup or package-generation invalidation. Keep browser assets
+and all integration-specific UI inside the package.
 
 ## Declare and build
 

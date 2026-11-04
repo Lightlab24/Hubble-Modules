@@ -13,7 +13,7 @@
     "validate": "hubble-module validate ."
   },
   "devDependencies": {
-    "@hubble/module-sdk": "workspace:1.7.0",
+    "@hubble/module-sdk": "workspace:1.8.0",
     "@hubble/module-tools": "workspace:1.5.0",
     "@types/node": "22.19.17",
     "typescript": "6.0.3"

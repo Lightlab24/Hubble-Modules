@@ -15,7 +15,7 @@ importers:
         specifier: workspace:1.0.0
         version: link:packages/module-runtime-helpers
       '@hubble/module-sdk':
-        specifier: workspace:1.7.0
+        specifier: workspace:1.8.0
         version: link:packages/module-sdk
       '@types/node':
         specifier: 22.19.17
@@ -45,7 +45,7 @@ importers:
         specifier: workspace:1.0.0
         version: link:../../packages/module-runtime-helpers
       '@hubble/module-sdk':
-        specifier: workspace:1.7.0
+        specifier: workspace:1.8.0
         version: link:../../packages/module-sdk
       '@hubble/protocol-videohub':
         specifier: workspace:1.0.0
@@ -70,7 +70,7 @@ importers:
         specifier: workspace:1.0.0
         version: link:../../packages/module-runtime-helpers
       '@hubble/module-sdk':
-        specifier: workspace:1.7.0
+        specifier: workspace:1.8.0
         version: link:../../packages/module-sdk
       '@hubble/protocol-videohub':
         specifier: workspace:1.0.0
@@ -95,7 +95,7 @@ importers:
         specifier: workspace:1.0.0
         version: link:../../packages/module-runtime-helpers
       '@hubble/module-sdk':
-        specifier: workspace:1.7.0
+        specifier: workspace:1.8.0
         version: link:../../packages/module-sdk
       '@hubble/protocol-cyanview-rcp':
         specifier: workspace:1.0.0
@@ -117,7 +117,7 @@ importers:
         specifier: workspace:1.0.0
         version: link:../../packages/module-runtime-helpers
       '@hubble/module-sdk':
-        specifier: workspace:1.7.0
+        specifier: workspace:1.8.0
         version: link:../../packages/module-sdk
       '@hubble/protocol-cyanview-rcp':
         specifier: workspace:1.0.0
@@ -139,7 +139,7 @@ importers:
         specifier: workspace:1.0.0
         version: link:../../packages/module-runtime-helpers
       '@hubble/module-sdk':
-        specifier: workspace:1.7.0
+        specifier: workspace:1.8.0
         version: link:../../packages/module-sdk
       zod:
         specifier: 4.4.3
@@ -161,7 +161,7 @@ importers:
         specifier: workspace:1.0.0
         version: link:../../packages/module-runtime-helpers
       '@hubble/module-sdk':
-        specifier: workspace:1.7.0
+        specifier: workspace:1.8.0
         version: link:../../packages/module-sdk
       zod:
         specifier: 4.4.3
@@ -180,7 +180,7 @@ importers:
         specifier: workspace:1.0.0
         version: link:../../packages/module-runtime-helpers
       '@hubble/module-sdk':
-        specifier: workspace:1.7.0
+        specifier: workspace:1.8.0
         version: link:../../packages/module-sdk
       '@hubble/protocol-ultrix-ogp':
         specifier: workspace:1.0.0
@@ -205,7 +205,7 @@ importers:
         specifier: workspace:1.0.0
         version: link:../../packages/module-runtime-helpers
       '@hubble/module-sdk':
-        specifier: workspace:1.7.0
+        specifier: workspace:1.8.0
         version: link:../../packages/module-sdk
       got:
         specifier: 15.1.0
@@ -233,7 +233,7 @@ importers:
         specifier: workspace:1.0.0
         version: link:../../packages/module-runtime-helpers
       '@hubble/module-sdk':
-        specifier: workspace:1.7.0
+        specifier: workspace:1.8.0
         version: link:../../packages/module-sdk
       zod:
         specifier: 4.4.3
@@ -252,7 +252,7 @@ importers:
         specifier: workspace:1.0.0
         version: link:../../packages/module-runtime-helpers
       '@hubble/module-sdk':
-        specifier: workspace:1.7.0
+        specifier: workspace:1.8.0
         version: link:../../packages/module-sdk
       zod:
         specifier: 4.4.3
@@ -265,7 +265,7 @@ importers:
   modules/mqtt-capture:
     devDependencies:
       '@hubble/module-sdk':
-        specifier: workspace:1.7.0
+        specifier: workspace:1.8.0
         version: link:../../packages/module-sdk
       '@hubble/module-tools':
         specifier: workspace:1.5.0
@@ -286,7 +286,7 @@ importers:
         specifier: workspace:1.0.0
         version: link:../../packages/module-runtime-helpers
       '@hubble/module-sdk':
-        specifier: workspace:1.7.0
+        specifier: workspace:1.8.0
         version: link:../../packages/module-sdk
       '@hubble/protocol-ultrix-ogp':
         specifier: workspace:1.0.0
@@ -311,7 +311,7 @@ importers:
         specifier: workspace:1.0.0
         version: link:../../packages/module-runtime-helpers
       '@hubble/module-sdk':
-        specifier: workspace:1.7.0
+        specifier: workspace:1.8.0
         version: link:../../packages/module-sdk
       zod:
         specifier: 4.4.3
@@ -324,7 +324,7 @@ importers:
   modules/tally-switch:
     dependencies:
       '@hubble/module-sdk':
-        specifier: workspace:1.7.0
+        specifier: workspace:1.8.0
         version: link:../../packages/module-sdk
       zod:
         specifier: 4.4.3
@@ -343,7 +343,7 @@ importers:
         specifier: workspace:1.0.0
         version: link:../../packages/module-runtime-helpers
       '@hubble/module-sdk':
-        specifier: workspace:1.7.0
+        specifier: workspace:1.8.0
         version: link:../../packages/module-sdk
       zod:
         specifier: 4.4.3
@@ -375,7 +375,7 @@ importers:
   packages/module-contracts:
     dependencies:
       '@hubble/module-sdk':
-        specifier: workspace:1.7.0
+        specifier: workspace:1.8.0
         version: link:../module-sdk
       zod:
         specifier: 4.4.3
@@ -387,7 +387,7 @@ importers:
         specifier: workspace:1.0.0
         version: link:../module-contracts
       '@hubble/module-sdk':
-        specifier: workspace:1.7.0
+        specifier: workspace:1.8.0
         version: link:../module-sdk
       zod:
         specifier: 4.4.3
@@ -419,7 +419,7 @@ importers:
         version: 4.4.3
     devDependencies:
       '@hubble/module-sdk':
-        specifier: workspace:1.7.0
+        specifier: workspace:1.8.0
         version: link:../module-sdk
 
   packages/official-module-runtime:
@@ -434,7 +434,7 @@ importers:
         specifier: workspace:1.0.0
         version: link:../module-contracts
       '@hubble/module-sdk':
-        specifier: workspace:1.7.0
+        specifier: workspace:1.8.0
         version: link:../module-sdk
       zod:
         specifier: 4.4.3
@@ -453,7 +453,7 @@ importers:
         specifier: workspace:1.0.0
         version: link:../module-runtime-helpers
       '@hubble/module-sdk':
-        specifier: workspace:1.7.0
+        specifier: workspace:1.8.0
         version: link:../module-sdk
       '@hubble/protocol-ultrix-ogp':
         specifier: workspace:1.0.0

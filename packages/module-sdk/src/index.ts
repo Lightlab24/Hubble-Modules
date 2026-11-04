@@ -36,7 +36,7 @@ import {
 } from "./exchange-contracts.js";
 import { z } from "zod";
 import { ModuleVersionSchema, type ModuleInstanceScope } from "./identity.js";
-import { ModuleHostRequirementsSchema } from "./compatibility.js";
+import { compareModuleVersions, ModuleHostRequirementsSchema } from "./compatibility.js";
 export * from "./identity.js";
 export * from "./diagnostics.js";
 export * from "./choices.js";
@@ -161,6 +161,8 @@ export const ModulePageTableSchema = z.strictObject({
   maxRows: z.int().min(1).max(512),
 });
 export const ModulePageSchema = z.strictObject({
+  /** Full-page is a single package-owned frontend; omission retains section layout. */
+  layout: z.enum(["sections", "full-page"]).optional(),
   navigation: z
     .strictObject({
       replaces: z.enum(["tally-switch", "ccc", "router"]).optional(),
@@ -783,6 +785,26 @@ export const ModuleManifestSchema = z
       const datasetIds = new Set<string>();
       const settings = new Set(manifest.settings.map((field) => field.id));
       manifest.pages.forEach((page, pageIndex) => {
+        if (page.layout !== undefined) {
+          if (page.layout === "full-page" && (page.sections.length !== 1 || page.sections[0]?.type !== "custom"))
+            ctx.addIssue({
+              code: "custom",
+              path: ["pages", pageIndex, "layout"],
+              message: "Full-page layout requires exactly one custom frontend section",
+            });
+          if (
+            !features.includes("module-custom-pages-full-page-v1") ||
+            !("minimumVersion" in manifest.host) ||
+            compareModuleVersions(manifest.host.minimumVersion, "2.0.18") < 0
+          )
+            ctx.addIssue({
+              code: "custom",
+              path: ["host"],
+              message:
+                "Page layout requires Hubble 2.0.18 or later and module-custom-pages-full-page-v1",
+            });
+        }
+
         if (
           page.navigation &&
           (!("requiredFeatures" in manifest.host) ||
