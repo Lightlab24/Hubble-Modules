@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Custom patch sheet</title>
+    <link rel="stylesheet" href="./app.css" />
+  </head>
+  <body>
+    <div id="patch-column-editor"></div>
+    <div class="patch-scroll">
+      <table role="grid" aria-label="Patch cells">
+        <colgroup></colgroup>
+        <thead>
+          <tr>
+            <th
+              scope="col"
+              rowspan="2"
+              class="row-corner"
+              aria-label="Columns"
+              tabindex="0"
+            ></th>
+            <th scope="col" rowspan="2" data-patch-column="route">Route</th>
+            <th scope="col" rowspan="2" data-patch-column="count">Number</th>
+            <th scope="col" rowspan="2" data-patch-column="enabled">Enabled</th>
+            <th scope="colgroup" id="patch-details-header" colspan="1">
+              <div id="patch-details-control"></div>
+            </th>
+          </tr>
+          <tr>
+            <th scope="col" data-patch-column="name">Name</th>
+            <th scope="col" data-patch-column="address">Address</th>
+            <th scope="col" data-patch-column="note">Note</th>
+            <th scope="col" data-patch-column="area">Area</th>
+            <th scope="col" data-patch-column="color">Color</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div id="patch-sheets"></div>
+    <output id="patch-save-status" aria-live="polite">Connecting…</output>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

@@ -145,3 +145,9 @@ Qualify frontend commands and errors, typing through state updates, navigation,
 package replacement/removal, stale sessions, scope isolation, held saves and
 history ownership. Compare Matrix and module workbook controls in the full
 renderer. Simulation of native menu dispatch is not an actual macOS menu test.
+
+## Spreadsheet controls in a bespoke layout
+
+Use the host [spreadsheet controls](spreadsheet-controls.md) when the module owns
+the grid layout and needs the Matrix choice editor, range selection, quoted TSV
+clipboard or fill. This smaller surface composes with the full native workbook.

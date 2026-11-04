@@ -1,3 +1,9 @@
+import {
+  ModuleWorkbookFieldRuleSchema,
+  moduleWorkbookEditOrder,
+  validateModuleWorkbookRow,
+} from "./workbook-rules.js";
+export * from "./workbook-rules.js";
 import type { ModuleDocumentMigrationInput } from "./documents.js";
 import { ModuleFrontendSectionSchema } from "./frontend.js";
 import { ModuleHelperDefinitionSchema } from "./helpers.js";
@@ -36,7 +42,10 @@ import {
 } from "./exchange-contracts.js";
 import { z } from "zod";
 import { ModuleVersionSchema, type ModuleInstanceScope } from "./identity.js";
-import { compareModuleVersions, ModuleHostRequirementsSchema } from "./compatibility.js";
+import {
+  compareModuleVersions,
+  ModuleHostRequirementsSchema,
+} from "./compatibility.js";
 export * from "./identity.js";
 export * from "./diagnostics.js";
 export * from "./choices.js";
@@ -159,6 +168,7 @@ export const ModulePageTableSchema = z.strictObject({
     "Expected 1–32 columns",
   ),
   maxRows: z.int().min(1).max(512),
+  fieldRules: z.array(ModuleWorkbookFieldRuleSchema).max(64).optional(),
 });
 export const ModulePageSchema = z.strictObject({
   /** Full-page is a single package-owned frontend; omission retains section layout. */
@@ -313,6 +323,22 @@ export const ModuleManifestSchema = z
         code: "custom",
         message:
           "Incomplete warning presentation requires module-matrix-quiet-incomplete-v1",
+      });
+    if (
+      !features.includes("module-workbook-formula-choice-labels-v1") &&
+      (manifest.pages ?? [])
+        .flatMap((page) => page.sections)
+        .some(
+          (table) =>
+            table.type === "table" &&
+            table.workbook?.formulaChoiceValues === "label",
+        )
+    )
+      ctx.addIssue({
+        code: "custom",
+        path: ["host", "requiredFeatures"],
+        message:
+          "Choice labels in formulas require module-workbook-formula-choice-labels-v1",
       });
     if (
       manifest.actionUi !== undefined &&
@@ -786,11 +812,15 @@ export const ModuleManifestSchema = z
       const settings = new Set(manifest.settings.map((field) => field.id));
       manifest.pages.forEach((page, pageIndex) => {
         if (page.layout !== undefined) {
-          if (page.layout === "full-page" && (page.sections.length !== 1 || page.sections[0]?.type !== "custom"))
+          if (
+            page.layout === "full-page" &&
+            (page.sections.length !== 1 || page.sections[0]?.type !== "custom")
+          )
             ctx.addIssue({
               code: "custom",
               path: ["pages", pageIndex, "layout"],
-              message: "Full-page layout requires exactly one custom frontend section",
+              message:
+                "Full-page layout requires exactly one custom frontend section",
             });
           if (
             !features.includes("module-custom-pages-full-page-v1") ||
@@ -882,6 +912,78 @@ export const ModuleManifestSchema = z
                 "Settings sections must reference unique declared fields",
             });
           if (section.type === "table") {
+            if (
+              section.fieldRules &&
+              !features.includes("module-workbook-field-rules-v1")
+            )
+              ctx.addIssue({
+                code: "custom",
+                path,
+                message: "Field rules require module-workbook-field-rules-v1",
+              });
+            try {
+              moduleWorkbookEditOrder(section);
+            } catch {
+              ctx.addIssue({
+                code: "custom",
+                path,
+                message: "Workbook dependencies must be acyclic",
+              });
+            }
+            const fields = new Map(
+              section.columns.map((field) => [field.id, field]),
+            );
+            if (
+              new Set(section.fieldRules?.map((rule) => rule.id)).size !==
+              (section.fieldRules?.length ?? 0)
+            )
+              ctx.addIssue({
+                code: "custom",
+                path,
+                message: "Duplicate field rule identity",
+              });
+            for (const rule of section.fieldRules ?? []) {
+              if (
+                new Set(rule.dependencies).size !== rule.dependencies.length ||
+                rule.dependencies.some((id) => !fields.has(id)) ||
+                rule.when.some(
+                  (condition) => !rule.dependencies.includes(condition.field),
+                ) ||
+                Object.keys(rule.fields).some((id) => !fields.has(id))
+              )
+                ctx.addIssue({
+                  code: "custom",
+                  path,
+                  message:
+                    "Field rules must declare their dependencies and known target fields",
+                });
+              for (const [id, options] of Object.entries(rule.fields)) {
+                const field = fields.get(id);
+                if (
+                  (options.choices && field?.type !== "choice") ||
+                  ((options.min !== undefined || options.max !== undefined) &&
+                    field?.type !== "number") ||
+                  (options.editor === "color" && field?.type !== "text") ||
+                  (options.min ?? -Infinity) > (options.max ?? Infinity) ||
+                  (options.choices &&
+                    new Set(options.choices.map((choice) => choice.id)).size !==
+                      options.choices.length)
+                )
+                  ctx.addIssue({
+                    code: "custom",
+                    path,
+                    message:
+                      "Conditional editor options must match the target field type and valid bounds",
+                  });
+              }
+            }
+            if (section.workbook?.groups)
+              ctx.addIssue({
+                code: "custom",
+                path,
+                message:
+                  "Declare expandable groups through the custom spreadsheet control",
+              });
             if (
               Object.values(section.workbook?.columns ?? {}).some(
                 (column) => column.duplicate,
@@ -1428,7 +1530,7 @@ function validateTableStorage(
   if (rows.length > section.maxRows)
     throw new Error(`Too many rows in ${section.label}`);
   for (const row of rows) {
-    validateModuleFields(moduleTableInputColumns(section), row.values);
+    validateModuleWorkbookRow(section, row.values);
     if (
       Object.keys(row.formulas ?? {}).some(
         (id) => !section.workbook?.columns?.[id]?.formula,

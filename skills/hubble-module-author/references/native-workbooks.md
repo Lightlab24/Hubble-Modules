@@ -128,6 +128,12 @@ follow stable row/field identities when layout changes. Deleted or disjoint
 references become `#REF!`; they must not silently point to another input. Invalid
 results remain local drafts and do not replace valid module settings.
 
+Set `workbook.formulaChoiceValues: "label"` and require
+`module-workbook-formula-choice-labels-v1` to use visible choice labels as
+formula inputs. The evaluator uses the row's effective choices and falls back
+to the stored ID when no label is available. Saved choices and clipboard
+identity continue to use stable IDs.
+
 Use `computed: { source, columns, preview? }` for domain calculations such as
 DataQ rates. Published results are displayed only when their input snapshot
 matches the current rows and settings. A read-only `preview: { id, version }`

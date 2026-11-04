@@ -215,3 +215,16 @@ The kit includes `examples/exchange-provider` and `examples/exchange-consumer`.
 They use an inert counter to demonstrate [routed data and approved actions](module-exchange.md),
 including module-owned automatic reactions and subscription cleanup. These examples
 are not production catalog modules.
+
+## Custom module spreadsheets
+
+- Use the [spreadsheet controls API](../skills/hubble-module-author/references/spreadsheet-controls.md)
+  to mount supported Hubble controls in a custom layout. Your module supplies
+  cells and handles edit batches. Declare the host features for the controls
+  you mount.
+- Use the [styling and implementation guide](../skills/hubble-module-author/references/spreadsheet-styling.md)
+  to build your own controls with the same visual and interaction conventions.
+  Use both paths in the same view when you want a mix of shared and custom UI.
+
+Patch Sheet in `examples/custom-spreadsheet` pairs a module-owned layout and
+shared controls with a native workbook over the same portable document.

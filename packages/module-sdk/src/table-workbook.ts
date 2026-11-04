@@ -50,6 +50,7 @@ export const ModuleTableViewStateSchema = z
       .max(32)
       .default([{ id: "sheet-1", name: "Sheet 1" }]),
     sheetByRowId: boundedRecord(Identifier, 512).default({}),
+    groupExpansion: boundedRecord(z.boolean(), 16).default({}),
   })
   .superRefine((view, context) => {
     const ids = new Set(view.sheets.map((sheet) => sheet.id));
@@ -70,6 +71,24 @@ export type ModuleTableViewState = z.infer<typeof ModuleTableViewStateSchema>;
 /** A native workbook uses the host's existing spreadsheet controls, never module renderer code. */
 export const ModuleTableWorkbookSchema = z.strictObject({
   stateKey: Identifier,
+  formulaChoiceValues: z.literal("label").optional(),
+  groups: z
+    .array(
+      z.strictObject({
+        id: Identifier,
+        label: z.string().trim().min(1).max(160),
+        fields: uniqueIdentifiers(32).refine((ids) => ids.length > 0),
+        defaultExpanded: z.boolean().default(true),
+        summaryField: Identifier.optional(),
+      }),
+    )
+    .max(16)
+    .refine(
+      (groups) =>
+        new Set(groups.map((group) => group.id)).size === groups.length,
+      "Duplicate group identity",
+    )
+    .optional(),
   columns: boundedRecord(
     z.strictObject({
       editor: z.enum(["text", "color"]).optional(),
@@ -143,4 +162,36 @@ export function moduleTableComputedRows(data: {
       JSON.stringify(values(current)) === JSON.stringify(values(original))
     );
   });
+}
+
+/** Presentation masks do not modify the operator's individual column choices. */
+export function moduleWorkbookHiddenColumns(
+  table: ModulePageTable,
+  view: ModuleTableViewState,
+): string[] {
+  const hidden = new Set(view.hiddenColumns);
+  for (const group of table.workbook?.groups ?? []) {
+    const expanded = view.groupExpansion[group.id] ?? group.defaultExpanded;
+    if (!expanded) for (const id of group.fields) hidden.add(id);
+    if (expanded && group.summaryField) hidden.add(group.summaryField);
+  }
+  return [...hidden];
+}
+/** Frozen count denotes visible columns; the grid split includes intervening hidden columns. */
+export function moduleWorkbookFrozenSplit(
+  table: ModulePageTable,
+  view: ModuleTableViewState,
+): number {
+  if (!view.frozenColumns) return 0;
+  const hidden = new Set(moduleWorkbookHiddenColumns(table, view));
+  let visible = 0;
+  let split = 0;
+  for (const [index, field] of table.columns.entries()) {
+    if (!hidden.has(field.id)) {
+      visible++;
+      split = index + 1;
+    }
+    if (visible >= view.frozenColumns) break;
+  }
+  return split;
 }

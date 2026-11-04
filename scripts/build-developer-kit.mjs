@@ -46,6 +46,7 @@ const examples = [
   "native-menu",
   "custom-canvas",
   "full-page",
+  "custom-spreadsheet",
   "prepared-document",
   "independent-api",
   "exchange-provider",
@@ -64,9 +65,13 @@ try {
   await cp(path.join(root, "skills"), path.join(kit, "skills"), {
     recursive: true,
   });
-  await cp(
+  const readme = await readFile(
     path.join(root, "docs/developer-kit.md"),
+    "utf8",
+  );
+  await writeFile(
     path.join(kit, "README.md"),
+    readme.replaceAll("](../skills/", "](skills/"),
   );
   await cp(path.join(root, "docs"), path.join(kit, "docs"), {
     recursive: true,
@@ -106,6 +111,19 @@ try {
     "examples/prepared-document/src/manifest.ts",
     "examples/prepared-document/src/index.ts",
     "examples/prepared-document/test/document.test.ts",
+    "sdk/src/spreadsheet-controls.ts",
+    "sdk/dist/spreadsheet-controls.d.ts",
+    "examples/custom-spreadsheet/README.md",
+    "examples/custom-spreadsheet/src/table.ts",
+    "examples/custom-spreadsheet/src/workbook-state.ts",
+    "examples/custom-spreadsheet/src/model.ts",
+    "examples/custom-spreadsheet/src/manifest.ts",
+    "examples/custom-spreadsheet/src/frontend.ts",
+    "examples/custom-spreadsheet/src/index.ts",
+    "examples/custom-spreadsheet/test/batches.test.ts",
+    "examples/custom-spreadsheet/test/layout.test.ts",
+    "skills/hubble-module-author/references/spreadsheet-controls.md",
+    "skills/hubble-module-author/references/spreadsheet-styling.md",
     "examples/custom-canvas/src/manifest.ts",
     "examples/custom-canvas/src/index.ts",
     "examples/custom-canvas/src/frontend.ts",
@@ -135,7 +153,14 @@ try {
     "examples/matrix-row-fields/test/matrix.test.ts",
   ]) {
     const exported = await readFile(path.join(kit, required));
-    const source = await readFile(path.join(root, required));
+    const source = await readFile(
+      path.join(
+        root,
+        required.startsWith("sdk/")
+          ? required.replace(/^sdk\//, "packages/module-sdk/")
+          : required,
+      ),
+    );
     if (!exported.equals(source))
       throw new Error(`Developer kit does not match its source: ${required}`);
   }
@@ -158,6 +183,26 @@ try {
       {
         version,
         apiVersions: [1],
+        sdkVersion: JSON.parse(
+          await readFile(
+            path.join(root, "packages/module-sdk/package.json"),
+            "utf8",
+          ),
+        ).version,
+        toolsVersion: JSON.parse(
+          await readFile(
+            path.join(root, "packages/module-tools/package.json"),
+            "utf8",
+          ),
+        ).version,
+        spreadsheetControls: {
+          minimumHostVersion: "2.0.18",
+          requiredFeatures: [
+            "module-pages-v1",
+            "module-custom-pages-v1",
+            "module-spreadsheet-controls-v1",
+          ],
+        },
         minimumNodeMajor: 22,
         moduleVersionIndependent: true,
       },

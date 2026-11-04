@@ -7,6 +7,10 @@
     "node": ">=22"
   },
   "exports": {
+    "./spreadsheet-controls": {
+      "types": "./dist/spreadsheet-controls.d.ts",
+      "import": "./dist/spreadsheet-controls.js"
+    },
     "./frontend": {
       "types": "./dist/frontend.d.ts",
       "import": "./dist/frontend.js"

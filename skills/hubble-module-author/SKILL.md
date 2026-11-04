@@ -21,6 +21,12 @@ For a package-owned screen that fills the app area, opt in with `pages[].layout:
 exactly one custom section, Hubble 2.0.18+ and `module-custom-pages-full-page-v1`.
 The package owns its header, tabs, footer and scrolling; keep mixed/native pages in section mode.
 See the kit 1.8.0 `full-page` example. Do not compensate with a fixed iframe height or host-specific screen.
+For Button Matrix controls inside a custom layout, read
+[the spreadsheet controls API](references/spreadsheet-controls.md) and build
+the `custom-spreadsheet` example from the kit. For module-owned controls,
+use the [spreadsheet styling and implementation guide](references/spreadsheet-styling.md).
+Patch Sheet is the reference for
+package-owned cell editing and an adjacent native workbook over one document.
 Use the public browser bridge and packaged assets; keep the actual Matrix surface
 in declared host-rendered workbook sections alongside the custom view.
 For saved canvas/workbook/backend data, read [portable documents](references/documents.md).

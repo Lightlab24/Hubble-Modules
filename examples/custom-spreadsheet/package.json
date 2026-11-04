@@ -1,0 +1,16 @@
+{
+  "name": "hubble-custom-spreadsheet-example",
+  "version": "0.6.7",
+  "private": true,
+  "type": "module",
+  "hubble": {
+    "id": "example-custom-spreadsheet",
+    "name": "Custom spreadsheet example",
+    "assets": [
+      "ui/index.html"
+    ],
+    "frontend": {
+      "ui/app.js": "src/frontend.ts"
+    }
+  }
+}

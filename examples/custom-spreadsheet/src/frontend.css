@@ -1,0 +1,107 @@
+body {
+  margin: 16px;
+  background: #111;
+  color: #dedede;
+  font:
+    13px system-ui,
+    sans-serif;
+}
+#patch-save-status {
+  display: block;
+  margin: 12px 0;
+}
+.patch-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+  color-scheme: dark;
+  scrollbar-width: thin;
+  scrollbar-color: #555 #111;
+}
+#patch-column-editor {
+  margin-bottom: 6px;
+}
+
+table {
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+table:focus-visible:has([data-hubble-spreadsheet-active="true"]) {
+  outline: none;
+}
+td,
+th {
+  border: 1px solid #3b3b3b;
+  padding: 4px 20px 4px 8px;
+  text-align: left;
+}
+td {
+  height: 28px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+th {
+  background: #222;
+}
+[aria-readonly="true"] {
+  color: #999;
+}
+.cell-input {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  min-height: 24px;
+  padding: 2px 4px;
+  border: 1px solid #6aa9ff;
+  background: #171a20;
+  outline: none;
+  color: inherit;
+  font: inherit;
+}
+/* While typing, use the earlier editor border as the sole focus indicator. */
+table td[data-hubble-spreadsheet-active="true"]:has(.cell-input) {
+  outline: none;
+}
+
+/* Matrix uses these colors for invalid workbook cells. */
+table td[aria-invalid="true"] {
+  position: relative;
+  background: #342021;
+  color: #f2aaa5;
+}
+table td[aria-invalid="true"]::after {
+  position: absolute;
+  top: 0;
+  right: 0;
+  border-top: 8px solid #f08a8a;
+  border-left: 8px solid transparent;
+  pointer-events: none;
+  content: "";
+}
+#patch-save-status[data-error] {
+  color: #f2aaa5;
+}
+
+.row-corner {
+  width: 28px;
+  padding: 0;
+}
+[data-patch-row] {
+  padding: 4px;
+  color: #999;
+  text-align: center;
+  font-weight: 400;
+  user-select: none;
+}
+th:focus-visible {
+  outline: 1px solid #6aa9ff;
+  outline-offset: -1px;
+}
+
+table td.patch-color {
+  background-color: var(--patch-cell-color);
+  color: var(--patch-cell-ink);
+}
+table td.patch-color[data-hubble-spreadsheet-selected="true"] {
+  background-image: none;
+  outline-color: var(--patch-cell-ink);
+}
