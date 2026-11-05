@@ -9,7 +9,10 @@ const repository = "Lightlab24/Hubble-Modules";
 const gh = (args) =>
   execFileSync("gh", args, { encoding: "utf8", maxBuffer: 4 * 1024 * 1024 });
 export function distributionIdentity(pin) {
-  if (!/^\d+\.\d+\.\d+$/.test(pin.version))
+  const isPrerelease = /^\d+\.\d+\.\d+-dev\.(?:0|[1-9]\d*)$/.test(
+    pin.version,
+  );
+  if (!isPrerelease && !/^\d+\.\d+\.\d+$/.test(pin.version))
     throw Error("Invalid distribution version");
   const prefixes = {
     "hubble-module-developer-kit": "developer-kit",
@@ -34,6 +37,8 @@ export function distributionIdentity(pin) {
       pin.file ===
       `${prefix}-${pin.version}.${prefix === "hubble-module-developer-kit" ? "tar.gz" : "tgz"}`,
   )?.[1];
+  if (isPrerelease && kind !== "developer-kit")
+    throw Error("Only developer kits support dev distribution versions");
   const digest = pin.digest ?? pin.sha256;
   if (
     !kind ||
@@ -49,7 +54,7 @@ export function distributionIdentity(pin) {
     `https://github.com/${repository}/releases/download/${tag}/${pin.file}`
   )
     throw Error("Distribution URL does not match immutable asset");
-  return { tag, digest };
+  return { tag, digest, isPrerelease };
 }
 export function verifyDistribution(pin, bytes) {
   const identity = distributionIdentity(pin);
@@ -92,7 +97,7 @@ export async function distributionRelease(mode, pinPath, reviewPath) {
   )
     throw Error("Publish requires a repository-relative reviewed pin");
   const pin = JSON.parse(await readFile(pinPath, "utf8"));
-  const { tag } = distributionIdentity(pin);
+  const { tag, digest, isPrerelease } = distributionIdentity(pin);
   if (mode === "stage") {
     if (!reviewPath)
       throw Error("Stage requires an explicit reviewed pin output path");
@@ -125,6 +130,7 @@ export async function distributionRelease(mode, pinPath, reviewPath) {
         "--target",
         commit,
         "--draft",
+        ...(isPrerelease ? ["--prerelease"] : []),
         "--title",
         tag,
         "--notes",
@@ -150,17 +156,23 @@ export async function distributionRelease(mode, pinPath, reviewPath) {
   execFileSync("git", ["diff", "--quiet", "HEAD", "--"], { stdio: "pipe" });
   await verifyRemote(pin, tag);
   const release = JSON.parse(
-    gh(["release", "view", tag, "--repo", repository, "--json", "isDraft"]),
-  );
-  if (mode === "verify")
-    return {
-      status: "verified",
+    gh([
+      "release",
+      "view",
       tag,
-      digest: distributionIdentity(pin).digest,
-    };
+      "--repo",
+      repository,
+      "--json",
+      "isDraft,isPrerelease",
+    ]),
+  );
+  if (isPrerelease && !release.isPrerelease)
+    throw Error("Developer kit preview must be marked as a prerelease");
+  if (mode === "verify")
+    return { status: "verified", tag, digest };
   if (release.isDraft)
     gh(["release", "edit", tag, "--repo", repository, "--draft=false"]);
-  return { status: "published", tag, digest: distributionIdentity(pin).digest };
+  return { status: "published", tag, digest };
 }
 if (
   process.argv[1] &&

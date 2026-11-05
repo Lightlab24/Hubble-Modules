@@ -47,3 +47,33 @@ test("reviewed pin paths still reject absolute paths and parent traversal", asyn
     );
   }
 });
+
+test("reviewed developer kit previews keep their prerelease identity", () => {
+  const bytes = Buffer.from("reviewed kit");
+  const version = "1.8.1-dev.1";
+  const file = `hubble-module-developer-kit-${version}.tar.gz`;
+  const releaseUrl = "https://github.com/Lightlab24/Hubble-Modules/releases/download";
+  const pin = {
+    version,
+    file,
+    bytes: bytes.length,
+    digest: createHash("sha256").update(bytes).digest("hex"),
+    url: `${releaseUrl}/developer-kit-v${version}/${file}`,
+  };
+  assert.deepEqual(verifyDistribution(pin, bytes), {
+    tag: `developer-kit-v${version}`,
+    digest: pin.digest,
+    isPrerelease: true,
+  });
+
+  const runtimeFile = `hubble-official-module-runtime-${version}.tgz`;
+  assert.throws(
+    () =>
+      distributionIdentity({
+        ...pin,
+        file: runtimeFile,
+        url: `${releaseUrl}/runtime-v${version}/${runtimeFile}`,
+      }),
+    /Only developer kits/,
+  );
+});
