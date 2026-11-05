@@ -10,6 +10,12 @@ export const MODULE_SPREADSHEET_COLUMN_GROUPS_FEATURE =
   "module-spreadsheet-column-groups-v1";
 export const MODULE_SPREADSHEET_COLUMN_EDITOR_FEATURE =
   "module-spreadsheet-column-editor-v1";
+export const MODULE_SPREADSHEET_COLUMN_VISIBILITY_FEATURE =
+  "module-spreadsheet-column-visibility-v1";
+export const MODULE_SPREADSHEET_COLUMN_PAINT_FEATURE =
+  "module-spreadsheet-column-paint-v1";
+export const MODULE_SPREADSHEET_TEXT_SIZE_FEATURE =
+  "module-spreadsheet-text-size-v1";
 export const MODULE_SPREADSHEET_WORKBOOK_TOOLS_FEATURE =
   "module-spreadsheet-workbook-tools-v1";
 export const MODULE_SPREADSHEET_TOOLBAR_SECTIONS_FEATURE =
@@ -56,7 +62,7 @@ export interface SpreadsheetColumnGroup {
   /** All fields in this group, in display order. */
   readonly columns: readonly SpreadsheetColumn[];
   readonly expanded: boolean;
-  /** Fields kept visible when collapsed. At least one field must remain. */
+  /** Empty keeps only the module-owned header. Requires column-visibility-v1. */
   readonly collapsedColumnIds: readonly string[];
 }
 export interface SpreadsheetColumnGroupOptions {
@@ -419,6 +425,8 @@ export interface SpreadsheetToolbarOptions {
   onHistory?(direction: "undo" | "redo"): void;
   onSource?(value: string): boolean | void;
   onFocusGrid?(): void;
+  /** Standalone Matrix text-size controls. Requires module-spreadsheet-text-size-v1. */
+  readonly textSize?: { get(): number; onChange(value: number): void };
   readonly layout?: {
     get(): { textSize: number; frozenColumns: number };
     onChange(update: { textSize?: number; frozenColumns?: number }): void;
@@ -437,6 +445,8 @@ export type SpreadsheetColumnEditorItem =
   | {
       readonly id: string;
       readonly label: string;
+      /** Optional independent group toggle. Requires column-visibility-v1. */
+      readonly visible?: boolean;
       readonly fields: readonly SpreadsheetColumnEditorField[];
     };
 export interface SpreadsheetColumnEditorOptions {
@@ -444,6 +454,10 @@ export interface SpreadsheetColumnEditorOptions {
   /** Include hidden fields and use unique, stable IDs for fields and groups. */
   getItems(): readonly SpreadsheetColumnEditorItem[];
   onVisibilityChange(id: string, visible: boolean): void;
+  /** One batch per drag; apply immediately and save once. Requires column-paint-v1. */
+  onVisibilityChanges?(
+    changes: readonly { id: string; visible: boolean }[],
+  ): void;
   /** Move a field or group before a sibling. Null means the end of its list. */
   onMove?(id: string, beforeId: string | null): void;
 }

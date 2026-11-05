@@ -151,8 +151,11 @@ const header = await mountSpreadsheetColumnGroup({
 });
 ```
 
-Every group has a stable ID and unique fields, with at least one field visible
-when collapsed. The module renders and hides its own cells and returns their
+Every group has a stable ID and unique fields. Require
+`module-spreadsheet-column-visibility-v1` to allow an empty `collapsedColumnIds`.
+Render a header-sized placeholder track/cell when no fields are shown so the
+operator can still expand the section; placeholders have no editable address.
+Older hosts require at least one collapsed field. The module renders and hides its own cells and returns their
 visible order to the spreadsheet adapter. Update that layout synchronously.
 Use `header.refresh()` for incoming module state and `header.dispose()` when
 removing the slot. The module decides whether to keep layout state transient
@@ -282,13 +285,33 @@ Kit 1.8.0-dev.16 adds `mountSpreadsheetColumnEditor`. Require
 button in a module-chosen slot. The module supplies an ordered list through
 `getItems`. Include every field the operator may restore, even when
 `visible` is false. A group supplies its own `id`, `label`, and ordered
-`fields` with stable IDs. The menu stays open after a visibility change.
+`fields` with stable IDs. The menu stays open after a visibility change and
+includes a search field for section and column labels. With
+`module-spreadsheet-column-visibility-v1`, a group may also declare `visible`;
+its checkbox calls `onVisibilityChange` with the group ID. Hiding a group must
+preserve its field choices, collapsed fields and order for restoration.
 Handle `onVisibilityChange` immediately and call `refresh()` with the updated
 items. Provide `onMove(id, beforeId)` for drag and arrow reordering within
 each sibling list. A null destination means the end of that list.
 If a toggle hides the active cell, `select(next, undefined, { focus: false })`
 lets the grid update its selection without closing the picker. Save layout
 through the module's existing preferences. This button can mount by itself.
+
+Require `module-spreadsheet-column-paint-v1` and provide
+`onVisibilityChanges(changes)` to opt in to drag painting. Starting on a checked
+field previews hiding the range; starting on an unchecked field previews showing
+it. Release submits one batch, suitable for one optimistic save and undo step.
+Escape cancels without a callback. The list scrolls near its edges. Field drags
+affect fields, section drags affect sections, and reorder grips remain separate.
+Apply the batch against the current layout synchronously before saving, preserve
+unrelated preferences and refresh the editor after receipts or rollback.
+
+Require `module-spreadsheet-text-size-v1` to mount only the Matrix text-size
+section with `mountSpreadsheetToolbar({ root, textSize: { get, onChange } })`.
+The shared − / + buttons use the native 9–24 range and preserve editor focus.
+The package applies the returned size to its own table and saves it in its
+portable layout. Default older documents explicitly; do not persist viewport
+zoom as text size. Other toolbar sections are unchanged.
 
 Kit 1.8.0-dev.14 includes `module-spreadsheet-workbook-tools-v1`. Add it to the
 manifest when using the workbook tools. The module selects the tools to mount

@@ -1,5 +1,22 @@
 # Hubble module developer kit
 
+Developer kit **1.8.1-dev.4** adds optional spreadsheet controls requiring these
+capabilities from the actual host's `describe` response:
+
+- `module-spreadsheet-column-visibility-v1`: empty collapsed fields and independently
+  hideable groups. The shared Columns menu searches section and field labels.
+- `module-spreadsheet-column-paint-v1`: `onVisibilityChanges(changes)` previews a
+  checkbox drag and commits one batch on release; Escape cancels it.
+- `module-spreadsheet-text-size-v1`: `mountSpreadsheetToolbar({ root, textSize })`
+  mounts the Matrix text-size control without other toolbar sections.
+
+The kit retains SDK 1.8.0, tools 1.6.0, API 1 and the existing full-page frontend
+contract. Require Hubble 2.0.18 or newer plus the individual feature names;
+installing the kit alone does not upgrade an older host runtime. Module layouts,
+optimistic saves, history and device behavior remain package-owned. Whole-sheet
+pinch/Ctrl-wheel zoom continues to use the existing viewport API independently.
+See the spreadsheet-controls skill reference for integration and save semantics.
+
 This kit builds independent module releases. SDK/tool versions, module versions,
 module API versions and settings schema versions are separate. Node 22 or newer is
 required. No Hubble application checkout or application rebuild is needed.
