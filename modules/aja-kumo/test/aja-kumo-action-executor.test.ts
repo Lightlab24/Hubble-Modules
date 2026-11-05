@@ -120,15 +120,17 @@ describe.each([{ name: 'source', Executor: RouterActionExecutor }])(
           outcome: 'success',
         })
       }
-      expect(groups.selectSource).toHaveBeenCalledWith({ ...scope, source: 2, levels: [1] })
-      expect(groups.selectDestination).toHaveBeenCalledWith({ ...scope, destination: 3 })
-      expect(groups.take).toHaveBeenCalledWith({ ...scope, levels: [1] })
+      const signal = expect.any(AbortSignal)
+      expect(groups.selectSource).toHaveBeenCalledWith({ ...scope, source: 2, levels: [1], signal })
+      expect(groups.selectDestination).toHaveBeenCalledWith({ ...scope, destination: 3, signal })
+      expect(groups.take).toHaveBeenCalledWith({ ...scope, levels: [1], signal })
       expect(groups.toggleGroupEnabled).toHaveBeenCalledWith(scope)
       expect(submit).toHaveBeenCalledWith({
         connectionId,
         source: 2,
         destination: 3,
         levels: [1],
+        signal,
       })
       expect(refresh).toHaveBeenCalledWith(connectionId)
       expect(recall).toHaveBeenCalledWith(connectionId, 8, expect.any(AbortSignal))

@@ -36,7 +36,9 @@ export function queueLegacyRoute(
   source: number,
   destination: number,
   levels: readonly number[],
+  signal?: AbortSignal,
 ): Promise<void> {
+  signal?.throwIfAborted()
   validateAddress(source, entry.definition.sourceLimit, 'source')
   validateAddress(destination, entry.definition.destinationLimit, 'destination')
   if (entry.pendingLegacyRoutes >= MAX_PENDING_LEGACY_ROUTES) {
@@ -46,6 +48,7 @@ export function queueLegacyRoute(
   runtime.assertConnected(connectionId, entry, epoch)
   entry.pendingLegacyRoutes += 1
   const operation = enqueueCommand(runtime, entry, async () => {
+    signal?.throwIfAborted()
     runtime.assertConnected(connectionId, entry, epoch)
     await entry.client.setCrosspoint({ source, destination, levels })
     runtime.assertConnected(connectionId, entry, epoch)
@@ -57,7 +60,7 @@ export function queueLegacyRoute(
     },
     (error: unknown) => {
       entry.pendingLegacyRoutes = Math.max(0, entry.pendingLegacyRoutes - 1)
-      if (runtime.isCurrentEntry(connectionId, entry)) {
+      if (!(signal?.aborted && error === signal.reason) && runtime.isCurrentEntry(connectionId, entry)) {
         entry.lastError = `Last submitted route failed: ${errorMessage(error)}`
         runtime.emit()
       }

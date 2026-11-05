@@ -13,6 +13,7 @@ import {
 } from "@hubble/module-sdk";
 import {
   RossRouteGroupRuntime,
+  type RouterDestinationDefault,
   type RossRouteGroupStateTransition,
   type RossRouteGroupConnectionManager,
 } from "./group-runtime.js";
@@ -48,6 +49,13 @@ const Journal = z.object({
 });
 type Journal = z.infer<typeof Journal>;
 
+export interface RouterMatrixDestinationRow {
+  readonly id: string;
+  readonly contextId: string;
+  readonly groupId: string | null;
+  readonly destinations: readonly [number, ...number[]];
+}
+
 /** Package-owned settings and routing state. Only generic scoped documents/contexts are host services. */
 export class RouterGroupController {
   readonly runtime: RossRouteGroupRuntime;
@@ -61,6 +69,7 @@ export class RouterGroupController {
   #document: ModuleDocumentSnapshot | undefined;
   #value: RouterGroupDocument = { contexts: [] };
   #watches: Promise<void>[] = [];
+  #destinationRows: readonly RouterMatrixDestinationRow[] = [];
   readonly #failedWatches = new Set<"documents" | "contexts">();
   #stopped = false;
 
@@ -248,7 +257,69 @@ export class RouterGroupController {
     this.#document = document;
     this.#value = value;
     this.#contexts = catalog.contexts;
+    this.applyDestinationDefaults();
     this.changed();
+  }
+
+  observeMatrixDestinations(
+    rows: readonly RouterMatrixDestinationRow[],
+  ): Promise<void> {
+    return this.ordered(async () => {
+      const previous = this.#destinationRows;
+      this.#destinationRows = rows;
+      this.applyDestinationDefaults(previous.length ? previous : rows);
+    });
+  }
+
+  private applyDestinationDefaults(previous = this.#destinationRows): void {
+    const scope = this.context.scope;
+    if (scope.kind !== "connection") return;
+    const contexts = new Map(
+      this.#contexts.map((context) => [context.reference.contextId, context]),
+    );
+    const prior = new Map(previous.map((row) => [row.id, row]));
+    const groups = new Map<
+      string,
+      RouterDestinationDefault & {
+        destinations: number[];
+        editedDestination?: number;
+      }
+    >();
+    for (const row of this.#destinationRows) {
+      const context = contexts.get(row.contextId);
+      if (!context) continue;
+      let groupId: string | null;
+      try {
+        groupId = resolveRouterGroup(
+          contextSettings(this.#value, context),
+          row.groupId,
+        );
+      } catch {
+        continue; // Rows can refer to a group that has just been removed.
+      }
+      const key = JSON.stringify([row.contextId, groupId]);
+      const group = groups.get(key) ?? {
+        ...scope,
+        moduleConnectionId: row.contextId,
+        groupId,
+        destinations: [],
+      };
+      group.destinations.push(...row.destinations);
+      const before = prior.get(row.id);
+      if (
+        group.editedDestination === undefined &&
+        (!before ||
+          before.contextId !== row.contextId ||
+          before.groupId !== row.groupId ||
+          before.destinations.length !== row.destinations.length ||
+          before.destinations.some(
+            (value, index) => value !== row.destinations[index],
+          ))
+      )
+        group.editedDestination = row.destinations[0];
+      groups.set(key, group);
+    }
+    this.runtime.reconcileDestinationDefaults([...groups.values()]);
   }
   refresh() {
     return this.ordered(() => this.refreshNow());
@@ -414,7 +485,9 @@ export class RouterGroupController {
         throw new Error("Choose a routing group to toggle");
       return { ...input, groupId };
     });
-    return this.runtime[method](resolved as never);
+    await this.runtime[method](resolved as never);
+    if (method === "toggleGroupEnabled")
+      await this.ordered(async () => this.applyDestinationDefaults());
   }
   async stop() {
     this.#stopped = true;

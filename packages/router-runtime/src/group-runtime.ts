@@ -32,10 +32,12 @@ export interface RossRouteGroupActionScope {
 export interface RossRouteGroupSelectSourceInput extends RossRouteGroupActionScope {
   readonly source: number;
   readonly levels?: readonly number[];
+  readonly signal?: AbortSignal;
 }
 
 export interface RossRouteGroupSelectDestinationInput extends RossRouteGroupActionScope {
   readonly destination: number;
+  readonly signal?: AbortSignal;
 }
 
 export interface RossRouteGroupCycleDestinationInput extends RossRouteGroupActionScope {
@@ -46,6 +48,7 @@ export interface RossRouteGroupCycleDestinationInput extends RossRouteGroupActio
 
 export interface RossRouteGroupTakeInput extends RossRouteGroupActionScope {
   readonly levels?: readonly number[];
+  readonly signal?: AbortSignal;
 }
 
 export interface RossRouteGroupToggleEnabledInput extends Omit<
@@ -193,6 +196,11 @@ export interface RossRouteGroupRuntimeOptions {
   readonly onDiagnostic?: (diagnostic: RossRouteGroupRuntimeDiagnostic) => void;
 }
 
+export interface RouterDestinationDefault extends RossRouteGroupActionScope {
+  readonly destinations: readonly number[];
+  readonly editedDestination?: number;
+}
+
 export interface RossRouteGroupRuntimeContract {
   reconcile(
     scopes: readonly RossRouteGroupModuleScope[],
@@ -241,6 +249,7 @@ interface MutableGroupState {
   stagedLevels: readonly number[];
   intentionalManualStage: boolean;
   selectedDestination: number | null;
+  matrixDestinationDefault: boolean;
   destinationSelectionEpoch: number;
   routeClaim: RossGroupRouteClaim | null;
   ownedClaim: RossGroupRouteClaim | null;
@@ -406,6 +415,7 @@ export class RossRouteGroupRuntime implements RossRouteGroupRuntimeContract {
   }
 
   selectSource(input: RossRouteGroupSelectSourceInput): Promise<void> {
+    input.signal?.throwIfAborted();
     const state = this.#requireGroup(input);
     if (state.toggleInProgress) return toggleInProgressAction();
     if (this.#stateHasReservation(state)) return transitionInProgressAction();
@@ -428,12 +438,14 @@ export class RossRouteGroupRuntime implements RossRouteGroupRuntimeContract {
       destination,
       levels,
       "automatic-take",
+      input.signal,
     );
   }
 
   selectDestination(
     input: RossRouteGroupSelectDestinationInput,
   ): Promise<void> {
+    input.signal?.throwIfAborted();
     const state = this.#requireGroup(input);
     if (state.toggleInProgress) return toggleInProgressAction();
     if (this.#stateHasReservation(state)) return transitionInProgressAction();
@@ -441,6 +453,7 @@ export class RossRouteGroupRuntime implements RossRouteGroupRuntimeContract {
     return this.#applyDestinationSelection(
       state,
       validateRouterAddress(input.destination, "destination"),
+      input.signal,
     );
   }
 
@@ -466,16 +479,64 @@ export class RossRouteGroupRuntime implements RossRouteGroupRuntimeContract {
     if (nextDestination === undefined) {
       throw new RangeError("Ross destination cycle must contain a destination");
     }
-    if (nextDestination === state.selectedDestination) return Promise.resolve();
-    return this.#applyDestinationCycle(state, nextDestination);
+    if (nextDestination === state.selectedDestination) {
+      if (state.matrixDestinationDefault) {
+        state.matrixDestinationDefault = false;
+        this.#persistGroup(state);
+      }
+      return Promise.resolve();
+    }
+    this.#applyDestinationCycle(state, nextDestination, false);
+    return Promise.resolve();
+  }
+
+  reconcileDestinationDefaults(
+    defaults: readonly RouterDestinationDefault[],
+  ): void {
+    const byGroup = new Map(
+      defaults.map((item) => [groupStateKey(item), item]),
+    );
+    for (const module of this.#modules.values()) {
+      for (const state of module.groups.values()) {
+        if (
+          !state.enabled ||
+          state.toggleInProgress ||
+          this.#stateHasReservation(state)
+        )
+          continue;
+        const candidate = byGroup.get(
+          groupStateKey({ ...module.scope, groupId: state.groupId }),
+        );
+        const current = state.selectedDestination;
+        if (
+          candidate?.editedDestination === undefined &&
+          current !== null &&
+          (!state.matrixDestinationDefault ||
+            candidate?.destinations.includes(current))
+        )
+          continue;
+        const destination =
+          candidate?.editedDestination ?? candidate?.destinations[0] ?? null;
+        if (destination === current) continue;
+        if (destination === null) {
+          this.#clearGroupRoutingState(state);
+          this.#persistGroup(state);
+          this.#emit();
+        } else {
+          this.#applyDestinationCycle(state, destination, true);
+        }
+      }
+    }
   }
 
   #applyDestinationCycle(
     state: MutableGroupState,
     destination: number,
-  ): Promise<void> {
+    matrixDestinationDefault: boolean,
+  ): void {
     state.destinationSelectionEpoch += 1;
     state.selectedDestination = destination;
+    state.matrixDestinationDefault = matrixDestinationDefault;
     state.stagedSource = null;
     state.intentionalManualStage = false;
     state.routeClaim = null;
@@ -485,18 +546,19 @@ export class RossRouteGroupRuntime implements RossRouteGroupRuntimeContract {
     this.#installWatch(state, this.#passiveLevels(state), false);
     this.#persistGroup(state);
     this.#emit();
-    return Promise.resolve();
   }
 
   #applyDestinationSelection(
     state: MutableGroupState,
     destination: number,
+    signal?: AbortSignal,
   ): Promise<void> {
     const stagedSource = state.stagedSource;
     const stagedLevels = state.stagedLevels;
     if (state.selectedDestination !== destination)
       state.destinationSelectionEpoch += 1;
     state.selectedDestination = destination;
+    state.matrixDestinationDefault = false;
     state.passiveBlockedFingerprint = undefined;
     this.#installWatch(state, this.#passiveLevels(state), true);
     this.#persistGroup(state);
@@ -517,10 +579,12 @@ export class RossRouteGroupRuntime implements RossRouteGroupRuntimeContract {
       state.selectedDestination,
       levels,
       "automatic-take",
+      signal,
     );
   }
 
   take(input: RossRouteGroupTakeInput): Promise<void> {
+    input.signal?.throwIfAborted();
     const state = this.#requireGroup(input);
     if (state.toggleInProgress) return toggleInProgressAction();
     if (this.#stateHasReservation(state)) return transitionInProgressAction();
@@ -545,6 +609,7 @@ export class RossRouteGroupRuntime implements RossRouteGroupRuntimeContract {
       state.selectedDestination,
       levels,
       "take",
+      input.signal,
     );
   }
 
@@ -720,6 +785,7 @@ export class RossRouteGroupRuntime implements RossRouteGroupRuntimeContract {
     destination: number,
     levels: readonly number[],
     origin: "take" | "automatic-take",
+    signal?: AbortSignal,
   ): Promise<void> {
     if (state.toggleInProgress) return toggleInProgressAction();
     if (this.#stateHasReservation(state)) return transitionInProgressAction();
@@ -752,6 +818,7 @@ export class RossRouteGroupRuntime implements RossRouteGroupRuntimeContract {
         source,
         destination,
         levels,
+        ...(signal ? { signal } : {}),
       });
       pending.submissionId = submission.submissionId;
     } catch (error: unknown) {
@@ -1096,7 +1163,9 @@ export class RossRouteGroupRuntime implements RossRouteGroupRuntimeContract {
         connectionId: state.module.scope.connectionId,
         groupId: state.groupId,
         enabled: state.enabled,
-        selectedDestination: state.selectedDestination,
+        selectedDestination: state.matrixDestinationDefault
+          ? null
+          : state.selectedDestination,
         levels: state.persistedLevels,
         committedTakeSequence: state.committedTakeSequence,
       }),
@@ -1113,7 +1182,9 @@ export class RossRouteGroupRuntime implements RossRouteGroupRuntimeContract {
           connectionId: state.module.scope.connectionId,
           groupId: state.groupId,
           enabled: state.enabled,
-          selectedDestination: state.selectedDestination,
+          selectedDestination: state.matrixDestinationDefault
+            ? null
+            : state.selectedDestination,
           levels: state.persistedLevels,
           committedTakeSequence: state.committedTakeSequence,
         });
@@ -1297,6 +1368,7 @@ export class RossRouteGroupRuntime implements RossRouteGroupRuntimeContract {
       selectedDestination: enabled
         ? (persisted?.selectedDestination ?? null)
         : null,
+      matrixDestinationDefault: false,
       destinationSelectionEpoch: 0,
       routeClaim: null,
       ownedClaim: null,
@@ -1321,6 +1393,7 @@ export class RossRouteGroupRuntime implements RossRouteGroupRuntimeContract {
     state.stagedLevels = Object.freeze([]);
     state.intentionalManualStage = false;
     state.selectedDestination = null;
+    state.matrixDestinationDefault = false;
     state.routeClaim = null;
     state.ownedClaim = null;
     state.pendingRouteClaims.clear();

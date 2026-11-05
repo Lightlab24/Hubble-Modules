@@ -421,6 +421,25 @@ describe('BlackmagicVideohubConnectionManager', () => {
     ).toThrow('source must be an integer from 1 to 1')
   })
 
+  it('skips a cancelled command still waiting behind a route and accepts the next one', async () => {
+    const { client, manager } = await readyManager()
+    const gate = deferred<void>()
+    client.setCrosspointGate = gate.promise
+    const first = manager.directRoute({ connectionId: CONNECTION_ID, source: 3, destination: 1 })
+    const cancellation = new AbortController()
+    const queued = manager.submitDirectRouteTracked({ connectionId: CONNECTION_ID, source: 1, destination: 2, signal: cancellation.signal })
+    const reason = new Error('Operator cancelled queued route')
+    const skipped = expect(queued.settled).rejects.toBe(reason)
+    await vi.waitFor(() => expect(client.setCrosspoint).toHaveBeenCalledOnce())
+    cancellation.abort(reason)
+    gate.resolve(undefined)
+    await Promise.all([first, skipped])
+    expect(client.setCrosspoint).toHaveBeenCalledOnce()
+    expect(manager.snapshots()[0]?.lastError).toBeNull()
+    await manager.directRoute({ connectionId: CONNECTION_ID, source: 1, destination: 2 })
+    expect(client.setCrosspoint).toHaveBeenCalledTimes(2)
+  })
+
   it('fences queued routes on disconnect and never replays them in a later epoch', async () => {
     const { client, manager } = await readyManager()
     const gate = deferred<undefined>()

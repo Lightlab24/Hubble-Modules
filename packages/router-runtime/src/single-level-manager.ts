@@ -429,6 +429,7 @@ export class SingleLevelRouterConnectionManager implements RouterConnectionManag
       this.requireEntry(input.connectionId),
       input.source,
       input.destination,
+      input.signal,
     )
   }
 
@@ -443,6 +444,7 @@ export class SingleLevelRouterConnectionManager implements RouterConnectionManag
       this.requireEntry(input.connectionId),
       input.source,
       input.destination,
+      input.signal,
     )
     const sequence = this.#nextSubmissionSequence
     this.#nextSubmissionSequence += 1
@@ -670,6 +672,7 @@ export class SingleLevelRouterConnectionManager implements RouterConnectionManag
     entry: ManagedEntry,
     source: number,
     destination: number,
+    signal?: AbortSignal,
   ): Promise<void> {
     return queueLegacyRoute(
       this.#singleLevelCommandsContext,
@@ -677,6 +680,7 @@ export class SingleLevelRouterConnectionManager implements RouterConnectionManag
       entry,
       source,
       destination,
+      signal,
     )
   }
 

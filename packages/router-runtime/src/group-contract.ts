@@ -9,10 +9,12 @@ export interface RossRouteGroupActionScope {
 export interface RossRouteGroupSelectSourceInput extends RossRouteGroupActionScope {
   readonly source: number
   readonly levels?: readonly number[]
+  readonly signal?: AbortSignal
 }
 
 export interface RossRouteGroupSelectDestinationInput extends RossRouteGroupActionScope {
   readonly destination: number
+  readonly signal?: AbortSignal
 }
 
 export interface RossRouteGroupCycleDestinationInput extends RossRouteGroupActionScope {
@@ -23,6 +25,7 @@ export interface RossRouteGroupCycleDestinationInput extends RossRouteGroupActio
 
 export interface RossRouteGroupTakeInput extends RossRouteGroupActionScope {
   readonly levels?: readonly number[]
+  readonly signal?: AbortSignal
 }
 
 export interface RossRouteGroupToggleEnabledInput extends Omit<

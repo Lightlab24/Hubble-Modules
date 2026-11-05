@@ -150,6 +150,7 @@ describe('RouterActionExecutor Blackmagic Videohub actions', () => {
       groupId: null,
       source: 9,
       levels: [1],
+      signal: expect.any(AbortSignal),
     })
   })
 
@@ -221,6 +222,7 @@ describe('RouterActionExecutor Blackmagic Videohub actions', () => {
       source: 10,
       destination: 2,
       levels: [1],
+      signal: expect.any(AbortSignal),
     })
     expect(groups.selectSource).not.toHaveBeenCalled()
     expect(groups.selectDestination).not.toHaveBeenCalled()

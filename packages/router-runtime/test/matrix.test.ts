@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import {
   parseModuleMatrixValue,
   resolveModuleMatrixField,
@@ -9,7 +9,7 @@ import {
   routerMatrix,
   routerMatrixAction,
   routerLevels,
-  routerMatrixFeedback,
+  createRouterMatrixFeedback,
   type RouterType,
 } from "../src/matrix.js";
 const types: RouterType[] = [
@@ -168,9 +168,10 @@ it("keeps source/address labels with no router snapshot and an unresolved legacy
     groupId: null,
     enabled: true,
     drivesTally: true,
-  } as Parameters<typeof routerMatrixFeedback>[1];
-  const groups = {
-    snapshot: () => ({
+  } as Parameters<ReturnType<typeof createRouterMatrixFeedback>>[0];
+  const controller = {
+    runtime: { snapshots: vi.fn(() => []) },
+    snapshot: vi.fn(() => ({
       contexts: [
         {
           reference: { contextId },
@@ -180,15 +181,22 @@ it("keeps source/address labels with no router snapshot and an unresolved legacy
           },
         },
       ],
-    }),
-  } as unknown as Parameters<typeof routerMatrixFeedback>[2];
-  const feedback = routerMatrixFeedback(randomUUID(), action, groups, []);
+    })),
+  };
+  const groups = controller as unknown as Parameters<
+    typeof createRouterMatrixFeedback
+  >[1];
+  const render = createRouterMatrixFeedback(randomUUID(), groups, []);
+  const feedback = render(action);
   expect(feedback.state).toBe("unavailable");
   expect(feedback.appearance?.backgroundColor).toBeNull();
   expect(feedback.appearance?.cells).toMatchObject({
     actionType: { label: "Select SRC" },
     actionValue: { label: "12 — Unlabeled" },
   });
+  expect(render(action)).toEqual(feedback);
+  expect(controller.snapshot).toHaveBeenCalledOnce();
+  expect(controller.runtime.snapshots).toHaveBeenCalledOnce();
 });
 
 it.each(types)(

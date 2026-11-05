@@ -13,6 +13,7 @@ import type {
   ModuleJsonValue,
   ModuleValues,
   ModuleFeedback,
+  ModuleFeedbackSubscription,
 } from "@hubble/module-sdk";
 import { createRouterFeedbackPublisher } from "./feedback-publisher.js";
 import { RouterPageRuntime } from "./page-runtime.js";
@@ -28,7 +29,8 @@ import { migrateRouterGroups, prepareRouterGroups } from "./group-document.js";
 import {
   routerMatrixAction,
   routerMatrixChoices,
-  routerMatrixFeedback,
+  routerMatrixDestination,
+  createRouterMatrixFeedback,
 } from "./matrix.js";
 import { z } from "zod";
 import { routePublic, routerReadiness } from "./public-api.js";
@@ -67,42 +69,53 @@ export function routerModule(
         ? createManager()
         : localRouterManager();
       const feedbackColumn = randomUUID();
+      const feedbackActions = new WeakMap<
+        ModuleFeedbackSubscription,
+        RouterActionDefinition | null
+      >();
       const feedbackPublisher = createRouterFeedbackPublisher(
         (subscriptions) => {
-          const snapshots = manager.snapshots();
+          if (!subscriptions.length || context.scope.kind !== "connection")
+            return [];
+          const { workspaceId, connectionId } = context.scope;
+          const render = createRouterMatrixFeedback(
+            workspaceId,
+            groupController,
+            manager.snapshots(),
+          );
           return subscriptions.map((subscription): ModuleFeedback => {
+            let action = feedbackActions.get(subscription);
             try {
-              const fields = subscription.fields;
-              const mapped = routerMatrixAction(type, fields, context.settings);
-              const schema = schemas.actions[mapped.id];
-              if (!schema || context.scope.kind !== "connection")
-                throw new Error("Unknown routing feedback");
-              const action = schema.parse({
-                ...mapped.fields,
-                type: mapped.id,
-                actionId: fields.actionId ?? "matrix-feedback",
-                actionColumnId: fields.actionColumnId ?? feedbackColumn,
-                connectionId: context.scope.connectionId,
-                enabled: (fields.values as ModuleValues)?.enabled !== false,
-                interaction: "press",
-              });
-              return {
-                ...subscription,
-                ...routerMatrixFeedback(
-                  context.scope.workspaceId,
-                  action,
-                  groupController,
-                  snapshots,
-                ),
-              };
+              if (action === undefined) {
+                const fields = subscription.fields;
+                const mapped = routerMatrixAction(
+                  type,
+                  fields,
+                  context.settings,
+                );
+                const schema = schemas.actions[mapped.id];
+                if (!schema) throw new Error("Unknown routing feedback");
+                action = schema.parse({
+                  ...mapped.fields,
+                  type: mapped.id,
+                  actionId: fields.actionId ?? "matrix-feedback",
+                  actionColumnId: fields.actionColumnId ?? feedbackColumn,
+                  connectionId,
+                  enabled: (fields.values as ModuleValues)?.enabled !== false,
+                  interaction: "press",
+                });
+                feedbackActions.set(subscription, action);
+              }
+              if (action) return { ...subscription, ...render(action) };
             } catch {
-              return {
-                ...subscription,
-                state: "unavailable",
-                observedAt: new Date().toISOString(),
-                appearance: { backgroundColor: null, glow: null },
-              };
+              if (action === undefined) feedbackActions.set(subscription, null);
             }
+            return {
+              ...subscription,
+              state: "unavailable",
+              observedAt: null,
+              appearance: { backgroundColor: null, glow: null },
+            };
           });
         },
         (feedback) => context.publishFeedback(feedback),
@@ -322,6 +335,7 @@ export function routerModule(
                     connectionId,
                     source: parsed.source,
                     destination: parsed.destination,
+                    signal,
                     ...(parsed.levels ? { levels: parsed.levels } : {}),
                   };
                   if (method === "directRoute")
@@ -513,10 +527,16 @@ export function routerModule(
             query,
           );
         },
-        subscribeFeedback(subscriptions) {
-          feedbackPublisher.subscribe(
-            subscriptions.filter((item) => item.id === "matrix"),
-          );
+        async subscribeFeedback(subscriptions) {
+          const matrix = subscriptions.filter((item) => item.id === "matrix");
+          if (connectionEnabled)
+            await groupController.observeMatrixDestinations(
+              matrix.flatMap(({ fields }) => {
+                const row = routerMatrixDestination(type, fields);
+                return row ? [row] : [];
+              }),
+            );
+          feedbackPublisher.subscribe(matrix);
         },
         async call(method, value, execution) {
           if (method === "page.routing") {

@@ -114,6 +114,7 @@ export async function routePublic(
       source,
       destination,
       levels: [level],
+      signal: execution.signal,
     });
     await Promise.all([submission.accepted, submission.settled]);
     if (execution.signal.aborted)
@@ -133,7 +134,7 @@ export async function routePublic(
   } catch (error) {
     return {
       status: "failure",
-      category: "rejected",
+      category: execution.signal.aborted ? "cancelled" : "rejected",
       message:
         error instanceof Error
           ? error.message.slice(0, 1000)

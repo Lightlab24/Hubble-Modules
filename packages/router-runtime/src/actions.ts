@@ -94,6 +94,7 @@ export class RouterActionExecutor implements TypedActionExecutor<RouterActionDef
             ...groupActionScope(this.#workspaceId, action),
             source: action.source,
             levels: action.type === 'ross-swp08.select-source' ? action.levels : [1],
+            signal: context.signal,
           })
           break
         case 'ross-swp08.select-destination':
@@ -105,6 +106,7 @@ export class RouterActionExecutor implements TypedActionExecutor<RouterActionDef
               await this.#groups.selectDestination({
                 ...groupActionScope(this.#workspaceId, action),
                 destination: action.destination,
+                signal: context.signal,
               })
             } else {
               await this.#groups.cycleDestination({
@@ -122,6 +124,7 @@ export class RouterActionExecutor implements TypedActionExecutor<RouterActionDef
           await this.#groups.take({
             ...groupActionScope(this.#workspaceId, action),
             levels: action.type === 'ross-swp08.take' ? action.levels : [1],
+            signal: context.signal,
           })
           break
         case 'ross-swp08.toggle-group-enabled':
@@ -143,6 +146,7 @@ export class RouterActionExecutor implements TypedActionExecutor<RouterActionDef
               connectionId: action.connectionId,
               source: action.source,
               destination: action.destination,
+              signal: context.signal,
               ...(levels.length === 0 ? {} : { levels }),
             }
             await (this.#connections.submitDirectRoute?.(route) ??
@@ -378,6 +382,9 @@ function mapRossError(error: unknown): AdapterActionResult {
 
 function mapBlackmagicError(error: unknown): AdapterActionResult {
   const message = error instanceof Error ? error.message : String(error)
+  const missing = /selected (source|destination) is not configured/iu.exec(message)
+  if (missing)
+    return failure('blackmagic_unconfigured', `Select a ${missing[1]} before routing`)
   if (
     /routing group is disabled|routing group (?:toggle|transition) is (?:already )?in progress/iu.test(
       message,
@@ -386,7 +393,7 @@ function mapBlackmagicError(error: unknown): AdapterActionResult {
     return failure('blackmagic_unconfigured', message)
   }
   if (
-    /selected (?:source|destination).*not configured|unconfigured|(?:source|destination).*integer from 1 to/iu.test(
+    /unconfigured|(?:source|destination).*integer from 1 to/iu.test(
       message,
     )
   ) {
@@ -429,6 +436,9 @@ function isCancelled(signal: AbortSignal): boolean {
 
 function mapKumoError(error: unknown): AdapterActionResult {
   const message = error instanceof Error ? error.message : String(error)
+  const missing = /selected (source|destination) is not configured/iu.exec(message)
+  if (missing)
+    return failure('aja_kumo_unconfigured', `Select a ${missing[1]} before routing`)
   if (
     /routing group is disabled|routing group (?:toggle|transition) is (?:already )?in progress/iu.test(
       message,
@@ -437,7 +447,7 @@ function mapKumoError(error: unknown): AdapterActionResult {
     return failure('aja_kumo_unconfigured', message)
   }
   if (
-    /selected (?:source|destination).*not configured|unconfigured|(?:source|destination).*integer from 1 to/iu.test(
+    /unconfigured|(?:source|destination).*integer from 1 to/iu.test(
       message,
     )
   ) {

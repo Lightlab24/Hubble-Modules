@@ -43,8 +43,7 @@ export function createRouterFeedbackPublisher(
       for (const value of evaluate(subscriptions)) {
         const id = key(value);
         // A fresh timestamp alone does not change the observed row state.
-        const { observedAt: _observedAt, ...appearance } = value;
-        const signature = JSON.stringify(appearance);
+        const signature = JSON.stringify([value.state, value.appearance]);
         if (sent.get(id) === signature) pending.delete(id);
         else pending.set(id, { value, signature });
       }

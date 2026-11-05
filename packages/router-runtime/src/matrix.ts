@@ -17,7 +17,10 @@ import type {
   RouterConnectionManagerContract,
   ManagedRouterConnectionSnapshot,
 } from "./connection-contract.js";
-import type { RouterGroupController } from "./group-controller.js";
+import type {
+  RouterGroupController,
+  RouterMatrixDestinationRow,
+} from "./group-controller.js";
 import { resolveRouterGroup } from "./group-document.js";
 import { resolveRossGroupFeedback } from "./group-feedback.js";
 
@@ -411,6 +414,46 @@ export function routerMatrixAction(
   return { id, fields: input };
 }
 
+const RouterMatrixDestinationFields = z.object({
+  actionId: z.string().min(1),
+  actionColumnId: z.uuid(),
+  contextId: z.uuid(),
+  values: z.object({
+    actionType: z.string(),
+    actionGroup: z.union([z.uuid(), z.literal(""), z.null()]).optional(),
+    enabled: z.boolean().optional(),
+    actionValue: z.union([z.string(), z.number()]),
+  }),
+});
+
+/** Read accepted Matrix configuration for local selection, without executing the row. */
+export function routerMatrixDestination(
+  type: RouterType,
+  fields: ModuleValues,
+): RouterMatrixDestinationRow | null {
+  const input = RouterMatrixDestinationFields.safeParse(fields);
+  if (
+    !input.success ||
+    input.data.values.enabled === false ||
+    routerActionName(input.data.values.actionType) !== "select-destination"
+  )
+    return null;
+  const { actionId, actionColumnId, contextId, values } = input.data;
+  const parsed = parseModuleOrderedNumbers(
+    values.actionValue,
+    numbers(type === "aja-kumo" ? 64 : 65536),
+  );
+  if (!parsed.success) return null;
+  const [first, ...rest] = parsed.values;
+  if (first === undefined) return null;
+  return {
+    id: JSON.stringify([actionColumnId, actionId]),
+    contextId,
+    groupId: values.actionGroup || null,
+    destinations: [first, ...rest],
+  };
+}
+
 export function routerMatrixChoices(
   type: RouterType,
   manager: RouterConnectionManagerContract,
@@ -536,96 +579,36 @@ function choicePage(
   };
 }
 
-/** Feedback decisions stay beside the protocol and group runtime in the package. */
-export function routerMatrixFeedback(
+type RouterLabelCatalog = ManagedRouterConnectionSnapshot["sourceCatalog"];
+const catalogIndexes = new WeakMap<
+  RouterLabelCatalog,
+  ReadonlyMap<number, string>
+>();
+
+function catalogLabel(
+  catalog: RouterLabelCatalog | undefined,
+  address: number,
+): string {
+  if (!catalog) return "Unlabeled";
+  let labels = catalogIndexes.get(catalog);
+  if (!labels) {
+    labels = new Map(catalog.map(({ address, label }) => [address, label]));
+    catalogIndexes.set(catalog, labels);
+  }
+  return labels.get(address) || "Unlabeled";
+}
+
+/** Resolve shared observations once, then render every row against that same view. */
+export function createRouterMatrixFeedback(
   workspaceId: string,
-  action: RouterActionDefinition,
   groups: RouterGroupController,
   snapshots: readonly ManagedRouterConnectionSnapshot[],
-): Pick<ModuleFeedback, "state" | "observedAt" | "appearance"> {
-  const cells: NonNullable<NonNullable<ModuleFeedback["appearance"]>["cells"]> =
-    {};
-  const context =
-    "moduleConnectionId" in action
-      ? groups
-          .snapshot()
-          .contexts.find(
-            (item) => item.reference.contextId === action.moduleConnectionId,
-          )
-      : undefined;
-  const snapshot = snapshots.find(
-    (item) => item.definition.connectionId === action.connectionId,
+): (
+  action: RouterActionDefinition,
+) => Pick<ModuleFeedback, "state" | "observedAt" | "appearance"> {
+  const contexts = new Map(
+    groups.snapshot().contexts.map((item) => [item.reference.contextId, item]),
   );
-  const actionName = routerActionName(action.type.split(".").at(-1));
-  let groupId: string | null = null;
-  let groupUnavailable = false;
-  try {
-    groupId =
-      context && "groupId" in action
-        ? resolveRouterGroup(context.settings, action.groupId)
-        : null;
-  } catch {
-    // A stale group must not erase the action/address presentation. Execution
-    // continues to validate the group independently before any router command.
-    groupUnavailable = true;
-  }
-  const group = context?.settings.groups.find((item) => item.id === groupId);
-  cells.actionType = {
-    color: null,
-    label:
-      `${labels[actionName] ?? actionName}${group ? " — " + group.name : ""}`.slice(
-        0,
-        160,
-      ),
-  };
-  const label = (address: number, source: boolean) =>
-    `${address} — ${(source ? snapshot?.sourceCatalog : snapshot?.destinationCatalog)?.find((item) => item.address === address)?.label || "Unlabeled"}`;
-  if ("source" in action && actionName === "select-source")
-    cells.actionValue = {
-      color: null,
-      label: label(action.source, true).slice(0, 160),
-    };
-  if ("destination" in action && actionName === "select-destination")
-    cells.actionValue = {
-      color: null,
-      label: ("destinations" in action && action.destinations?.length
-        ? action.destinations
-        : [action.destination]
-      )
-        .map((address) => label(address, false))
-        .join(", ")
-        .slice(0, 160),
-    };
-  if (actionName === "route" && "source" in action && "destination" in action) {
-    cells.source = {
-      color: null,
-      label: label(action.source, true).slice(0, 160),
-    };
-    cells.destination = {
-      color: null,
-      label: label(action.destination, false).slice(0, 160),
-    };
-  }
-  const neutral = {
-    state: "inactive" as const,
-    observedAt: new Date().toISOString(),
-    appearance: { backgroundColor: null, cells },
-  };
-  if (groupUnavailable) return { ...neutral, state: "unavailable" };
-  if (!action.enabled || !("drivesTally" in action) || !action.drivesTally)
-    return neutral;
-  if ("groupId" in action) {
-    const context = groups
-      .snapshot()
-      .contexts.find(
-        (item) => item.reference.contextId === action.moduleConnectionId,
-      );
-    if (!context) return { ...neutral, state: "unavailable" };
-    action = {
-      ...action,
-      groupId: resolveRouterGroup(context.settings, action.groupId),
-    } as RouterActionDefinition;
-  }
   const byId = new Map(
     snapshots.map((item) => [item.definition.connectionId, item]),
   );
@@ -634,63 +617,144 @@ export function routerMatrixFeedback(
     groups.runtime.snapshots(),
     byId,
   );
-  let active = false,
-    color: string | null = null;
-  switch (action.type) {
-    case "ross-swp08.toggle-group-enabled":
-    case "blackmagic-videohub.toggle-group-enabled":
-    case "aja-kumo.toggle-group-enabled":
-      active = feedback.groupIsEnabled(action);
-      color = active ? action.feedbackColor : action.feedbackInactiveColor;
-      break;
-    case "ross-swp08.select-destination":
-    case "blackmagic-videohub.select-destination":
-    case "aja-kumo.select-destination":
-      if (action.destinations) {
-        const selected = feedback.selectedDestination(action),
-          index =
-            selected === null ? -1 : action.destinations.indexOf(selected);
-        active = index >= 0;
-        color = active
-          ? (action.feedbackColors?.[index] ?? action.feedbackColor)
+  const observedAt = new Date().toISOString();
+  return (action) => {
+    const cells: NonNullable<
+      NonNullable<ModuleFeedback["appearance"]>["cells"]
+    > = {};
+    const context =
+      "moduleConnectionId" in action
+        ? contexts.get(action.moduleConnectionId)
+        : undefined;
+    const snapshot = byId.get(action.connectionId);
+    const actionName = routerActionName(action.type.split(".").at(-1));
+    let groupId: string | null = null;
+    let groupUnavailable = false;
+    try {
+      groupId =
+        context && "groupId" in action
+          ? resolveRouterGroup(context.settings, action.groupId)
           : null;
+    } catch {
+      // A stale group must not erase the action/address presentation. Execution
+      // continues to validate the group independently before any router command.
+      groupUnavailable = true;
+    }
+    const group = context?.settings.groups.find((item) => item.id === groupId);
+    cells.actionType = {
+      color: null,
+      label:
+        `${labels[actionName] ?? actionName}${group ? " — " + group.name : ""}`.slice(
+          0,
+          160,
+        ),
+    };
+    const label = (address: number, source: boolean) =>
+      `${address} — ${catalogLabel(source ? snapshot?.sourceCatalog : snapshot?.destinationCatalog, address)}`;
+    if ("source" in action && actionName === "select-source")
+      cells.actionValue = {
+        color: null,
+        label: label(action.source, true).slice(0, 160),
+      };
+    if ("destination" in action && actionName === "select-destination")
+      cells.actionValue = {
+        color: null,
+        label: ("destinations" in action && action.destinations?.length
+          ? action.destinations
+          : [action.destination]
+        )
+          .map((address) => label(address, false))
+          .join(", ")
+          .slice(0, 160),
+      };
+    if (
+      actionName === "route" &&
+      "source" in action &&
+      "destination" in action
+    ) {
+      cells.source = {
+        color: null,
+        label: label(action.source, true).slice(0, 160),
+      };
+      cells.destination = {
+        color: null,
+        label: label(action.destination, false).slice(0, 160),
+      };
+    }
+    const neutral = {
+      state: "inactive" as const,
+      observedAt,
+      appearance: { backgroundColor: null, cells },
+    };
+    if (groupUnavailable) return { ...neutral, state: "unavailable" };
+    if (!action.enabled || !("drivesTally" in action) || !action.drivesTally)
+      return neutral;
+    if ("groupId" in action) {
+      if (!context) return { ...neutral, state: "unavailable" };
+      action = {
+        ...action,
+        groupId,
+      } as RouterActionDefinition;
+    }
+    let active = false,
+      color: string | null = null;
+    switch (action.type) {
+      case "ross-swp08.toggle-group-enabled":
+      case "blackmagic-videohub.toggle-group-enabled":
+      case "aja-kumo.toggle-group-enabled":
+        active = feedback.groupIsEnabled(action);
+        color = active ? action.feedbackColor : action.feedbackInactiveColor;
         break;
-      }
-      active = feedback.actionIsActive(action);
-      color = active ? action.feedbackColor : null;
-      break;
-    case "ross-swp08.select-source":
-    case "blackmagic-videohub.select-source":
-    case "aja-kumo.select-source":
-    case "ross-swp08.take":
-    case "blackmagic-videohub.take":
-    case "aja-kumo.take":
-      active = feedback.actionIsActive(action);
-      color = active ? action.feedbackColor : null;
-      break;
-    case "ross-swp08.direct-route":
-    case "blackmagic-videohub.direct-route":
-    case "aja-kumo.direct-route":
-      active =
-        byId
-          .get(action.connectionId)
-          ?.routes.routes.get(action.destination)
-          ?.get(
-            action.type === "ross-swp08.direct-route"
-              ? (action.levels[0] ?? 1)
-              : 1,
-          ) === action.source;
-      color = active ? action.feedbackColor : null;
-      break;
-  }
-  if (
-    feedback.actionIsStaged(action) &&
-    (color === null || ("destinations" in action && action.destinations))
-  )
-    color = "#FFC654";
-  return {
-    state: active ? "active" : "inactive",
-    observedAt: new Date().toISOString(),
-    appearance: { backgroundColor: color, cells },
+      case "ross-swp08.select-destination":
+      case "blackmagic-videohub.select-destination":
+      case "aja-kumo.select-destination":
+        if (action.destinations) {
+          const selected = feedback.selectedDestination(action),
+            index =
+              selected === null ? -1 : action.destinations.indexOf(selected);
+          active = index >= 0;
+          color = active
+            ? (action.feedbackColors?.[index] ?? action.feedbackColor)
+            : null;
+          break;
+        }
+        active = feedback.selectedDestination(action) === action.destination;
+        color = active ? action.feedbackColor : null;
+        break;
+      case "ross-swp08.select-source":
+      case "blackmagic-videohub.select-source":
+      case "aja-kumo.select-source":
+      case "ross-swp08.take":
+      case "blackmagic-videohub.take":
+      case "aja-kumo.take":
+        active = feedback.actionIsActive(action);
+        color = active ? action.feedbackColor : null;
+        break;
+      case "ross-swp08.direct-route":
+      case "blackmagic-videohub.direct-route":
+      case "aja-kumo.direct-route":
+        active =
+          byId
+            .get(action.connectionId)
+            ?.routes.routes.get(action.destination)
+            ?.get(
+              action.type === "ross-swp08.direct-route"
+                ? (action.levels[0] ?? 1)
+                : 1,
+            ) === action.source;
+        color = active ? action.feedbackColor : null;
+        break;
+    }
+    if (
+      feedback.actionIsStaged(action) &&
+      (color === null || ("destinations" in action && action.destinations))
+    )
+      color = "#FFC654";
+    if (cells.actionValue) cells.actionValue = { ...cells.actionValue, color };
+    return {
+      state: active ? "active" : "inactive",
+      observedAt,
+      appearance: { backgroundColor: color, cells },
+    };
   };
 }

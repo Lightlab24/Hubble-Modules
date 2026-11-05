@@ -517,6 +517,25 @@ describe('RossUltrixOgpConnectionManager', () => {
     })
   })
 
+  it('skips a cancelled command still waiting behind a route and accepts the next one', async () => {
+    const { client, manager } = await readyManager()
+    const gate = deferred<void>()
+    client.setCrosspoint.mockImplementationOnce(() => gate.promise)
+    const first = manager.directRoute({ connectionId: CONNECTION_ID, source: 21, destination: 9, levels: [1] })
+    const cancellation = new AbortController()
+    const queued = manager.submitDirectRouteTracked({ connectionId: CONNECTION_ID, source: 43, destination: 7, levels: [1], signal: cancellation.signal })
+    const reason = new Error('Operator cancelled queued route')
+    const skipped = expect(queued.settled).rejects.toBe(reason)
+    await vi.waitFor(() => expect(client.setCrosspoint).toHaveBeenCalledOnce())
+    cancellation.abort(reason)
+    gate.resolve(undefined)
+    await Promise.all([first, skipped])
+    expect(client.setCrosspoint).toHaveBeenCalledOnce()
+    expect(manager.snapshots()[0]?.lastError).toBeNull()
+    await manager.directRoute({ connectionId: CONNECTION_ID, source: 43, destination: 7, levels: [1] })
+    expect(client.setCrosspoint).toHaveBeenCalledTimes(2)
+  })
+
   it('keeps submitted routes pending through confirmation and propagates a late rejection', async () => {
     const { client, manager } = await readyManager()
     manager.selectDestination(CONNECTION_ID, 9)

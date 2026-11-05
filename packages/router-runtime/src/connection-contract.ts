@@ -53,6 +53,7 @@ export interface RouterDirectRouteInput {
   readonly source: number
   readonly destination: number
   readonly levels?: readonly number[]
+  readonly signal?: AbortSignal
 }
 
 export interface RouterDirectRouteSubmission {

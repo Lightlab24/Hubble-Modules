@@ -17,6 +17,12 @@ import {
   RouterGroupDocumentSchema,
 } from "../src/group-document.js";
 import type { RossRouteGroupConnectionManager } from "../src/group-runtime.js";
+import {
+  routerMatrixAction,
+  routerMatrixDestination,
+  createRouterMatrixFeedback,
+} from "../src/matrix.js";
+import type { RouterActionDefinition } from "../src/actions.js";
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -171,6 +177,100 @@ async function fixture() {
     },
   };
 }
+
+it.each([
+  "ross-ultrix-ogp",
+  "blackmagic-videohub",
+  "aja-kumo",
+  "evertz-quartz",
+] as const)(
+  "%s selects and highlights the first accepted destination without routing",
+  async (type) => {
+    const f = await fixture();
+    const scope = f.action();
+    await f.controller.edit(
+      scope.moduleConnectionId,
+      (value) => ({ ...value, automaticTake: true }),
+      new AbortController().signal,
+    );
+    const fields = (actionValue: string) => ({
+      contextId: scope.moduleConnectionId,
+      actionId: "destination-row",
+      actionColumnId: randomUUID(),
+      values: {
+        actionType: "select-destination",
+        actionValue,
+        drivesTally: true,
+        feedbackColor: "#123456",
+      },
+    });
+    const column = fields("8");
+    const observe = (value: string) => {
+      const row = routerMatrixDestination(type, {
+        ...column,
+        values: { ...column.values, actionValue: value },
+      });
+      return f.controller.observeMatrixDestinations(row ? [row] : []);
+    };
+    const color = (value: string) => {
+      const mapped = routerMatrixAction(
+        type,
+        {
+          ...column,
+          values: { ...column.values, actionValue: value },
+        },
+        {},
+      );
+      return createRouterMatrixFeedback(
+        f.scope.workspaceId,
+        f.controller,
+        [],
+      )({
+        ...mapped.fields,
+        type: mapped.id,
+        connectionId: f.scope.connectionId,
+        enabled: true,
+      } as RouterActionDefinition).appearance?.cells?.actionValue?.color;
+    };
+    await observe("8");
+    expect(color("8")).toBe("#123456");
+    await observe("5, 8");
+    expect(color("5, 8")).toBe("#FF0000");
+    expect(f.manager.submitDirectRouteTracked).not.toHaveBeenCalled();
+    await f.controller.dispatch("cycleDestination", {
+      ...scope,
+      destinations: [5, 8],
+      step: 1,
+      wrap: true,
+    });
+    await observe("5, 8");
+    expect(color("5, 8")).toBe("#0000FF");
+    await observe("8, 5");
+    await observe("6");
+    expect(color("6")).toBe("#123456");
+    expect(f.manager.submitDirectRouteTracked).not.toHaveBeenCalled();
+    await f.controller.dispatch("selectSource", {
+      ...scope,
+      source: 3,
+      levels: [1],
+    });
+    expect(f.manager.submitDirectRouteTracked).toHaveBeenCalledExactlyOnceWith({
+      connectionId: f.scope.connectionId,
+      source: 3,
+      destination: 6,
+      levels: [1],
+    });
+    await observe("");
+    await expect(
+      f.controller.dispatch("selectSource", {
+        ...scope,
+        source: 4,
+        levels: [1],
+      }),
+    ).rejects.toThrow(/destination is not configured/);
+    expect(f.manager.submitDirectRouteTracked).toHaveBeenCalledTimes(1);
+  },
+);
 
 it("moves a selected destination through first/last group edits and restores it after restart without a device command", async () => {
   const f = await fixture(),

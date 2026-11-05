@@ -408,6 +408,7 @@ export class MultiLevelRouterConnectionManager implements RouterConnectionManage
       input.source,
       input.destination,
       routeLevels(entry.definition, input.levels),
+      input.signal,
     )
   }
 
@@ -423,6 +424,7 @@ export class MultiLevelRouterConnectionManager implements RouterConnectionManage
       input.source,
       input.destination,
       routeLevels(entry.definition, input.levels),
+      input.signal,
     )
     const submissionSequence = this.#nextTrackedDirectRouteSubmissionSequence
     this.#nextTrackedDirectRouteSubmissionSequence += 1
@@ -661,6 +663,7 @@ export class MultiLevelRouterConnectionManager implements RouterConnectionManage
     source: number,
     destination: number,
     levels: readonly number[],
+    signal?: AbortSignal,
   ): Promise<void> {
     return queueLegacyRoute(
       this.#multiLevelCommandsContext,
@@ -669,6 +672,7 @@ export class MultiLevelRouterConnectionManager implements RouterConnectionManage
       source,
       destination,
       levels,
+      signal,
     )
   }
 
