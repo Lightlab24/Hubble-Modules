@@ -13,7 +13,7 @@ export async function sdkAliases() {
   const base = path.join(import.meta.dirname, "author-sdk");
   if (!(await exists(base))) return {};
   return Object.fromEntries(
-    ["index", "authoring", "testing", "frontend", "spreadsheet-controls", "helper-runtime"].map(
+    ["index", "authoring", "testing", "frontend", "spreadsheet-controls", "slider-controls", "helper-runtime"].map(
       (name) => [
         name === "index" ? "@hubble/module-sdk" : `@hubble/module-sdk/${name}`,
         path.join(base, name + ".mjs"),

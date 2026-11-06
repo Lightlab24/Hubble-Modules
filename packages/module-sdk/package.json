@@ -11,6 +11,10 @@
       "types": "./dist/spreadsheet-controls.d.ts",
       "import": "./dist/spreadsheet-controls.js"
     },
+    "./slider-controls": {
+      "types": "./dist/slider-controls.d.ts",
+      "import": "./dist/slider-controls.js"
+    },
     "./frontend": {
       "types": "./dist/frontend.d.ts",
       "import": "./dist/frontend.js"

@@ -103,6 +103,7 @@ import {
   ModuleFieldsSchema as FieldsSchema,
   moduleFieldsRequireV2,
   moduleFieldsAllowEmptyNumbers,
+  moduleFieldsUseSliders,
   moduleFieldDefault,
   moduleFieldsContainSecrets,
   validateModuleFields,
@@ -761,6 +762,26 @@ export const ModuleManifestSchema = z
         message: "Optional empty numbers require module-optional-numbers-v1",
       });
     if (
+      fieldSets.some(moduleFieldsUseSliders) &&
+      !features.includes("module-sliders-v1")
+    )
+      ctx.addIssue({
+        code: "custom",
+        path: ["host"],
+        message: "Slider fields require module-sliders-v1",
+      });
+    // Rejected rather than ignored: these are Matrix cells, which edit as typed numbers.
+    if (
+      [...manifest.actions, ...manifest.feedback].some(({ fields }) =>
+        moduleFieldsUseSliders(fields),
+      )
+    )
+      ctx.addIssue({
+        code: "custom",
+        path: ["host"],
+        message: "Slider fields are not available in action or feedback fields",
+      });
+    if (
       fieldSets.some(moduleFieldsRequireV2) &&
       (!("requiredFeatures" in manifest.host) ||
         !manifest.host.requiredFeatures?.includes("module-fields-v2"))
@@ -886,6 +907,16 @@ export const ModuleManifestSchema = z
                   "Custom page entry must be a declared portable package file",
               });
           }
+          // Rejected rather than ignored: table cells would still edit as typed numbers.
+          if (
+            section.type === "table" &&
+            moduleFieldsUseSliders(section.columns)
+          )
+            ctx.addIssue({
+              code: "custom",
+              path,
+              message: "Slider fields are not available in table columns",
+            });
           if (
             section.type === "controls" &&
             (!("requiredFeatures" in manifest.host) ||

@@ -1,5 +1,10 @@
 # Hubble module developer kit
 
+The next developer kit adds `module-sliders-v1`: Hubble's shared slider, either as a
+`slider` option on a number field or mounted in a custom page with
+`@hubble/module-sdk/slider-controls`. Check for the feature in the actual host's
+`describe` response. See the sliders skill reference and `examples/custom-slider`.
+
 Developer kit **1.8.1-dev.4** adds optional spreadsheet controls requiring these
 capabilities from the actual host's `describe` response:
 

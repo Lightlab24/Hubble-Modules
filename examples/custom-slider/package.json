@@ -1,0 +1,16 @@
+{
+  "name": "hubble-custom-slider-example",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "hubble": {
+    "id": "example-custom-slider",
+    "name": "Custom slider example",
+    "assets": [
+      "ui/index.html"
+    ],
+    "frontend": {
+      "ui/app.js": "src/frontend.ts"
+    }
+  }
+}

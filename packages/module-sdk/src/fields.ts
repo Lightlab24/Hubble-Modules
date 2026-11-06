@@ -9,6 +9,12 @@ const Identifier = z
 export const ModuleShortcutEditorSchema = z.strictObject({
   modifiersField: Identifier,
 });
+/** Draws a number field as Hubble's shared slider. Steps below 1e-6 cannot snap reliably. */
+export const ModuleFieldSliderSchema = z.strictObject({
+  step: z.number().min(0.000001),
+  /** Printed directly after the value, so include any space: "%" or " dB". */
+  unit: z.string().max(16).optional(),
+});
 const Label = z.string().trim().min(1).max(160);
 export const ModuleChoiceSchema = z.strictObject({
   id: z.string().max(160),
@@ -63,6 +69,7 @@ export type ModuleField = BaseField &
         min?: number | undefined;
         max?: number | undefined;
         integer?: boolean | undefined;
+        slider?: z.infer<typeof ModuleFieldSliderSchema> | undefined;
       }
     | { type: "boolean"; default: boolean }
     | ({ type: "choice"; default: string } & Choices)
@@ -112,6 +119,7 @@ function fieldSchema(depth: number): z.ZodType<ModuleField> {
         min: z.number().optional(),
         max: z.number().optional(),
         integer: z.boolean().optional(),
+        slider: ModuleFieldSliderSchema.optional(),
       }),
       z.strictObject({
         ...Base,
@@ -219,6 +227,10 @@ export const ModuleFieldsSchema = z
           problem("Number default/bounds conflict");
         if (field.type === "number" && field.default === null && field.required)
           problem("Empty numeric defaults require an optional field");
+        if (field.type === "number" && field.slider) {
+          const issue = moduleSliderFieldIssue(field, field.slider);
+          if (issue) problem(issue);
+        }
         if (field.type === "choice" || field.type === "multi-choice") {
           const choices = new Set(field.choices.map((choice) => choice.id));
           if (choices.size !== field.choices.length)
@@ -261,6 +273,47 @@ export const ModuleFieldsSchema = z
     };
     visit(fields, 0, []);
   });
+/** Allow for binary rounding, as in (200 - 10) / 0.1 = 1900.0000000000002. */
+function onSliderGrid(value: number, min: number, step: number): boolean {
+  const steps = (value - min) / step;
+  return (
+    Math.abs(steps - Math.round(steps)) <= 1e-9 * Math.max(1, Math.abs(steps))
+  );
+}
+function moduleSliderFieldIssue(
+  field: Extract<ModuleField, { type: "number" }>,
+  slider: z.infer<typeof ModuleFieldSliderSchema>,
+): string | undefined {
+  const { min, max, default: initial } = field;
+  if (min === undefined || max === undefined || min >= max)
+    return "Slider fields need a min below their max";
+  if (initial === null) return "Slider fields need a numeric default";
+  if (
+    field.integer &&
+    !(Number.isInteger(min) && Number.isInteger(slider.step))
+  )
+    return "Integer sliders need a whole number min and step";
+  // A slider only stops on min + n * step, so a max or default between stops is unreachable.
+  if (
+    !onSliderGrid(max, min, slider.step) ||
+    !onSliderGrid(initial, min, slider.step)
+  )
+    return "Slider max and default must be whole steps from min";
+  return undefined;
+}
+export function moduleFieldsUseSliders(
+  fields: readonly ModuleField[],
+): boolean {
+  return fields.some((field) =>
+    field.type === "number"
+      ? field.slider !== undefined
+      : field.type === "object"
+        ? moduleFieldsUseSliders(field.fields)
+        : field.type === "array"
+          ? moduleFieldsUseSliders([field.item])
+          : false,
+  );
+}
 export function moduleFieldVisible(
   field: ModuleField,
   values: ModuleValues,
