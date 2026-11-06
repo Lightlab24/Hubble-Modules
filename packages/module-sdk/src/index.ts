@@ -174,6 +174,8 @@ export const ModulePageTableSchema = z.strictObject({
 export const ModulePageSchema = z.strictObject({
   /** Full-page is a single package-owned frontend; omission retains section layout. */
   layout: z.enum(["sections", "full-page"]).optional(),
+  /** A module-settings page renders in its connection's settings instead of the sidebar. */
+  placement: z.enum(["sidebar", "module-settings"]).optional(),
   navigation: z
     .strictObject({
       replaces: z.enum(["tally-switch", "ccc", "router"]).optional(),
@@ -880,6 +882,27 @@ export const ModuleManifestSchema = z
             path: ["pages", pageIndex, "navigation"],
             message: "Page composition requires module-page-navigation-v1",
           });
+        if (page.placement !== undefined) {
+          if (!features.includes("module-settings-pages-v1"))
+            ctx.addIssue({
+              code: "custom",
+              path: ["pages", pageIndex, "placement"],
+              message: "Page placement requires module-settings-pages-v1",
+            });
+          if (
+            page.placement === "module-settings" &&
+            (page.layout !== undefined ||
+              page.navigation !== undefined ||
+              manifest.instanceScope === "workspace" ||
+              page.sections.some((section) => section.type !== "custom"))
+          )
+            ctx.addIssue({
+              code: "custom",
+              path: ["pages", pageIndex, "placement"],
+              message:
+                "A module-settings page belongs to a connection and contains only custom frontend sections without layout or navigation",
+            });
+        }
         if (pageIds.has(page.id))
           ctx.addIssue({
             code: "custom",

@@ -55,6 +55,32 @@ change `sandbox="allow-scripts"`, the scoped MessagePort bridge, session tokens,
 heartbeat, tab cleanup or package-generation invalidation. Keep browser assets
 and all integration-specific UI inside the package.
 
+## Show a frontend in module settings
+
+Add `placement: "module-settings"` to a page to show its custom section with the
+connection's settings instead of in the sidebar. Require
+`module-settings-pages-v1` in addition to the normal custom page features; a host
+without it refuses the package. Such a page belongs to a connection, contains only `custom` sections,
+and cannot declare `layout` or `navigation`. Omit `placement`, or use `"sidebar"`,
+for a normal sidebar page.
+
+```ts
+{
+  id: 'routing-settings', label: 'Routing', placement: 'module-settings',
+  sections: [{
+    type: 'custom', id: 'routing-settings', label: 'Routing',
+    entry: 'ui/settings.html', height: 72,
+    commands: [{ id: 'read', label: 'Read' }, { id: 'write', label: 'Write' }],
+  }],
+}
+```
+
+Declare `service.page.<pageId>` as usual. Use this when a control's value lives in
+a module document, so a settings field would create a second saved copy. A
+frontend saves on its own schedule rather than with **Save Changes**; say so in
+its text. It uses the same sandbox and scoped bridge as any other custom page.
+`height` can be as low as 48 for a single settings row.
+
 ## Declare and build
 
 Add a `custom` section to a normal page. Require both `module-pages-v1` and

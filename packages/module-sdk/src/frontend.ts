@@ -11,7 +11,7 @@ export const ModuleFrontendSectionSchema = z
       .string()
       .max(240)
       .regex(/^ui\/(?:[A-Za-z0-9_][A-Za-z0-9_.-]*\/)*[A-Za-z0-9_][A-Za-z0-9_.-]*\.html$/u),
-    height: z.int().min(160).max(1600).default(560),
+    height: z.int().min(48).max(1600).default(560),
     commands: z
       .array(
         z.strictObject({
