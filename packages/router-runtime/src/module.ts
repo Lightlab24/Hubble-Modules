@@ -20,6 +20,7 @@ import { RouterPageRuntime } from "./page-runtime.js";
 import { localRouterManager } from "./local-connection-manager.js";
 import { connectionView } from "./frontend/connection-view.js";
 import { groupPage, editRouterGroups } from "./group-page.js";
+import { createRoutingStatePublisher } from "./routing-state-publisher.js";
 import {
   createModuleDocumentClient,
   ModuleDocumentConflictError,
@@ -126,12 +127,15 @@ export function routerModule(
           ? new RouterPageRuntime(manager, context.scope.connectionId)
           : null;
       const documents = createModuleDocumentClient(context.services!);
+      // Frontends follow this revision, so every open view shows saved routing settings.
+      const statePublisher = createRoutingStatePublisher(context.publishState);
       const groupController = new RouterGroupController(
         context,
         manager,
         () => {
           emitFeedback();
           const state = groupController.snapshot();
+          statePublisher.setRevision(state.document?.revision ?? null);
           pageRuntime?.notifyGroups([
             state.document?.revision,
             state.contexts.map((item) => [item.reference.contextId, item.name]),
@@ -424,7 +428,11 @@ export function routerModule(
             "Router adapter completed at its existing command submission boundary",
         },
         schemas,
-      ).createInstance({ ...context, settings: driverSettings });
+      ).createInstance({
+        ...context,
+        settings: driverSettings,
+        publishState: statePublisher.publish,
+      });
       return {
         ...legacy,
         async start() {
@@ -539,6 +547,39 @@ export function routerModule(
           feedbackPublisher.subscribe(matrix);
         },
         async call(method, value, execution) {
+          const routingSettingsCall = async (
+            commandId: string,
+            input: ModuleJsonValue,
+          ) => {
+            if (commandId === "groups") {
+              await groupController.refresh();
+              return json(
+                groupPage(groupController, z.uuid().nullable().parse(input)),
+              );
+            }
+            if (commandId === "edit-group")
+              return json(
+                await editRouterGroups(
+                  groupController,
+                  input,
+                  execution.signal,
+                ),
+              );
+            throw new Error("Unknown routing settings command");
+          };
+          if (method === "page.routing-settings") {
+            const input = z
+              .strictObject({
+                sectionId: z.literal("routing-settings"),
+                commandId: z.string(),
+                value: z.json(),
+              })
+              .parse(value);
+            return routingSettingsCall(
+              input.commandId,
+              input.value as ModuleJsonValue,
+            );
+          }
           if (method === "page.routing") {
             const input = z
               .strictObject({
@@ -594,20 +635,10 @@ export function routerModule(
                 throw new Error("Router zoom changed; try again");
               }
               case "groups":
-                await groupController.refresh();
-                return json(
-                  groupPage(
-                    groupController,
-                    z.uuid().nullable().parse(input.value),
-                  ),
-                );
               case "edit-group":
-                return json(
-                  await editRouterGroups(
-                    groupController,
-                    input.value,
-                    execution.signal,
-                  ),
+                return routingSettingsCall(
+                  input.commandId,
+                  input.value as ModuleJsonValue,
                 );
               default:
                 return pageRuntime.call(

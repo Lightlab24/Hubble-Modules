@@ -7,7 +7,8 @@
     "id": "hubble-ross-ultrix-ogp",
     "name": "Ross Ultrix OGP",
     "assets": [
-      "ui/index.html"
+      "ui/index.html",
+      "ui/settings.html"
     ],
     "frontend": {
       "ui/app.js": "src/frontend.ts"

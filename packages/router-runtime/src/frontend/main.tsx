@@ -5,6 +5,7 @@ import { RouterView } from "./RouterView.js";
 import { useRouterState } from "./use-router-state.js";
 import { createRouterPageApi, type PageBridge } from "./page-client.js";
 import { GroupPanel } from "./GroupPanel.js";
+import { AutomaticTakeSettings } from "./AutomaticTakeSettings.js";
 import { initializeRouterZoom } from "./zoom-storage.js";
 import { uuid } from "./uuid.js";
 import type { ConnectionView } from "./connection-view.js";
@@ -75,6 +76,19 @@ function RouterPage({
 async function start() {
   const element = document.getElementById("root")!;
   const bridge = await connectModuleFrontend(window);
+  if (document.documentElement.dataset.view === "settings") {
+    const root = createRoot(element);
+    root.render(<AutomaticTakeSettings bridge={bridge} />);
+    window.addEventListener(
+      "pagehide",
+      () => {
+        root.unmount();
+        bridge.dispose();
+      },
+      { once: true },
+    );
+    return;
+  }
   const settings = (await bridge.call("settings")) as unknown as {
     connection: ConnectionView;
     zoom: number;

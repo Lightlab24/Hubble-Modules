@@ -160,3 +160,103 @@ p {
   background: #512820;
   box-shadow: 0 4px 16px #0008;
 }
+html[data-view="settings"],
+html[data-view="settings"] body {
+  background: transparent;
+}
+.automatic-take-settings {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  height: 100%;
+  overflow: auto;
+  font-size: 12px;
+}
+.automatic-take-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 10px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--chrome);
+}
+.automatic-take-row > div {
+  display: grid;
+  gap: 3px;
+}
+.automatic-take-row strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.automatic-take-row > div > span {
+  color: var(--secondary);
+  line-height: 1.45;
+}
+.automatic-take-row > button {
+  display: grid;
+  min-width: 42px;
+  flex: 0 0 auto;
+  justify-items: center;
+  gap: 4px;
+  padding: 2px;
+  border: 0;
+  color: var(--secondary);
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.automatic-take-row > button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.automatic-take-track {
+  position: relative;
+  width: 30px;
+  height: 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--surface-selected);
+  transition:
+    border-color 100ms ease,
+    background-color 100ms ease;
+}
+.automatic-take-track > span {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #a4a7ad;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 45%);
+  transition:
+    background-color 100ms ease,
+    transform 100ms ease;
+}
+.automatic-take-row > button[aria-checked="true"] {
+  color: #8fcdbb;
+}
+.automatic-take-row > button[aria-checked="true"] .automatic-take-track {
+  border-color: #397f6c;
+  background: #24594c;
+}
+.automatic-take-row > button[aria-checked="true"] .automatic-take-track > span {
+  background: #e8fff7;
+  transform: translateX(14px);
+}
+.automatic-take-failure {
+  position: absolute;
+  z-index: 1;
+  top: 4px;
+  right: 72px;
+  max-width: 70%;
+  padding: 6px 10px;
+  border-radius: 6px;
+  color: var(--text);
+  background: #512820;
+  box-shadow: 0 4px 16px #0008;
+}

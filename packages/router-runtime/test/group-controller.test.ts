@@ -30,7 +30,7 @@ afterEach(async () => {
   cleanups.length = 0;
 });
 
-async function fixture() {
+async function fixture({ savedManualChoice = true } = {}) {
   const runtimeDirectory = await mkdtemp(
     path.join(tmpdir(), "router-group-controller-"),
   );
@@ -62,7 +62,17 @@ async function fixture() {
     id: "routing-groups",
     version: 1,
     revision: null,
-    value: { contexts: [] },
+    // Most scenarios stage selections, so they start from a saved manual choice.
+    value: {
+      contexts: savedManualChoice
+        ? contexts.map(({ reference }) => ({
+            reference,
+            automaticTake: false,
+            groups: [],
+            groupAliases: {},
+          }))
+        : [],
+    },
     canUndo: false,
     canRedo: false,
   };
@@ -508,6 +518,60 @@ it("rejects ordinary deleted groups and removes a deleted alias without discardi
   expect(f.controller.runtime.snapshots()[0]).toMatchObject({
     selectedDestination: 17,
   });
+});
+
+it("routes a selected source by default when no choice has been saved", async () => {
+  const f = await fixture({ savedManualChoice: false });
+  // Destination first: the destination is kept and the press explains what is missing.
+  await expect(
+    f.controller.dispatch("selectDestination", {
+      ...f.action(),
+      destination: 9,
+    }),
+  ).rejects.toThrow("selected source is not configured");
+  expect(f.manager.submitDirectRouteTracked).not.toHaveBeenCalled();
+
+  await f.controller.dispatch("selectSource", {
+    ...f.action(),
+    source: 2,
+    levels: [1],
+  });
+  expect(f.manager.submitDirectRouteTracked).toHaveBeenCalledTimes(1);
+  expect(f.manager.submitDirectRouteTracked).toHaveBeenCalledWith(
+    expect.objectContaining({ source: 2, destination: 9, levels: [1] }),
+  );
+});
+
+it("keeps staging for a saved manual choice until Automatic Take is turned on", async () => {
+  const f = await fixture();
+  await f.controller.dispatch("selectDestination", {
+    ...f.action(),
+    destination: 9,
+  });
+  await f.controller.dispatch("selectSource", {
+    ...f.action(),
+    source: 2,
+    levels: [1],
+  });
+  expect(f.manager.submitDirectRouteTracked).not.toHaveBeenCalled();
+
+  await f.controller.edit(
+    f.action().moduleConnectionId,
+    (settings) => ({ ...settings, automaticTake: true }),
+    new AbortController().signal,
+  );
+  // Turning the setting on must not send the stage by itself.
+  expect(f.manager.submitDirectRouteTracked).not.toHaveBeenCalled();
+
+  await f.controller.dispatch("selectSource", {
+    ...f.action(),
+    source: 3,
+    levels: [1],
+  });
+  expect(f.manager.submitDirectRouteTracked).toHaveBeenCalledTimes(1);
+  expect(f.manager.submitDirectRouteTracked).toHaveBeenCalledWith(
+    expect.objectContaining({ source: 3, destination: 9 }),
+  );
 });
 
 it("submits successive routes without waiting for another host settings read", async () => {

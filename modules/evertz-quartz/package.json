@@ -7,7 +7,8 @@
     "id": "hubble-evertz-quartz",
     "name": "Evertz Quartz",
     "assets": [
-      "ui/index.html"
+      "ui/index.html",
+      "ui/settings.html"
     ],
     "frontend": {
       "ui/app.js": "src/frontend.ts"

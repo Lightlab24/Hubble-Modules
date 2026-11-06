@@ -17,7 +17,7 @@ export function GroupPanel({
     contexts: [],
     contextId: null,
     groups: [],
-    automaticTake: false,
+    automaticTake: true,
   });
   const [selected, setSelected] = useState<string | null>(null);
   const queues = useRef(new Map<string, GroupEditQueue>());
@@ -75,7 +75,7 @@ export function GroupPanel({
                 contexts: page.contexts,
                 contextId: id,
                 groups: [],
-                automaticTake: false,
+                automaticTake: true,
               },
             );
           }}

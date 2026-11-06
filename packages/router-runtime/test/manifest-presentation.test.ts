@@ -19,7 +19,7 @@ it.each([
       name: type,
       version: "1.1.3",
       entry: "module.mjs",
-      files: ["module.mjs", "ui/index.html", "ui/app.js"],
+      files: ["module.mjs", "ui/index.html", "ui/settings.html", "ui/app.js"],
     });
     const features =
       "minimumVersion" in manifest.host
@@ -49,6 +49,28 @@ it.each([
           features: features.filter((item) => item !== feature),
         }),
       ).toContain(feature);
+    // The connection settings screen shows the same saved Automatic Take as the Router page.
+    expect(features).toContain("module-settings-pages-v1");
+    expect(manifest.capabilities).toContain("service.page.routing-settings");
+    const settingsPage = manifest.pages?.find(
+      (page) => page.placement === "module-settings",
+    );
+    expect(settingsPage?.sections).toEqual([
+      expect.objectContaining({
+        type: "custom",
+        id: "routing-settings",
+        entry: "ui/settings.html",
+      }),
+    ]);
+    expect(
+      moduleCompatibility(manifest, {
+        version: "2.0.15",
+        apiVersions: [1],
+        features: features.filter(
+          (item) => item !== "module-settings-pages-v1",
+        ),
+      }),
+    ).toContain("module-settings-pages-v1");
     expect(manifest.matrix?.legacy).toMatchObject({
       adapter: type,
       connectionType: type,

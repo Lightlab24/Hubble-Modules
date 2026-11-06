@@ -47,7 +47,7 @@ export function groupPage(
       name: item.name,
     })),
     contextId: selected?.reference.contextId ?? null,
-    automaticTake: selected?.settings.automaticTake ?? false,
+    automaticTake: selected?.settings.automaticTake ?? true,
     groups:
       selected?.settings.groups.map((item) => ({
         id: item.id,

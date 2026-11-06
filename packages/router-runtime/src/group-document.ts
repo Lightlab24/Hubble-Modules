@@ -19,7 +19,7 @@ const group = z.object({ id: z.uuid(), name }).catchall(z.json());
 export const RouterContextSettingsSchema = z
   .object({
     reference: ModuleContextReferenceSchema,
-    automaticTake: z.boolean().default(false),
+    automaticTake: z.boolean().default(true),
     groups: z.array(group).max(64).default([]),
     // Compatibility aliases preserve first/last-group behavior without rewriting other documents.
     groupAliases: z.record(z.string(), z.uuid().nullable()).default({}),

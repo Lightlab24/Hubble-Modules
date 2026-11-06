@@ -58,7 +58,41 @@ it("imports stable aliases and group IDs without importing another device or cha
     reference: { ...value.contexts[0]!.reference, contextId: randomUUID() },
     name: "New operator",
   });
-  expect(next).toMatchObject({ automaticTake: false, groups: [] });
+  expect(next).toMatchObject({ automaticTake: true, groups: [] });
+});
+it("defaults a new routing context to Automatic Take while keeping every saved choice", () => {
+  const { source } = fixture();
+  const saved = migrateRouterGroups({
+    id: "routing-groups",
+    fromVersion: 0,
+    toVersion: 1,
+    value: {
+      ...source,
+      contexts: [{ ...source.contexts[0], automaticTake: false }],
+    },
+  });
+  expect(saved.contexts[0]?.automaticTake).toBe(false);
+  expect(
+    contextSettings(saved, {
+      reference: saved.contexts[0]!.reference,
+      name: "Saved operator",
+    }).automaticTake,
+  ).toBe(false);
+  // An edit to another field must not turn a saved choice back on.
+  expect(
+    normalizeRouterGroups(saved, {
+      contexts: [
+        { ...saved.contexts[0], groups: [{ id: randomUUID(), name: "Video" }] },
+      ],
+    }).contexts[0]?.automaticTake,
+  ).toBe(false);
+  // A context with no saved entry uses the current default.
+  expect(
+    contextSettings(
+      { contexts: [] },
+      { reference: saved.contexts[0]!.reference, name: "New operator" },
+    ).automaticTake,
+  ).toBe(true);
 });
 it("preserves blank/first/last group references and leaves deleted intermediate groups invalid", () => {
   const { value } = fixture(),
