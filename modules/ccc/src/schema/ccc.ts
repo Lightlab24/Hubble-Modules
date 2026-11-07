@@ -11,7 +11,9 @@ export function normalizeCccIp(value: string): string {
     .trim()
     .replace(/^\[|\]$/gu, "")
     .toLowerCase();
-  if (z.ipv6().safeParse(ip).success)
+  // Only IPv6 contains a colon. Testing every IPv4 row with the IPv6 parser builds and
+  // discards a validation error for each row, each time camera state is read.
+  if (ip.includes(":") && z.ipv6().safeParse(ip).success)
     return new URL(`http://[${ip}]/`).hostname.slice(1, -1);
   return ip;
 }

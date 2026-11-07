@@ -95,6 +95,17 @@ export function createCccModule(
         boolean | null | undefined
       >();
       let unsubscribe = () => {};
+      const saveCheckpoint = () => {
+        const next = controller.recording.checkpoint();
+        const json = JSON.stringify(next);
+        if (json === savedCheckpoint) return;
+        try {
+          checkpoint?.write(next);
+          savedCheckpoint = json;
+        } catch {
+          /* A failed save can't interrupt control. The next change tries again. */
+        }
+      };
       const emit = () => {
         if (!context.publishEvent)
           throw new Error("CCC observation support unavailable");
@@ -208,14 +219,12 @@ export function createCccModule(
             if (stopped) return;
             scheduled ??= setImmediate(() => {
               scheduled = undefined;
-              if (!stopped) emit();
+              if (stopped) return;
+              emit();
+              // Reading state can settle a camera's uncertainty, with no later change to save it.
+              saveCheckpoint();
             });
-            const next = controller.recording.checkpoint();
-            const json = JSON.stringify(next);
-            if (json !== savedCheckpoint) {
-              checkpoint?.write(next);
-              savedCheckpoint = json;
-            }
+            saveCheckpoint();
           });
           await controller.activate(workspaceId);
           emit();

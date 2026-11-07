@@ -1,6 +1,6 @@
 import { documentServices } from "./document-services.js";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setImmediate as nextTurn } from "node:timers/promises";
@@ -11,6 +11,7 @@ import { createCccModule } from "../src/module.js";
 import { CccController } from "../src/ccc-controller.js";
 import { RcpSession } from "../src/rcp-session.js";
 import { type CccConfig } from "../src/config.js";
+import { recordingCheckpoint } from "../src/recording-checkpoint.js";
 import { broker, closeBrokers } from "./loopback-broker.js";
 
 const cleanups: (() => Promise<unknown>)[] = [];
@@ -107,6 +108,7 @@ async function harness(beforeWrite?: () => Promise<void>) {
     execution,
     observations,
     cameraState,
+    directory,
   };
 }
 
@@ -166,6 +168,58 @@ it("suppresses unchanged snapshots and status across separate controller notific
     feedback.mock.calls.length,
   ]).toEqual(initial);
   expect(status.mock.lastCall?.[0].observedAt).toBe(lastObservedAt);
+});
+
+it("does no camera work on polls that find the same peers", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  const h = await harness();
+  await nextTurn();
+  const state = vi.spyOn(h.controller, "state");
+  const notified = vi.fn();
+  const unsubscribe = h.controller.subscribe(notified);
+  for (let index = 0; index < 5; index += 1) {
+    await vi.advanceTimersByTimeAsync(1000);
+    await nextTurn();
+  }
+  unsubscribe();
+  expect(notified).not.toHaveBeenCalled();
+  expect(state).not.toHaveBeenCalled();
+});
+
+it("saves settled camera uncertainty straight away rather than at the next change", async () => {
+  const h = await harness();
+  h.network.controls.feedback = false;
+  await h.instance.execute("roll-enabled-cameras", {}, h.execution());
+  const uncertain = () =>
+    (recordingCheckpoint(h.directory).checkpoint as { uncertain: string[] })
+      .uncertain;
+  await expect.poll(uncertain).toHaveLength(1);
+  // Live status settles it, and nothing happens afterwards to prompt a save.
+  h.network.send("unit/a/camhead/status/volatile/recording", "1");
+  await expect.poll(uncertain, { timeout: 500 }).toEqual([]);
+});
+
+it("keeps running when uncertainty can't be saved, and saves at the next change", async () => {
+  const h = await harness();
+  h.network.controls.feedback = false;
+  await h.instance.execute("roll-enabled-cameras", {}, h.execution());
+  const uncertain = () =>
+    (recordingCheckpoint(h.directory).checkpoint as { uncertain: string[] })
+      .uncertain;
+  await expect.poll(uncertain).toHaveLength(1);
+
+  await chmod(h.directory, 0o500);
+  cleanups.push(() => chmod(h.directory, 0o700));
+  h.network.send("unit/a/camhead/status/volatile/recording", "1");
+  await expect
+    .poll(() => h.controller.state().rows[0]?.recording)
+    .toBe("recording");
+  await nextTurn();
+  expect(uncertain()).toHaveLength(1);
+
+  await chmod(h.directory, 0o700);
+  h.network.send("unit/a/camhead/status/persist/name", "Renamed");
+  await expect.poll(uncertain).toEqual([]);
 });
 
 it.each([false, true])(

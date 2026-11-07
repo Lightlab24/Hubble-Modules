@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
+import { normalizeCccIp } from "../src/config.js";
 import {
   cccDocumentConfig,
   migrateCccDocument,
@@ -111,4 +112,14 @@ it("keeps incomplete blank rows editable and accepts normalized IPv6 addresses",
     rcpIp: "",
     cameraNumber: null,
   });
+});
+
+it("normalizes addresses without putting IPv4 through the IPv6 parser", () => {
+  const url = vi.spyOn(globalThis, "URL");
+  expect(normalizeCccIp(" 192.0.2.2 ")).toBe("192.0.2.2");
+  expect(normalizeCccIp("")).toBe("");
+  expect(url).not.toHaveBeenCalled();
+  url.mockRestore();
+  expect(normalizeCccIp(" [2001:0DB8:0:0:0:0:0:1] ")).toBe("2001:db8::1");
+  expect(normalizeCccIp("not:an:address")).toBe("not:an:address");
 });

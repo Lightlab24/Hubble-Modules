@@ -24,14 +24,17 @@ export function observeRcpPeers(
   >();
   let stopped = false;
   let pending: Promise<void> | undefined;
+  let applied: string | undefined;
+  // Adopting consumers re-evaluates every camera, and most polls find nothing new.
   const apply = () => {
-    if (!stopped)
-      controller.configureConsumers(
-        [...entries.values()].flatMap((entry) =>
-          entry.definition ? [entry.definition] : [],
-        ),
-        true,
-      );
+    if (stopped) return;
+    const definitions = [...entries.values()].flatMap((entry) =>
+      entry.definition ? [entry.definition] : [],
+    );
+    const signature = JSON.stringify(definitions);
+    if (signature === applied) return;
+    controller.configureConsumers(definitions, true);
+    applied = signature;
   };
   const refresh = async () => {
     const peers = (await modules.discover()).filter(
