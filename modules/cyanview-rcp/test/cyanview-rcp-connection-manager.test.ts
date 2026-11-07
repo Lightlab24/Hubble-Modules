@@ -260,6 +260,9 @@ describe('CyanView RCP MQTT control', () => {
     await expect(connections.selectCamera(ID, 102, AbortSignal.abort())).rejects.toThrow(
       'cancelled',
     )
+    fake.send('unit/duplicate/camhead/status/persist/number', '102')
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    await expect(connections.selectCamera(ID, 102)).rejects.toThrow('More than one camera')
     expect(fake.commands).toEqual([])
   })
 
@@ -466,61 +469,13 @@ describe('CyanView RCP only switches cameras', () => {
 })
 
 describe('CyanView RCP recording commands', () => {
-  it('resolves a camera number independently of panel selection and publishes each toggle only once', async () => {
+  it('sends none when switching cameras', async () => {
     const fake = await broker()
     const { manager: connections } = manager(fake.port)
     await ready(connections)
-    await connections.recordCamera(ID, 102)
-    await connections.recordCamera(ID, 104)
-    await connections.recordGroupAll(ID)
-    expect(fake.commands).toEqual([
-      { topic: 'unit/camera-a/camhead/action/set/keyboard', value: 'RecToggle', header: 0x32 },
-      { topic: 'unit/camera-b/camhead/action/set/keyboard', value: 'RecToggle', header: 0x32 },
-      { topic: 'unit/All/camgroup/action/set/keyboard', value: 'RecToggle', header: 0x32 },
+    await connections.selectCamera(ID, 102)
+    expect(fake.commands.map(({ topic }) => topic)).toEqual([
+      'unit/RCP-1/rcp/action/set/active_camera_number',
     ])
-    expect(connections.snapshots()[0]?.activeCameraNumber).toBe(104)
-  })
-  it('rejects invalid, missing, ambiguous and cancelled camera targets without sending a toggle', async () => {
-    const fake = await broker()
-    const { manager: connections } = manager(fake.port)
-    await ready(connections)
-    for (const camera of [0, -1, 1.5, 1_000_000, NaN])
-      await expect(connections.recordCamera(ID, camera)).rejects.toMatchObject({
-        code: 'cyanview_invalid_request',
-      })
-    await expect(connections.recordCamera(ID, 103)).rejects.toMatchObject({
-      code: 'cyanview_camera_not_found',
-    })
-    await expect(connections.recordCamera('missing', 102)).rejects.toMatchObject({
-      code: 'cyanview_unconfigured',
-    })
-    await expect(connections.recordGroupAll('missing')).rejects.toMatchObject({
-      code: 'cyanview_unconfigured',
-    })
-    await expect(connections.recordCamera(ID, 102, AbortSignal.abort())).rejects.toThrow(
-      'cancelled',
-    )
-    await expect(connections.recordGroupAll(ID, AbortSignal.abort())).rejects.toThrow('cancelled')
-    fake.send('unit/duplicate/camhead/status/persist/number', '102')
-    await new Promise((resolve) => setTimeout(resolve, 150))
-    await expect(connections.recordCamera(ID, 102)).rejects.toThrow('More than one camera')
-    fake.send('unit/RCP-1/rcp_helper/status/volatile/control', 'offline')
-    await expect.poll(() => connections.snapshots()[0]?.phase).toBe('unavailable')
-    await expect(connections.recordGroupAll(ID)).rejects.toThrow('offline')
-    expect(fake.commands).toEqual([])
-  })
-  it('does not replay a recording toggle after lost acknowledgement and reconnect', async () => {
-    const fake = await broker({ ack: false })
-    const { manager: connections } = manager(fake.port)
-    await ready(connections)
-    const result = expect(connections.recordGroupAll(ID)).rejects.toMatchObject({
-      code: 'cyanview_unavailable',
-    })
-    await expect.poll(() => fake.commands.length).toBe(1)
-    fake.disconnect()
-    await result
-    await expect.poll(() => fake.connects.length, { timeout: 4000 }).toBe(2)
-    await ready(connections)
-    expect(fake.commands).toHaveLength(1)
   })
 })

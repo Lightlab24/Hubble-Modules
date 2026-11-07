@@ -8,7 +8,6 @@
   "cyanview-studio-connection-manager": "modules/cyanview-studio/src/cyanview-studio-connection-manager.ts",
   "cyanview-studio-action-executor": "modules/cyanview-studio/src/cyanview-studio-action-executor.ts",
   "cyanview-studio-http-client": "modules/cyanview-studio/src/cyanview-studio-http-client.ts",
-  "cyanview-rcp-action-executor": "modules/cyanview-rcp/src/cyanview-rcp-action-executor.ts",
   "livegrade-connection-manager": "modules/livegrade/src/livegrade-connection-manager.ts",
   "livegrade-action-executor": "modules/livegrade/src/livegrade-action-executor.ts",
   "ccc-controller": "modules/ccc/src/ccc-controller.ts",

@@ -57,8 +57,6 @@ export interface CyanViewRcpConnectionManagerContract {
   reconcile(connections: readonly unknown[]): void
   refresh(): void
   selectCamera(connectionId: string, cameraNumber: number, signal?: AbortSignal): Promise<void>
-  recordCamera(connectionId: string, cameraNumber: number, signal?: AbortSignal): Promise<void>
-  recordGroupAll(connectionId: string, signal?: AbortSignal): Promise<void>
   snapshots(): readonly ManagedCyanViewRcpConnectionSnapshot[]
   subscribe(listener: CyanViewRcpConnectionManagerListener): () => void
   stop(): void
