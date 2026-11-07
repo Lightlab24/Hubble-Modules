@@ -1,6 +1,9 @@
 import { defineModuleManifest } from '@hubble/module-sdk/authoring'
 import { matrix } from './matrix.js'
 
+const REFUSED =
+  'CyanView RCP only switches cameras, so this refuses and sends nothing. Kept so saved rows still load.'
+
 export default defineModuleManifest({
   formatVersion: 1,
   apiVersion: 1,
@@ -21,8 +24,6 @@ export default defineModuleManifest({
     'persistent-connection',
     'state-feedback',
     'service.selectCamera',
-    'service.recordCamera',
-    'service.recordGroupAll',
   ],
   exchange: {
     data: [{ id: 'connection', label: 'RCP connection', version: 1, query: true }],
@@ -61,8 +62,7 @@ export default defineModuleManifest({
     {
       id: 'matrix',
       label: 'Camera control',
-      description:
-        'Runs the action selected by this Matrix row. Recording uses the approved CCC peer.',
+      description: 'Switches the RCP panel to the camera in this Matrix row.',
       completion: 'response',
       completionAlternatives: ['state-confirmed', 'local'],
       timeoutMs: 120000,
@@ -72,7 +72,7 @@ export default defineModuleManifest({
     ...(['start-enabled-cameras', 'stop-enabled-cameras'] as const).map((command) => ({
       id: `cyanview-rcp.${command}`,
       label: command === 'start-enabled-cameras' ? 'Start enabled cameras' : 'Stop enabled cameras',
-      description: 'Controls matching enabled CCC cameras through the shared recording queue.',
+      description: REFUSED,
       completion: 'state-confirmed' as const,
       completionAlternatives: ['local' as const],
       timeoutMs: 120000,
@@ -92,7 +92,7 @@ export default defineModuleManifest({
     {
       id: 'cyanview-rcp.record-camera',
       label: 'record camera',
-      description: 'Preserves the existing saved action contract and protocol completion boundary.',
+      description: REFUSED,
       completion: 'response',
       completionAlternatives: ['state-confirmed', 'local'],
       timeoutMs: 120000,
@@ -102,7 +102,7 @@ export default defineModuleManifest({
     {
       id: 'cyanview-rcp.record-group-all',
       label: 'record group all',
-      description: 'Preserves the existing saved action contract and protocol completion boundary.',
+      description: REFUSED,
       completion: 'response',
       completionAlternatives: ['state-confirmed', 'local'],
       timeoutMs: 120000,

@@ -1,18 +1,22 @@
 import { managedModule } from '@hubble/module-runtime-helpers/managed'
 import { withModuleMatrix } from '@hubble/module-runtime-helpers/matrix'
 import { matrix, matrixAction, matrixFeedback } from './matrix.js'
-import type { HubbleModule, ModuleActionResult, ModuleValues } from '@hubble/module-sdk'
+import type { HubbleModule } from '@hubble/module-sdk'
 import { CyanViewRcpConnectionManager } from '@hubble/protocol-cyanview-rcp'
 import { z } from 'zod'
 import { legacyActionSchemas, type ActionDefinition } from './actions.js'
 import { ConnectionDefinitionSchema, type ConnectionDefinition } from './config.js'
 
-const recording = new Map([
-  ['cyanview-rcp.record-camera', 'record-camera'],
-  ['cyanview-rcp.record-group-all', 'record-group-all'],
-  ['cyanview-rcp.start-enabled-cameras', 'start-enabled-cameras'],
-  ['cyanview-rcp.stop-enabled-cameras', 'stop-enabled-cameras'],
+/** This module only switches cameras. These IDs stay declared so rows saved by older versions load. */
+const refusedActions = new Set([
+  'cyanview-rcp.record-camera',
+  'cyanview-rcp.record-group-all',
+  'cyanview-rcp.start-enabled-cameras',
+  'cyanview-rcp.stop-enabled-cameras',
 ])
+const SWITCHING_ONLY =
+  'CyanView RCP only switches cameras. Use the Cyanview module or CCC to record. No recording command was sent.'
+
 export function createCyanViewRcpModule(
   createManager: () => Pick<
     CyanViewRcpConnectionManager,
@@ -33,7 +37,6 @@ export function createCyanViewRcpModule(
         enabled: true,
         schemaVersion: 1,
       })
-      let started = false
       const selection = managedModule<ConnectionDefinition, ActionDefinition>(
         'cyanview-rcp',
         () => {
@@ -48,7 +51,7 @@ export function createCyanViewRcpModule(
             },
             async execute(action, execution) {
               if (action.type !== 'cyanview-rcp.select-camera')
-                throw new Error('Recording belongs to CCC')
+                throw new Error(SWITCHING_ONLY)
               await manager.selectCamera(connectionId, action.cameraNumber, execution.signal)
               return { outcome: 'success' as const }
             },
@@ -57,53 +60,9 @@ export function createCyanViewRcpModule(
         { kind: 'response', summary: 'RCP acknowledged camera selection' },
         { connection: ConnectionDefinitionSchema, actions: legacyActionSchemas },
       ).createInstance(context)
-      const record = async (
-        command: string,
-        fields: ModuleValues,
-        signal: AbortSignal,
-      ): Promise<ModuleActionResult> => {
-        try {
-          if (!started) throw new Error('CyanView RCP is stopped')
-          const cameraNumber =
-            command === 'record-camera'
-              ? z.int().min(1).max(999999).parse(fields.cameraNumber)
-              : undefined
-          const target = (await modules.discover(signal)).find(
-            (item) =>
-              item.peer.kind === 'host' &&
-              item.peer.capabilityId === 'ccc' &&
-              item.peer.moduleId === 'hubble-ccc',
-          )
-          if (!target?.available) throw new Error('Add and enable CCC for shared camera recording')
-          if (!target.actionsAllowed)
-            throw new Error(
-              'Approve this CyanView RCP module to control CCC in Modules → Other modules before recording',
-            )
-          return await modules.execute(
-            target.peer,
-            'record-rcp',
-            {
-              connectionId,
-              command,
-              ...(cameraNumber === undefined ? {} : { cameraNumber }),
-            },
-            signal,
-          )
-        } catch (error) {
-          return {
-            status: 'failure',
-            category: signal.aborted ? 'cancelled' : 'unavailable',
-            message: (error instanceof Error ? error.message : 'Recording unavailable').slice(
-              0,
-              1000,
-            ),
-          }
-        }
-      }
       return {
         async start() {
           await selection.start()
-          started = true
           await modules.publish('connection', 1, JSON.parse(JSON.stringify(definition)))
         },
         queryData(query) {
@@ -111,28 +70,15 @@ export function createCyanViewRcpModule(
             throw new Error('Unknown RCP data query')
           return JSON.parse(JSON.stringify(definition))
         },
-        execute(id, fields, execution) {
-          const command = recording.get(id)
-          return command
-            ? record(command, fields, execution.signal)
-            : selection.execute(id, fields, execution)
+        async execute(id, fields, execution) {
+          if (!refusedActions.has(id)) return selection.execute(id, fields, execution)
+          execution.log({ level: 'error', stage: 'not-supported', message: SWITCHING_ONLY })
+          return { status: 'failure', category: 'rejected', message: SWITCHING_ONLY }
         },
         async call(method, value, execution) {
-          const command = (
-            {
-              recordCamera: 'record-camera',
-              recordGroupAll: 'record-group-all',
-              startEnabledCameras: 'start-enabled-cameras',
-              stopEnabledCameras: 'stop-enabled-cameras',
-            } as Record<string, string>
-          )[method]
-          if (!command) return (await selection.call?.(method, value, execution)) ?? null
-          const result = await record(command, { cameraNumber: value }, execution.signal)
-          if (result.status === 'failure') throw new Error(result.message)
-          return null
+          return (await selection.call?.(method, value, execution)) ?? null
         },
         async dispose() {
-          started = false
           await selection.dispose()
         },
       }

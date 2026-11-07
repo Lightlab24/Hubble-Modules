@@ -1,7 +1,13 @@
 # CyanView RCP
 
-Official module `hubble-cyanview-rcp`, version **1.0.0**, using stable Hubble module API **1**.
-CyanView RCP MQTT discovery and command acknowledgments.
+Official module `hubble-cyanview-rcp`, version **1.3.0**, using stable Hubble module API **1**.
+Switches an RCP panel to a camera, using MQTT discovery and command acknowledgments.
+
+## Scope
+
+This module only switches cameras. It works with no other module in the workspace, and it doesn't call CCC or anything else. Camera control, such as recording and exposure, belongs in the Cyanview module.
+
+The action IDs `cyanview-rcp.record-camera`, `cyanview-rcp.record-group-all`, `cyanview-rcp.start-enabled-cameras` and `cyanview-rcp.stop-enabled-cameras` stay declared so rows saved by older versions load. They aren't offered for new rows. Pressing one refuses and sends nothing.
 
 ## Source ownership
 
