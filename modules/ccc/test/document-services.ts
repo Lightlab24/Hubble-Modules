@@ -17,6 +17,7 @@ export function documentServices(
   initial: CccConfig,
   changed: (config: CccConfig) => void,
   beforeWrite?: () => Promise<void>,
+  beforeRequest?: (method: string) => void | Promise<void>,
 ) {
   let document: ModuleDocumentSnapshot = {
     workspaceId,
@@ -49,6 +50,7 @@ export function documentServices(
     )
       throw Error("Unexpected host service");
     const input = ModuleDocumentRequestSchema.parse(value.input);
+    await beforeRequest?.(input.method);
     if (input.method === "watch" && document.revision === input.afterRevision)
       await new Promise<void>((resolve, reject) => {
         const finish = () => {

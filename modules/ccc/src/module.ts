@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { recordingCheckpoint } from "./recording-checkpoint.js";
 import { z } from "zod";
 import { actionResult } from "./recording-result.js";
@@ -89,6 +90,7 @@ export function createCccModule(
       let stopped = false;
       let publishedSnapshot: string | undefined;
       let publishedStatus: string | undefined;
+      let documentError: string | null = null;
       const feedbackStates = new Map<string, boolean | null | undefined>();
       const cameraFeedbackStates = new Map<
         string,
@@ -167,8 +169,8 @@ export function createCccModule(
         const status = {
           // Selection is a local workspace operation. Camera availability is
           // reported per row and must not disable selection feedback.
-          phase: "ready" as const,
-          message: unavailable[0]?.message ?? null,
+          phase: documentError ? ("error" as const) : ("ready" as const),
+          message: documentError ?? unavailable[0]?.message ?? null,
           values: {
             enabledCameraCount: selected.size,
             unavailableCameraCount: unavailable.length,
@@ -191,6 +193,58 @@ export function createCccModule(
             observedAt: new Date().toISOString(),
           });
           publishedStatus = statusSignature;
+        }
+      };
+      const showDocumentError = (message: string) => {
+        documentError = message;
+        try {
+          emit();
+        } catch {
+          // A document too broken to summarize still has to report that.
+          publishedStatus = undefined;
+          context.publishState({
+            phase: "error",
+            message,
+            observedAt: new Date().toISOString(),
+            values: {},
+          });
+        }
+      };
+      // A version switch refuses one watch request while its saved selection lands,
+      // so only a second failure in a row is worth showing. Nothing stops retrying.
+      const watchDocument = async () => {
+        let backoff = 250;
+        let failures = 0;
+        while (!stopped) {
+          try {
+            for await (const _document of store.client.watch(
+              documentId,
+              documentAbort.signal,
+            )) {
+              if (stopped) return;
+              await controller.activate(workspaceId);
+              documentError = null;
+              emit();
+              failures = 0;
+            }
+          } catch (error) {
+            if (stopped) return;
+            const message =
+              error instanceof Error
+                ? error.message.slice(0, 1000)
+                : "Camera document unavailable";
+            failures += 1;
+            context.log({
+              level: failures > 1 ? "error" : "info",
+              stage: "document-watch",
+              message,
+            });
+            if (failures > 1) showDocumentError(message);
+          }
+          await delay(backoff, undefined, {
+            signal: documentAbort.signal,
+          }).catch(() => {});
+          backoff = Math.min(5000, backoff * 2);
         }
       };
       return {
@@ -220,27 +274,7 @@ export function createCccModule(
           await controller.activate(workspaceId);
           emit();
           await peers.start();
-          documentWatch = (async () => {
-            for await (const _document of store.client.watch(
-              documentId,
-              documentAbort.signal,
-            )) {
-              if (stopped) break;
-              await controller.activate(workspaceId);
-              emit();
-            }
-          })().catch((error: unknown) => {
-            if (!stopped)
-              context.publishState({
-                phase: "error",
-                message:
-                  error instanceof Error
-                    ? error.message.slice(0, 1000)
-                    : "Camera document unavailable",
-                observedAt: new Date().toISOString(),
-                values: {},
-              });
-          });
+          documentWatch = watchDocument();
         },
         queryData(query) {
           if (query.version !== 1)
