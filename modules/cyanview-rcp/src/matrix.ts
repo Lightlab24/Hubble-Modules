@@ -44,13 +44,8 @@ export const matrix = ModuleMatrixSchema.parse({
       type: "choice",
       default: "select-camera",
       width: 240,
-      choices: [
-        { value: "select-camera", label: "Select camera" },
-        { value: "record-camera", label: "Record camera" },
-        { value: "record-group-all", label: "Record Group ALL" },
-        { value: "start-enabled-cameras", label: "Start enabled cameras" },
-        { value: "stop-enabled-cameras", label: "Stop enabled cameras" },
-      ],
+      // Rows saved with an older action keep it and refuse when pressed. New rows can only switch.
+      choices: [{ value: "select-camera", label: "Select camera" }],
     },
     {
       fill: "series",

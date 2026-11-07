@@ -3,6 +3,7 @@ import { once } from 'node:events'
 import { createServer, type Socket } from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CyanViewRcpConnectionDefinitionSchema } from '../src/config.js'
+import manifest from '../src/manifest.js'
 import rcpModule from '../src/module.js'
 import type { ModuleFeedback, ModuleExchange, ModuleState } from '@hubble/module-sdk'
 
@@ -365,6 +366,102 @@ describe('CyanView RCP MQTT control', () => {
     const fake = await broker({ silent: true })
     const { manager: connections } = manager(fake.port, 100)
     await expect.poll(() => connections.snapshots()[0]?.lastError).toContain('timed out')
+  })
+})
+
+describe('CyanView RCP only switches cameras', () => {
+  function start(port: number) {
+    const forbidden = () => {
+      throw new Error('This module must not look for or call another module')
+    }
+    const modules = {
+      discover: vi.fn(forbidden),
+      bindings: vi.fn(forbidden),
+      query: vi.fn(forbidden),
+      subscribe: vi.fn(forbidden),
+      reportAction: vi.fn(forbidden),
+      execute: vi.fn(forbidden),
+      publish: vi.fn(async () => {}),
+    } satisfies ModuleExchange
+    let state: ModuleState | undefined
+    const instance = rcpModule.createInstance({
+      instanceId: 'rcp-switching',
+      scope: { kind: 'connection', workspaceId: ID, connectionId: ID },
+      settings: { host: '127.0.0.1', port, requestTimeoutMs: 300 },
+      modules,
+      log() {},
+      publishState(value) {
+        state = value
+      },
+      publishEvent() {},
+      publishFeedback() {},
+    })
+    cleanups.push(async () => instance.dispose())
+    const execution = () => ({
+      executionId: 'press',
+      gesture: 'press' as const,
+      wrap: true,
+      signal: new AbortController().signal,
+      log() {},
+    })
+    return { instance, modules, execution, ready: () => state?.phase }
+  }
+
+  it('switches with no other module, sending one command per press', async () => {
+    const fake = await broker()
+    const { instance, modules, execution, ready } = start(fake.port)
+    await instance.start()
+    await expect.poll(ready).toBe('ready')
+    const values = { enabled: true, actionType: 'select-camera', cameraNumber: 102 }
+    expect(await instance.execute('matrix', { values }, execution())).toMatchObject({
+      status: 'success',
+    })
+    expect(
+      await instance.execute('cyanview-rcp.select-camera', { cameraNumber: 104 }, execution()),
+    ).toMatchObject({ status: 'success' })
+    expect(await instance.call?.('selectCamera', 102, execution())).toBeNull()
+    expect(fake.commands.map(({ value }) => value)).toEqual(['102', '104', '102'])
+    for (const name of ['discover', 'bindings', 'query', 'subscribe', 'reportAction', 'execute'])
+      expect(modules[name as keyof typeof modules], name).not.toHaveBeenCalled()
+    expect(fake.connects).toHaveLength(1)
+  })
+
+  it.each(['record-camera', 'record-group-all', 'start-enabled-cameras', 'stop-enabled-cameras'])(
+    'refuses a saved %s row without sending anything or contacting another module',
+    async (command) => {
+      const fake = await broker()
+      const { instance, modules, execution, ready } = start(fake.port)
+      await instance.start()
+      await expect.poll(ready).toBe('ready')
+      const refusal = {
+        status: 'failure',
+        category: 'rejected',
+        message: expect.stringContaining('only switches cameras'),
+      }
+      expect(
+        await instance.execute(`cyanview-rcp.${command}`, { cameraNumber: 102 }, execution()),
+      ).toMatchObject(refusal)
+      expect(
+        await instance.execute(
+          'matrix',
+          { values: { enabled: true, actionType: command, cameraNumber: 102 } },
+          execution(),
+        ),
+      ).toMatchObject(refusal)
+      expect(fake.commands).toEqual([])
+      expect(modules.discover).not.toHaveBeenCalled()
+      expect(modules.execute).not.toHaveBeenCalled()
+    },
+  )
+
+  it('offers only Select camera for new rows and declares no recording services', () => {
+    const field = manifest.matrix?.fields.find(({ id }) => id === 'actionType')
+    expect(field?.choices?.map(({ value }) => value)).toEqual(['select-camera'])
+    expect(manifest.capabilities.filter((item) => item.startsWith('service.'))).toEqual([
+      'service.selectCamera',
+    ])
+    for (const id of ['record-camera', 'record-group-all', 'start-enabled-cameras', 'stop-enabled-cameras'])
+      expect(manifest.actions.some((action) => action.id === `cyanview-rcp.${id}`), id).toBe(true)
   })
 })
 
