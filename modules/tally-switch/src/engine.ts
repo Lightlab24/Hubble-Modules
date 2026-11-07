@@ -201,13 +201,7 @@ export class TallySwitchEngine {
       }
       const router = this.routers.get(winner.values.router);
       if (!router?.ready || !router.approved) {
-        set(
-          winner,
-          !router?.approved
-            ? "Holding · approve router actions in module settings"
-            : "Holding · router unavailable",
-          true,
-        );
+        set(winner, "Holding · router unavailable", true);
         continue;
       }
       const previous = this.attempts.get(key);

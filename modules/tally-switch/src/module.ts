@@ -180,8 +180,8 @@ const module: HubbleModule = {
           )
             engine.tallies.delete(id);
         notice = peers.length
-          ? "Receiving module data. Router actions require approval."
-          : "Allow access to other modules’ data in module settings.";
+          ? "Receiving module data."
+          : "Add a TSL receiver and a router to this workspace.";
         engine.evaluate(false);
       } catch (error) {
         if (!closed) {

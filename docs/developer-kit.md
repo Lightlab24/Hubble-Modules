@@ -236,7 +236,9 @@ artifacts have not been published; use the locally generated kit for offline che
 The kit includes `examples/exchange-provider` and `examples/exchange-consumer`.
 They use an inert counter to demonstrate [routed data and approved actions](module-exchange.md),
 including module-owned automatic reactions and subscription cleanup. These examples
-are not production catalog modules.
+are not production catalog modules. A module that always works with a kind of peer should
+[declare it](module-exchange.md#declared-peers) in `exchange.peers`, so it connects with
+no operator step.
 
 ## Custom module spreadsheets
 

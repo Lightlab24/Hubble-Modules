@@ -18,6 +18,7 @@ export default defineModuleManifest({
       "module-table-spreadsheet-v1",
       "module-table-selection-v1",
       "module-exchange-v1",
+      "module-exchange-peers-v1",
     ],
   },
   configVersion: 1,
@@ -131,6 +132,15 @@ export default defineModuleManifest({
         query: true,
       },
       { id: "tally", label: "TSL tally observations", version: 1, query: true },
+    ],
+    // Follow buttons and cross-receiver indication work with no approval step.
+    peers: [
+      { data: "following", version: 1, actions: ["follow"] },
+      {
+        data: "matrix-columns",
+        version: 1,
+        actions: ["set-column-indication"],
+      },
     ],
   },
   pages: [

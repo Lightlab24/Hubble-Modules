@@ -29,6 +29,8 @@ Patch Sheet is the reference for
 package-owned cell editing and an adjacent native workbook over one document.
 Use the public browser bridge and packaged assets; keep the actual Matrix surface
 in declared host-rendered workbook sections alongside the custom view.
+For a module that works with other modules, read
+[working with other modules](references/peers.md).
 For a slider, read [sliders](references/sliders.md): add a `slider` option to a number
 field, or use `mountSlider` in a custom page. Both require `module-sliders-v1`. Use
 `mountSlider` for live device control, because a slider on a setting saves like any

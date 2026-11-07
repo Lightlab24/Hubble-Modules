@@ -1,6 +1,7 @@
 # Modules communicating through Hubble
 
 `module-exchange-v1`, API 1. Hubble 2.0.4 adds per-module data access approvals.
+`module-exchange-peers-v1` adds peers that a package declares and Hubble connects itself.
 
 ## Ownership and approval
 
@@ -31,10 +32,57 @@ become unavailable without exposing cached data, and late results are rejected. 
 a module's permission refreshes that module's worker so startup subscriptions can adopt
 the decision. The checkbox never enables a connection or issues a device command.
 
+## Declared peers
+
+`module-exchange-peers-v1` lets a package name the kinds of peer it works with:
+
+```ts
+exchange: {
+  data: [],
+  peers: [
+    { data: "tally", version: 1, actions: [] },
+    { data: "router", version: 1, actions: ["route"] },
+  ],
+},
+```
+
+Hubble connects every running module in the workspace that shares the declared data,
+with no operator step. A router added later simply appears. The operator chose this
+for tally routing on 2026-11-07: they don't want a permission step there, and no
+screen could grant one.
+
+The grant is limited to the declaration: that data, and those public actions, on peers
+sharing that data. The module's other reads still need **Allow access to other
+modules' data**, and its other actions still need a saved approval. Modules without a
+declaration are unchanged and remain denied by default. Because a package grants this
+to itself, installing it is the trust decision, as it already is for code that runs on
+the service computer. The module's settings name what it connected to, without adding
+a control.
+
+Connecting never enables a connection or issues a device command. The module decides
+when to act: TALLY Switch still needs a mapping, Follow and a fresh tally change before
+it routes.
+
+`bindings()` returns each declared peer with a stable derived `id`, the module's current
+name, and `allowActions` set when any action is declared. A saved binding for the same
+pair keeps its `id`. A stopped module drops out and returns with the same `id`, so a
+consumer must hold rather than fail. `discover()` lists these peers even without data
+access. `host.exchange.block` still stops a declared pair and cancels its calls in flight.
+
+Declared peers aren't saved, so import has no approval to revoke and needs no review.
+Saved settings can still hold a derived `id`, which depends on the connections, and import
+always gives connections new identities. So import saves each `id` the settings or
+documents actually refer to as a binding for the new endpoints, and the reference keeps
+resolving. That binding is ordinary saved data from then on: it follows the connection
+mapping, and it keeps working through re-export. If two imported connections are mapped
+onto one, the first keeps its `id`, and a reference to the other holds until it's chosen
+again.
+
 ## Author contract
 
 Declare `exchange.data` entries with `id`, `label`, integer `version`, and `query`.
-Require `module-exchange-v1` in the manifest. Use:
+Require `module-exchange-v1` in the manifest. See [declared peers](#declared-peers) for
+`exchange.peers`. Use:
 
 - `discover()` and `bindings()` to resolve workspace peers and saved named bindings;
 - `publish(id, version, value)` for a current data snapshot;

@@ -84,7 +84,9 @@ describe("independent TALLY Switch decisions", () => {
     engine.routers.set("router", { ready: true, approved: false });
     update(tally(false, true));
     expect(route).not.toHaveBeenCalled();
-    expect(engine.statuses[1]?.values.status).toContain("approve");
+    expect(engine.statuses[1]?.values.status).toBe(
+      "Holding · router unavailable",
+    );
     engine.routers.set("router", { ready: false, approved: true });
     update(tally(false, true));
     expect(route).not.toHaveBeenCalled();
@@ -177,6 +179,13 @@ it("keeps TALLY Switch in its page and peer follow workflow, not the button auth
   );
   expect(manifest.actions.map((action) => action.id)).toContain("follow");
   expect(manifest.pages?.length).toBeGreaterThan(0);
+});
+it("connects to every TSL receiver and router, with only route allowed", () => {
+  expect(manifest.host.requiredFeatures).toContain("module-exchange-peers-v1");
+  expect(manifest.exchange.peers).toEqual([
+    { data: "tally", version: 1, actions: [] },
+    { data: "router", version: 1, actions: ["route"] },
+  ]);
 });
 
 import module from "../src/module.js";

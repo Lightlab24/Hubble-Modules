@@ -275,7 +275,7 @@ it("uses approved peers for switch controls and reports unavailable feedback aft
     allowed = false;
     await expect(
       h.instance.execute(request("tally-switch-toggle").fields),
-    ).rejects.toThrow("approve");
+    ).rejects.toThrow("Add a TALLY Switch module");
     expect(execute).toHaveBeenCalledTimes(2);
   } finally {
     await h.instance.close();

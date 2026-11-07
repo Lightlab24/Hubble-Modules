@@ -33,15 +33,37 @@ export const ModuleDataDefinitionSchema = z.strictObject({
   version: z.int().min(1).max(65535),
   query: z.boolean().default(false),
 });
+/**
+ * A kind of peer this package works with. Hubble connects every workspace module that shares
+ * this data, without an operator step, and allows only the listed public actions on it.
+ */
+export const ModuleExchangeDeclaredPeerSchema = z.strictObject({
+  data: Id,
+  version: z.int().min(1).max(65535),
+  actions: z.array(Id).max(64).default([]),
+});
+export type ModuleExchangeDeclaredPeer = z.infer<
+  typeof ModuleExchangeDeclaredPeerSchema
+>;
 export const ModuleExchangeDefinitionSchema = z
   .strictObject({
     data: z.array(ModuleDataDefinitionSchema).max(64),
+    /** Requires module-exchange-peers-v1. */
+    peers: z.array(ModuleExchangeDeclaredPeerSchema).max(16).optional(),
   })
   .superRefine((value, context) => {
     if (new Set(value.data.map((item) => item.id)).size !== value.data.length)
       context.addIssue({
         code: "custom",
         message: "Duplicate shared data identity",
+      });
+    const peers = (value.peers ?? []).map(
+      (item) => `${item.data}@${String(item.version)}`,
+    );
+    if (new Set(peers).size !== peers.length)
+      context.addIssue({
+        code: "custom",
+        message: "Duplicate declared module peer",
       });
   });
 export const ModulePeerBindingSchema = z.strictObject({

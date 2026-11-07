@@ -23,3 +23,13 @@ describe("module-owned action registry", () => {
     }
   });
 });
+
+it("connects to TALLY Switch and other receivers, with only their control actions allowed", () => {
+  expect(manifest.host).toMatchObject({
+    requiredFeatures: expect.arrayContaining(["module-exchange-peers-v1"]),
+  });
+  expect(manifest.exchange?.peers).toEqual([
+    { data: "following", version: 1, actions: ["follow"] },
+    { data: "matrix-columns", version: 1, actions: ["set-column-indication"] },
+  ]);
+});

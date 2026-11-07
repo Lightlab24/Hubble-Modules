@@ -49,6 +49,7 @@ export default defineModuleManifest({
       "module-table-presentation-v1",
       "module-table-spreadsheet-v1",
       "module-exchange-v1",
+      "module-exchange-peers-v1",
       "module-runtime-directory-v1",
       "module-page-controls-v1",
     ],
@@ -99,6 +100,11 @@ export default defineModuleManifest({
   exchange: {
     data: [
       { id: "following", label: "Following state", version: 1, query: true },
+    ],
+    // Every TSL receiver and router in the workspace connects with no approval step.
+    peers: [
+      { data: "tally", version: 1, actions: [] },
+      { data: "router", version: 1, actions: ["route"] },
     ],
   },
   pages: [
@@ -154,7 +160,7 @@ export default defineModuleManifest({
           },
           label: "Camera mappings",
           description:
-            "Assign receiver and router permissions in module settings. Startup and reconnect hold the last route until fresh tally changes.",
+            "Choose a TSL receiver and a router for each camera. Startup and reconnect hold the last route until fresh tally changes.",
           source: "settings",
           selectionHighlight: "row",
           rowHighlight: {

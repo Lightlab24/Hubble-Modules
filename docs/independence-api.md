@@ -10,6 +10,7 @@ candidate is 1.2.0 in the sibling `Modules` checkout.
 | Feature                       | Contract                                                                                        |
 | ----------------------------- | ----------------------------------------------------------------------------------------------- |
 | `module-workspace-actions-v1` | Generic actions and feedback on the CCC and System Actions workspace scopes                     |
+| `module-exchange-peers-v1`    | Peers a package declares connect automatically, limited to the declared data and actions        |
 | `module-exchange-v1`          | Versioned shared data, subscriptions and approved public actions between modules                |
 | `module-fields-v2`            | Conditional fields, multi-choice, objects, arrays, integer constraints, and validation messages |
 | `module-choices-v2`           | Draft-sensitive search and pagination with revision and worker-generation checks                |

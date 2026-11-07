@@ -46,7 +46,7 @@ export const listenerFields: ModuleField[] = [
     choices: [],
     choiceProvider: "tally-switch-peers",
     description:
-      "Uses the only approved TALLY Switch when blank. If there are several, choose one and grant it data and action access in module permissions.",
+      "Uses the only TALLY Switch when blank. If there are several, choose one.",
   },
   choice("protocol", "TSL version", ["3.1", "5.0"], "3.1"),
   choice("transport", "Transport", ["tcp", "udp"], "tcp"),

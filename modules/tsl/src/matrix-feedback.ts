@@ -327,7 +327,7 @@ export class MatrixFeedback {
       await this.refreshPeer();
       if (!exchange || !this.peer)
         throw new Error(
-          "Choose and approve one TALLY Switch module in module permissions",
+          "Add a TALLY Switch module, or choose one in this module's settings",
         );
       const result = await exchange.execute(
         this.peer,
@@ -377,7 +377,7 @@ export class MatrixFeedback {
         return;
       }
       throw new Error(
-        "Target Tally column is unavailable; approve its receiver in module permissions",
+        "Target Tally column is unavailable; check that its receiver is on",
       );
     }
     const saving = this.writes.then(async () => {

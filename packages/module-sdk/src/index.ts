@@ -728,6 +728,18 @@ export const ModuleManifestSchema = z
         message: "Module exchange requires module-exchange-v1",
       });
     if (
+      manifest.exchange?.peers?.length &&
+      !(
+        "requiredFeatures" in manifest.host &&
+        manifest.host.requiredFeatures?.includes("module-exchange-peers-v1")
+      )
+    )
+      ctx.addIssue({
+        code: "custom",
+        path: ["host"],
+        message: "Declared module peers require module-exchange-peers-v1",
+      });
+    if (
       manifest.savedActionVersion !== undefined &&
       (!("requiredFeatures" in manifest.host) ||
         !manifest.host.requiredFeatures?.includes("module-saved-actions-v1"))

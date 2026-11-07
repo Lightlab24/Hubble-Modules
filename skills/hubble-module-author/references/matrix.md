@@ -240,8 +240,9 @@ button glow. A presentation receipt must not repaint newer edited values.
 Use `runtimeDirectory` for local runtime state that must survive module versions.
 Document any data excluded from workspace export. Tally's follow-state file is
 local runtime state; row colour/glow choices and column defaults are portable.
-Cross-module actions use `context.modules` and explicit workspace permissions,
-never a Tally-specific host service. Observation subscriptions do not grant action
+Cross-module actions use `context.modules` and declared peers or explicit workspace
+permissions, never a Tally-specific host service. See
+[working with other modules](peers.md). Observation subscriptions do not grant action
 permission. Ambiguous peer selection must fail clearly.
 
 ## Acceptance
