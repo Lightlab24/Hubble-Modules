@@ -99,9 +99,27 @@ The module owns validation, serializing commands and readback:
   unsent values to the newest. `examples/custom-slider` has a tested queue to copy.
 - Keep the device's value in `confirmedValue`, apart from the local value. An older
   readback must never overwrite a newer local edit.
+- Read the device's value with `page.state()` before mounting, so a reopened page never
+  shows a stale value first.
 - When a command fails, keep the latest local value and set `error`.
 - Keep the slider editable during background sync. Set `disabled` only for a real
   access, availability, dependency or firmware restriction.
+
+## Test it
+
+Run the page in the full renderer with a backend slow enough to hold a reply. These are
+the cases that fail in practice:
+
+- A second edit while a command is in flight. It shows at once, and the device ends on
+  the newest value.
+- A readback arriving during a drag. The thumb stays under the pointer.
+- A rejected command. The value stays, the error shows, and the next edit clears it.
+- Leaving the page and coming back. The first value shown is the device's.
+- A slider on a setting. Each release starts a new worker generation, so check that the
+  restart is acceptable and that no in-memory state is lost.
+
+Reach the slider with Tab when checking the focus ring. Focus moved by script after a
+pointer gesture does not show it, by browser design.
 
 ## Style it
 

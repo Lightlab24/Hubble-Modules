@@ -30,7 +30,9 @@ package-owned cell editing and an adjacent native workbook over one document.
 Use the public browser bridge and packaged assets; keep the actual Matrix surface
 in declared host-rendered workbook sections alongside the custom view.
 For a slider, read [sliders](references/sliders.md): add a `slider` option to a number
-field, or use `mountSlider` in a custom page. Both require `module-sliders-v1`.
+field, or use `mountSlider` in a custom page. Both require `module-sliders-v1`. Use
+`mountSlider` for live device control, because a slider on a setting saves like any
+setting and restarts the instance on each release.
 For saved canvas/workbook/backend data, read [portable documents](references/documents.md).
 Use the scoped document client and declared table sources; keep active drafts local
 and use revision checks when reconciling multiple editors.

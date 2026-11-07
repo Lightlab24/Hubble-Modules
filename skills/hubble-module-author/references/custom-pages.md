@@ -151,3 +151,9 @@ renderer. Simulation of native menu dispatch is not an actual macOS menu test.
 Use the host [spreadsheet controls](spreadsheet-controls.md) when the module owns
 the grid layout and needs the Matrix choice editor, range selection, quoted TSV
 clipboard or fill. This smaller surface composes with the full native workbook.
+
+## Sliders in a bespoke layout
+
+Use the host [slider](sliders.md) for a value an operator adjusts live. It runs in the
+existing frame with no extra permissions. The module keeps validation, command queueing
+and readback.
