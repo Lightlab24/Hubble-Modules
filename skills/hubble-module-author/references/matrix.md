@@ -68,9 +68,21 @@ With `module-matrix-choice-presentation-v1`, static `fields[].choices` can suppl
 fallback labels and optional `textColor: '#RRGGBB'`, including text fields that
 also use `choiceProvider`. Hubble renders these labels and exact text colors
 without waiting for feedback or a device connection. A current observation may
-supply a richer label; it does not erase the declared text color. These are
-presentation values, never replacement source values or execution feedback.
+supply a richer label; it does not erase the declared text color. Labels and
+colors are presentation only: they never rewrite a saved source or report
+execution feedback. A choice's `value` is saved only when someone picks it.
 Require the feature explicitly. Older hosts do not support choice text colors.
+
+While the package is not running, or its `choiceProvider` otherwise cannot answer,
+the Matrix dropdown offers the field's static `choices` and hides the provider's
+error when it has any to offer. Entries with the same label are one choice and
+the first spelling is the one saved, so list canonical values before aliases.
+Companion `choiceFields` are saved blank; keeping a row's current choice saves
+nothing, which leaves them and any older spelling alone. Choices matching
+`matrix.availableWhenDisabled` are left out; the running package can still offer
+them. The running package's answer replaces this list as soon as it arrives, even
+when it is empty. A field with no static `choices` still lists nothing and shows
+the provider's error, and older hosts do so for every field.
 
 With `module-matrix-field-presentation-v1`, a field can declare
 `textColor: '#RRGGBB'` directly or through `rules[].set.textColor`. This colors
