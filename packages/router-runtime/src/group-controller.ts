@@ -14,6 +14,7 @@ import {
 import {
   RossRouteGroupRuntime,
   type RouterDestinationDefault,
+  type RouterDestinationEdit,
   type RossRouteGroupStateTransition,
   type RossRouteGroupConnectionManager,
 } from "./group-runtime.js";
@@ -282,7 +283,7 @@ export class RouterGroupController {
       string,
       RouterDestinationDefault & {
         destinations: number[];
-        editedDestination?: number;
+        edits: RouterDestinationEdit[];
       }
     >();
     for (const row of this.#destinationRows) {
@@ -303,20 +304,23 @@ export class RouterGroupController {
         moduleConnectionId: row.contextId,
         groupId,
         destinations: [],
+        edits: [],
       };
       group.destinations.push(...row.destinations);
       const before = prior.get(row.id);
+      const sameGroup =
+        before?.contextId === row.contextId && before.groupId === row.groupId;
       if (
-        group.editedDestination === undefined &&
-        (!before ||
-          before.contextId !== row.contextId ||
-          before.groupId !== row.groupId ||
-          before.destinations.length !== row.destinations.length ||
-          before.destinations.some(
-            (value, index) => value !== row.destinations[index],
-          ))
+        !sameGroup ||
+        before.destinations.length !== row.destinations.length ||
+        before.destinations.some(
+          (value, index) => value !== row.destinations[index],
+        )
       )
-        group.editedDestination = row.destinations[0];
+        group.edits.push({
+          previous: sameGroup ? before.destinations : [],
+          next: row.destinations,
+        });
       groups.set(key, group);
     }
     this.runtime.reconcileDestinationDefaults([...groups.values()]);

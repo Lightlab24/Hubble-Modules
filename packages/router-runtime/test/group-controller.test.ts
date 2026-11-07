@@ -272,6 +272,71 @@ it.each([
   },
 );
 
+it.each([
+  "ross-ultrix-ogp",
+  "blackmagic-videohub",
+  "aja-kumo",
+  "evertz-quartz",
+] as const)(
+  "%s moves a chosen destination only when an edit stops its row listing it",
+  async (type) => {
+    const f = await fixture();
+    const scope = f.action();
+    await f.controller.edit(
+      scope.moduleConnectionId,
+      (value) => ({ ...value, automaticTake: true }),
+      new AbortController().signal,
+    );
+    const column = randomUUID();
+    const row = (actionId: string, actionValue: string) =>
+      routerMatrixDestination(type, {
+        contextId: scope.moduleConnectionId,
+        actionId,
+        actionColumnId: column,
+        values: { actionType: "select-destination", actionValue },
+      });
+    const observe = (...rows: ReturnType<typeof row>[]) =>
+      f.controller.observeMatrixDestinations(
+        rows.filter((item) => item !== null),
+      );
+    const routeTo = (destination: number) => ({
+      connectionId: f.scope.connectionId,
+      source: 5,
+      destination,
+      levels: [1],
+    });
+    const selectSource = () =>
+      f.controller.dispatch("selectSource", {
+        ...scope,
+        source: 5,
+        levels: [1],
+      });
+
+    await observe(row("a", "2"), row("b", "3"));
+    await expect(
+      f.controller.dispatch("selectDestination", { ...scope, destination: 3 }),
+    ).rejects.toThrow(/source is not configured/);
+
+    // Added, edited, removed and re-added rows elsewhere all leave it alone.
+    await observe(row("a", "2"), row("b", "3"), row("c", "4"));
+    await observe(row("a", "9"), row("b", "3"), row("c", "4"));
+    await observe(row("b", "3"), row("c", "4"));
+    await observe(row("a", "9"), row("b", "3"), row("c", "4"));
+    expect(f.manager.submitDirectRouteTracked).not.toHaveBeenCalled();
+    await selectSource();
+    expect(f.manager.submitDirectRouteTracked).toHaveBeenLastCalledWith(
+      routeTo(3),
+    );
+
+    await observe(row("a", "9"), row("b", "6"), row("c", "4"));
+    expect(f.manager.submitDirectRouteTracked).toHaveBeenCalledTimes(1);
+    await selectSource();
+    expect(f.manager.submitDirectRouteTracked).toHaveBeenLastCalledWith(
+      routeTo(6),
+    );
+  },
+);
+
 it("moves a selected destination through first/last group edits and restores it after restart without a device command", async () => {
   const f = await fixture(),
     groupId = randomUUID();

@@ -196,9 +196,15 @@ export interface RossRouteGroupRuntimeOptions {
   readonly onDiagnostic?: (diagnostic: RossRouteGroupRuntimeDiagnostic) => void;
 }
 
+/** A Matrix row's destinations changing. `previous` is empty for a row new to its group. */
+export interface RouterDestinationEdit {
+  readonly previous: readonly number[];
+  readonly next: readonly [number, ...number[]];
+}
+
 export interface RouterDestinationDefault extends RossRouteGroupActionScope {
   readonly destinations: readonly number[];
-  readonly editedDestination?: number;
+  readonly edits: readonly RouterDestinationEdit[];
 }
 
 export interface RossRouteGroupRuntimeContract {
@@ -250,6 +256,8 @@ interface MutableGroupState {
   intentionalManualStage: boolean;
   selectedDestination: number | null;
   matrixDestinationDefault: boolean;
+  /** Select SRC was pressed. A default destination's readback alone is not a choice. */
+  sourceChosen: boolean;
   destinationSelectionEpoch: number;
   routeClaim: RossGroupRouteClaim | null;
   ownedClaim: RossGroupRouteClaim | null;
@@ -424,6 +432,7 @@ export class RossRouteGroupRuntime implements RossRouteGroupRuntimeContract {
     state.stagedSource = validateRouterAddress(input.source, "source");
     state.stagedLevels = levels;
     state.intentionalManualStage = !state.module.scope.automaticTake;
+    state.sourceChosen = true;
     this.#emit();
     if (!state.module.scope.automaticTake) return Promise.resolve();
     const destination = state.selectedDestination;
@@ -504,19 +513,14 @@ export class RossRouteGroupRuntime implements RossRouteGroupRuntimeContract {
           this.#stateHasReservation(state)
         )
           continue;
-        const candidate = byGroup.get(
-          groupStateKey({ ...module.scope, groupId: state.groupId }),
-        );
         const current = state.selectedDestination;
-        if (
-          candidate?.editedDestination === undefined &&
-          current !== null &&
-          (!state.matrixDestinationDefault ||
-            candidate?.destinations.includes(current))
-        )
-          continue;
-        const destination =
-          candidate?.editedDestination ?? candidate?.destinations[0] ?? null;
+        const destination = reconciledDestination(
+          current,
+          state.matrixDestinationDefault,
+          byGroup.get(
+            groupStateKey({ ...module.scope, groupId: state.groupId }),
+          ),
+        );
         if (destination === current) continue;
         if (destination === null) {
           this.#clearGroupRoutingState(state);
@@ -537,8 +541,16 @@ export class RossRouteGroupRuntime implements RossRouteGroupRuntimeContract {
     state.destinationSelectionEpoch += 1;
     state.selectedDestination = destination;
     state.matrixDestinationDefault = matrixDestinationDefault;
-    state.stagedSource = null;
-    state.intentionalManualStage = false;
+    // A Matrix change can move the destination, but a chosen source still waits for its Take.
+    if (
+      !matrixDestinationDefault ||
+      !state.sourceChosen ||
+      !this.#preservesIntentionalManualStage(state)
+    ) {
+      state.stagedSource = null;
+      state.intentionalManualStage = false;
+      state.sourceChosen = false;
+    }
     state.routeClaim = null;
     state.ownedClaim = null;
     state.committedTakeSequence = null;
@@ -553,6 +565,7 @@ export class RossRouteGroupRuntime implements RossRouteGroupRuntimeContract {
     destination: number,
     signal?: AbortSignal,
   ): Promise<void> {
+    if (this.#hasOnlyDefaultReadback(state)) state.stagedSource = null;
     const stagedSource = state.stagedSource;
     const stagedLevels = state.stagedLevels;
     if (state.selectedDestination !== destination)
@@ -592,7 +605,7 @@ export class RossRouteGroupRuntime implements RossRouteGroupRuntimeContract {
     const levels = canonicalLevels(input.levels, state.module.scope.levelCount);
     state.stagedLevels = levels;
     this.#emit();
-    if (state.stagedSource === null) {
+    if (state.stagedSource === null || this.#hasOnlyDefaultReadback(state)) {
       return Promise.reject(
         new Error("Ross selected source is not configured"),
       );
@@ -1147,6 +1160,11 @@ export class RossRouteGroupRuntime implements RossRouteGroupRuntimeContract {
     return !state.module.scope.automaticTake && state.intentionalManualStage;
   }
 
+  /** What's routed on a destination nobody chose isn't a source anybody chose. */
+  #hasOnlyDefaultReadback(state: MutableGroupState): boolean {
+    return state.matrixDestinationDefault && !state.sourceChosen;
+  }
+
   #persistGroup(state: MutableGroupState): void {
     if (state.toggleInProgress) {
       state.persistenceDirtyDuringToggle = true;
@@ -1369,6 +1387,7 @@ export class RossRouteGroupRuntime implements RossRouteGroupRuntimeContract {
         ? (persisted?.selectedDestination ?? null)
         : null,
       matrixDestinationDefault: false,
+      sourceChosen: false,
       destinationSelectionEpoch: 0,
       routeClaim: null,
       ownedClaim: null,
@@ -1394,6 +1413,7 @@ export class RossRouteGroupRuntime implements RossRouteGroupRuntimeContract {
     state.intentionalManualStage = false;
     state.selectedDestination = null;
     state.matrixDestinationDefault = false;
+    state.sourceChosen = false;
     state.routeClaim = null;
     state.ownedClaim = null;
     state.pendingRouteClaims.clear();
@@ -1829,6 +1849,29 @@ function transitionAffectsGroup(
     case "discard-module":
       return true;
   }
+}
+
+/**
+ * Where a Matrix change leaves a group's destination. Only an edit to the row that holds a
+ * destination can move it, so changing any other row never redirects the next route.
+ */
+function reconciledDestination(
+  current: number | null,
+  isDefault: boolean,
+  matrix: RouterDestinationDefault | undefined,
+): number | null {
+  const listed = matrix?.destinations ?? [];
+  if (current === null) return listed[0] ?? null;
+  const edited = matrix?.edits.find(({ previous }) =>
+    previous.includes(current),
+  );
+  if (isDefault)
+    return (
+      edited?.next[0] ??
+      (listed.includes(current) ? current : (listed[0] ?? null))
+    );
+  // The operator chose this one, so it follows only an edit that leaves no row listing it.
+  return edited && !listed.includes(current) ? edited.next[0] : current;
 }
 
 function transitionAffectsState(

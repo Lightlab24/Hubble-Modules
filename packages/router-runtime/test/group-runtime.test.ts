@@ -14,6 +14,7 @@ import {
   type RossRouteGroupConnectionManager,
   type RossRouteGroupModuleScope,
   type RossRouteGroupStateTransition,
+  type RouterDestinationEdit,
 } from "../src/group-runtime.js";
 
 const WORKSPACE_1 = "10000000-0000-4000-8000-000000000001";
@@ -2690,3 +2691,278 @@ function moduleStateKey(state: {
 }): string {
   return `${state.workspaceId}:${state.moduleConnectionId}`;
 }
+
+describe("Matrix destination defaults", () => {
+  const defaults = (
+    destinations: readonly number[],
+    edits: readonly RouterDestinationEdit[] = [],
+  ) => [{ ...actionScope(), destinations, edits }];
+  const group = (runtime: RossRouteGroupRuntime) => runtime.snapshots()[0];
+  const routes = (connections: FakeConnections) =>
+    connections.submissions.map(({ input }) => [
+      input.source,
+      input.destination,
+      input.levels,
+    ]);
+
+  async function defaulted(
+    automaticTake: boolean,
+    sources: Readonly<Record<number, number>>,
+    destinations: readonly number[] = [2, 3],
+  ) {
+    const connections = new FakeConnections();
+    for (const [destination, source] of Object.entries(sources))
+      connections.immediateReadySources.set(
+        `${CONNECTION_1}:${destination}`,
+        readyRoutes(source),
+      );
+    const made = await makeRuntime(
+      [moduleScope({ automaticTake })],
+      new FakeStateStore(),
+      connections,
+    );
+    made.runtime.reconcileDestinationDefaults(defaults(destinations));
+    return made;
+  }
+
+  it("does not route a default destination's readback when another Select DST is pressed", async () => {
+    const { connections, runtime } = await defaulted(true, {
+      2: 12,
+      3: 13,
+      4: 14,
+    });
+    expect(group(runtime)).toMatchObject({
+      selectedDestination: 2,
+      stagedSource: 12,
+    });
+    expect(connections.submissions).toHaveLength(0);
+
+    await expect(
+      runtime.selectDestination({ ...actionScope(), destination: 3 }),
+    ).rejects.toThrow("Ross selected source is not configured");
+    expect(connections.submissions).toHaveLength(0);
+    expect(group(runtime)).toMatchObject({
+      selectedDestination: 3,
+      stagedSource: 13,
+    });
+
+    // The destination is now the operator's, so the documented Select DST route applies.
+    await runtime.selectDestination({ ...actionScope(), destination: 4 });
+    expect(routes(connections)).toEqual([[13, 4, [1, 2, 3, 4]]]);
+  });
+
+  it("rejects re-pressing the default destination's own row until it is the operator's", async () => {
+    const { connections, runtime } = await defaulted(true, { 2: 12 });
+    await expect(
+      runtime.selectDestination({ ...actionScope(), destination: 2 }),
+    ).rejects.toThrow("Ross selected source is not configured");
+    expect(connections.submissions).toHaveLength(0);
+    await runtime.selectDestination({ ...actionScope(), destination: 2 });
+    expect(routes(connections)).toEqual([[12, 2, [1, 2, 3, 4]]]);
+  });
+
+  it("does not carry a default's readback into a press that beats the next readback", async () => {
+    const { connections, runtime } = await defaulted(true, { 2: 12 });
+    await expect(
+      runtime.selectDestination({ ...actionScope(), destination: 3 }),
+    ).rejects.toThrow("Ross selected source is not configured");
+    await expect(
+      runtime.selectDestination({ ...actionScope(), destination: 4 }),
+    ).rejects.toThrow("Ross selected source is not configured");
+    expect(connections.submissions).toHaveLength(0);
+  });
+
+  it.each([5, 12])(
+    "routes chosen source %i through the default, then to a pressed destination",
+    async (source) => {
+      const { connections, runtime } = await defaulted(true, { 2: 12 });
+      await runtime.selectSource({ ...actionScope(), source, levels: [1] });
+      expect(routes(connections)).toEqual([[source, 2, [1]]]);
+      await runtime.selectDestination({ ...actionScope(), destination: 3 });
+      expect(routes(connections)).toEqual([
+        [source, 2, [1]],
+        [source, 3, [1]],
+      ]);
+    },
+  );
+
+  it("rejects Take on a default destination until a source is chosen", async () => {
+    const { connections, runtime } = await defaulted(false, { 2: 12 });
+    await expect(
+      runtime.take({ ...actionScope(), levels: [1] }),
+    ).rejects.toThrow("Ross selected source is not configured");
+    expect(connections.submissions).toHaveLength(0);
+    await runtime.selectSource({ ...actionScope(), source: 5, levels: [1] });
+    expect(connections.submissions).toHaveLength(0);
+    await runtime.take({ ...actionScope(), levels: [1] });
+    expect(routes(connections)).toEqual([[5, 2, [1]]]);
+  });
+
+  it("keeps the operator's destination when other rows are added or edited", async () => {
+    const { connections, runtime } = await defaulted(true, { 2: 12, 3: 13 });
+    await runtime
+      .selectDestination({ ...actionScope(), destination: 3 })
+      .catch(() => {});
+    runtime.reconcileDestinationDefaults(
+      defaults([2, 3, 4], [{ previous: [], next: [4] }]),
+    );
+    expect(group(runtime)).toMatchObject({
+      selectedDestination: 3,
+      stagedSource: 13,
+    });
+    runtime.reconcileDestinationDefaults(
+      defaults([2, 3, 5], [{ previous: [4], next: [5] }]),
+    );
+    expect(group(runtime)?.selectedDestination).toBe(3);
+    await runtime.selectSource({ ...actionScope(), source: 1, levels: [1] });
+    expect(routes(connections)).toEqual([[1, 3, [1]]]);
+  });
+
+  it("keeps a default destination when other rows are added or edited", async () => {
+    const { connections, runtime } = await defaulted(true, { 2: 12 });
+    await runtime.selectSource({ ...actionScope(), source: 5, levels: [1] });
+    runtime.reconcileDestinationDefaults(
+      defaults([2, 3, 4], [{ previous: [], next: [4] }]),
+    );
+    runtime.reconcileDestinationDefaults(
+      defaults([2, 3, 6], [{ previous: [4], next: [6] }]),
+    );
+    expect(group(runtime)?.selectedDestination).toBe(2);
+    await runtime.selectDestination({ ...actionScope(), destination: 3 });
+    expect(routes(connections)).toEqual([
+      [5, 2, [1]],
+      [5, 3, [1]],
+    ]);
+  });
+
+  it("follows an edit to the row holding a default, and leaves when its row is gone", async () => {
+    const { connections, runtime } = await defaulted(true, {});
+    runtime.reconcileDestinationDefaults(
+      defaults([6, 3], [{ previous: [2], next: [6] }]),
+    );
+    expect(group(runtime)?.selectedDestination).toBe(6);
+    runtime.reconcileDestinationDefaults(
+      defaults([7, 6, 3], [{ previous: [6], next: [7, 6] }]),
+    );
+    expect(group(runtime)?.selectedDestination).toBe(7);
+    runtime.reconcileDestinationDefaults(defaults([3]));
+    expect(group(runtime)?.selectedDestination).toBe(3);
+    runtime.reconcileDestinationDefaults(defaults([]));
+    expect(group(runtime)?.selectedDestination).toBeNull();
+    runtime.reconcileDestinationDefaults(defaults([8]));
+    expect(group(runtime)?.selectedDestination).toBe(8);
+    expect(connections.submissions).toHaveLength(0);
+  });
+
+  it("moves the operator's destination only when no row lists it any more", async () => {
+    const { connections, runtime } = await defaulted(true, {}, [2, 3, 4]);
+    await runtime
+      .selectDestination({ ...actionScope(), destination: 3 })
+      .catch(() => {});
+    runtime.reconcileDestinationDefaults(
+      defaults([2, 4, 3], [{ previous: [3, 4], next: [4, 3] }]),
+    );
+    expect(group(runtime)?.selectedDestination).toBe(3);
+    // Another row still lists it.
+    runtime.reconcileDestinationDefaults(
+      defaults([3, 5], [{ previous: [3], next: [5] }]),
+    );
+    expect(group(runtime)?.selectedDestination).toBe(3);
+    runtime.reconcileDestinationDefaults(
+      defaults([6, 5], [{ previous: [3], next: [6] }]),
+    );
+    expect(group(runtime)?.selectedDestination).toBe(6);
+    expect(connections.submissions).toHaveLength(0);
+  });
+
+  it("keeps a removed row's selection when the operator chose it", async () => {
+    const { runtime } = await defaulted(true, {});
+    await runtime
+      .selectDestination({ ...actionScope(), destination: 3 })
+      .catch(() => {});
+    runtime.reconcileDestinationDefaults(defaults([2]));
+    expect(group(runtime)?.selectedDestination).toBe(3);
+  });
+
+  it.each([
+    ["an operator's", true],
+    ["a default", false],
+  ])(
+    "keeps a staged source on %s destination through an unrelated row change",
+    async (_name, press) => {
+      const { connections, runtime } = await defaulted(false, {
+        2: 12,
+        4: 14,
+      });
+      if (press)
+        await runtime.selectDestination({ ...actionScope(), destination: 2 });
+      await runtime.selectSource({ ...actionScope(), source: 5, levels: [1] });
+      runtime.reconcileDestinationDefaults(
+        defaults([2, 3, 4], [{ previous: [], next: [4] }]),
+      );
+      expect(group(runtime)).toMatchObject({
+        selectedDestination: 2,
+        stagedSource: 5,
+        manualStageActive: true,
+      });
+      await runtime.take({ ...actionScope(), levels: [1] });
+      expect(routes(connections)).toEqual([[5, 2, [1]]]);
+    },
+  );
+
+  it("keeps a staged source when the row holding its destination is edited", async () => {
+    const { connections, runtime } = await defaulted(false, { 2: 12, 6: 16 });
+    await runtime.selectSource({ ...actionScope(), source: 5, levels: [1] });
+    runtime.reconcileDestinationDefaults(
+      defaults([6, 3], [{ previous: [2], next: [6] }]),
+    );
+    expect(group(runtime)).toMatchObject({
+      selectedDestination: 6,
+      stagedSource: 5,
+      manualStageActive: true,
+    });
+    await runtime.take({ ...actionScope(), levels: [1] });
+    expect(routes(connections)).toEqual([[5, 6, [1]]]);
+  });
+
+  it("keeps a source staged before the first destination row arrives", async () => {
+    const connections = new FakeConnections();
+    connections.immediateReadySources.set(
+      `${CONNECTION_1}:2`,
+      readyRoutes(12),
+    );
+    const { runtime } = await makeRuntime(
+      [moduleScope({ automaticTake: false })],
+      new FakeStateStore(),
+      connections,
+    );
+    await runtime.selectSource({ ...actionScope(), source: 5, levels: [1] });
+    runtime.reconcileDestinationDefaults(defaults([2]));
+    expect(group(runtime)).toMatchObject({
+      selectedDestination: 2,
+      stagedSource: 5,
+    });
+    await runtime.take({ ...actionScope(), levels: [1] });
+    expect(routes(connections)).toEqual([[5, 2, [1]]]);
+  });
+
+  it("still treats a saved destination's readback as the current source", async () => {
+    const connections = new FakeConnections();
+    connections.immediateReadySources.set(
+      `${CONNECTION_1}:7`,
+      readyRoutes(21, [1, 2]),
+    );
+    const { runtime } = await makeRuntime(
+      [moduleScope({ automaticTake: true })],
+      new FakeStateStore([persistedGroup()]),
+      connections,
+    );
+    runtime.reconcileDestinationDefaults(defaults([2]));
+    expect(group(runtime)).toMatchObject({
+      selectedDestination: 7,
+      stagedSource: 21,
+    });
+    await runtime.selectDestination({ ...actionScope(), destination: 8 });
+    expect(routes(connections)).toEqual([[21, 8, [1, 2]]]);
+  });
+});
