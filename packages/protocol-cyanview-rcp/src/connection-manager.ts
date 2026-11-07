@@ -68,32 +68,6 @@ export class CyanViewRcpConnectionManager implements CyanViewRcpConnectionManage
       )
     )
   }
-  recordCamera(
-    connectionId: string,
-    cameraNumber: number,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    return (
-      this.#entries.get(connectionId)?.recordCamera(cameraNumber, signal) ??
-      Promise.reject(
-        new CyanViewRcpConnectionError(
-          'cyanview_unconfigured',
-          'CyanView RCP connection is unavailable',
-        ),
-      )
-    )
-  }
-  recordGroupAll(connectionId: string, signal?: AbortSignal): Promise<void> {
-    return (
-      this.#entries.get(connectionId)?.recordGroupAll(signal) ??
-      Promise.reject(
-        new CyanViewRcpConnectionError(
-          'cyanview_unconfigured',
-          'CyanView RCP connection is unavailable',
-        ),
-      )
-    )
-  }
   snapshots(): readonly ManagedCyanViewRcpConnectionSnapshot[] {
     return Object.freeze([...this.#entries.values()].map((session) => session.snapshot()))
   }

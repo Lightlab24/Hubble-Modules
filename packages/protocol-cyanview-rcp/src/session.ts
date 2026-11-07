@@ -13,6 +13,11 @@ import {
 } from './models.js'
 import { FILTERS, MAX_ENTITIES, MAX_PACKET_BYTES, mqttText, packet } from './mqtt.js'
 
+/**
+ * Recording commands aren't here. A press has to be decided from the camera's reported state, and the
+ * modules that record do that themselves, so nothing built on this session can send a blind toggle
+ * or a group broadcast.
+ */
 export class RcpSession {
   definition: CyanViewRcpConnectionDefinition
   #socket: Socket | undefined
@@ -86,16 +91,6 @@ export class RcpSession {
     return { address: camera, generation: this.#generation, observation }
   }
 
-  async sendCameraCommand(
-    target: CyanViewCameraTarget,
-    value: 'Rec' | 'Stop' | 'RecToggle',
-    signal?: AbortSignal,
-  ): Promise<void> {
-    const current = this.requireCameraTarget(target)
-    if (current.recordingLocked) throw unavailable('Camera recording is locked')
-    await this.publishCommand(`${target.address}/camhead/action/set/keyboard`, value, signal)
-  }
-
   async stepCameraParameter(
     target: CyanViewCameraTarget,
     step: CyanViewCameraParameterStep,
@@ -129,19 +124,6 @@ export class RcpSession {
       String(cameraNumber),
       signal,
     )
-  }
-
-  async recordCamera(cameraNumber: number, signal?: AbortSignal): Promise<void> {
-    const { camera } = this.cameraTarget(cameraNumber)
-    await this.publishCommand(`${camera}/camhead/action/set/keyboard`, 'RecToggle', signal)
-  }
-
-  async recordGroupAll(signal?: AbortSignal): Promise<void> {
-    const panel = this.requirePanel()
-    const root = panel.slice(0, panel.indexOf('/'))
-    // The RCP expands this one group command to its members. Publishing per camera as
-    // well would toggle those cameras twice and could undo the requested operation.
-    await this.publishCommand(`${root}/All/camgroup/action/set/keyboard`, 'RecToggle', signal)
   }
 
   private requirePanel(): string {
