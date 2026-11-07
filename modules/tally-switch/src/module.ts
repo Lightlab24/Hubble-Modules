@@ -23,29 +23,44 @@ const module: HubbleModule = {
     let refreshing = false;
     let writes = Promise.resolve();
     let notice = "Waiting for module data";
+    // The bindings and peers the engine was last reconciled against. Provider events keep it
+    // current between changes, so a poll that gets the same answer has nothing to do.
+    let reconciled: string | undefined;
+    let publishedState: string | undefined;
+    let publishedFollowing: boolean | undefined;
     const stateFile = context.runtimeDirectory
       ? path.join(context.runtimeDirectory, "following.json")
       : undefined;
+    // observedAt timestamps a change, not a heartbeat. Saved settings can't change within a
+    // worker generation, so the status rows, notice and follow state decide what is new.
     const publish = () => {
       if (closed) return;
-      context.publishState({
-        phase: "ready",
-        message: null,
-        observedAt: new Date().toISOString(),
-        values: {
-          following: engine.following ? "Following" : "Unfollowing",
-          notice,
-          mappingStatus: {
-            settings: JSON.parse(JSON.stringify(context.settings)),
-            rows: engine.statuses,
+      const following = engine.following ? "Following" : "Unfollowing";
+      const state = JSON.stringify([following, notice, engine.statuses]);
+      if (state !== publishedState) {
+        context.publishState({
+          phase: "ready",
+          message: null,
+          observedAt: new Date().toISOString(),
+          values: {
+            following,
+            notice,
+            mappingStatus: {
+              settings: JSON.parse(JSON.stringify(context.settings)),
+              rows: engine.statuses,
+            },
           },
-        },
-      });
-      context.publishFeedback({
-        id: "following",
-        state: engine.following ? "active" : "inactive",
-        observedAt: new Date().toISOString(),
-      });
+        });
+        publishedState = state;
+      }
+      if (engine.following !== publishedFollowing) {
+        context.publishFeedback({
+          id: "following",
+          state: engine.following ? "active" : "inactive",
+          observedAt: new Date().toISOString(),
+        });
+        publishedFollowing = engine.following;
+      }
     };
     const engine = new TallySwitchEngine(
       rows,
@@ -81,6 +96,10 @@ const module: HubbleModule = {
           exchange.discover(controller.signal),
         ]);
         if (closed) return;
+        const signature = JSON.stringify([next, peers]);
+        if (signature === reconciled) return;
+        // Set first: an event or failure during this pass clears it, so the next poll repeats it.
+        reconciled = signature;
         bindings = next;
         const wanted = new Set<string>();
         for (const binding of bindings) {
@@ -125,6 +144,7 @@ const module: HubbleModule = {
               if (closed) return;
               if (event.kind === "availability") {
                 if (!event.available) {
+                  reconciled = undefined;
                   engine.tallies.delete(binding.id);
                   engine.routers.delete(binding.id);
                   generation = undefined;
@@ -145,6 +165,8 @@ const module: HubbleModule = {
                 const value = z
                   .object({ ready: z.boolean() })
                   .safeParse(event.value);
+                // Approval here ignores the peer's answer; the next pass restores the full rule.
+                reconciled = undefined;
                 engine.routers.set(binding.id, {
                   ready: value.success && value.data.ready,
                   approved: bindings.some(
@@ -185,6 +207,7 @@ const module: HubbleModule = {
         engine.evaluate(false);
       } catch (error) {
         if (!closed) {
+          reconciled = undefined;
           engine.tallies.clear();
           engine.routers.clear();
           notice =
