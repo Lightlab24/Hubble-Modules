@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
+import { directRouteAction } from "@hubble/router-runtime/public-api";
 import manifest from "../src/manifest.js";
 import { actionSchemas } from "../src/actions.js";
 
 describe("module-owned action registry", () => {
   it("supplies exactly the action IDs advertised to Hubble", () => {
     expect(
-      [...Object.keys(actionSchemas), manifest.matrix!.actionId].sort(),
+      [
+        ...Object.keys(actionSchemas),
+        manifest.matrix!.actionId,
+        directRouteAction.id,
+      ].sort(),
     ).toEqual(manifest.actions.map((action) => action.id).sort());
   });
   it("each validator requires its own stable action ID", () => {

@@ -1,3 +1,4 @@
+import { routePublic } from '@hubble/router-runtime/public-api'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   AjaKumoConnectionDefinitionSchema,
@@ -372,6 +373,31 @@ describe('AJA KUMO transport and selected-driver manager', () => {
     server.invalidCounts = true
     await expect(client().connect()).rejects.toThrow(/integer from 1 to 64/iu)
   })
+  it('takes a public route once on the device', async () => {
+    const config = definition()
+    const manager = new Manager()
+    managers.push(manager)
+    manager.reconcile([config])
+    await vi.waitFor(() => {
+      expect(manager.routeState(config.connectionId).phase).toBe('ready')
+    })
+    await expect(
+      routePublic(
+        manager,
+        config.connectionId,
+        { source: 3, destination: 1, level: 1 },
+        {
+          executionId: 'public-route',
+          signal: new AbortController().signal,
+          gesture: 'press',
+          wrap: false,
+          log: vi.fn(),
+        },
+      ),
+    ).resolves.toMatchObject({ status: 'success', evidence: { kind: 'submitted' } })
+    expect(server.writes).toEqual([{ destination: 1, source: 3 }])
+  })
+
   it('uses the shared router manager for confirmed routes and reconnects with a new event session', async () => {
     const config = definition()
     const manager = new Manager()

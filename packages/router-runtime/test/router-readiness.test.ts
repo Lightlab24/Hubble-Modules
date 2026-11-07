@@ -24,6 +24,10 @@ import evertz from "../../../modules/evertz-quartz/src/manifest.js";
 import { actionSchemas as rossActions } from "../../../modules/ross-ultrix-ogp/src/actions.js";
 import { ConnectionDefinitionSchema as rossConnection } from "../../../modules/ross-ultrix-ogp/src/config.js";
 import ross from "../../../modules/ross-ultrix-ogp/src/manifest.js";
+import type {
+  RouterConnectionManagerContract,
+  RouterDirectRouteSubmission,
+} from "../src/connection-contract.js";
 import { localRouterManager } from "../src/local-connection-manager.js";
 import { routerSettings } from "../src/manifest.js";
 import { routerModule } from "../src/module.js";
@@ -33,7 +37,7 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-/** The host refuses undeclared shared data, so these packages must declare what the runtime publishes. */
+/** The host refuses undeclared shared data and actions, so these packages must declare what the runtime offers. */
 const routers = [
   ["aja-kumo", aja, { connection: ajaConnection, actions: ajaActions }],
   [
@@ -65,10 +69,40 @@ function parsedManifest(type: Router[0], source: Router[1]) {
   });
 }
 
+const execution = () => ({
+  executionId: randomUUID(),
+  signal: new AbortController().signal,
+  gesture: "press" as const,
+  wrap: false,
+  log: vi.fn(),
+});
+
+/** Connected and ready, without a network. */
+function readyManager(
+  submitDirectRouteTracked: RouterConnectionManagerContract["submitDirectRouteTracked"],
+) {
+  return (): RouterConnectionManagerContract => {
+    const local = localRouterManager();
+    return {
+      ...local,
+      snapshots: () =>
+        local
+          .snapshots()
+          .map((item) => ({ ...item, routeTransport: "connected" as const })),
+      routeState: (id) => ({ ...local.routeState(id), phase: "ready" }),
+      submitDirectRouteTracked,
+    };
+  };
+}
+
 async function startedRouter(
   type: Router[0],
   source: Router[1],
   schemas: Router[2],
+  options: {
+    createManager?: () => RouterConnectionManagerContract;
+    connectionEnabled?: boolean;
+  } = {},
 ) {
   const manifest = parsedManifest(type, source);
   const publish = vi.fn(async (id: string, version: number, value: unknown) => {
@@ -129,7 +163,7 @@ async function startedRouter(
   cleanups.push(() => rm(runtimeDirectory, { recursive: true, force: true }));
   const log = vi.fn();
   const context: ModuleContext = {
-    connectionEnabled: true,
+    connectionEnabled: options.connectionEnabled ?? true,
     runtimeDirectory,
     scope,
     instanceId: randomUUID(),
@@ -149,13 +183,13 @@ async function startedRouter(
   // The local manager keeps these tests off the network; the publication path is the same.
   const instance = routerModule(
     type,
-    localRouterManager,
+    options.createManager ?? localRouterManager,
     schemas as Parameters<typeof routerModule>[2],
   ).createInstance(context);
   cleanups.push(async () => instance.dispose());
   await instance.start();
   await nextTurn();
-  return { instance, log, publish };
+  return { instance, log, publish, scope };
 }
 
 it.each(routers)(
@@ -192,5 +226,92 @@ it.each(routers)(
         { signal: new AbortController().signal },
       ),
     ).toEqual(published);
+  },
+);
+
+it.each(routers)(
+  "%s offers the public route action TALLY Switch calls",
+  (type, source) => {
+    const manifest = parsedManifest(type, source);
+    const route = manifest.actions.filter(({ id }) => id === "route");
+    expect(route).toHaveLength(1);
+    expect(route[0]?.legacy).toBeFalsy();
+    expect(route[0]?.fields.map(({ id, required }) => [id, required])).toEqual([
+      ["source", true],
+      ["destination", true],
+      ["level", true],
+    ]);
+    // The action's group label is shared presentation.
+    expect(
+      "minimumVersion" in manifest.host ? manifest.host.requiredFeatures : [],
+    ).toContain("module-presentation-v1");
+  },
+);
+
+it.each(routers)(
+  "%s dispatches one route per request and never retries a rejection",
+  async (type, source, schemas) => {
+    const submit = vi.fn(
+      (): RouterDirectRouteSubmission => ({
+        submissionId: "route",
+        accepted: Promise.resolve(),
+        settled: Promise.resolve(),
+      }),
+    );
+    const { instance, scope } = await startedRouter(type, source, schemas, {
+      createManager: readyManager(submit),
+    });
+    const fields = { source: 3, destination: 2, level: 1 };
+    await expect(
+      instance.execute("route", fields, execution()),
+    ).resolves.toMatchObject({
+      status: "success",
+      evidence: { kind: "submitted" },
+    });
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        connectionId: scope.connectionId,
+        source: 3,
+        destination: 2,
+        levels: [1],
+      }),
+    );
+    submit.mockImplementationOnce(() => {
+      const failed = Promise.reject(new Error("Destination locked"));
+      return { submissionId: "route", accepted: failed, settled: failed };
+    });
+    await expect(
+      instance.execute("route", fields, execution()),
+    ).resolves.toMatchObject({
+      status: "failure",
+      category: "rejected",
+      message: "Destination locked",
+    });
+    expect(submit).toHaveBeenCalledTimes(2);
+  },
+);
+
+it.each(routers)(
+  "%s refuses a route and publishes nothing while its connection is disabled",
+  async (type, source, schemas) => {
+    const createManager = vi.fn(localRouterManager);
+    const { instance, publish } = await startedRouter(type, source, schemas, {
+      createManager,
+      connectionEnabled: false,
+    });
+    expect(createManager).not.toHaveBeenCalled();
+    expect(publish).not.toHaveBeenCalled();
+    await expect(
+      instance.execute(
+        "route",
+        { source: 1, destination: 1, level: 1 },
+        execution(),
+      ),
+    ).resolves.toMatchObject({
+      status: "failure",
+      category: "unavailable",
+      message: "Router connection is disabled",
+    });
   },
 );

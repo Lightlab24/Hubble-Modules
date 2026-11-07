@@ -4,6 +4,7 @@ import {
   type VideohubCrosspoint,
   type VideohubSnapshot,
 } from '@hubble/protocol-videohub'
+import { routePublic } from '@hubble/router-runtime/public-api'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   BlackmagicVideohubConnectionDefinitionSchema,
@@ -359,6 +360,34 @@ describe('BlackmagicVideohubConnectionManager', () => {
     expect(feedback).toHaveBeenLastCalledWith(
       expect.objectContaining({ phase: 'pending', lastError: 'socket closed' }),
     )
+  })
+
+  it('takes a public route once, reports a foreign lock without forcing it, and stays on video', async () => {
+    const { client, manager } = await readyManager()
+    const execution = {
+      executionId: 'public-route',
+      signal: new AbortController().signal,
+      gesture: 'press' as const,
+      wrap: false,
+      log: vi.fn(),
+    }
+
+    await expect(
+      routePublic(manager, CONNECTION_ID, { source: 3, destination: 1, level: 1 }, execution),
+    ).resolves.toMatchObject({ status: 'success', evidence: { kind: 'submitted' } })
+    expect(client.setCrosspoint).toHaveBeenCalledTimes(1)
+    expect(client.setCrosspoint).toHaveBeenCalledWith({ source: 3, destination: 1 })
+
+    client.publishForeignLock(2)
+    await expect(
+      routePublic(manager, CONNECTION_ID, { source: 1, destination: 2, level: 1 }, execution),
+    ).resolves.toMatchObject({ status: 'failure', category: 'rejected' })
+    expect(client.setCrosspoint).toHaveBeenCalledTimes(2)
+
+    await expect(
+      routePublic(manager, CONNECTION_ID, { source: 1, destination: 1, level: 2 }, execution),
+    ).resolves.toMatchObject({ status: 'failure', category: 'invalid-config' })
+    expect(client.setCrosspoint).toHaveBeenCalledTimes(2)
   })
 
   it('confirms direct routes, rejects foreign locks, and never accepts non-video levels', async () => {

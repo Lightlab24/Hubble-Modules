@@ -1,6 +1,7 @@
 import type { ModuleField, ModuleManifest } from "@hubble/module-sdk";
 import type { ModuleManifestSource } from "@hubble/module-sdk/authoring";
 import { routerMatrix, routerLabels, type RouterType } from "./matrix.js";
+import { directRouteAction } from "./public-api.js";
 
 export function routerSettings(type: RouterType): ModuleField[] {
   const automaticDimensions =
@@ -179,6 +180,7 @@ export function withRouterInterface(
           "module-choices-v2",
           "module-settings-v1",
           "module-exchange-v1",
+          "module-presentation-v1",
         ]),
       ],
     },
@@ -239,6 +241,9 @@ export function withRouterInterface(
       },
     ],
     actions: [
+      ...(base.actions.some(({ id }) => id === directRouteAction.id)
+        ? []
+        : [directRouteAction]),
       ...base.actions,
       {
         id: "matrix",

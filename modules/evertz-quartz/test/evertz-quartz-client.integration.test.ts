@@ -1,5 +1,6 @@
 import net, { type Socket } from 'node:net'
-import { afterEach, describe, expect, it } from 'vitest'
+import { routePublic } from '@hubble/router-runtime/public-api'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   EvertzQuartzConnectionDefinitionSchema,
   type EvertzQuartzConnectionDefinition,
@@ -192,6 +193,49 @@ describe('native Evertz Quartz TCP client', () => {
     expect(client.snapshot().levels.at(-1)).toEqual({ level: 26, label: 'Z' })
     await client.setCrosspoint({ source: 2, destination: 1, levels: [1, 26] })
     expect(commands.slice(-3)).toEqual(['.SVZ1,2', '.IV1', '.IZ1'])
+  })
+
+  it('takes a public route once on its requested level and never retries a rejection', async () => {
+    let reject = false
+    const { definition, commands } = await simulator((command, socket) => {
+      if (!reject || !command.startsWith('.S')) return false
+      socket.write('.E\r')
+      return true
+    })
+    const manager = new EvertzQuartzConnectionManager()
+    cleanup.push(() => {
+      manager.stop()
+    })
+    manager.reconcile([definition])
+    await expect.poll(() => manager.routeState(definition.connectionId).phase).toBe('ready')
+    const execution = {
+      executionId: 'public-route',
+      signal: new AbortController().signal,
+      gesture: 'press' as const,
+      wrap: false,
+      log: vi.fn(),
+    }
+    const takes = () => commands.filter((command) => command.startsWith('.S'))
+    await expect(
+      routePublic(
+        manager,
+        definition.connectionId,
+        { source: 2, destination: 1, level: 2 },
+        execution,
+      ),
+    ).resolves.toMatchObject({ status: 'success', evidence: { kind: 'submitted' } })
+    expect(takes()).toEqual(['.SA1,2'])
+
+    reject = true
+    await expect(
+      routePublic(
+        manager,
+        definition.connectionId,
+        { source: 1, destination: 2, level: 1 },
+        execution,
+      ),
+    ).resolves.toMatchObject({ status: 'failure', category: 'rejected' })
+    expect(takes()).toEqual(['.SA1,2', '.SV2,1'])
   })
 
   it('resynchronizes manager state after a controller drops the TCP connection', async () => {
