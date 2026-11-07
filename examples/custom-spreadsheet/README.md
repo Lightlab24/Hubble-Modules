@@ -19,7 +19,7 @@ and V, plus the native Edit menu, are available for clipboard operations.
 - `src/manifest.ts` declares both tabs, the host capabilities, and the portable document.
 - `src/table.ts` defines the native workbook, typed columns, fill rules, and cell restrictions. The custom adapter reads those same rules.
 - `src/frontend.ts` attaches the kit controls, declares the optional column group, adds direct editing, and submits immediate drafts to one ordered queue.
-- `src/index.ts` uses the document service and the same validation for both views. Revision checks protect other edits, formulas, and layout.
+- `src/index.ts` uses the document service and the same validation for both views. Revision checks protect other edits, formulas, and layout. Its document watch retries with bounded backoff and shows only a failure that lasts.
 - `src/workbook-state.ts` defines the portable custom view. The shared workbook session applies edits immediately, queues saves, and supports undo/redo.
 
 The custom view requires `module-spreadsheet-controls-v1`,

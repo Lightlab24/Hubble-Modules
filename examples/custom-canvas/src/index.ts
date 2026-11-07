@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import {
   createModuleDocumentClient,
   createModuleDatasetClient,
@@ -21,6 +22,8 @@ export default {
     const lifetime = new AbortController();
     let count = 0;
     let document: ModuleDocumentSnapshot | null = null;
+    let watchError: string | null = null;
+    let watching: Promise<void> | undefined;
     let subscriptions: readonly ModuleFeedbackSubscription[] = [];
     let saves: Promise<unknown> = Promise.resolve();
     const body = (value: ModuleJsonValue) => {
@@ -31,8 +34,8 @@ export default {
     const publish = () => {
       const value = document ? body(document.value) : {};
       context.publishState({
-        phase: "ready",
-        message: null,
+        phase: watchError ? "error" : "ready",
+        message: watchError,
         observedAt: new Date().toISOString(),
         values: {
           count,
@@ -121,6 +124,39 @@ export default {
       saves = next;
       return next;
     };
+    // Some hosts refuse a watch briefly right after a version switch, and other
+    // failures can happen on any host, so one failure must not end it. Only a
+    // failure that lasts is shown.
+    const watchDesign = async () => {
+      let failures = 0;
+      while (!lifetime.signal.aborted) {
+        const opened = Date.now();
+        try {
+          for await (const next of documents.watch("design", lifetime.signal)) {
+            document = next;
+            watchError = null;
+            publish();
+          }
+        } catch (error) {
+          if (lifetime.signal.aborted) return;
+          // A watch that stayed open was working, so this failure starts a new count.
+          failures = Date.now() - opened > 5000 ? 1 : failures + 1;
+          const message = String(error).slice(0, 1000);
+          context.log({
+            level: failures > 1 ? "error" : "info",
+            stage: "document-watch",
+            message,
+          });
+          if (failures > 1) {
+            watchError = message;
+            publish();
+          }
+          await delay(Math.min(5000, 250 * 2 ** (failures - 1)), undefined, {
+            signal: lifetime.signal,
+          }).catch(() => {});
+        }
+      }
+    };
     return {
       async start() {
         const helper = await renderer.start(lifetime.signal);
@@ -128,19 +164,7 @@ export default {
           throw new Error("Package renderer is unavailable");
         document = await documents.read("design", lifetime.signal);
         publish();
-        void (async () => {
-          for await (const next of documents.watch("design", lifetime.signal)) {
-            document = next;
-            publish();
-          }
-        })().catch((error) => {
-          if (!lifetime.signal.aborted)
-            context.log({
-              level: "error",
-              stage: "document-watch",
-              message: String(error),
-            });
-        });
+        watching = watchDesign();
       },
       subscribeFeedback(value) {
         subscriptions = value;
@@ -260,8 +284,9 @@ export default {
           };
         }
       },
-      dispose() {
+      async dispose() {
         lifetime.abort();
+        await watching;
       },
     };
   },

@@ -20,12 +20,13 @@ The example does not control hardware. Its preview counter is transient.
 The title and workbook rows/formulas/layout share a revisioned portable document
 through `host.documents` and `module-documents-v1`. Sidebar and Matrix actions read
 that same document. The example keeps typing responsive while saves are pending
-and rebases only disjoint revision conflicts. Its source picker uses `host.datasets`
-and `module-datasets-v1`, with explicit operator read grants for shared Hubble or
-other-module data. Its own Label data table is also a declared dataset. Link one
-cell, edit its workbook value, and preview again: the canvas and an action without
-a text override use the same saved reference. Removing the source row reports an
-error and retains the link for correction.
+and rebases only disjoint revision conflicts. Its document watch retries with
+bounded backoff and shows only a failure that lasts. Its source picker uses
+`host.datasets` and `module-datasets-v1`, with explicit operator read grants for
+shared Hubble or other-module data. Its own Label data table is also a declared
+dataset. Link one cell, edit its workbook value, and preview again: the canvas and
+an action without a text override use the same saved reference. Removing the source
+row reports an error and retains the link for correction.
 
 The preview backend uses `host.helpers` and `module-helpers-v1` to start the
 package's separately bundled `helpers/renderer.mjs`. Both sidebar and Matrix

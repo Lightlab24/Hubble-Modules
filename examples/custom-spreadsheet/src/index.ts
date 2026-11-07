@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import {
   createModuleDocumentClient,
   ModuleDocumentConflictError,
@@ -81,6 +82,9 @@ export default {
     const lifetime = new AbortController();
     let batches = 0;
     let latestSequence = 0;
+    let latestDocument: ModuleDocumentSnapshot;
+    let watchError: string | null = null;
+    let watching: Promise<void> | undefined;
     const snapshot = (document: ModuleDocumentSnapshot) => ({
       sequence: document.sequence ?? 0,
       ...workbookFromDocument(document.value),
@@ -90,30 +94,53 @@ export default {
       const patch = snapshot(document);
       if (patch.sequence < latestSequence) return;
       latestSequence = patch.sequence;
+      latestDocument = document;
       context.publishState({
-        phase: "ready",
-        message: null,
+        phase: watchError ? "error" : "ready",
+        message: watchError,
         observedAt: new Date().toISOString(),
         values: { patch },
       });
     };
-    return {
-      async start() {
-        publish(await documents.read(documentId, lifetime.signal));
-        void (async () => {
+    // Some hosts refuse a watch briefly right after a version switch, and other
+    // failures can happen on any host, so one failure must not end it. Only a
+    // failure that lasts is shown.
+    const watchPatch = async () => {
+      let failures = 0;
+      while (!lifetime.signal.aborted) {
+        const opened = Date.now();
+        try {
           for await (const document of documents.watch(
             documentId,
             lifetime.signal,
-          ))
+          )) {
+            watchError = null;
             publish(document);
-        })().catch((error: unknown) => {
-          if (!lifetime.signal.aborted)
-            context.log({
-              level: "error",
-              stage: "patch-watch",
-              message: String(error),
-            });
-        });
+          }
+        } catch (error) {
+          if (lifetime.signal.aborted) return;
+          // A watch that stayed open was working, so this failure starts a new count.
+          failures = Date.now() - opened > 5000 ? 1 : failures + 1;
+          const message = String(error).slice(0, 1000);
+          context.log({
+            level: failures > 1 ? "error" : "info",
+            stage: "patch-watch",
+            message,
+          });
+          if (failures > 1) {
+            watchError = message;
+            publish(latestDocument);
+          }
+          await delay(Math.min(5000, 250 * 2 ** (failures - 1)), undefined, {
+            signal: lifetime.signal,
+          }).catch(() => {});
+        }
+      }
+    };
+    return {
+      async start() {
+        publish(await documents.read(documentId, lifetime.signal));
+        watching = watchPatch();
       },
       queryData(query) {
         if (query.id !== "validate-patch" || query.version !== 1)
@@ -241,8 +268,9 @@ export default {
           message: "No device actions",
         };
       },
-      dispose() {
+      async dispose() {
         lifetime.abort();
+        await watching;
       },
     };
   },

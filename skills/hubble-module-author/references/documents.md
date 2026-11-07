@@ -67,19 +67,48 @@ globally; document values survive restart. Whole-document history uses revision
 checks. The host workbook additionally maintains its own field-aware editing
 history, preserving unrelated canvas edits. Neither history edits Button Matrix.
 
-Subscribe using an instance-lifetime AbortController and abort on disposal:
+Subscribe using an instance-lifetime AbortController and abort on disposal. One
+failure must not end the watch. Some hosts refuse a watch briefly right after a
+version switch, with no feature to detect them, and other failures can happen on
+any host. A loop that stops at its first error misses every later edit until its
+worker restarts:
 
 ```ts
-for await (const snapshot of documents.watch("design", lifetime.signal)) {
-  // Update confirmed state without replacing active text drafts or firing commands.
-}
+import { setTimeout as delay } from "node:timers/promises";
+
+const watchDesign = async () => {
+  let failures = 0;
+  while (!lifetime.signal.aborted) {
+    const opened = Date.now();
+    try {
+      for await (const snapshot of documents.watch("design", lifetime.signal)) {
+        // Update confirmed state without replacing active text drafts or firing commands.
+        // Clear any watch error you are showing.
+      }
+    } catch (error) {
+      if (lifetime.signal.aborted) return;
+      // A watch that stayed open was working, so this failure starts a new count.
+      failures = Date.now() - opened > 5000 ? 1 : failures + 1;
+      // Log every failure, and publish phase "error" from the second in a row.
+      await delay(Math.min(5000, 250 * 2 ** (failures - 1)), undefined, {
+        signal: lifetime.signal,
+      }).catch(() => {});
+    }
+  }
+};
+const watching = watchDesign(); // On disposal: lifetime.abort(), then await this.
 ```
 
-The client performs bounded long polls; handle cancellation and errors. Do not
-create a new watch loop for every render. Worker state may publish a small public
-summary, but never expose credentials. A custom frontend calls declared backend
-commands over `@hubble/module-sdk/frontend`; it receives no private document/IPC
-escape hatch. Use the same document from Matrix/Advanced action handlers.
+The client performs bounded long polls. Each `watch` call starts with a fresh read,
+so a retry catches up on anything it missed. That read can succeed while the long
+poll keeps failing, as it does at the host's limit on document subscriptions, so
+a delivered snapshot clears the shown error but doesn't reset the count. The
+`custom-spreadsheet` and `custom-canvas` examples test this loop in
+`test/document-watch.test.ts`. Do not create a new watch loop for every render.
+Worker state may publish a small public summary, but never expose credentials. A
+custom frontend calls declared backend commands over `@hubble/module-sdk/frontend`;
+it receives no private document/IPC escape hatch. Use the same document from
+Matrix/Advanced action handlers.
 
 ## Host-rendered workbook in a document
 
@@ -178,6 +207,7 @@ contract; do not silently omit user assets from export or use private disk paths
 
 Qualify non-default documents, layouts and formulas through new-workspace and
 applicable replacement import modes, re-export and real-worker restart. Test
-held saves, second edits, failure/dependent rollback, concurrent canvas/workbook
-changes, package replacement/removal/re-addition and independent histories.
+held saves, second edits, failure/dependent rollback, a refused watch, concurrent
+canvas/workbook changes, package replacement/removal/re-addition and independent
+histories.
 Separate offline, installed, native-menu and physical-device evidence.
