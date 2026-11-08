@@ -1,0 +1,87 @@
+# Cyanview configuration module
+
+Version 0.1.31 · module ID `lightlab-cyanview-config` · workspace host module for Hubble 2.0.18 or later with the spreadsheet controls, column groups, layout, and extended editing features.
+
+Cyanview owns the two tabs, camera and network layouts, and device workflows. The Camera Configuration sheets use Hubble's Patch Sheet spreadsheet controls for selection, clipboard, series fill and the Button Matrix choice editor. Cyanview's amber cell tint and corner marker follow staged edits until device readback verifies them.
+
+## Included
+
+- Devices: one expandable settings section per managed device, local display name and connection IP, individual LAN plans, Columns, Send settings, Add and Replace, protected management addresses, status and Refresh all. Remove device clears only its managed entry and local camera/LAN drafts, with session Undo; it never removes hardware configuration.
+- Find & add devices is on the Devices page. Fast IP discovery pings in parallel with four-byte payloads, checks port 80 on responders and reads the Cyanview identity before displaying a result. Known/neighbor addresses are also verified immediately, including devices that block ICMP. Choose `10.192.0.0/16`, `10.20.0.0/16` or a custom `/16`–`/32` filter. Broadcast discovery and Full IP scan remain available. Probe a single IP and explicitly add discovered RCPs/RIOs. Device identity deduplicates aliases. Manual-IP results remain visible through scan updates.
+- Camera Configuration: one expandable sheet per controller, mixed RCP/RIO ordering with drag handles, Expand/Collapse all, per-controller Add camera dropdown, camera IP/port/username/plain-text password and lens settings on the same row.
+- REMI cameras: choose a managed source in the receiving controller’s Add camera menu, then add one, selected, or all cameras. The module reuses or creates the receiver’s manual IP connection. REMI settings offers an address override and tag editing. Device names are workspace labels used throughout the module.
+- A verified source camera edit refreshes its identifiable REMI copies on managed devices, including a chain through a master RCP. The module saves the chain, removes downstream copies first, and restores them from the source outward. Retry REMI refresh resumes saved progress after a failed hop. Imported rows show the original camera model and source controller’s workspace name when known. Remove those rows through REMI.
+- Iris, Zoom and Focus settings are off by default on each camera. Expand a lens section and check **Setup** on the camera row to stage its settings for Tilta Nucleus-M or direct ARRI cforce. New sheets start with header-only collapsed lens sections; existing saved collapsed fields keep their visibility. A dash means setup is unavailable. Use **+** in the group header to reveal its fields at their own widths. Right-click the header and open **Collapsed fields** to choose which fields stay visible. Unchecking an axis drops its pending edits and keeps its saved controller settings.
+- Camera, Lens and Sync header bands organize the camera sheet. The strip above each sheet shows the active camera and field, with keyboard hints and the Columns menu. Real camera numbers remain editable. Passwords are masked in the strip.
+- The shared Columns popup searches section and field labels. Toggle Camera, Lens, Iris, Zoom or Focus independently without losing field choices. Drag across field checkmarks to preview a range, then release for one save and one Undo step; Escape cancels. Selected **Collapsed fields** remain visible.
+- Each camera sheet has shared text-size controls (9–24) saved with its layout. Pinch or Ctrl-wheel zooms the whole sheet independently; zoom resets when the page reloads. Undo/Redo covers layout changes and staged camera setting edit batches, including paste and fill. It does not replay camera commands or undo settings already verified on hardware.
+- Drag a column edge to resize it or drag the bottom edge of the row gutter to resize the row. Each controller's sizes, collapsed fields, and expansion state save with the workspace.
+- Right-click a camera row and choose **Delete camera**, or select a cell and click the card's **Delete camera** button. The button names the active camera, including when a range spans several rows. The confirmation shows the camera and its controller. Imported cameras use REMI removal.
+- Camera sheets default to ascending numeric camera number. Click any data column header to sort; click again to reverse it. Each controller retains its own selected column and direction. Sorting changes the view without renumbering cameras or sending configuration.
+- Manual send by default. Auto send applies valid committed edits on Enter, Tab or blur, without sending intermediate typing or previously staged edits when enabled. Reconnecting does not replay pending writes.
+- Sending submits all selected pending rows together. Camera additions, edits, deletions and independent LAN additions run concurrently, with a separate verified result for each row. Further sends to the same row wait for its current send; network replacements retain their connection and identity verification sequence.
+- Auto sends and confirmed deletions on different cameras also run concurrently. Deleting a camera waits for its active edit, then blocks further edits to that camera. Concurrent draft saves preserve generated IDs and cannot restore deleted rows.
+- Cached camera or controller Offline status never blocks sending. Each send attempts a fresh connection; connection or verification failures leave the edit pending with an error.
+- Status sockets retain the documented text keepalive and use WebSocket protocol ping/pong to verify liveness, including controllers that do not reply to text pings.
+- Type to replace a text cell, or double-click, press Enter or press F2 to edit its current value. Enter, Tab and blur commit the edit. Escape cancels it. Choice cells use the Button Matrix popup with a checked current value, grouped options, and live controller choices. Type in a selected choice cell to search.
+- Saved dropdown choices are available after reload and when a controller is offline. Adding or refreshing a controller saves its camera models. Open other choice lists while connected to save the controller-specific lens and connection options. Offline edits can be staged and sent after reconnection.
+- Drag across cells or Shift-select a range, then copy or paste with the standard keyboard shortcuts. Paste rectangular tab-separated data into existing camera rows. Read-only and inactive fields are skipped.
+- Drag the selection’s bottom-right handle to fill. Camera numbers, names and IP addresses continue a consistent series. Other fields repeat their values.
+- Workspace storage for plans, credentials, ordering, expansion and hidden columns. Up to 128 controllers and 512 camera rows.
+
+LAN replacement creates and saves the new address, reconnects to that address, verifies the controller serial and settings, and only then removes the old configurable address. Add retains the old address. Generated object IDs are stored immediately so an interrupted operation does not silently create duplicates. An uncertain create requires reconciliation with Refresh before further action.
+
+## Cyanview controls and RCP routing
+
+Add a **Cyanview** action column in Button Matrix. Choose the Action and the named **Cyanview controller**; camera-specific actions also take a camera number, with a filtered list of camera names and support for formulas and series fill. The Action dropdown has separate **RCP set active camera** and **Cyanview** headings. **Select camera** is under the RCP heading; recording, group selection and exposure actions are under Cyanview. Existing saved action values stay valid. Controller choices list every managed RCP, RIO and Gateway, store stable identities and display the workspace name plus serial, or the serial alone while the name is still the serial. **Select camera** lists RCPs and Gateways. Renaming or changing a controller address preserves button assignments. New rows start with no Action. A row with no Action is simply empty: nothing on it is flagged as missing, its other cells are inactive until an Action is chosen, and it sends nothing. Any Action needs a controller, and camera-specific Actions also need a camera number. A row that already has **Select camera** saved from an earlier version keeps it until it's changed or cleared.
+
+Each existing Camera Configuration row has **Camera Control Enabled**, including REMI rows. These checkmarks define the quick group on that controller. They save immediately as local workspace selection, independently of staged device settings and Manual/Auto send. Existing and new cameras start unchecked. Checkbox edits support shared spreadsheet paste and fill.
+
+Each controller card in Camera Configuration has **Single switch** and **Enable all** controls, and shows how many of its cameras are enabled and how many of those are unavailable. These controls act at once and don't wait for the save. If a save fails, the edit and any later edits on that controller roll back, a message appears, and other work is kept.
+
+Each camera row also has read-only **Recording** and **Status** columns. **Status** shows what stops the next press first (for example `Recording locked`, `Camera offline` or `Waiting for fresh camera state`), otherwise the last press's result, otherwise `Ready`. Every managed RCP, RIO and Gateway keeps one connection to its MQTT broker from when the worker starts, whether or not a camera is ticked, so they fill in by themselves. That connection only subscribes, sends no commands and reconnects by itself. Until a controller has answered, both columns stay empty rather than guess. They can be hidden with **Columns**.
+
+**Control** and each controller's mark read **Online**, **Offline** or **Not checked**. They come only from that MQTT connection, the same state **Status** reads, so the two can't disagree. Offline only ever follows a connection that failed or a camera that reported it, and Not checked means nothing has answered yet. A Gateway runs its own broker as an RCP does, so it's watched and controlled the same way.
+
+**Refresh all** reads every controller once over a WebSocket, closes it, and merges changes made outside this module around local edits. It doesn't change any controller's status, and a controller it can't read is named in its message. Opening the page opens no connections.
+
+Enable / Disable Camera, Enable / Disable All Cameras and Single switch affect only the named controller. Single switch keeps one camera checked; Enable All exits Single switch. Record, ND, ISO, reported Base Gain and Sony VENICE Add preset commands affect only checked cameras on that controller. Select camera routes the RCP panel an RCP or Gateway reports, and says so if none has reported; Record camera targets one camera directly regardless of its checkmark. Record Group ALL has been removed for now. A row that already has it saved shows as invalid and sends nothing until its Action is changed or cleared. An empty quick group sends nothing.
+
+Camera commands use the managed controller's MQTT broker on port 1883. A camera that isn't connected is sent nothing, on any command, and the press says so. The other cameras in the press still get theirs, and nothing is held to send later. A connected camera whose state is known is checked first and isn't sent what it's already doing. It gets the command it accepts, `Rec` or `Stop` for a switch camera and `RecToggle` for a toggle-only one. It then has 15 seconds to report its new state, plus half a second for each other camera in the press, up to a minute, so a press on many cameras doesn't read as failed while the RCP catches up. A connected camera that hasn't reported its state still gets `Rec` or `Stop` straight away, and the result says it wasn't confirmed. A toggle-only one waits for a report before Start or Stop, because a blind toggle could do the opposite of what was asked. A recording lock stops a recording command. Fresh configuration verifies the controller serial and applied camera numbers before sending, so a press still needs that WebSocket read to succeed. Send or refresh staged camera number changes first. Recording preserves per-camera ordering and bounded concurrency. Presses act in press order on each controller, and a tick made just before a press counts while one made just after doesn't. Exposure/preset delivery acknowledgment does not claim camera completion. No commands are retained or replayed after reconnect. Runtime recording uncertainty is local to the host and is excluded from workspace export; selection flags and per-controller Single switch state are portable module documents.
+
+The new control runtime is packaged here, adapted from the RCP transport and CCC 1.2.9 recording implementation. It does not require the standalone RCP or CCC module. Existing standalone connections and buttons remain available alongside these new actions. All development device writes are tested with loopback simulators; physical camera operation requires a designated test target.
+
+## Build and check
+
+Use Node 22.22.2 and pnpm 11.0.8 from the root of this repository:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm build
+pnpm --filter @hubble-module/cyanview-config build
+node scripts/modules.mjs test cyanview-config
+pnpm --filter @hubble-module/cyanview-config test:ui
+node scripts/modules.mjs package cyanview-config
+```
+
+`src/ui-controller.js` is generated from `src/approved-ui.js` and the `src/ui-*.js` partials by `tools/adapt-ui.mjs`. Run this module's `build` script after editing those files and commit the result, because repository-wide builds use the committed copy.
+
+The package is written to `artifacts/lightlab-cyanview-config-0.1.31.hubble-module` at the repository root. Check for `module-spreadsheet-controls-v1`, `module-spreadsheet-column-groups-v1`, `module-spreadsheet-layout-v1`, `module-spreadsheet-extended-editing-v1`, `module-spreadsheet-column-editor-v1`, `module-spreadsheet-workbook-tools-v1`, `module-spreadsheet-column-visibility-v1`, `module-spreadsheet-column-paint-v1`, and `module-spreadsheet-text-size-v1` in the target host's `describe` response before importing. `Use sample devices` defaults to off and opens a separate sample plan when enabled.
+
+The existing `studio` page uses Hubble's `full-page` layout with its single `frontend` section. The iframe fills the bounded host content area and owns its existing header, tabs and footer. Long content scrolls within the selected tab; no fixed section height is used. Hubble retains its sidebar and window controls. The sandbox, scoped SDK bridge, page disposal and generation invalidation remain intact.
+
+Fast IP discovery uses the system `fping` utility, found in standard macOS/Linux installation locations; it is not bundled or silently installed. Four helper calls run concurrently, each covering up to 1,024 addresses at a one-millisecond interval, with no retries and a 300-millisecond timeout. This sends up to roughly 4,000 probes per second; the IP/ICMP headers add traffic beyond the four-byte payload. A full `/16` is not instantaneous, but verified devices appear as batches return. The Scan command remains open while the helper runs, so host cancellation and page closure settle its work. Stop cancels outstanding batches. If `fping` is unavailable, the module reports that explicitly; Find by IP, Broadcast discovery and Full IP scan still work.
+
+Broadcast discovery listens for Cyanview UDP/3838 announcements. If another app holds that port exclusively, the module reports it while continuing known-neighbor and manual IP checks. Fast IP discovery does not claim UDP/3838. Every candidate must return a Cyanview WebSocket configuration before it appears in the list.
+
+`pnpm preview` serves the compiled UI at `http://127.0.0.1:43127`. It loads the shared spreadsheet runtime from `CYANVIEW_SPREADSHEET_HOST`, which defaults to the side host at `http://127.0.0.1:42841`. Set `CYANVIEW_RENDERER_ASSETS` to the qualified main renderer assets directory for offline checks without connecting to either installed host. The browser tests use the selected shared runtime, a module-owned SDK bridge fixture, and a loopback WebSocket simulator for every device connection.
+
+## Capture-dependent features
+
+Camera model, endpoint, USB, lens model and lens connection commands resolve current options from each controller instead of reusing captured element IDs. Tilta Nucleus-M and direct ARRI cforce parameter editors use the documented formats only when the controller exposes a writable LensParams mapping; fresh readback confirms saved configuration. Unrecognized existing parameter formats remain blank and disabled to preserve their values.
+
+REMI imports require the source controller to advertise the camera. Chained refresh and recovery are verified with simulated controllers. cGate configuration, calibration and WAN address/DHCP writes await separate captures. Gateway/DNS writes require a live writable mapping. Physical camera and lens operation require hardware verification.
+
+The approved design hashes are recorded in `design-reference/ui-source-provenance.json`.
+
+Browser fixture tests exercise resizing, long content, tab switching and sorting without physical hardware connections.

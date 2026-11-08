@@ -1,0 +1,129 @@
+/* Full-page iframe: fixed module chrome with scrolling inside the active tab. */
+:root {
+  color-scheme: light dark;
+  background: light-dark(#f7f7f7, #111111);
+}
+
+html,
+body,
+#cyanview-design {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  min-height: 0;
+}
+
+body { overflow: hidden; }
+
+#cyanview-design,
+#cyanview-design > .hc-window {
+  height: 100%;
+  min-height: 0;
+  background: var(--hc-window);
+}
+
+#cyanview-design > .hc-window > .hc-main {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
+
+#cyanview-design .hc-main > .hc-panel { min-height: 0; overflow: auto; overscroll-behavior: contain; }
+#cyanview-design .hc-main > .hc-panel > * { flex-shrink: 0; }
+#cyanview-design .hc-global-foot { margin-top: 0; }
+
+#cyanview-design .hc-discovery-card {
+  border: 1px solid var(--hc-line);
+  border-radius: 7px;
+  background: var(--hc-window);
+}
+
+#cyanview-design .hc-discovery-card > summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+#cyanview-design .hc-discovery-card > summary::after {
+  content: '›';
+  margin-left: auto;
+  font-size: 18px;
+  line-height: 1;
+}
+
+#cyanview-design .hc-discovery-card[open] > summary::after {
+  transform: rotate(90deg);
+}
+
+#cyanview-design .hc-discovery-card > summary::-webkit-details-marker { display: none; }
+#cyanview-design .hc-discovery-card > summary .hc-caption { font-weight: 400; }
+
+#cyanview-design .hc-discovery-block {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  padding: 0 12px 12px;
+}
+
+#cyanview-design .hc-discovery-block .hc-results { min-height: 0; }
+#cyanview-design .hc-discovery-block .hc-state-empty { min-height: 140px; }
+
+#cyanview-design .hc-device-settings {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 10px;
+  border-top: 1px solid var(--hc-grid);
+}
+
+#cyanview-design .hc-device-settings label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--hc-secondary);
+  font-size: 11px;
+}
+
+#cyanview-design .hc-device-settings input { width: 220px; }
+#cyanview-design .hc-device-settings > .hc-caption { padding: 7px 0; }
+
+#cyanview-design .hc-managed-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 30px 16px;
+  border: 1px dashed var(--hc-line);
+  border-radius: 6px;
+  color: var(--hc-secondary);
+  text-align: center;
+}
+
+#cyanview-design .hc-grid caption { padding: 20px; color: var(--hc-secondary); }
+#cyanview-design .hc-grid th .hc-sort-heading { display: flex; align-items: center; gap: 3px; padding: 0; width: 100%; border: 0; border-radius: 0; text-align: left; font: inherit; }
+#cyanview-design .hc-sort-heading > span { font-size: 10px; color: var(--hc-secondary); }
+#cyanview-design .hc-axis-toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+
+#cyanview-design .hc-remi-panel { border-top: 1px solid var(--hc-line); padding: 9px 10px; }
+#cyanview-design .hc-remi-row { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin: 5px 0; }
+#cyanview-design .hc-remi-row label { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+#cyanview-design .hc-remi-row .hc-right { margin-left: auto; }
+#cyanview-design .hc-remi-panel :is(button, select, .hc-input) { padding: 4px 7px; min-height: 27px; font-size: 11px; }
+#cyanview-design .hc-remi-panel .hc-input { width: 150px; }
+#cyanview-design .hc-remi-catalog { overflow-x: auto; border: 1px solid var(--hc-line); border-radius: 5px; margin: 7px 0; }
+#cyanview-design .hc-remi-catalog .hc-grid { width: 100%; min-width: 295px; }
+#cyanview-design .hc-remi-catalog .hc-grid :is(td,th) { height: 30px; }
+#cyanview-design .hc-remi-catalog .hc-grid :is(td,th):last-child { border-right: 0; text-align: right; }
+#cyanview-design .hc-remi-catalog .hc-grid tr:last-child td { border-bottom: 0; }
+#cyanview-design .hc-remi-catalog .hc-grid button { padding: 1px 7px; min-height: 24px; }
+#cyanview-design .hc-remi-settings > summary { width: fit-content; color: var(--hc-secondary); padding: 3px 0; font-size: 11px; cursor: pointer; }
+#cyanview-design .hc-remi-chip { display: inline-flex; align-items: center; background: var(--hc-selected); border-radius: 4px; padding-left: 6px; }
+#cyanview-design .hc-remi-chip button { min-height: 22px; padding: 1px 5px; }
+#cyanview-design .hc-remi-model { display: grid; min-width: 0; line-height: 1.25; }
+#cyanview-design .hc-remi-model > span { overflow: hidden; text-overflow: ellipsis; }

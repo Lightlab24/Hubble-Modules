@@ -1,0 +1,7 @@
+{
+  "implementation": "The approved HTML, CSS and JavaScript are the module frontend. Hubble is the container and scoped backend bridge.",
+  "mainMarkupSha256": "37db2d52b5e2eec30f3751b6d1fb0054b5568d71653bdb86962f55bc04384ad8",
+  "stylesheetSha256": "aac8fc92f2eed27fa28bb87b05253775617f88a94295d1aaf64cd9a660191a2c",
+  "scriptSha256": "6f96b2754ebf4f4226edd19d8ef1f0295d921f97526847ea34ddbe7308014af7",
+  "hostExperiment": "Isolated and unused; no host source or installed app changes are required by this frontend."
+}

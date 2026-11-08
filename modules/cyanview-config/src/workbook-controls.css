@@ -1,0 +1,169 @@
+#cyanview-design .hc-camera-selection {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 34px;
+  gap: 8px;
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--hc-line);
+  background: var(--hc-window);
+  font-size: 11px;
+}
+#cyanview-design .hc-camera-location {
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--hc-line);
+  border-radius: 5px;
+  background: var(--hc-surface);
+}
+#cyanview-design .hc-camera-value {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--hc-secondary);
+}
+#cyanview-design .hc-camera-grid-shortcuts {
+  color: var(--hc-secondary);
+  white-space: nowrap;
+}
+#cyanview-design .hc-camera-grid-shortcuts kbd { font: inherit; color: var(--hc-text); }
+#cyanview-design .hc-camera-selection > button { padding: 4px 6px; }
+@media (max-width: 680px) {
+  #cyanview-design .hc-camera-grid-shortcuts { display: none; }
+}
+
+#cyanview-design .hc-grid[data-camera-device] {
+  min-width: 0;
+  color: light-dark(#252525, #dedede);
+  font: 13px system-ui, sans-serif;
+  --hc-matrix-heading: light-dark(#eaeaea, #222);
+  --hc-matrix-grid: light-dark(#d9d9d9, #3b3b3b);
+}
+#cyanview-design .hc-scroll:has(> [data-camera-device]) {
+  scrollbar-color: light-dark(#aaa, #555) var(--hc-window);
+}
+#cyanview-design .hc-grid[data-camera-device]:focus-visible:has([data-hubble-spreadsheet-active]) {
+  outline: none;
+}
+#cyanview-design .hc-grid[data-camera-device] :is(td,th) {
+  border-color: var(--hc-matrix-grid);
+}
+#cyanview-design .hc-controller .hc-grid[data-camera-device] thead th {
+  background: var(--hc-matrix-heading);
+  text-align: left;
+  font-weight: 600;
+}
+#cyanview-design .hc-grid[data-camera-device] .hc-camera-bands th {
+  height: 24px;
+  padding-left: 8px;
+  color: var(--hc-secondary);
+  font-size: 11px;
+}
+#cyanview-design .hc-grid[data-camera-device] th.hc-camera-group-header { padding: 0 4px; }
+#cyanview-design [data-axis-header] button[aria-expanded] {
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  padding: 0;
+  color: inherit;
+}
+#cyanview-design .hc-grid[data-camera-device] .hc-sort-heading {
+  justify-content: flex-start;
+  overflow: hidden;
+  min-height: 28px;
+  padding: 2px 0;
+  text-overflow: ellipsis;
+}
+#cyanview-design .hc-controller .hc-grid[data-camera-device] tbody td {
+  height: var(--hc-camera-row-height, calc(var(--hc-row) - 7px));
+  font-size: 13px;
+}
+#cyanview-design .hc-grid[data-camera-device] td[aria-readonly="true"] {
+  color: light-dark(#626262, #999);
+}
+#cyanview-design .hc-grid[data-camera-device] td[data-column] { position: relative; }
+#cyanview-design .hc-grid[data-camera-device] td.hc-camera-frozen { position: sticky; }
+#cyanview-design .hc-grid[data-camera-device] td.hc-camera-row-gutter { cursor: context-menu; }
+#cyanview-design .hc-grid[data-camera-device] button.hc-choice-cell {
+  display: block;
+  width: 100%;
+  padding: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+#cyanview-design .hc-grid[data-camera-device] button.hc-choice-cell:focus-visible { outline: none; }
+#cyanview-design .hc-grid[data-camera-device] :is(input[data-field], .hc-choice-cell) {
+  pointer-events: none;
+  text-overflow: ellipsis;
+}
+#cyanview-design .hc-grid[data-camera-device] input[data-lens-axis] {
+  width: 16px;
+  height: 16px;
+  accent-color: #2f6bff;
+}
+#cyanview-design .hc-grid[data-camera-device] input.hc-cell-editing {
+  pointer-events: auto;
+}
+#cyanview-design .hc-grid[data-camera-device] td:has(input.hc-cell-editing) {
+  outline: 1px solid #6aa9ff;
+  outline-offset: -1px;
+}
+#cyanview-design .hc-grid[data-camera-device] td[data-hubble-spreadsheet-selected]:not(.hc-changed) {
+  background-image: linear-gradient(rgb(206 206 206 / 12%), rgb(206 206 206 / 12%));
+}
+#cyanview-design .hc-controller .hc-grid[data-camera-device] tbody td.hc-changed {
+  background-color: var(--hc-pending);
+}
+#cyanview-design .hc-grid[data-camera-device] td.hc-changed::after {
+  pointer-events: none;
+}
+#cyanview-design .hc-grid[data-camera-device] input[data-field].hc-control-check {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+#cyanview-design .hc-camera-selection > :is([data-camera-columns], [data-camera-text-size]) { flex: 0 0 auto; }
+#cyanview-design .hc-control-single { display: inline-flex; align-items: center; gap: 5px; margin-left: 7px; font-size: 11px; white-space: nowrap; cursor: pointer; }
+#cyanview-design .hc-recording { color: var(--hc-red); }
+#cyanview-design .hc-unchecked { color: var(--hc-faint); }
+#cyanview-design .hc-unchecked .hc-dot { background: transparent; box-shadow: inset 0 0 0 1px currentColor; }
+#cyanview-design .hc-camera-status { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--hc-secondary); }
+#cyanview-design [data-camera-zoom] { color: var(--hc-secondary); min-width: 35px; text-align: right; }
+#cyanview-design .hc-grid[data-camera-device] {
+  --hc-camera-heading-height: max(30px, calc(var(--hc-camera-text-size, 13px) * 1.35 + 8px));
+  font-size: var(--hc-camera-text-size, 13px);
+  border-collapse: separate;
+  border-spacing: 0;
+  isolation: isolate;
+}
+#cyanview-design .hc-controller .hc-grid[data-camera-device] :is(td, th, .hc-cell-input, .hc-choice-cell, .hc-status, .hc-camera-status, .hc-mono, .hc-axis-toggle) {
+  font-size: var(--hc-camera-text-size, 13px);
+  line-height: 1.35;
+}
+#cyanview-design .hc-grid[data-camera-device] thead th { height: var(--hc-camera-heading-height); overflow: hidden; z-index: 12; }
+#cyanview-design .hc-grid[data-camera-device] thead tr:nth-child(2) th { top: 24px; }
+#cyanview-design .hc-grid[data-camera-device] thead tr:nth-child(3) th { top: calc(24px + var(--hc-camera-heading-height)); }
+#cyanview-design .hc-grid[data-camera-device] .hc-camera-bands th { height: 24px; font-size: 11px; top: 0; z-index: 22; }
+#cyanview-design .hc-controller .hc-grid[data-camera-device] tbody td {
+  height: max(var(--hc-camera-row-height, 36px), calc(var(--hc-camera-text-size, 13px) * 1.35 + 12px));
+}
+#cyanview-design .hc-controller .hc-grid[data-camera-device] :is(td, th).hc-camera-frozen { z-index: 8; }
+#cyanview-design .hc-controller .hc-grid[data-camera-device] thead th.hc-camera-frozen { z-index: 24; }
+#cyanview-design .hc-grid[data-camera-device] td:has(> input.hc-cell-editing) { padding: 0; outline: none; }
+#cyanview-design .hc-grid[data-camera-device] input.hc-cell-editing {
+  box-sizing: border-box; position: absolute; inset: 0; display: block;
+  width: 100%; height: 100%; min-height: 0; margin: 0; padding: 3px 6px;
+  border: 1px solid #6aa9ff; border-radius: 0; outline: none;
+  background: var(--hc-window); color: inherit; font: inherit;
+}
+#cyanview-design .hc-grid[data-camera-device] input[type="checkbox"] {
+  box-sizing: border-box; width: 16px; height: 16px; min-width: 16px; min-height: 16px;
+  flex: 0 0 16px; padding: 0; margin: 0; aspect-ratio: 1;
+}
+#cyanview-design .hc-grid[data-camera-device] .hc-empty-axis { background: var(--hc-window); }

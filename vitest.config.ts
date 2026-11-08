@@ -8,6 +8,8 @@ export default defineConfig({
     ],
     exclude: [
       "packages/module-tools/**",
+      // These use node:test and run through scripts/modules.mjs test cyanview-config.
+      "modules/cyanview-config/test/**",
       "templates/**",
       "**/node_modules/**",
       "**/dist/**",

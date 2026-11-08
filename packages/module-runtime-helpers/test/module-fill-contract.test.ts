@@ -20,6 +20,7 @@ const series: Record<string, readonly string[]> = {
   "aja-kumo": ["source", "destination"],
   "blackmagic-videohub": ["source", "destination"],
   ccc: ["cameraId"],
+  "cyanview-config": ["module.cameraNumber"],
   "cyanview-rcp": ["cameraNumber"],
   "cyanview-studio": ["feedNumber", "feedId"],
   "dit-browse": [],

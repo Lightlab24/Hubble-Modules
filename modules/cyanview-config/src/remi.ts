@@ -1,0 +1,532 @@
+import { object, stable, validIp, type Plan, type RecordValue } from './model.js';
+import { normalizeSnapshot } from './normalize.js';
+import type { ClientFactory } from './operations.js';
+import type { PlanRepository } from './repository.js';
+import {
+  describeRemiOrigins, isRemiModel, remiAddresses, remiCamera, remiEntries, remiLabel, remiTagRelay, samePeer,
+  type RemiCamera, type RemiEntry, type RemiLink, type RemiRefresh, type RemiSelector, type RemiStep,
+} from './remi-model.js';
+import type { CyanviewClient } from './transport.js';
+
+type Receipt = Awaited<ReturnType<PlanRepository['readRemi']>>;
+type Snapshot = ReturnType<typeof normalizeSnapshot>;
+type Observed = { device: RecordValue; config: RecordValue; entries: RemiEntry[]; selectors: Map<string, RemiSelector> };
+const message = (error: unknown) => error instanceof Error ? error.message : 'REMI operation failed';
+const cameraKeys = (config: RecordValue) => Object.keys(object(config.Camera));
+const linkKey = (link: RemiLink) => JSON.stringify([link.receiver, link.entry.localKey]);
+const sameEntry = (a: RemiEntry, b: RemiEntry) => a.selector === b.selector && a.connection === b.connection &&
+  a.importer === b.importer && a.peer === b.peer;
+const isImported = (entry: RemiEntry, config: RecordValue) =>
+  entry.enabled && !!entry.localKey && isRemiModel(config.Camera?.[entry.localKey]?.Model);
+
+export class RemiOperations {
+  private tail: Promise<unknown> = Promise.resolve();
+
+  constructor(private repository: PlanRepository, private factory: ClientFactory) {}
+
+  private enqueue<T>(run: () => Promise<T>) {
+    const task = this.tail.catch(() => undefined).then(run);
+    this.tail = task;
+    return task;
+  }
+
+  private device(plan: Plan, id: unknown) {
+    const device = plan.devices.find(row => row.id === id);
+    if (!device) throw new Error('Choose a managed controller');
+    return device;
+  }
+
+  private async connect(device: RecordValue, signal: AbortSignal) {
+    const client = this.factory(device.address || device.base);
+    try {
+      await client.connect(signal);
+      if (client.serial !== device.serial) throw new Error('Controller identity changed. Refresh before sending.');
+      return client;
+    } catch (error) {
+      client.close();
+      throw error;
+    }
+  }
+
+  private async selectors(client: CyanviewClient, signal: AbortSignal) {
+    try { return await client.readRemiSelectors(signal); }
+    catch { signal.throwIfAborted(); return new Map<string, RemiSelector>(); }
+  }
+
+  async readCameraReferences(snapshot: Snapshot, client: CyanviewClient, signal: AbortSignal, links: RemiLink[] = []) {
+    const imports = snapshot.cameras.filter(row => row.remi && !links.some(link =>
+      link.receiver === row.device && link.entry.localKey === row.elementKey &&
+      link.entry.selector === row.remi!.selector && link.entry.connection === row.remi!.connection));
+    if (!imports.length) return;
+    const selectors = await this.selectors(client, signal);
+    for (const row of imports) {
+      const info = row.remi!, selector = selectors.get(info.selector), prefix = info.peer + '.';
+      if (selector?.connection === info.connection && selector.deviceId.startsWith(prefix)) {
+        const sourceKey = selector.deviceId.slice(prefix.length);
+        if (sourceKey) info.sourceKey = sourceKey;
+      }
+    }
+  }
+
+  async describeCameras(plan: Plan, snapshots: Snapshot[], signal: AbortSignal, links?: RemiLink[]) {
+    const updated = new Set(snapshots.map(snapshot => snapshot.device.id));
+    const rows = snapshots.length ? snapshots.flatMap(snapshot => snapshot.cameras) : plan.cameras;
+    if (!rows.some(row => row.remi)) return;
+    const available = [...plan.cameras.filter(row => !updated.has(row.device)), ...snapshots.flatMap(snapshot => snapshot.cameras)];
+    const devices = [...plan.devices.filter(device => !updated.has(device.id)), ...snapshots.map(snapshot => snapshot.device)];
+    describeRemiOrigins(rows, available, plan.cameras, devices, links ?? (await this.repository.readRemi(signal)).data.links);
+  }
+
+  private async observe(device: RecordValue, signal: AbortSignal): Promise<Observed> {
+    const client = await this.connect(device, signal);
+    try {
+      const entries = remiEntries(client.config);
+      const selectors = entries.some(entry => entry.enabled) ? await this.selectors(client, signal) : new Map();
+      return { device, config: client.config, entries, selectors };
+    } finally { client.close(); }
+  }
+
+  private match(entries: RemiEntry[], selectors: Map<string, RemiSelector>, source: RecordValue,
+    config: RecordValue, camera: RemiCamera, previous?: RemiCamera) {
+    const peers = entries.filter(entry => samePeer(entry.peer, source));
+    if (!peers.length) return [];
+    const identity = (entry: RemiEntry) => {
+      const info = selectors.get(entry.selector);
+      return info?.connection === entry.connection ? info.deviceId : '';
+    };
+    const exact = peers.filter(entry => identity(entry) === entry.peer + '.' + camera.key);
+    if (exact.length) return exact;
+
+    // Some firmware reports only the remote number/name in the UI catalog.
+    // Use it only when it identifies one camera on the source and on each peer.
+    const labels = new Set([remiLabel(camera), ...(previous ? [remiLabel(previous)] : [])]);
+    for (const key of cameraKeys(config)) {
+      if (key !== camera.key && labels.has(remiLabel(remiCamera(key, config)))) {
+        throw new Error('Camera identity is ambiguous on ' + source.name);
+      }
+    }
+    const matches = peers.filter(entry => {
+      if (!labels.has(entry.label)) return false;
+      const remote = identity(entry), other = remote.startsWith(entry.peer + '.') ? remote.slice(entry.peer.length + 1) : '';
+      return !other || !config.Camera?.[other] || other === camera.key;
+    });
+    if (new Set(matches.map(entry => entry.connection)).size !== matches.length) {
+      throw new Error('Several REMI cameras match on ' + source.name);
+    }
+    return matches;
+  }
+
+  async state(input: RecordValue, signal: AbortSignal) {
+    const { plan } = await this.repository.read(signal);
+    const receiver = this.device(plan, input.receiver);
+    const store = await this.repository.readRemi(signal);
+    const target = await this.observe(receiver, signal);
+    const tagRelay = remiTagRelay(target.config);
+    const refreshes = store.data.refreshes.filter(job => job.source === receiver.id ||
+      job.steps?.some(step => step.receiver === receiver.id)).map(job => ({
+        source: job.source, key: job.camera.key, name: job.camera.name,
+      }));
+    if (!input.source) return { tags: tagRelay?.tags ?? null, cameras: [], addresses: [], refreshes };
+    const source = this.device(plan, input.source);
+    if (source.id === receiver.id) throw new Error('Choose a different source controller');
+    const from = await this.connect(source, signal);
+    try {
+      const active = target.entries.filter(entry => isImported(entry, target.config) && samePeer(entry.peer, source));
+      const cameras = cameraKeys(from.config).map(key => {
+        const camera = remiCamera(key, from.config);
+        try {
+          const assigned = active.find(entry => store.data.links.some(link => link.source === source.id &&
+            link.sourceKey === key && link.receiver === receiver.id && sameEntry(link.entry, entry) && link.entry.localKey === entry.localKey)) ??
+            this.match(active, target.selectors, source, from.config, camera)[0];
+          return { ...camera, assigned: !!assigned, localKey: assigned?.localKey ?? null };
+        } catch { return { ...camera, assigned: false, ambiguous: true }; }
+      });
+      return { tags: tagRelay?.tags ?? null, cameras, addresses: remiAddresses(source, from.config), refreshes };
+    } finally { from.close(); }
+  }
+
+  send(input: RecordValue, signal: AbortSignal) {
+    return this.enqueue(async () => {
+      const { plan } = await this.repository.read(signal);
+      const receiver = this.device(plan, input.receiver);
+      const store = await this.repository.readRemi(signal);
+      if (input.operation === 'retry') {
+        const jobs = store.data.refreshes.filter(job => job.source === receiver.id ||
+          job.steps?.some(step => step.receiver === receiver.id));
+        const results = [];
+        for (const job of jobs) {
+          try { await this.refresh(plan, job, store, signal); results.push({ id: job.camera.key, verified: true }); }
+          catch (error) { results.push({ id: job.camera.key, error: message(error) }); }
+        }
+        return { results, refresh: jobs.length > 0 };
+      }
+      if (!Array.isArray(input.items) || !input.items.length || input.items.length > 512) throw new Error('Choose between 1 and 512 REMI changes');
+      const items = input.items.map(object);
+      if (items.some((item: RecordValue) => typeof item.id !== 'string' || !item.id || !['camera', 'tag', 'remove'].includes(item.kind)) ||
+        new Set(items.map((item: RecordValue) => item.id)).size !== items.length) throw new Error('Invalid REMI changes');
+      if (items.some((item: RecordValue) => item.kind !== 'tag') && store.data.refreshes.some(job =>
+        job.source === receiver.id || job.steps?.some(step => step.receiver === receiver.id) ||
+        items.some((item: RecordValue) => item.source === job.source || job.steps?.some(step => step.receiver === item.source)))) {
+        throw new Error('Finish the pending REMI refresh before changing these camera assignments');
+      }
+      const target = await this.connect(receiver, signal);
+      const sources = new Map<string, CyanviewClient>();
+      try {
+        const results = [];
+        const additions = items.filter((item: RecordValue) => item.kind === 'camera' && item.enable === true);
+        if (additions.length) {
+          const current = cameraKeys(target.config).length;
+          const limit = String(target.config.Product?.MaxCam ?? '');
+          const capacity = /^\d+$/.test(limit) ? Number(limit) : Infinity;
+          // Existing assignments and copied camera rows count once.
+          const managed = plan.cameras.filter(row => row.device !== receiver.id).length;
+          const selectors = remiEntries(target.config).some(entry => entry.enabled) ? await this.selectors(target, signal) : new Map();
+          let newCount = 0;
+          for (const item of additions) {
+            try {
+              const source = this.device(plan, item.source);
+              const from = await this.sourceClient(sources, source, signal);
+              const camera = remiCamera(String(item.key), from.config);
+              if (!this.assigned(target, receiver, source, from.config, camera, store, selectors)) newCount++;
+            } catch { /* Invalid rows report their own errors below. */ }
+          }
+          if (newCount && (current + newCount > capacity || managed + current + newCount > 512)) {
+            throw new Error('This import would exceed camera capacity');
+          }
+        }
+        for (const item of items) {
+          signal.throwIfAborted();
+          try {
+            if (item.kind === 'tag') await this.tag(target, item, signal);
+            else if (item.kind === 'remove') await this.removeRow(target, receiver, item, store, signal);
+            else {
+              const source = this.device(plan, item.source);
+              const from = await this.sourceClient(sources, source, signal);
+              await this.assign(target, receiver, source, from, item, store, signal);
+            }
+            results.push({ id: item.id, verified: true });
+          } catch (error) { results.push({ id: item.id, error: message(error) }); }
+        }
+        const snapshot = normalizeSnapshot(target.config, target.address);
+        if (target.connected && snapshot.cameras.some(row => row.remi)) {
+          const observed = [snapshot];
+          await this.readCameraReferences(snapshot, target, signal, store.data.links);
+          for (const client of sources.values()) {
+            const source = normalizeSnapshot(client.config, client.address);
+            await this.readCameraReferences(source, client, signal, store.data.links);
+            observed.push(source);
+          }
+          await this.describeCameras(plan, observed, signal, store.data.links);
+        }
+        // A closed socket may have missed a write readback. The frontend refreshes it separately.
+        return { results, ...(target.connected ? { snapshot } : {}), refresh: !target.connected };
+      } finally {
+        target.close();
+        for (const client of sources.values()) client.close();
+      }
+    });
+  }
+
+  private async sourceClient(sources: Map<string, CyanviewClient>, source: RecordValue, signal: AbortSignal) {
+    let from = sources.get(source.id);
+    if (!from) {
+      from = await this.connect(source, signal);
+      sources.set(source.id, from);
+    }
+    return from;
+  }
+
+  private async tag(target: CyanviewClient, item: RecordValue, signal: AbortSignal) {
+    const tag = typeof item.tag === 'string' ? item.tag.trim() : '';
+    if (!tag || tag.length > 160 || /[,\r\n]/.test(tag) || typeof item.enable !== 'boolean') throw new Error('Enter a tag without commas');
+    const relay = remiTagRelay(target.config);
+    if (!relay) throw new Error('This controller does not expose writable REMI tags');
+    const next = item.enable ? [...new Set([...relay.tags, tag])] : relay.tags.filter(value => value !== tag);
+    if (stable(next) === stable(relay.tags)) return;
+    const mapping = await target.mapping(relay.key, 'Tags', signal);
+    if (mapping.key !== relay.key || mapping.property !== 'tags') throw new Error('REMI tag mapping could not be verified');
+    await target.update(mapping.key, { tags: next.join(',') }, signal);
+    await target.waitFor(config => stable(remiTagRelay(config)?.tags) === stable(next), signal);
+  }
+
+  private assigned(target: CyanviewClient, receiver: RecordValue, source: RecordValue, config: RecordValue,
+    camera: RemiCamera, store: Receipt, selectors: Map<string, RemiSelector>) {
+    const active = remiEntries(target.config).filter(entry => isImported(entry, target.config) && samePeer(entry.peer, source));
+    const known = store.data.links.filter(link => link.source === source.id && link.sourceKey === camera.key && link.receiver === receiver.id);
+    return active.find(entry => known.some(link => sameEntry(link.entry, entry) && link.entry.localKey === entry.localKey)) ??
+      this.match(active, selectors, source, config, camera)[0];
+  }
+
+  private assertNoLoop(receiver: RecordValue, source: RecordValue, key: string, store: Receipt) {
+    const visited = new Set([receiver.id]);
+    let next = source.id;
+    while (next) {
+      if (visited.has(next)) throw new Error('This import would create a REMI camera loop');
+      visited.add(next);
+      const parent = store.data.links.find(link => link.receiver === next && link.entry.localKey === key);
+      next = parent?.source ?? '';
+      key = parent?.sourceKey ?? '';
+    }
+  }
+
+  private async assign(target: CyanviewClient, receiver: RecordValue, source: RecordValue, from: CyanviewClient,
+    item: RecordValue, store: Receipt, signal: AbortSignal) {
+    if (receiver.id === source.id || typeof item.enable !== 'boolean') throw new Error('Choose a camera on a different controller');
+    const camera = remiCamera(String(item.key), from.config);
+    const selectors = remiEntries(target.config).some(entry => entry.enabled) ? await this.selectors(target, signal) : new Map();
+    const existing = this.assigned(target, receiver, source, from.config, camera, store, selectors);
+    if (!item.enable) {
+      if (existing) await this.remove(target, receiver.id, existing, store, signal);
+      return;
+    }
+    if (existing) {
+      this.rememberLink(store, { source: source.id, sourceKey: camera.key, receiver: receiver.id, entry: existing });
+      await this.repository.writeRemi(store, signal);
+      return;
+    }
+    this.assertNoLoop(receiver, source, camera.key, store);
+    const addresses = remiAddresses(source, from.config);
+    const linked = remiEntries(target.config).find(entry => entry.manual && entry.connected && samePeer(entry.peer, source) && addresses.includes(entry.address));
+    const address = item.address || linked?.address || addresses[0];
+    if (!addresses.includes(address) || remiAddresses(receiver, target.config).includes(address)) throw new Error('Choose a verified source IP address');
+    const importer = await this.ensureImporter(target, receiver, address, store, signal);
+    const selected = await this.resolve(target, source, from.config, camera, importer, signal);
+    const entry = await this.enable(target, selected, camera, signal);
+    this.rememberLink(store, { source: source.id, sourceKey: camera.key, receiver: receiver.id, entry });
+    await this.repository.writeRemi(store, signal);
+  }
+
+  private async ensureImporter(target: CyanviewClient, receiver: RecordValue, address: string, store: Receipt, signal: AbortSignal) {
+    if (!validIp(address) || !Object.hasOwn(target.config, 'Remi')) throw new Error('This controller does not expose REMI configuration');
+    const existing = Object.entries(object(target.config.Remi)).filter(([, value]) => {
+      const row = object(value);
+      return row.Type === 'LAN_manual' && row.IP === address;
+    });
+    if (existing.length > 1) throw new Error('Several manual REMI sources use ' + address);
+    const previous = store.data.creates.find(create => create.receiver === receiver.id && create.address === address);
+    if (existing[0]) {
+      if (previous) {
+        store.data.creates = store.data.creates.filter(create => create !== previous);
+        await this.repository.writeRemi(store, signal);
+      }
+      return existing[0][0];
+    }
+    if (previous) throw new Error('The manual connection to ' + address + ' could not be confirmed. Check the receiver before retrying.');
+    const receipt = { receiver: receiver.id as string, address, key: '' };
+    store.data.creates.push(receipt);
+    await this.repository.writeRemi(store, signal);
+    try {
+      const reply = await target.action({ new: ['CyElement.SessionImporter', address] }, signal);
+      if (typeof reply[1] !== 'string' || !reply[1]) throw new Error('Controller did not return a REMI connection identity');
+      receipt.key = reply[1];
+      await this.repository.writeRemi(store, signal);
+      await target.waitFor(config => config.Remi?.[receipt.key]?.IP === address &&
+        config.Remi?.[receipt.key]?.Type === 'LAN_manual', signal);
+    } catch (error) {
+      if (message(error) === 'Controller rejected the requested configuration') {
+        store.data.creates = store.data.creates.filter(create => create !== receipt);
+        await this.repository.writeRemi(store, signal);
+      }
+      throw new Error('Could not confirm the REMI connection to ' + address + ': ' + message(error));
+    }
+    store.data.creates = store.data.creates.filter(create => create !== receipt);
+    await this.repository.writeRemi(store, signal);
+    return receipt.key;
+  }
+
+  private async resolve(target: CyanviewClient, source: RecordValue, config: RecordValue, camera: RemiCamera,
+    importer: string, signal: AbortSignal, old?: RemiStep) {
+    const eligible = (snapshot: RecordValue) => remiEntries(snapshot).filter(entry =>
+      entry.importer === importer && entry.connected && samePeer(entry.peer, source));
+    const changedKey = old && camera.key !== old.sourceKey;
+    try {
+      await target.waitFor(snapshot => eligible(snapshot).some(entry =>
+        entry.label === remiLabel(camera) && (!changedKey || entry.selector !== old.entry.selector)), signal);
+    } catch {
+      signal.throwIfAborted();
+      // An identity can be available even when firmware formats its label differently.
+    }
+    const selectors = await this.selectors(target, signal);
+    const candidates = eligible(target.config).filter(entry => {
+      if (!changedKey || entry.selector !== old.entry.selector) return true;
+      return selectors.get(entry.selector)?.deviceId === entry.peer + '.' + camera.key;
+    });
+    const matches = this.match(candidates, selectors, source, config, camera);
+    if (matches.length !== 1) {
+      const address = target.config.Remi?.[importer]?.IP;
+      throw new Error((matches.length ? 'Several advertised cameras match ' : 'Camera is not advertised by ') +
+        source.name + (address ? ' via ' + address + '. Check or change the source IP.' : '. Refresh the REMI source.'));
+    }
+    return matches[0]!;
+  }
+
+  private async enable(target: CyanviewClient, entry: RemiEntry, camera: RemiCamera, signal: AbortSignal) {
+    const current = () => remiEntries(target.config).find(candidate => sameEntry(candidate, entry));
+    const live = current();
+    if (!live?.connected) throw new Error('The REMI source changed before the import could be sent');
+    if (!live.enabled) await target.update(entry.selector, { auto_camera: '1' }, signal);
+    await target.waitFor(config => {
+      const next = remiEntries(config).find(candidate => sameEntry(candidate, entry));
+      return !!next && isImported(next, config) && String(config.Camera[next.localKey!].Name ?? '') === camera.name;
+    }, signal);
+    return current()!;
+  }
+
+  private async disable(target: CyanviewClient, entry: RemiEntry, signal: AbortSignal, allowAlreadyRemoved = false) {
+    const current = remiEntries(target.config).find(candidate => sameEntry(candidate, entry));
+    if (current?.enabled && current.localKey === entry.localKey && isImported(current, target.config)) {
+      await target.update(current.selector, { auto_camera: '0' }, signal);
+    } else if (!allowAlreadyRemoved || current?.enabled || !!target.config.Camera?.[entry.localKey!]) {
+      throw new Error('The REMI assignment changed. Refresh before removing it.');
+    }
+    await target.waitFor(config => !remiEntries(config).some(candidate => sameEntry(candidate, entry) && candidate.enabled) &&
+      !config.Camera?.[entry.localKey!], signal);
+  }
+
+  private async removeRow(target: CyanviewClient, receiver: RecordValue, item: RecordValue, store: Receipt, signal: AbortSignal) {
+    const entry = remiEntries(target.config).find(row => row.localKey === item.key && row.selector === item.selector &&
+      row.connection === item.connection && isImported(row, target.config));
+    if (!entry) throw new Error('The REMI assignment changed. Refresh before removing it.');
+    await this.remove(target, receiver.id, entry, store, signal);
+  }
+
+  private async remove(target: CyanviewClient, receiver: string, entry: RemiEntry, store: Receipt, signal: AbortSignal) {
+    await this.disable(target, entry, signal);
+    store.data.links = store.data.links.filter(link => link.receiver !== receiver || link.entry.localKey !== entry.localKey);
+    await this.repository.writeRemi(store, signal);
+  }
+
+  private rememberLink(store: Receipt, link: RemiLink) {
+    store.data.links = store.data.links.filter(item => linkKey(item) !== linkKey(link));
+    store.data.links.push(link);
+  }
+
+  async assertCameraReady(device: string, key: string, signal: AbortSignal) {
+    const { data } = await this.repository.readRemi(signal);
+    if (data.refreshes.some(job => job.source === device && job.camera.key === key)) {
+      throw new Error('Retry this camera’s pending REMI refresh before sending another edit');
+    }
+  }
+
+  cameraChanged(source: RecordValue, before: RemiCamera, camera: RemiCamera, signal: AbortSignal) {
+    return this.enqueue(async () => {
+      const { plan } = await this.repository.read(signal);
+      if (plan.devices.length < 2) return {};
+      const store = await this.repository.readRemi(signal);
+      const job: RemiRefresh = { source: source.id, camera, before, steps: null };
+      // Persist the verified source change before looking up downstream devices.
+      store.data.refreshes.push(job);
+      await this.repository.writeRemi(store, signal);
+      try {
+        await this.refresh(plan, job, store, signal);
+        return job.steps?.length ? { remiRefresh: true } : {};
+      } catch (error) {
+        return { remiRefresh: true, remiError: message(error) };
+      }
+    });
+  }
+
+  private async captureChain(plan: Plan, job: RemiRefresh, store: Receipt, signal: AbortSignal) {
+    const inventory = new Map<string, Observed>();
+    // Bound simultaneous sockets when a workspace contains a large fleet.
+    for (let start = 0; start < plan.devices.length; start += 8) {
+      await Promise.all(plan.devices.slice(start, start + 8).map(async device => {
+        try { inventory.set(device.id, await this.observe(device, signal)); }
+        catch { signal.throwIfAborted(); }
+      }));
+    }
+    const steps: RemiStep[] = [], found = new Set<string>();
+    const walk = (sourceId: string, camera: RemiCamera, parent: number, ancestors: Set<string>, previous?: RemiCamera) => {
+      const from = inventory.get(sourceId);
+      if (!from) throw new Error('Cannot read REMI source ' + this.device(plan, sourceId).name);
+      for (const link of store.data.links.filter(link => link.source === sourceId && link.sourceKey === camera.key)) {
+        if (plan.devices.some(row => row.id === link.receiver) && !inventory.has(link.receiver)) {
+          throw new Error('REMI receiver is offline: ' + this.device(plan, link.receiver).name);
+        }
+      }
+      for (const target of inventory.values()) {
+        if (target.device.id === sourceId) continue;
+        const active = target.entries.filter(entry => isImported(entry, target.config));
+        const tracked = store.data.links.filter(link => link.source === sourceId && link.sourceKey === camera.key && link.receiver === target.device.id);
+        const entries = this.match(active, target.selectors, from.device, from.config, camera, previous);
+        for (const entry of active) if (tracked.some(link => sameEntry(link.entry, entry) && link.entry.localKey === entry.localKey) &&
+          samePeer(entry.peer, from.device) && !entries.some(candidate => sameEntry(candidate, entry))) entries.push(entry);
+        for (const entry of entries) {
+          if (!entry.connected) throw new Error('REMI source is disconnected on ' + target.device.name);
+          if (ancestors.has(target.device.id)) throw new Error('A REMI camera loop needs to be resolved before refreshing copies');
+          const step: RemiStep = { source: sourceId, sourceKey: camera.key, receiver: target.device.id, entry, parent, phase: 'attached' };
+          if (found.has(linkKey(step))) throw new Error('The REMI camera has more than one upstream assignment');
+          if (steps.length >= 512) throw new Error('The REMI chain exceeds camera capacity');
+          found.add(linkKey(step));
+          const index = steps.push(step) - 1;
+          walk(target.device.id, remiCamera(entry.localKey!, target.config), index, new Set([...ancestors, target.device.id]));
+        }
+      }
+    };
+    walk(job.source, job.camera, -1, new Set([job.source]), job.before);
+    return steps;
+  }
+
+  private async refresh(plan: Plan, job: RemiRefresh, store: Receipt, signal: AbortSignal) {
+    if (!job.steps) {
+      job.steps = await this.captureChain(plan, job, store, signal);
+      await this.repository.writeRemi(store, signal);
+    }
+    const steps = job.steps;
+    if (!steps.length) {
+      store.data.refreshes = store.data.refreshes.filter(current => current !== job);
+      await this.repository.writeRemi(store, signal);
+      return;
+    }
+    const clients = new Map<string, CyanviewClient>();
+    try {
+      // Verify every endpoint before interrupting any copy. Remove downstream
+      // first, while the old parent camera and its selector still exist.
+      for (const id of new Set([job.source, ...steps.map(step => step.receiver)])) {
+        await this.sourceClient(clients, this.device(plan, id), signal);
+      }
+      for (const step of steps) {
+        if (step.phase !== 'attached') continue;
+        const config = clients.get(step.receiver)!.config;
+        const current = remiEntries(config).find(entry => sameEntry(entry, step.entry));
+        if (!current?.connected || current.localKey !== step.entry.localKey || !isImported(current, config)) {
+          throw new Error('A REMI assignment changed on ' + this.device(plan, step.receiver).name + '. Check the connection before retrying.');
+        }
+      }
+      for (const step of [...steps].reverse()) {
+        if (step.phase !== 'attached' && step.phase !== 'removing') continue;
+        const target = clients.get(step.receiver)!;
+        const alreadyStarted = step.phase === 'removing';
+        step.phase = 'removing';
+        await this.repository.writeRemi(store, signal);
+        await this.disable(target, step.entry, signal, alreadyStarted);
+        step.phase = 'removed';
+        await this.repository.writeRemi(store, signal);
+      }
+      // Rebuild from the origin outward. Each child uses its parent's new key.
+      for (const step of steps) {
+        if (step.phase === 'done') continue;
+        const parent = step.parent === -1 ? undefined : steps[step.parent];
+        const key = parent ? parent.next?.localKey : job.camera.key;
+        if (!key) throw new Error('The upstream REMI camera is not restored yet');
+        const from = clients.get(step.source)!, target = clients.get(step.receiver)!;
+        const camera = remiCamera(key, from.config);
+        const receiver = this.device(plan, step.receiver);
+        const importer = step.entry.manual ?
+          await this.ensureImporter(target, receiver, step.entry.address, store, signal) : step.entry.importer;
+        const entry = await this.resolve(target, this.device(plan, step.source), from.config, camera, importer, signal, step);
+        step.phase = 'adding';
+        await this.repository.writeRemi(store, signal);
+        step.next = await this.enable(target, entry, camera, signal);
+        step.phase = 'done';
+        store.data.links = store.data.links.filter(link => linkKey(link) !== linkKey(step));
+        this.rememberLink(store, { source: step.source, sourceKey: key, receiver: step.receiver, entry: step.next });
+        await this.repository.writeRemi(store, signal);
+      }
+      store.data.refreshes = store.data.refreshes.filter(current => current !== job);
+      await this.repository.writeRemi(store, signal);
+    } finally {
+      for (const client of clients.values()) client.close();
+    }
+  }
+}

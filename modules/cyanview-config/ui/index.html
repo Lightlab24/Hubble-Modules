@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cyanview</title><link rel="stylesheet" href="app.css"></head><body style="margin:0"><div id="cyanview-design" hidden><div class="hc-window">
+<main class="hc-main">
+        <header class="hc-module-header">
+          <div class="hc-module-title"><h2>Cyanview</h2><p>RCP / RIO configuration</p></div>
+          <div class="hc-send-control"><span class="hc-muted">Send mode</span><div class="hc-segment" role="group" aria-label="Spreadsheet send mode"><button data-action="send-mode" data-mode="Manual" aria-pressed="true">Manual</button><button data-action="send-mode" data-mode="Auto send" aria-pressed="false">Auto send</button></div></div>
+          <span class="hc-live"><span class="hc-dot"></span>Live<span class="hc-live-label" data-role="live-summary"> · 4 online / 1 offline</span></span>
+          <button class="hc-button" data-action="refresh-all"><i data-lucide="refresh-cw" class="hc-icon" aria-hidden="true"></i>Refresh all</button>
+        </header>
+        <nav class="hc-tabs" role="tablist" aria-label="Cyanview pages">
+          <button class="hc-tab" role="tab" id="hc-tab-devices" aria-controls="hc-devices" aria-selected="true" data-tab="devices">Devices <span class="hc-tab-count" data-role="device-count">5</span></button>
+          <button class="hc-tab" role="tab" id="hc-tab-discovery" aria-controls="hc-discovery" aria-selected="false" data-tab="discovery">Network Discovery</button>
+          <button class="hc-tab" role="tab" id="hc-tab-cameras" aria-controls="hc-cameras" aria-selected="false" data-tab="cameras">Camera Configuration <span class="hc-tab-count" data-role="camera-count">8</span></button>
+        </nav>
+        <section id="hc-devices" class="hc-panel" role="tabpanel" aria-labelledby="hc-tab-devices">
+          <div class="hc-toolbar">
+            <div class="hc-toolbar-title"><h3>LAN settings</h3><span data-role="device-summary">5 managed devices</span></div>
+            <button class="hc-button" data-action="add-ip"><i data-lucide="plus" class="hc-icon" aria-hidden="true"></i>Add by IP</button>
+            <button class="hc-primary" data-action="review-lan">Send changes <span data-role="lan-pending">2</span></button>
+          </div>
+          <div class="hc-toolbar-secondary" style="position:relative">
+            <label><span class="hc-muted">Show</span><select data-role="device-filter" aria-label="Filter LAN sheet by device"><option value="all">All devices</option></select></label>
+            <button data-action="add-lan"><i data-lucide="plus" class="hc-icon" aria-hidden="true"></i>LAN address</button>
+            <span class="hc-right"></span>
+            <button data-action="lan-columns"><i data-lucide="columns-3" class="hc-icon" aria-hidden="true"></i>Columns</button>
+            <div class="hc-column-menu" data-role="lan-columns-menu" hidden></div>
+          </div>
+          <div class="hc-sheet">
+            <div class="hc-formula"><span class="hc-address" data-role="lan-address">E4</span><span class="hc-fx">fx</span><span class="hc-formula-value hc-mono" data-role="lan-value">10.20.101.106/16</span></div>
+            <div class="hc-scroll"><table class="hc-grid" data-role="lan-grid" aria-label="Device LAN configuration spreadsheet"></table></div>
+            <div class="hc-sheet-tabs"><span class="hc-sheet-tab">Network plan</span><span class="hc-sheet-caption">Pending cells highlighted</span></div>
+          </div>
+          <div class="hc-panel-foot"><span data-role="lan-foot">2 pending changes · 1 offline device</span><span class="hc-caption">Select a device name for current interfaces</span></div>
+        </section>
+        <section id="hc-discovery" class="hc-panel" role="tabpanel" aria-labelledby="hc-tab-discovery" hidden>
+          <div class="hc-toolbar"><div class="hc-toolbar-title"><h3>Network discovery</h3><span>Find RCPs and RIOs</span></div></div>
+          <div class="hc-scan-controls">
+            <label class="hc-field"><span>Network range</span><select data-role="scan-range" aria-label="Network range"><option value="">Choose a network…</option><option value="10.192.0.0/16">10.192.0.0/16</option><option value="10.20.0.0/16">10.20.0.0/16</option><option value="custom">Custom range…</option></select></label>
+            <label class="hc-field" data-role="custom-range-field" hidden><span>CIDR range</span><input class="hc-input hc-mono" data-role="custom-range" placeholder="10.20.101.0/24" aria-label="Custom CIDR range" style="width:165px"></label>
+            <button class="hc-primary" data-action="scan" disabled><i data-lucide="radar" class="hc-icon" aria-hidden="true"></i>Discover</button>
+            <button class="hc-button" data-action="stop-scan" hidden>Stop</button>
+            <label class="hc-field hc-manual"><span>Or add a device by IP</span><div><input class="hc-input hc-mono" data-role="manual-ip" placeholder="10.20.101.200" aria-label="Device IP address"><button class="hc-button" data-action="probe-ip">Find</button></div></label>
+          </div>
+          <div class="hc-error" data-role="discovery-error" role="alert" hidden></div>
+          <div class="hc-scan-status"><div><span data-role="scan-label">No scan running</span><span data-role="scan-addresses"></span></div><div class="hc-progress" role="progressbar" aria-label="Network scan progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span data-role="scan-progress"></span></div></div>
+          <div class="hc-toolbar"><div class="hc-toolbar-title"><h3>Discovered devices</h3><span data-role="found-count">0 found</span></div><button class="hc-primary" data-action="add-discovered" disabled>Add selected <span data-role="found-selected">0</span></button></div>
+          <div class="hc-results" data-role="discovery-results"><div class="hc-state-empty"><i data-lucide="radar" class="hc-icon" aria-hidden="true"></i><strong>Choose a network to start</strong><span class="hc-caption">Discovered devices appear here before you add them.</span></div></div>
+          <div class="hc-panel-foot"><span>One entry per device, even when found at multiple IPs</span></div>
+        </section>
+        <section id="hc-cameras" class="hc-panel" role="tabpanel" aria-labelledby="hc-tab-cameras" hidden>
+          <div class="hc-toolbar"><div class="hc-toolbar-title"><h3>Added RCPs &amp; RIOs</h3><span data-role="camera-summary">8 cameras across 4 devices</span></div><button class="hc-button" data-action="toggle-all-controllers" aria-label="Expand all device spreadsheets"><i data-lucide="chevrons-up-down" class="hc-icon" aria-hidden="true"></i><span data-role="expand-all-label">Expand all</span></button></div>
+          <div class="hc-mode-note" data-role="camera-mode-note">Manual mode · edit each device's sheet, then send its changes.</div>
+          <div class="hc-controller-list" data-role="controllers"></div>
+          <div class="hc-panel-foot"><span data-role="camera-foot">1 pending change · 2 cameras offline</span><span class="hc-caption">Camera and lens settings share the same row</span></div>
+        </section>
+        <footer class="hc-global-foot" aria-live="polite"><i data-lucide="check" class="hc-icon" aria-hidden="true"></i><span data-role="saved-label">Plan saved</span><span class="hc-right hc-changes-label" data-role="pending-summary">3 device changes pending</span></footer>
+        <aside class="hc-drawer" data-role="drawer" aria-label="Device details" hidden></aside>
+        <div class="hc-veil" data-role="modal-layer" hidden></div>
+        <div class="hc-toast" data-role="toast" role="status" hidden></div>
+      </main>
+</div></div><script type="module" src="app.js"></script></body></html>
