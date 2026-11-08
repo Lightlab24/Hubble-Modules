@@ -1394,6 +1394,21 @@
   white-space: nowrap;
 }
 
+.router-take-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.router-automatic-take {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--secondary);
+  font-size: var(--font-size-small);
+  white-space: nowrap;
+}
+
 .router-take-button {
   min-width: 104px;
   min-height: 34px;
@@ -1661,7 +1676,7 @@
     grid-area: actions;
     flex-wrap: wrap;
   }
-  .router-take-button {
+  .router-take-controls {
     grid-area: take;
   }
   .router-batch-summary {

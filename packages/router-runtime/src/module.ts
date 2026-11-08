@@ -597,32 +597,48 @@ export function routerModule(
                   "router-view",
                   execution.signal,
                 );
-                const zoom = z
-                  .object({ zoom: z.number() })
-                  .safeParse(saved.value);
+                const view = routerViewPreferences(saved.value);
                 return json({
                   connection: connectionView(snapshot),
-                  zoom: zoom.success ? zoom.data.zoom : 100,
+                  zoom: view.zoom,
+                  automaticTake: view.automaticTake,
                 });
               }
-              case "set-zoom": {
-                const zoom = z
-                  .union([
-                    z.literal(75),
-                    z.literal(90),
-                    z.literal(100),
-                    z.literal(110),
-                    z.literal(125),
-                    z.literal(150),
-                  ])
-                  .parse(input.value);
+              case "set-zoom":
+              case "set-automatic-take": {
+                const change: Record<string, ModuleJsonValue> =
+                  input.commandId === "set-zoom"
+                    ? {
+                        zoom: z
+                          .union([
+                            z.literal(75),
+                            z.literal(90),
+                            z.literal(100),
+                            z.literal(110),
+                            z.literal(125),
+                            z.literal(150),
+                          ])
+                          .parse(input.value),
+                      }
+                    : { automaticTake: z.boolean().parse(input.value) };
                 for (let attempt = 0; attempt < 3; attempt++) {
                   const current = await documents.read(
                     "router-view",
                     execution.signal,
                   );
+                  // Keep the other preference; zoom and Automatic Take share this document.
+                  const base =
+                    typeof current.value === "object" &&
+                    current.value !== null &&
+                    !Array.isArray(current.value)
+                      ? current.value
+                      : {};
                   try {
-                    await documents.write(current, { zoom }, execution.signal);
+                    await documents.write(
+                      current,
+                      { ...base, ...change },
+                      execution.signal,
+                    );
                     return null;
                   } catch (error) {
                     if (
@@ -632,7 +648,7 @@ export function routerModule(
                       throw error;
                   }
                 }
-                throw new Error("Router zoom changed; try again");
+                throw new Error("Router page preferences changed; try again");
               }
               case "groups":
               case "edit-group":
@@ -667,4 +683,19 @@ export function routerModule(
       };
     },
   };
+}
+
+/** Router page preferences; Automatic Take here is the page's own, not the Button Matrix's. */
+export function routerViewPreferences(value: unknown): {
+  readonly zoom: number;
+  readonly automaticTake: boolean;
+} {
+  const view = z
+    .object({
+      zoom: z.number().catch(100),
+      automaticTake: z.boolean().catch(false),
+    })
+    .catch({ zoom: 100, automaticTake: false })
+    .parse(value ?? {});
+  return { zoom: view.zoom, automaticTake: view.automaticTake };
 }

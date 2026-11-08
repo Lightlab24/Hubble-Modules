@@ -235,6 +235,7 @@ export function withRouterInterface(
               "refresh",
               "settings",
               "set-zoom",
+              "set-automatic-take",
               "groups",
               "edit-group",
             ].map((id) => ({ id, label: id })),
@@ -243,15 +244,16 @@ export function withRouterInterface(
       },
       {
         id: "routing-settings",
-        label: "Routing",
+        label: "Button Matrix",
         placement: "module-settings",
         sections: [
           {
             type: "custom",
             id: "routing-settings",
-            label: "Routing",
+            label: "Button Matrix",
             entry: "ui/settings.html",
-            height: 72,
+            // Automatic Take and a few groups; a longer list scrolls inside.
+            height: 300,
             commands: ["groups", "edit-group"].map((id) => ({
               id,
               label: id,

@@ -3,26 +3,42 @@ import { createRoot } from "react-dom/client";
 import { connectModuleFrontend } from "@hubble/module-sdk/frontend";
 import { RouterView } from "./RouterView.js";
 import { useRouterState } from "./use-router-state.js";
-import { createRouterPageApi, type PageBridge } from "./page-client.js";
-import { GroupPanel } from "./GroupPanel.js";
-import { AutomaticTakeSettings } from "./AutomaticTakeSettings.js";
+import { createRouterPageApi } from "./page-client.js";
+import {
+  ButtonMatrixSettings,
+  type ButtonMatrixSettingsBridge,
+} from "./ButtonMatrixSettings.js";
+import { PreferenceSaveQueue } from "./preference-save-queue.js";
 import { initializeRouterZoom } from "./zoom-storage.js";
 import { uuid } from "./uuid.js";
 import type { ConnectionView } from "./connection-view.js";
 import "./page.css";
 
+/** A failure message that fades on its own, like the host's failure toast. */
+function useFadingMessage() {
+  const [message, setMessage] = useState<string | null>(null);
+  const failed = useCallback((next: string) => setMessage(next), []);
+  useEffect(() => {
+    if (!message) return;
+    const timer = setTimeout(() => setMessage(null), 7000);
+    return () => clearTimeout(timer);
+  }, [message]);
+  return { message, failed };
+}
+
 function RouterPage({
   bridge,
   initial,
+  initialAutomaticTake,
 }: {
-  bridge: PageBridge;
+  bridge: ButtonMatrixSettingsBridge;
   initial: ConnectionView;
+  initialAutomaticTake: boolean;
 }) {
   const [connection, setConnection] = useState(initial);
   const [revision, setRevision] = useState("initial");
-  const [message, setMessage] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const failed = useCallback((message: string) => setMessage(message), []);
+  const { message, failed } = useFadingMessage();
   useEffect(() => {
     const listener = (event: Event) =>
       failed(String((event as CustomEvent).detail));
@@ -30,12 +46,17 @@ function RouterPage({
     return () =>
       window.removeEventListener("router-preference-failure", listener);
   }, [failed]);
-  useEffect(() => {
-    if (message) {
-      const timer = setTimeout(() => setMessage(null), 7000);
-      return () => clearTimeout(timer);
-    }
-  }, [message]);
+  const [automaticTake, setAutomaticTake] = useState(initialAutomaticTake);
+  // The saved value is read once per page load; later choices live in the queue.
+  const [automaticTakeQueue] = useState(
+    () =>
+      new PreferenceSaveQueue(
+        initialAutomaticTake,
+        (enabled) => bridge.call("set-automatic-take", enabled),
+        setAutomaticTake,
+        (reason) => failed(`Router page Automatic Take wasn't saved: ${reason}`),
+      ),
+  );
   const api = useMemo(
     () =>
       createRouterPageApi(bridge, (next, revision) => {
@@ -49,7 +70,14 @@ function RouterPage({
   });
   return (
     <main className="router-page">
-      <GroupPanel bridge={bridge} revision={revision} failed={failed} />
+      <details className="router-groups">
+        <summary>Button Matrix: Automatic Take and groups</summary>
+        <ButtonMatrixSettings
+          bridge={bridge}
+          revision={revision}
+          failed={failed}
+        />
+      </details>
       {message && (
         <div className="router-failure" role="alert">
           {message}
@@ -60,6 +88,10 @@ function RouterPage({
         selectedConnectionId={connection.connectionId}
         onConnectionChange={() => {}}
         router={router}
+        automaticTake={automaticTake}
+        onAutomaticTakeChange={(enabled) => {
+          void automaticTakeQueue.set(enabled);
+        }}
         refreshingRouterNames={refreshing}
         onRefreshRouterNames={() => {
           setRefreshing(true);
@@ -73,12 +105,26 @@ function RouterPage({
   );
 }
 
+function SettingsPage({ bridge }: { bridge: ButtonMatrixSettingsBridge }) {
+  const { message, failed } = useFadingMessage();
+  return (
+    <main className="button-matrix-settings-page">
+      <ButtonMatrixSettings bridge={bridge} failed={failed} />
+      {message && (
+        <div className="button-matrix-failure" role="alert">
+          {message}
+        </div>
+      )}
+    </main>
+  );
+}
+
 async function start() {
   const element = document.getElementById("root")!;
   const bridge = await connectModuleFrontend(window);
   if (document.documentElement.dataset.view === "settings") {
     const root = createRoot(element);
-    root.render(<AutomaticTakeSettings bridge={bridge} />);
+    root.render(<SettingsPage bridge={bridge} />);
     window.addEventListener(
       "pagehide",
       () => {
@@ -92,6 +138,7 @@ async function start() {
   const settings = (await bridge.call("settings")) as unknown as {
     connection: ConnectionView;
     zoom: number;
+    automaticTake?: boolean;
   };
   let zoomTail: Promise<unknown> = Promise.resolve();
   initializeRouterZoom(
@@ -111,7 +158,13 @@ async function start() {
     },
   );
   const root = createRoot(element);
-  root.render(<RouterPage bridge={bridge} initial={settings.connection} />);
+  root.render(
+    <RouterPage
+      bridge={bridge}
+      initial={settings.connection}
+      initialAutomaticTake={settings.automaticTake === true}
+    />,
+  );
   window.addEventListener(
     "pagehide",
     () => {

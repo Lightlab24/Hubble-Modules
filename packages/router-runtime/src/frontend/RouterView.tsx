@@ -56,6 +56,7 @@ import {
   VirtualRouterList,
   type VirtualRouterSelectionGesture,
 } from "./VirtualRouterList.js";
+import { SettingSwitch } from "./SettingSwitch.js";
 import "./router.css";
 import { routerZoomStorage } from "./zoom-storage.js";
 
@@ -83,6 +84,10 @@ export interface RouterViewProps {
   readonly onRefreshRouterNames?: () => void;
   readonly refreshingRouterNames?: boolean;
   readonly router: RouterConnection;
+  /** Route each Router page selection at once instead of staging it for Take. */
+  readonly automaticTake?: boolean;
+  /** Omit to hide the Router page Automatic Take switch. */
+  readonly onAutomaticTakeChange?: (enabled: boolean) => void;
 }
 
 interface RouterListModel<T> {
@@ -119,6 +124,8 @@ export function RouterView({
   onRefreshRouterNames = () => undefined,
   refreshingRouterNames = false,
   router,
+  automaticTake = false,
+  onAutomaticTakeChange,
 }: RouterViewProps): React.JSX.Element {
   const [routerViewZoom, setRouterViewZoom] = useState<RouterViewZoom>(() =>
     loadRouterViewZoom(routerZoomStorage),
@@ -308,10 +315,12 @@ export function RouterView({
       </header>
 
       <RouterBody
+        automaticTake={automaticTake}
         connectionCount={routerConnections.length}
         selectedConnection={selectedConnection}
         router={router}
         state={state}
+        onAutomaticTakeChange={onAutomaticTakeChange}
       />
     </section>
   );
@@ -366,11 +375,15 @@ function RouterZoomControl({
 }
 
 function RouterBody({
+  automaticTake,
   connectionCount,
+  onAutomaticTakeChange,
   selectedConnection,
   router,
   state,
 }: {
+  readonly automaticTake: boolean;
+  readonly onAutomaticTakeChange: ((enabled: boolean) => void) | undefined;
   readonly connectionCount: number;
   readonly selectedConnection: OperatingRouterConnectionView | undefined;
   readonly router: RouterConnection;
@@ -422,6 +435,8 @@ function RouterBody({
   return (
     <RouterWorkspace
       key={state.connectionId}
+      automaticTake={automaticTake}
+      onAutomaticTakeChange={onAutomaticTakeChange}
       destinationLocks={
         selectedConnection.type === "evertz-quartz"
           ? selectedConnection.destinationLocks
@@ -530,11 +545,15 @@ function RouterEmptyState({
 }
 
 function RouterWorkspace({
+  automaticTake,
   destinationLocks,
+  onAutomaticTakeChange,
   router,
   showsLevels,
   state,
 }: {
+  readonly automaticTake: boolean;
+  readonly onAutomaticTakeChange: ((enabled: boolean) => void) | undefined;
   readonly destinationLocks?:
     | readonly { destination: number; owner: number }[]
     | undefined;
@@ -712,9 +731,10 @@ function RouterWorkspace({
     [],
   );
 
+  /** True when this call staged the pair. */
   const stagePair = useCallback(
-    (source: number, destination: number): void => {
-      if (!canStageWithSource(source)) return;
+    (source: number, destination: number): boolean => {
+      if (!canStageWithSource(source)) return false;
       const existing = state.drafts.find(
         (draft) => draft.destination === destination,
       );
@@ -723,20 +743,22 @@ function RouterWorkspace({
         existing.source === source &&
         numberArraysEqual(existing.levels, stagingLevels)
       ) {
-        return;
+        return false;
       }
       if (existing !== undefined) {
         setPendingRouteReplacement(destination);
-        return;
+        return false;
       }
       router.stageMapping({ source, destination, levels: stagingLevels });
+      return true;
     },
     [canStageWithSource, router, stagingLevels, state.drafts],
   );
 
+  /** True when this call staged the pair. */
   const replaceStagedPair = useCallback(
-    (source: number, destination: number): void => {
-      if (!canStartStage) return;
+    (source: number, destination: number): boolean => {
+      if (!canStartStage) return false;
       const onlyDraft = state.drafts.length === 1 ? state.drafts[0] : undefined;
       if (
         onlyDraft?.status === "staged" &&
@@ -744,14 +766,74 @@ function RouterWorkspace({
         onlyDraft.destination === destination &&
         numberArraysEqual(onlyDraft.levels, stagingLevels)
       ) {
-        return;
+        return automaticTake;
       }
       router.clearStaged();
       router.stageMapping({ source, destination, levels: stagingLevels });
       setPendingRouteReplacement(null);
+      return true;
     },
-    [canStartStage, router, stagingLevels, state.drafts],
+    [automaticTake, canStartStage, router, stagingLevels, state.drafts],
   );
+
+  // A click that arrives while a take is still running routes once it settles.
+  const deferredAutomaticTakeRef = useRef<{
+    readonly source: number;
+    readonly destination: number;
+  } | null>(null);
+
+  /** With Automatic Take on, route what a click staged and keep its destination. */
+  const takeStagedAutomatically = useCallback(
+    (destination: number): void => {
+      if (!automaticTake) return;
+      void router.submitTake();
+      // Take clears the selection; keep the destination so the next source routes to it.
+      router.selectDestination(destination);
+      destinationSelectionAnchorRef.current = destination;
+    },
+    [automaticTake, router],
+  );
+
+  const routePair = useCallback(
+    (source: number, destination: number): void => {
+      if (replaceStagedPair(source, destination)) {
+        deferredAutomaticTakeRef.current = null;
+        takeStagedAutomatically(destination);
+      } else if (automaticTake && hasActiveTake) {
+        deferredAutomaticTakeRef.current = { source, destination };
+      }
+    },
+    [automaticTake, hasActiveTake, replaceStagedPair, takeStagedAutomatically],
+  );
+
+  useEffect(() => {
+    const deferred = deferredAutomaticTakeRef.current;
+    if (deferred === null) return;
+    if (!automaticTake) {
+      deferredAutomaticTakeRef.current = null;
+      return;
+    }
+    if (hasActiveTake || !truthReady) return;
+    deferredAutomaticTakeRef.current = null;
+    const blocked = state.drafts.some(
+      ({ status }) => status === "failed" || status === "conflict",
+    );
+    // Route it only if the operator still has that pair selected.
+    if (
+      !blocked &&
+      state.selection.source === deferred.source &&
+      state.selection.destination === deferred.destination
+    )
+      routePair(deferred.source, deferred.destination);
+  }, [
+    automaticTake,
+    hasActiveTake,
+    routePair,
+    state.drafts,
+    state.selection.destination,
+    state.selection.source,
+    truthReady,
+  ]);
 
   const activateSource = useCallback(
     (source: number): void => {
@@ -759,7 +841,7 @@ function RouterWorkspace({
       router.selectSource(source);
       destinationSelectionAnchorRef.current = destination;
       if (destination !== null) {
-        replaceStagedPair(source, destination);
+        routePair(source, destination);
       } else if (
         batchSource !== null &&
         batchSource !== source &&
@@ -768,13 +850,7 @@ function RouterWorkspace({
         router.clearStaged();
       }
     },
-    [
-      batchSource,
-      hasActiveTake,
-      replaceStagedPair,
-      router,
-      state.selection.destination,
-    ],
+    [batchSource, hasActiveTake, routePair, router, state.selection.destination],
   );
 
   const activateDestination = useCallback(
@@ -795,11 +871,12 @@ function RouterWorkspace({
         );
         if (anchorIndex < 0 || destinationIndex < 0) {
           destinationSelectionAnchorRef.current = destination;
-          replaceStagedPair(selectedSource, destination);
+          routePair(selectedSource, destination);
           return;
         }
         const firstIndex = Math.min(anchorIndex, destinationIndex);
         const lastIndex = Math.max(anchorIndex, destinationIndex);
+        let staged = false;
         for (const item of destinationModel.items.slice(
           firstIndex,
           lastIndex + 1,
@@ -807,9 +884,10 @@ function RouterWorkspace({
           if (
             !state.drafts.some((draft) => draft.destination === item.address)
           ) {
-            stagePair(selectedSource, item.address);
+            staged = stagePair(selectedSource, item.address) || staged;
           }
         }
+        if (staged) takeStagedAutomatically(destination);
         return;
       }
 
@@ -821,22 +899,23 @@ function RouterWorkspace({
         if (existing !== undefined) {
           if (truthReady && !hasActiveTake)
             router.removeStagedMapping(existing.mappingId);
-        } else {
-          stagePair(selectedSource, destination);
+        } else if (stagePair(selectedSource, destination)) {
+          takeStagedAutomatically(destination);
         }
         return;
       }
 
-      replaceStagedPair(selectedSource, destination);
+      routePair(selectedSource, destination);
     },
     [
       destinationModel.items,
       hasActiveTake,
-      replaceStagedPair,
+      routePair,
       router,
       selectedSource,
       stagePair,
       state.drafts,
+      takeStagedAutomatically,
       truthReady,
     ],
   );
@@ -854,12 +933,14 @@ function RouterWorkspace({
       levels: stagingLevels,
     });
     setPendingRouteReplacement(null);
+    takeStagedAutomatically(pendingRouteReplacement);
   }, [
     pendingRouteReplacement,
     router,
     selectedSource,
     stageDisabled,
     stagingLevels,
+    takeStagedAutomatically,
   ]);
 
   const requestSource = useCallback(
@@ -1170,6 +1251,8 @@ function RouterWorkspace({
       />
 
       <RouterActionBar
+        automaticTake={automaticTake}
+        onAutomaticTakeChange={onAutomaticTakeChange}
         batchSource={batchSource}
         clearStagedOpen={truthReady && clearStagedOpen}
         configuredLevels={configuredLevels}
@@ -2090,6 +2173,8 @@ function StagedRouteList({
 }
 
 function RouterActionBar({
+  automaticTake,
+  onAutomaticTakeChange,
   batchSource,
   clearStagedOpen,
   configuredLevels,
@@ -2108,6 +2193,8 @@ function RouterActionBar({
   state,
   truthReady,
 }: {
+  readonly automaticTake: boolean;
+  readonly onAutomaticTakeChange: ((enabled: boolean) => void) | undefined;
   readonly batchSource: number | null;
   readonly clearStagedOpen: boolean;
   readonly configuredLevels: readonly number[];
@@ -2342,17 +2429,32 @@ function RouterActionBar({
           </span>
         )}
       </div>
-      <button
-        className="router-take-button"
-        type="button"
-        disabled={!takeReady}
-        onClick={() => {
-          focusAfterMutationRef.current = true;
-          void router.submitTake();
-        }}
-      >
-        {takeLabel}
-      </button>
+      <div className="router-take-controls">
+        {onAutomaticTakeChange === undefined ? null : (
+          <div
+            className="router-automatic-take"
+            title="Route each Router page selection at once instead of staging it for Take. Button Matrix buttons keep their own setting."
+          >
+            <span aria-hidden="true">Automatic Take</span>
+            <SettingSwitch
+              label="Router page Automatic Take"
+              checked={automaticTake}
+              onChange={onAutomaticTakeChange}
+            />
+          </div>
+        )}
+        <button
+          className="router-take-button"
+          type="button"
+          disabled={!takeReady}
+          onClick={() => {
+            focusAfterMutationRef.current = true;
+            void router.submitTake();
+          }}
+        >
+          {takeLabel}
+        </button>
+      </div>
 
       <div className="router-visually-hidden" role="status" aria-live="polite">
         {hasCriticalDraft

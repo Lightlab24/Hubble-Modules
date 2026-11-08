@@ -123,30 +123,28 @@ p {
 .router-groups {
   padding: 10px;
   border-bottom: 1px solid var(--line);
-  max-height: 250px;
+  max-height: 320px;
   overflow: auto;
   font-size: 13px;
 }
 .router-groups summary {
   cursor: pointer;
 }
-.router-groups label {
-  display: inline-flex;
-  gap: 8px;
-  align-items: center;
-  margin: 8px 16px 8px 0;
-}
-.router-groups p {
-  margin: 4px 0 10px;
-  color: var(--secondary);
+.router-groups[open] summary {
+  margin-bottom: 8px;
 }
 .router-group-row {
   display: flex;
+  align-items: center;
   gap: 8px;
-  margin-bottom: 6px;
+  margin: 0 0 6px;
+}
+.router-group-row button {
+  white-space: nowrap;
 }
 .router-group-row input {
   min-width: 200px;
+  flex: 0 1 280px;
 }
 .router-failure {
   position: absolute;
@@ -164,38 +162,88 @@ html[data-view="settings"],
 html[data-view="settings"] body {
   background: transparent;
 }
-.automatic-take-settings {
+.button-matrix-settings-page {
   position: relative;
-  display: grid;
-  align-content: start;
-  gap: 6px;
   height: 100%;
   overflow: auto;
   font-size: 12px;
 }
-.automatic-take-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
+.button-matrix-settings {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+.button-matrix-context {
+  display: grid;
+  gap: 6px;
+}
+.button-matrix-context h3 {
+  margin: 4px 0 0;
+  color: var(--text-strong);
+  font-size: 12px;
+  font-weight: 600;
+}
+.button-matrix-row,
+.button-matrix-groups {
   padding: 10px 11px;
   border: 1px solid var(--line-strong);
   border-radius: 4px;
   background: var(--chrome);
 }
-.automatic-take-row > div {
+.button-matrix-row,
+.button-matrix-groups-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+.button-matrix-groups {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+}
+.button-matrix-groups-heading {
+  justify-self: stretch;
+}
+.button-matrix-groups ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.button-matrix-row > div,
+.button-matrix-groups-heading > div {
   display: grid;
   gap: 3px;
 }
-.automatic-take-row strong {
+.button-matrix-row strong,
+.button-matrix-groups strong {
   color: var(--text);
   font-weight: 600;
 }
-.automatic-take-row > div > span {
+.button-matrix-row > div > span,
+.button-matrix-groups-heading > div > span,
+.button-matrix-count,
+.button-matrix-note {
   color: var(--secondary);
   line-height: 1.45;
 }
-.automatic-take-row > button {
+.button-matrix-count {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.button-matrix-failure {
+  position: absolute;
+  z-index: 1;
+  top: 4px;
+  right: 72px;
+  max-width: 70%;
+  padding: 6px 10px;
+  border-radius: 6px;
+  color: var(--text);
+  background: #512820;
+  box-shadow: 0 4px 16px #0008;
+}
+.setting-switch {
   display: grid;
   min-width: 42px;
   flex: 0 0 auto;
@@ -209,11 +257,11 @@ html[data-view="settings"] body {
   font-size: 11px;
   cursor: pointer;
 }
-.automatic-take-row > button:focus-visible {
+.setting-switch:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
-.automatic-take-track {
+.setting-switch-track {
   position: relative;
   width: 30px;
   height: 16px;
@@ -224,7 +272,7 @@ html[data-view="settings"] body {
     border-color 100ms ease,
     background-color 100ms ease;
 }
-.automatic-take-track > span {
+.setting-switch-track > span {
   position: absolute;
   top: 2px;
   left: 2px;
@@ -237,26 +285,14 @@ html[data-view="settings"] body {
     background-color 100ms ease,
     transform 100ms ease;
 }
-.automatic-take-row > button[aria-checked="true"] {
+.setting-switch[aria-checked="true"] {
   color: #8fcdbb;
 }
-.automatic-take-row > button[aria-checked="true"] .automatic-take-track {
+.setting-switch[aria-checked="true"] .setting-switch-track {
   border-color: #397f6c;
   background: #24594c;
 }
-.automatic-take-row > button[aria-checked="true"] .automatic-take-track > span {
+.setting-switch[aria-checked="true"] .setting-switch-track > span {
   background: #e8fff7;
   transform: translateX(14px);
-}
-.automatic-take-failure {
-  position: absolute;
-  z-index: 1;
-  top: 4px;
-  right: 72px;
-  max-width: 70%;
-  padding: 6px 10px;
-  border-radius: 6px;
-  color: var(--text);
-  background: #512820;
-  box-shadow: 0 4px 16px #0008;
 }
