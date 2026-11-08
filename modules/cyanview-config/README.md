@@ -1,6 +1,6 @@
 # Cyanview configuration module
 
-Version 0.1.31 · module ID `lightlab-cyanview-config` · workspace host module for Hubble 2.0.18 or later with the spreadsheet controls, column groups, layout, and extended editing features.
+Version 0.1.32 · module ID `lightlab-cyanview-config` · workspace host module for Hubble 2.0.18 or later with the spreadsheet controls, column groups, layout, and extended editing features.
 
 Cyanview owns the two tabs, camera and network layouts, and device workflows. The Camera Configuration sheets use Hubble's Patch Sheet spreadsheet controls for selection, clipboard, series fill and the Button Matrix choice editor. Cyanview's amber cell tint and corner marker follow staged edits until device readback verifies them.
 
@@ -66,7 +66,7 @@ node scripts/modules.mjs package cyanview-config
 
 `src/ui-controller.js` is generated from `src/approved-ui.js` and the `src/ui-*.js` partials by `tools/adapt-ui.mjs`. Run this module's `build` script after editing those files and commit the result, because repository-wide builds use the committed copy.
 
-The package is written to `artifacts/lightlab-cyanview-config-0.1.31.hubble-module` at the repository root. Check for `module-spreadsheet-controls-v1`, `module-spreadsheet-column-groups-v1`, `module-spreadsheet-layout-v1`, `module-spreadsheet-extended-editing-v1`, `module-spreadsheet-column-editor-v1`, `module-spreadsheet-workbook-tools-v1`, `module-spreadsheet-column-visibility-v1`, `module-spreadsheet-column-paint-v1`, and `module-spreadsheet-text-size-v1` in the target host's `describe` response before importing. `Use sample devices` defaults to off and opens a separate sample plan when enabled.
+The package is written to `artifacts/lightlab-cyanview-config-0.1.32.hubble-module` at the repository root. Check for `module-spreadsheet-controls-v1`, `module-spreadsheet-column-groups-v1`, `module-spreadsheet-layout-v1`, `module-spreadsheet-extended-editing-v1`, `module-spreadsheet-column-editor-v1`, `module-spreadsheet-workbook-tools-v1`, `module-spreadsheet-column-visibility-v1`, `module-spreadsheet-column-paint-v1`, and `module-spreadsheet-text-size-v1` in the target host's `describe` response before importing. `Use sample devices` defaults to off and opens a separate sample plan when enabled.
 
 The existing `studio` page uses Hubble's `full-page` layout with its single `frontend` section. The iframe fills the bounded host content area and owns its existing header, tabs and footer. Long content scrolls within the selected tab; no fixed section height is used. Hubble retains its sidebar and window controls. The sandbox, scoped SDK bridge, page disposal and generation invalidation remain intact.
 
