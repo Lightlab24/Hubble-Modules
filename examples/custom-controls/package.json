@@ -1,0 +1,16 @@
+{
+  "name": "hubble-custom-controls-example",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "hubble": {
+    "id": "example-custom-controls",
+    "name": "Custom controls example",
+    "assets": [
+      "ui/index.html"
+    ],
+    "frontend": {
+      "ui/app.js": "src/frontend.ts"
+    }
+  }
+}

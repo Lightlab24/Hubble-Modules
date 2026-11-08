@@ -19,12 +19,20 @@ const tool = await build({
 });
 await build({
   entryPoints: Object.fromEntries(
-    ["index", "authoring", "testing", "frontend", "spreadsheet-controls", "slider-controls", "helper-runtime"].map(
-      (name) => [
-        name,
-        path.join(root, "packages/module-sdk/dist", name + ".js"),
-      ],
-    ),
+    [
+      "index",
+      "authoring",
+      "testing",
+      "frontend",
+      "spreadsheet-controls",
+      "slider-controls",
+      "controls",
+      "timecode",
+      "helper-runtime",
+    ].map((name) => [
+      name,
+      path.join(root, "packages/module-sdk/dist", name + ".js"),
+    ]),
   ),
   outdir: path.join(output, "author-sdk"),
   outExtension: { ".js": ".mjs" },

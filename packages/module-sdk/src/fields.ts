@@ -1,5 +1,10 @@
 import { z } from "zod";
 import type { ModuleJsonValue, ModuleValues } from "./index.js";
+import {
+  MODULE_TIMECODE_FRAME_RATES,
+  moduleTimecodeIssue,
+} from "./timecode.js";
+export * from "./timecode.js";
 
 const Identifier = z
   .string()
@@ -14,6 +19,21 @@ export const ModuleFieldSliderSchema = z.strictObject({
   step: z.number().min(0.000001),
   /** Printed directly after the value, so include any space: "%" or " dB". */
   unit: z.string().max(16).optional(),
+});
+/** Draws a boolean field as Hubble's On/Off switch. Requires module-controls-v1. */
+export const ModuleFieldSwitchSchema = z.strictObject({
+  onLabel: z.string().trim().min(1).max(16).optional(),
+  offLabel: z.string().trim().min(1).max(16).optional(),
+});
+/** Draws a choice field as a row of buttons. Requires module-controls-v1. */
+export const ModuleFieldSegmentedSchema = z.strictObject({});
+/** Draws a number field with − and + buttons. Requires module-controls-v1. */
+export const ModuleFieldStepperSchema = z.strictObject({
+  step: z.number().min(0.000001),
+});
+/** Checks a text field as HH:MM:SS:FF timecode. Requires module-controls-v1. */
+export const ModuleFieldTimecodeSchema = z.strictObject({
+  frameRate: z.enum(MODULE_TIMECODE_FRAME_RATES),
 });
 const Label = z.string().trim().min(1).max(160);
 export const ModuleChoiceSchema = z.strictObject({
@@ -62,7 +82,12 @@ type BaseField = {
 type Choices = { choices: ModuleChoice[]; choiceProvider?: string | undefined };
 export type ModuleField = BaseField &
   (
-    | { type: "text"; default: string; secret?: boolean | undefined }
+    | {
+        type: "text";
+        default: string;
+        secret?: boolean | undefined;
+        timecode?: z.infer<typeof ModuleFieldTimecodeSchema> | undefined;
+      }
     | {
         type: "number";
         default: number | null;
@@ -70,9 +95,18 @@ export type ModuleField = BaseField &
         max?: number | undefined;
         integer?: boolean | undefined;
         slider?: z.infer<typeof ModuleFieldSliderSchema> | undefined;
+        stepper?: z.infer<typeof ModuleFieldStepperSchema> | undefined;
       }
-    | { type: "boolean"; default: boolean }
-    | ({ type: "choice"; default: string } & Choices)
+    | {
+        type: "boolean";
+        default: boolean;
+        switch?: z.infer<typeof ModuleFieldSwitchSchema> | undefined;
+      }
+    | ({
+        type: "choice";
+        default: string;
+        segmented?: z.infer<typeof ModuleFieldSegmentedSchema> | undefined;
+      } & Choices)
     | ({
         type: "multi-choice";
         default: string[];
@@ -111,6 +145,7 @@ function fieldSchema(depth: number): z.ZodType<ModuleField> {
         type: z.literal("text"),
         default: z.string().max(16_384),
         secret: z.boolean().optional(),
+        timecode: ModuleFieldTimecodeSchema.optional(),
       }),
       z.strictObject({
         ...Base,
@@ -120,16 +155,19 @@ function fieldSchema(depth: number): z.ZodType<ModuleField> {
         max: z.number().optional(),
         integer: z.boolean().optional(),
         slider: ModuleFieldSliderSchema.optional(),
+        stepper: ModuleFieldStepperSchema.optional(),
       }),
       z.strictObject({
         ...Base,
         type: z.literal("boolean"),
         default: z.boolean(),
+        switch: ModuleFieldSwitchSchema.optional(),
       }),
       z.strictObject({
         ...Base,
         type: z.literal("choice"),
         default: z.string().max(160),
+        segmented: ModuleFieldSegmentedSchema.optional(),
         ...ChoiceFields,
       }),
       z.strictObject({
@@ -231,6 +269,27 @@ export const ModuleFieldsSchema = z
           const issue = moduleSliderFieldIssue(field, field.slider);
           if (issue) problem(issue);
         }
+        if (field.type === "number" && field.stepper) {
+          const issue = moduleStepperFieldIssue(field, field.stepper);
+          if (issue) problem(issue);
+        }
+        if (
+          field.type === "choice" &&
+          field.segmented &&
+          (field.choiceProvider !== undefined ||
+            field.choices.length < 2 ||
+            field.choices.length > 8)
+        )
+          problem("Segmented choices need 2 to 8 static choices");
+        if (field.type === "text" && field.timecode) {
+          if (field.secret || field.shortcut)
+            problem("Timecode fields cannot be secret shortcuts");
+          else if (
+            (field.default !== "" || field.required) &&
+            moduleTimecodeIssue(field.default, field.timecode.frameRate)
+          )
+            problem("Timecode default must be valid timecode");
+        }
         if (field.type === "choice" || field.type === "multi-choice") {
           const choices = new Set(field.choices.map((choice) => choice.id));
           if (choices.size !== field.choices.length)
@@ -300,6 +359,40 @@ function moduleSliderFieldIssue(
   )
     return "Slider max and default must be whole steps from min";
   return undefined;
+}
+function moduleStepperFieldIssue(
+  field: Extract<ModuleField, { type: "number" }>,
+  stepper: z.infer<typeof ModuleFieldStepperSchema>,
+): string | undefined {
+  if (field.slider)
+    return "A number field cannot be both a slider and a stepper";
+  const { min, max, default: initial } = field;
+  if (min === undefined || max === undefined || min >= max)
+    return "Stepper fields need a min below their max";
+  if (initial === null) return "Stepper fields need a numeric default";
+  if (
+    field.integer &&
+    !(Number.isInteger(min) && Number.isInteger(stepper.step))
+  )
+    return "Integer steppers need a whole number min and step";
+  if (!onSliderGrid(initial, min, stepper.step))
+    return "Stepper default must be whole steps from min";
+  return undefined;
+}
+/** Fields drawn by module-controls-v1: switch, segmented, stepper or timecode. */
+export function moduleFieldsUseControls(
+  fields: readonly ModuleField[],
+): boolean {
+  return fields.some((field) =>
+    field.type === "object"
+      ? moduleFieldsUseControls(field.fields)
+      : field.type === "array"
+        ? moduleFieldsUseControls([field.item])
+        : (field.type === "boolean" && field.switch !== undefined) ||
+          (field.type === "choice" && field.segmented !== undefined) ||
+          (field.type === "number" && field.stepper !== undefined) ||
+          (field.type === "text" && field.timecode !== undefined),
+  );
 }
 export function moduleFieldsUseSliders(
   fields: readonly ModuleField[],
@@ -430,6 +523,18 @@ export function validateModuleFields(
         (field.required && !value.trim()))
     )
       fail("Invalid text");
+    if (
+      field.type === "text" &&
+      field.timecode &&
+      typeof value === "string" &&
+      (value !== "" || field.required)
+    ) {
+      const issue = moduleTimecodeIssue(value, field.timecode.frameRate);
+      if (issue)
+        throw new Error(
+          field.validation?.message ?? `${issue}: ${field.label}`,
+        );
+    }
     if (
       field.type === "choice" &&
       (typeof value !== "string" ||

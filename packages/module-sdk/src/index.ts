@@ -104,12 +104,86 @@ import {
   moduleFieldsRequireV2,
   moduleFieldsAllowEmptyNumbers,
   moduleFieldsUseSliders,
+  moduleFieldsUseControls,
   moduleFieldDefault,
   moduleFieldsContainSecrets,
   validateModuleFields,
   type ModuleChoice,
   type ModuleField,
 } from "./fields.js";
+export const MODULE_STATUS_LAMP_TONES = [
+  "red",
+  "green",
+  "amber",
+  "blue",
+  "off",
+] as const;
+export const MODULE_METER_TONES = ["warning", "failure"] as const;
+/**
+ * Shows a published state value as a lamp or a meter. Requires module-controls-v1.
+ * A missing, stale or unmapped value shows as unknown, never as off.
+ */
+export const ModuleStatusDisplaySchema = z.discriminatedUnion("type", [
+  z.strictObject({
+    type: z.literal("lamp"),
+    states: z
+      .record(
+        z.string().min(1).max(160),
+        z.strictObject({
+          tone: z.enum(MODULE_STATUS_LAMP_TONES),
+          label: LabelSchema.optional(),
+        }),
+      )
+      .refine((states) => {
+        const count = Object.keys(states).length;
+        return count >= 1 && count <= 16;
+      }, "Lamps map 1 to 16 states"),
+  }),
+  z
+    .strictObject({
+      type: z.literal("meter"),
+      min: z.number(),
+      max: z.number(),
+      unit: z.string().max(16).optional(),
+      zones: z
+        .array(
+          z.strictObject({
+            from: z.number(),
+            tone: z.enum(MODULE_METER_TONES),
+          }),
+        )
+        .max(4)
+        .optional(),
+    })
+    .superRefine((meter, ctx) => {
+      if (!(
+        Number.isFinite(meter.min) &&
+        Number.isFinite(meter.max) &&
+        meter.min < meter.max
+      ))
+        ctx.addIssue({
+          code: "custom",
+          message: "Meters need a finite min below their max",
+        });
+      const zones = meter.zones ?? [];
+      if (
+        zones.some((zone, index) => {
+          const previous = zones[index - 1];
+          return (
+            zone.from <= meter.min ||
+            zone.from >= meter.max ||
+            (previous !== undefined && zone.from <= previous.from)
+          );
+        })
+      )
+        ctx.addIssue({
+          code: "custom",
+          message:
+            "Meter zones must start inside the range, in ascending order",
+        });
+    }),
+]);
+export type ModuleStatusDisplay = z.infer<typeof ModuleStatusDisplaySchema>;
 /** Shared controls and isolated package frontends compose module-owned screens. */
 export const ModulePageTableSchema = z.strictObject({
   type: z.literal("table"),
@@ -206,6 +280,7 @@ export const ModulePageSchema = z.strictObject({
               z.strictObject({
                 id: ModuleIdentifierSchema,
                 label: LabelSchema,
+                display: ModuleStatusDisplaySchema.optional(),
               }),
             )
             .max(32),
@@ -795,6 +870,35 @@ export const ModuleManifestSchema = z
         path: ["host"],
         message: "Slider fields are not available in action or feedback fields",
       });
+    const statusDisplays = (manifest.pages ?? []).some((page) =>
+      page.sections.some(
+        (section) =>
+          section.type === "status" &&
+          section.fields.some((field) => field.display !== undefined),
+      ),
+    );
+    if (
+      (fieldSets.some(moduleFieldsUseControls) || statusDisplays) &&
+      !features.includes("module-controls-v1")
+    )
+      ctx.addIssue({
+        code: "custom",
+        path: ["host"],
+        message:
+          "Switch, segmented, stepper, timecode, lamp and meter declarations require module-controls-v1",
+      });
+    // Rejected rather than ignored: these are Matrix cells, which keep their cell editors.
+    if (
+      [...manifest.actions, ...manifest.feedback].some(({ fields }) =>
+        moduleFieldsUseControls(fields),
+      )
+    )
+      ctx.addIssue({
+        code: "custom",
+        path: ["host"],
+        message:
+          "Switch, segmented, stepper and timecode fields are not available in action or feedback fields",
+      });
     if (
       fieldSets.some(moduleFieldsRequireV2) &&
       (!("requiredFeatures" in manifest.host) ||
@@ -951,6 +1055,16 @@ export const ModuleManifestSchema = z
               code: "custom",
               path,
               message: "Slider fields are not available in table columns",
+            });
+          if (
+            section.type === "table" &&
+            moduleFieldsUseControls(section.columns)
+          )
+            ctx.addIssue({
+              code: "custom",
+              path,
+              message:
+                "Switch, segmented, stepper and timecode fields are not available in table columns",
             });
           if (
             section.type === "controls" &&

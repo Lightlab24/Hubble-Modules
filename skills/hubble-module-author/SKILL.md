@@ -35,6 +35,11 @@ For a slider, read [sliders](references/sliders.md): add a `slider` option to a 
 field, or use `mountSlider` in a custom page. Both require `module-sliders-v1`. Use
 `mountSlider` for live device control, because a slider on a setting saves like any
 setting and restarts the instance on each release.
+For switches, segmented choices, steppers, timecode, buttons, lamps, meters, an XY pad,
+standalone choice and colour pickers, toasts or confirmations, read
+[controls](references/controls.md). Declare the option on a field or status field, or
+mount the control in a custom page. All require `module-controls-v1`. There is no
+rotary knob. Do not draw your own versions of these in a custom page.
 For saved canvas/workbook/backend data, read [portable documents](references/documents.md).
 Use the scoped document client and declared table sources; keep active drafts local
 and use revision checks when reconciling multiple editors.

@@ -1,0 +1,46 @@
+/* Tokens set on an ancestor reach every control inside it. */
+#root {
+  --switch-on-color: #10a37f;
+  --control-focus-color: #cecece;
+}
+html {
+  color-scheme: dark;
+}
+body {
+  margin: 0;
+  padding: 16px;
+  background: #0c0c0c;
+  color: #dedede;
+  font:
+    13px system-ui,
+    sans-serif;
+}
+main {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  gap: 24px;
+  max-width: 760px;
+}
+section {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+}
+h1 {
+  margin: 8px 0 0;
+  color: #b2b2b2;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px;
+}
+.grow {
+  flex: 1 1 160px;
+}

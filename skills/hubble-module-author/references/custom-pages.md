@@ -183,3 +183,10 @@ clipboard or fill. This smaller surface composes with the full native workbook.
 Use the host [slider](sliders.md) for a value an operator adjusts live. It runs in the
 existing frame with no extra permissions. The module keeps validation, command queueing
 and readback.
+
+## Other shared controls in a bespoke layout
+
+Use the host [controls](controls.md) for switches, segmented choices, steppers,
+timecode, buttons, lamps, meters, an XY pad, standalone choice and colour pickers,
+toasts and confirmations. They run in the existing frame with no extra permissions.
+The module keeps validation, command queueing and readback.

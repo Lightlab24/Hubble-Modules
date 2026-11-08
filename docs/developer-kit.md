@@ -1,5 +1,12 @@
 # Hubble module developer kit
 
+The next developer kit also adds `module-controls-v1`: Hubble's shared switch,
+segmented choice, stepper, timecode field, buttons, lamps, meters, XY pad, standalone
+choice and colour pickers, toasts and confirmations. Declare the field and status
+options or mount them with `@hubble/module-sdk/controls`. Check for the feature in the
+actual host's `describe` response. See the controls skill reference and
+`examples/custom-controls`. There is no rotary knob.
+
 The next developer kit adds `module-sliders-v1`: Hubble's shared slider, either as a
 `slider` option on a number field or mounted in a custom page with
 `@hubble/module-sdk/slider-controls`. Check for the feature in the actual host's

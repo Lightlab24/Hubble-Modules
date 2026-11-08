@@ -15,6 +15,14 @@
       "types": "./dist/slider-controls.d.ts",
       "import": "./dist/slider-controls.js"
     },
+    "./controls": {
+      "types": "./dist/controls.d.ts",
+      "import": "./dist/controls.js"
+    },
+    "./timecode": {
+      "types": "./dist/timecode.d.ts",
+      "import": "./dist/timecode.js"
+    },
     "./frontend": {
       "types": "./dist/frontend.d.ts",
       "import": "./dist/frontend.js"
