@@ -110,6 +110,8 @@ export class DitBrowseActionExecutor implements TypedActionExecutor<DitBrowseAct
     }
 
     if (!status.expansionEnabled) {
+      // A locked grid never expands, but DIT Browse still selects the requested camera.
+      if (status.selectedCameraNumber === action.cameraNumber) return { outcome: 'success' }
       return failure(
         'dit_browse_expansion_disabled',
         'DIT Browse Grid Lock is enabled; camera focus was not performed',

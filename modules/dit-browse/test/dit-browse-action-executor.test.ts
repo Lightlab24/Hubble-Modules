@@ -175,7 +175,10 @@ describe('DitBrowseActionExecutor', () => {
   )
 
   it.each([
-    [status({ expansionEnabled: false, focusMode: false }), 'dit_browse_expansion_disabled'],
+    [
+      status({ expansionEnabled: false, focusMode: false, selectedCameraNumber: 4 }),
+      'dit_browse_expansion_disabled',
+    ],
     [status({ focusMode: false }), 'dit_browse_not_confirmed'],
     [status({ selectedCameraNumber: 4 }), 'dit_browse_not_confirmed'],
   ] as const)('rejects an unconfirmed returned status', async (returnedStatus, errorCode) => {
@@ -189,10 +192,28 @@ describe('DitBrowseActionExecutor', () => {
     })
   })
 
-  it('explains that Grid Lock blocked a successful focus no-op', async () => {
+  it('succeeds when Grid Lock keeps the grid but selects the requested camera', async () => {
+    const focusCamera = vi.fn(() =>
+      Promise.resolve(status({ expansionEnabled: false, focusMode: false })),
+    )
+    const executor = new DitBrowseActionExecutor(manager(client(focusCamera)))
+
+    await expect(executor.execute(action(), context())).resolves.toEqual({ outcome: 'success' })
+    expect(focusCamera).toHaveBeenCalledTimes(1)
+    expect(focusCamera).toHaveBeenCalledWith(3)
+  })
+
+  it.each([
+    ['another camera stays selected', 4],
+    ['no camera is selected', null],
+  ] as const)('fails a locked focus when %s', async (_case, selectedCameraNumber) => {
     const executor = new DitBrowseActionExecutor(
       manager(
-        client(() => Promise.resolve(status({ expansionEnabled: false, focusMode: false }))),
+        client(() =>
+          Promise.resolve(
+            status({ expansionEnabled: false, focusMode: false, selectedCameraNumber }),
+          ),
+        ),
       ),
     )
 

@@ -1,6 +1,12 @@
 import { expect, it, vi } from 'vitest'
-import type { ModuleContext, ModuleFeedback } from '@hubble/module-sdk'
+import type {
+  ModuleContext,
+  ModuleFeedback,
+  ModuleJsonValue,
+  ModuleState,
+} from '@hubble/module-sdk'
 import type { DitBrowseConnectionSnapshot, DitBrowseStatus } from '@hubble/dit-browse-client'
+import { matrixFeedback } from '../src/matrix.js'
 import { createDitBrowseModule } from '../src/module.js'
 import {
   DitBrowseConnectionManager,
@@ -186,4 +192,114 @@ it('owns Matrix commands, contextual discovery and feedback without a host DIT r
     await instance.dispose()
   }
   expect(listeners.size).toBe(0)
+})
+
+function observe(
+  values: Record<string, ModuleJsonValue>,
+  overrides: Partial<DitBrowseConnectionSnapshot> = {},
+  status: Partial<DitBrowseStatus> = {},
+) {
+  const legacySnapshot: DitBrowseConnectionSnapshot = {
+    phase: 'connected',
+    connected: true,
+    endpoint: 'ws://127.0.0.1:7502/api/ws',
+    port: 7502,
+    serverVersion: '1',
+    status: {
+      expansionEnabled: true,
+      focusMode: false,
+      selectedCameraNumber: null,
+      selectedTileId: null,
+      selectedIndex: null,
+      tabs: [],
+      activeWorkspaceNumber: 1,
+      workspaceNumbers: [1, 2],
+      ...status,
+    },
+    revision: 1,
+    catalog: [
+      { cameraNumber: 3, title: 'Camera Three', url: 'fixture:three' },
+      { cameraNumber: 5, title: '', url: 'fixture:five' },
+    ],
+    lastError: null,
+    reconnectAttempt: 0,
+    nextReconnectDelayMs: null,
+    ...overrides,
+  }
+  return matrixFeedback({
+    state: {
+      phase: 'ready',
+      message: null,
+      observedAt: '2026-11-08T00:00:00.000Z',
+      values: { legacySnapshot } as unknown as ModuleState['values'],
+    },
+    events: new Map(),
+    data: new Map(),
+    feedback: new Map(),
+    fields: { values },
+    settings: {},
+  }).appearance
+}
+
+it.each([
+  [3, '3 — Camera Three'],
+  ['3', '3 — Camera Three'],
+  [5, '5 — Unlabeled'],
+  [9, '9 — Unlabeled'],
+] as const)('labels camera %s without needing Feedback', (actionValue, label) => {
+  expect(observe({ actionType: 'focus-camera', actionValue })).toEqual({
+    backgroundColor: null,
+    cells: { actionValue: { color: null, label } },
+  })
+})
+
+it('keeps the camera number and marks it Unavailable while disconnected', () => {
+  expect(
+    observe(
+      { actionType: 'focus-camera', actionValue: 3, feedback: true, feedbackColor: '#123456' },
+      { connected: false, phase: 'disconnected', status: null, catalog: [] },
+    ),
+  ).toEqual({
+    backgroundColor: null,
+    cells: { actionValue: { color: null, label: '3 — Unavailable' } },
+  })
+})
+
+it.each(['', 'not a number', 0, -2, 1.5, null])('adds no camera label for value %s', (actionValue) => {
+  expect(observe({ actionType: 'focus-camera', actionValue }).cells).toEqual({})
+})
+
+it('colors the Value cell with the row when its camera is focused', () => {
+  const values = {
+    actionType: 'focus-camera',
+    actionValue: 3,
+    feedback: true,
+    feedbackColor: '#123456',
+  }
+  expect(observe(values, {}, { focusMode: true, selectedCameraNumber: 3 })).toEqual({
+    backgroundColor: '#123456',
+    cells: { actionValue: { color: '#123456', label: '3 — Camera Three' } },
+  })
+  expect(observe(values, {}, { focusMode: true, selectedCameraNumber: 4 })).toEqual({
+    backgroundColor: null,
+    cells: { actionValue: { color: null, label: '3 — Camera Three' } },
+  })
+})
+
+it('colors non-camera Value cells only while active and adds no label', () => {
+  const workspace = { actionType: 'switch-workspace', feedback: true, feedbackColor: '#123456' }
+  expect(observe({ ...workspace, actionValue: 1 }).cells).toEqual({
+    actionValue: { color: '#123456' },
+  })
+  expect(observe({ ...workspace, actionValue: 2 }).cells).toEqual({})
+})
+
+it('leaves the unused Value cell alone for Toggle Grid Lock', () => {
+  expect(
+    observe(
+      { actionType: 'toggle-grid-lock', feedback: true, feedbackColor: '#123456 | #654321' },
+      {},
+      { expansionEnabled: false },
+    ),
+  ).toEqual({ backgroundColor: '#654321', cells: {} })
 })

@@ -1,4 +1,8 @@
-import { ModuleMatrixSchema, type ModuleValues } from "@hubble/module-sdk";
+import {
+  ModuleMatrixSchema,
+  type ModuleFeedback,
+  type ModuleValues,
+} from "@hubble/module-sdk";
 import type { MatrixObservation } from "@hubble/module-runtime-helpers/matrix";
 import type { DitBrowseConnectionSnapshot } from "@hubble/dit-browse-client";
 import { z } from "zod";
@@ -183,6 +187,30 @@ export function matrixAction(fields: ModuleValues) {
     },
   };
 }
+function cameraLabel(
+  values: ModuleValues,
+  connection: DitBrowseConnectionSnapshot | undefined,
+) {
+  if (values.actionType !== "focus-camera") return undefined;
+  const cameraNumber = Number(values.actionValue);
+  if (!Number.isInteger(cameraNumber) || cameraNumber < 1) return undefined;
+  const title = connection?.connected
+    ? connection.catalog.find((camera) => camera.cameraNumber === cameraNumber)
+        ?.title || "Unlabeled"
+    : "Unavailable";
+  return `${cameraNumber} — ${title}`.slice(0, 160);
+}
+/** Live presentation of the Value cell. The saved value is never changed. */
+function valueCell(
+  values: ModuleValues,
+  connection: DitBrowseConnectionSnapshot | undefined,
+  color: string | null,
+): NonNullable<NonNullable<ModuleFeedback["appearance"]>["cells"]> {
+  const label = cameraLabel(values, connection);
+  return label === undefined && color === null
+    ? {}
+    : { actionValue: { color, ...(label === undefined ? {} : { label }) } };
+}
 export function matrixFeedback({ state, fields }: MatrixObservation) {
   const values = (fields.values ?? {}) as ModuleValues;
   const connection = state?.values.legacySnapshot as unknown as
@@ -196,7 +224,10 @@ export function matrixFeedback({ state, fields }: MatrixObservation) {
     return {
       state: "inactive" as const,
       observedAt: new Date().toISOString(),
-      appearance: { backgroundColor: null },
+      appearance: {
+        backgroundColor: null,
+        cells: valueCell(values, connection, null),
+      },
     };
   let active: boolean | null = false;
   if (!state?.observedAt || !connection?.connected || !connection.status)
@@ -243,6 +274,13 @@ export function matrixFeedback({ state, fields }: MatrixObservation) {
           ? ("active" as const)
           : ("inactive" as const),
     observedAt: active === null ? null : (state?.observedAt ?? null),
-    appearance: { backgroundColor },
+    appearance: {
+      backgroundColor,
+      cells: valueCell(
+        values,
+        connection,
+        values.actionType === "toggle-grid-lock" ? null : backgroundColor,
+      ),
+    },
   };
 }
