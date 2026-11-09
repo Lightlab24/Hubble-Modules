@@ -13,6 +13,14 @@
     }
     return restored;
   }
+  // Earlier versions stored made-up motor and limit values on every camera, even with the axis off.
+  const formerLensDefaults={irisMotor:'3',zoomMotor:'5',focusMotor:'2',irisMin:'1.6',irisMax:'32',irisTorque:'2',zoomTorque:'2',focusTorque:'2',irisDirection:'left',zoomDirection:'left',focusDirection:'left'};
+  function withoutFormerLensDefaults(row){
+    for(const [field,value] of Object.entries(formerLensDefaults)){
+      if(row[field]===value&&!row.dirty.has(field)&&!row.enabledLensAxes?.includes(lensAxisForField(field)))delete row[field];
+    }
+    return row;
+  }
   const manualDiscoveries=new Map();let scanDiscoveries=[],addingDiscovered=false;
   function mergeDiscoveries(){
     const merged=new Map();
@@ -48,7 +56,7 @@
     const rows=new Map();
     for(const camera of cameras){camera.online=cameraConnection(camera,device(camera.device));rows.set(camera.id,camera);}
     root.querySelectorAll('td[data-column="control"]').forEach(cell=>{
-      const camera=rows.get(cell.dataset.hubbleRow);if(!camera)return;
+      const camera=rows.get(cell.dataset.camera);if(!camera)return;
       const markup=status(camera.online);if(cell.innerHTML!==markup)cell.innerHTML=markup;
     });
   }
@@ -60,7 +68,7 @@
       const plan=await moduleBridge.read();
       applyCameraControlState(await moduleBridge.controlState());
       await restoreCameraChoiceCatalogs();
-      if(plan){devices.splice(0,devices.length,...plan.devices);cameras=(plan.cameras||[]).map(restoredRow);lans=(plan.lans||[]).map(restoredRow);deviceOrder=devices.map(item=>item.id);openControllers.clear();openNetworkDevices.clear();if(devices[0]){openControllers.add(devices[0].id);openNetworkDevices.add(devices[0].id);}discoveryCard.open=!devices.length;syncConnections();syncFilter();renderLans();renderCameras();if(plan.uiState)restore(plan.uiState);}
+      if(plan){devices.splice(0,devices.length,...plan.devices);cameras=(plan.cameras||[]).map(row=>withoutFormerLensDefaults(restoredRow(row)));lans=(plan.lans||[]).map(restoredRow);deviceOrder=devices.map(item=>item.id);openControllers.clear();openNetworkDevices.clear();if(devices[0]){openControllers.add(devices[0].id);openNetworkDevices.add(devices[0].id);}discoveryCard.open=!devices.length;syncConnections();syncFilter();renderLans();renderCameras();if(plan.uiState)restore(plan.uiState);}
       moduleBridge.onReceipt(applyReceipts);
       moduleBridge.subscribe(applyLiveState);
       if(plan?.uiState?.privateContent?.ui?.discoveryVersion!==2&&ui.discoveryMethod==='broadcast')ui.discoveryMethod='ping';

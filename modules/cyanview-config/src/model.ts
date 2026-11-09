@@ -94,6 +94,13 @@ export function lensParameters(camera: RecordValue, fields: readonly string[], c
   const blocks = parseLensParameters(camera.lens, current);
   if (!blocks) throw new Error('Existing advanced lens parameters need a separate capture before editing');
   for (const { axis, settings } of edits) {
+    // The controller can't hold part of an entry, so a deleted setting takes the entry with it.
+    // A Tilta iris is the exception: its limits are optional, so it can keep the motor.
+    if (settings.some(field => fields.includes(field) && !camera[field])) {
+      if (tilta && axis === 'iris' && positiveMotorId(camera.irisMotor)) blocks.set(axis, { text: `${camera.irisMotor}:${tiltaCodes.iris}`, values: { irisMotor: camera.irisMotor } });
+      else blocks.delete(axis);
+      continue;
+    }
     const observed = blocks.get(axis)?.values;
     const values = Object.fromEntries(settings.map(field => [field, !observed || fields.includes(field) ? camera[field] : observed[field]]));
     if (axis === 'iris' && !validIrisRange(values)) throw new Error('Enter valid iris limits');

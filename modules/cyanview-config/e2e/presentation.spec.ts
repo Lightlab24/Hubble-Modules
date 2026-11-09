@@ -95,8 +95,8 @@ test('text sizing preserves an editor and a second edit during a held save, inde
   await expect(group.getByRole('button', { name: 'Increase text size' })).toBeDisabled();
   const heading = (await group.locator('th.hc-camera-group-header').first().boundingBox())!, child = (await group.locator('th[data-field-header="irisSummary"]').boundingBox())!;
   expect(Math.abs(heading.y + heading.height - child.y)).toBeLessThanOrEqual(1);
-  const checkbox = (await group.locator('[data-hubble-row="cam1"] input[type="checkbox"]').first().boundingBox())!;
-  expect(checkbox.width).toBe(16); expect(checkbox.height).toBe(16);
+  const checkbox = (await group.locator('[data-hubble-row="cam1"] [role="checkbox"]').first().boundingBox())!;
+  expect(checkbox.width).toBe(18); expect(checkbox.height).toBe(18);
   for (let i = 0; i < 15; i++) await group.getByRole('button', { name: 'Decrease text size' }).click();
   await expect(group.getByLabel('Workbook text size value')).toHaveText('9');
   await expect(group.getByRole('button', { name: 'Decrease text size' })).toBeDisabled();

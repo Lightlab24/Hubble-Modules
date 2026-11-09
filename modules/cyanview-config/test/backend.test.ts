@@ -376,6 +376,14 @@ test('existing lens parameter values are restored without inventing values for u
   assert.deepEqual(decodeLensParameters('ARRI - cforce', 'iris:_:_,zoom:4:right'), { lensParamsEditable: false });
   assert.deepEqual(decodeLensParameters('Tilta - Nucleus-M', '7:I'), { irisMotor: '7', irisMin: '1.6', irisMax: '32', lensParamsEditable: true });
   assert.deepEqual(decodeLensParameters('ARRI - cforce', 'zoom:4:right'), { zoomTorque: '4', zoomDirection: 'right', lensParamsEditable: true });
+  const emptied = { lens: 'Tilta - Nucleus-M', irisMotor: '', irisMin: '', irisMax: '', zoomMotor: '8' };
+  assert.equal(lensParameters(emptied, ['irisMotor', 'irisMin', 'irisMax'], '7:I:2.8:22,8:Z'), '8:Z');
+  assert.equal(lensParameters({ ...emptied, zoomMotor: '' }, ['irisMotor', 'zoomMotor'], '7:I:2.8:22,8:Z'), '');
+  assert.equal(lensParameters({ ...emptied, irisMotor: '7' }, ['irisMin'], '7:I:2.8:22,8:Z'), '7:I,8:Z');
+  assert.equal(lensParameters({ ...emptied, irisMin: '2.8', irisMax: '22' }, ['irisMotor'], '7:I:2.8:22'), '');
+  assert.equal(lensParameters({ lens: 'ARRI - cforce', zoomTorque: '', zoomDirection: 'left' }, ['zoomTorque'], 'zoom:4:right,focus:1:left'), 'focus:1:left');
+  // A setting nobody filled in holds an axis back. It doesn't remove anything.
+  assert.throws(() => lensParameters({ ...emptied, irisMotor: '7' }, ['irisMotor'], ''), /iris limits/);
   assert.equal(lensParameters({ lens: 'ARRI - cforce', zoomTorque: '4', zoomDirection: 'left', irisMin: 'invalid' }, ['zoomTorque'], 'zoom:3:right,focus:1:left'), 'zoom:4:right,focus:1:left');
   assert.equal(lensParameters({ lens: 'Tilta - Nucleus-M', focusMotor: '2' }, ['focusMotor'], '7:I'), '7:I,2:F');
   assert.throws(() => lensParameters({ lens: 'Tilta - Nucleus-M', focusMotor: '7' }, ['focusMotor'], '7:I'), /distinct motor IDs/);

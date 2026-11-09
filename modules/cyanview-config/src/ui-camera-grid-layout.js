@@ -17,7 +17,7 @@
       ] },
       { id: 'lens', label: 'Lens', fields: [{ id: 'lens', label: 'Lens model' }, { id: 'connection', label: 'Lens connection' }] },
       ...cameraAxes.map(axis => ({ id: axis, axis, label: axisName(axis), fields: [
-        { id: axis + 'Summary', label: 'Setup', width: 78, summary: true }, ...axisDefinitions[axis],
+        { id: axis + 'Summary', label: 'Use ' + axisName(axis), width: 88, summary: true }, ...axisDefinitions[axis],
       ] })),
     ];
   }
@@ -42,29 +42,37 @@
     return columns.length ? columns : [{ id: axis + 'Placeholder', group: axis, placeholder: true, label: '', width: Math.max(130, axisName(axis).length * 12 + 50) }];
   }
   function cameraColumnWidth(id, column) { return cameraLayouts.get(id)?.columns[column.id] ?? column.width; }
+  function pruneCameraLayout(id, layout) {
+    const ids = new Set(cameras.filter(camera => camera.device === id).map(camera => camera.id));
+    const kept = sizes => Object.fromEntries(Object.entries(sizes).filter(([cameraId]) => ids.has(cameraId)));
+    return { ...layout, rows: kept(layout.rows), ...(layout.cameraWidths && { cameraWidths: kept(layout.cameraWidths) }) };
+  }
   function saveCameraLayouts() {
-    return Object.fromEntries([...cameraLayouts].filter(([id]) => device(id)).map(([id, layout]) => {
-      const ids = new Set(cameras.filter(camera => camera.device === id).map(camera => camera.id));
-      return [id, { ...layout, rows: Object.fromEntries(Object.entries(layout.rows).filter(([rowId]) => ids.has(rowId))) }];
-    }));
+    return Object.fromEntries([...cameraLayouts].filter(([id]) => device(id)).map(([id, layout]) => [id, pruneCameraLayout(id, layout)]));
   }
   function restoreCameraLayouts(data) {
     cameraLayouts.clear();
-    for (const d of devices) {
-      const id = d.id, saved = data.cameraLayouts?.[id] ?? {}, layout = cameraLayout(id);
-      const columnIds = cameraSheetSections().flatMap(section => section.fields.map(field => field.id));
-      for (const [column, size] of Object.entries(saved.columns ?? {})) if (columnIds.includes(column) && Number.isInteger(size) && size >= 36 && size <= 640) layout.columns[column] = size;
-      const rowIds = new Set(cameras.filter(camera => camera.device === id).map(camera => camera.id));
-      for (const [rowId, size] of Object.entries(saved.rows ?? {})) if (rowIds.has(rowId) && Number.isInteger(size) && size >= 30 && size <= 240) layout.rows[rowId] = size;
-      for (const axis of cameraAxes) {
-        const group = saved.groups?.[axis], ids = [axis + 'Summary', ...axisDefinitions[axis].map(field => field.id)];
-        const valid = values => [...new Set(values.filter(value => ids.includes(value)))];
-        if (Array.isArray(group?.order) && Array.isArray(group.collapsed)) layout.groups[axis] = { order: valid(group.order), collapsed: valid(group.collapsed) };
-        else if (saved.version !== 2) layout.groups[axis] = { order: ids, collapsed: [axis + 'Summary'] };
-      }
-      if (Array.isArray(saved.hiddenGroups)) layout.hiddenGroups = [...new Set(saved.hiddenGroups.filter(group => cameraSheetSections().some(section => section.id === group)))];
-      if (Number.isInteger(saved.textSize) && saved.textSize >= 9 && saved.textSize <= 24) layout.textSize = saved.textSize;
+    for (const d of devices) cameraLayouts.set(d.id, cleanCameraLayout(d.id, data.cameraLayouts?.[d.id]));
+  }
+  function cleanCameraLayout(id, saved = {}) {
+    const layout = { version: 2, columns: {}, rows: {}, groups: {}, hiddenGroups: [], textSize: 13 };
+    const columnIds = cameraSheetSections().flatMap(section => section.fields.map(field => field.id));
+    const cameraIds = new Set(cameras.filter(camera => camera.device === id).map(camera => camera.id));
+    const within = (value, least, most) => Number.isInteger(value) && value >= least && value <= most;
+    for (const [column, size] of Object.entries(saved.columns ?? {})) if (columnIds.includes(column) && within(size, 36, 640)) layout.columns[column] = size;
+    for (const [rowId, size] of Object.entries(saved.rows ?? {})) if (cameraIds.has(rowId) && within(size, 30, 240)) layout.rows[rowId] = size;
+    for (const [camera, size] of Object.entries(saved.cameraWidths ?? {})) if (cameraIds.has(camera) && within(size, 72, 640)) (layout.cameraWidths ??= {})[camera] = size;
+    for (const [field, size] of Object.entries(saved.settingHeights ?? {})) if (columnIds.includes(field) && within(size, 30, 240)) (layout.settingHeights ??= {})[field] = size;
+    if (within(saved.settingWidth, 100, 640)) layout.settingWidth = saved.settingWidth;
+    for (const axis of cameraAxes) {
+      const group = saved.groups?.[axis], ids = [axis + 'Summary', ...axisDefinitions[axis].map(field => field.id)];
+      const valid = values => [...new Set(values.filter(value => ids.includes(value)))];
+      if (Array.isArray(group?.order) && Array.isArray(group.collapsed)) layout.groups[axis] = { order: valid(group.order), collapsed: valid(group.collapsed) };
+      else if (saved.version !== 2) layout.groups[axis] = { order: ids, collapsed: [axis + 'Summary'] };
     }
+    if (Array.isArray(saved.hiddenGroups)) layout.hiddenGroups = [...new Set(saved.hiddenGroups.filter(group => cameraSheetSections().some(section => section.id === group)))];
+    if (within(saved.textSize, 9, 24)) layout.textSize = saved.textSize;
+    return layout;
   }
   function cameraGridHeader(columns, deviceId) {
     const hasGroups = columns.some(column => column.group), top = [], fields = [];
@@ -85,7 +93,7 @@
   function cameraColumnItems(id) {
     return cameraSheetSections().map(section => ({
       id: 'section:' + section.id, label: section.label, visible: !cameraLayout(id).hiddenGroups.includes(section.id),
-      fields: section.fields.map(field => ({ id: field.id, label: field.id.endsWith('Summary') ? section.label + ' setup' : field.label, visible: cameraFieldVisible(id, field.id, true) && (!section.axis || axisGroups(id)[section.axis] || cameraAxisGroup(id, section.axis).collapsedColumnIds.includes(field.id)) })),
+      fields: section.fields.map(field => ({ id: field.id, label: field.label, visible: cameraFieldVisible(id, field.id, true) && (!section.axis || axisGroups(id)[section.axis] || cameraAxisGroup(id, section.axis).collapsedColumnIds.includes(field.id)) })),
     }));
   }
   function changeCameraVisibility(id, changes) {
@@ -136,10 +144,10 @@
       resize?.refresh();
     }
     void mountSpreadsheetResize({ root: table, viewport, getScale: () => sheet.scale ?? 1,
-      getItems: () => [
-        ...[...table.querySelectorAll('th[data-field-header]:not([data-field-header="row"])')].map(header => ({ id: header.dataset.fieldHeader, header, axis: 'column', label: cameraSortLabels[header.dataset.fieldHeader] ?? axisName(header.dataset.fieldHeader.replace(/Summary$/, '')) + ' setup', size: header.offsetWidth, min: header.dataset.fieldHeader.endsWith('Summary') ? 72 : 36, max: 640 })),
+      getItems: () => cameraSheetView(id) === 'columns' ? flippedResizeItems(table) : [
+        ...[...table.querySelectorAll('th[data-field-header]:not([data-field-header="row"])')].map(header => ({ id: header.dataset.fieldHeader, header, axis: 'column', label: cameraSortLabels[header.dataset.fieldHeader] ?? 'Use ' + axisName(header.dataset.fieldHeader.replace(/Summary$/, '')), size: header.offsetWidth, min: header.dataset.fieldHeader.endsWith('Summary') ? 72 : 36, max: 640 })),
         ...[...table.tBodies[0].rows].map(row => ({ id: row.dataset.id, header: row.cells[0], axis: 'row', label: 'camera ' + (cameras.find(item => item.id === row.dataset.id)?.number ?? row.sectionRowIndex + 1) + ' row', size: row.offsetHeight, min: 30, max: 240 })),
-      ], onResize({ id: item, axis }, size) { changeCameraPresentation(id, () => { cameraLayout(id)[axis === 'row' ? 'rows' : 'columns'][item] = size; }); },
+      ], onResize({ id: item, axis }, size) { changeCameraPresentation(id, () => { if (cameraSheetView(id) === 'columns') resizeFlippedSheet(id, item, axis, size); else cameraLayout(id)[axis === 'row' ? 'rows' : 'columns'][item] = size; }); },
     }).then(controls => { if (disposed) controls.dispose(); else { resize = controls; resize.refresh(); } }).catch(error => { if (!disposed) toast(error.message); });
     refresh();
     return { refresh, dispose() { disposed = true; for (const group of groups.values()) group.controls?.dispose(); resize?.dispose(); } };
@@ -163,7 +171,7 @@
       '<span class="hc-camera-value" data-camera-value></span>'+
       '<span class="hc-camera-grid-shortcuts"><span data-camera-search-hint hidden>Type to search <span aria-hidden="true">·</span> </span>'+cameraClipboardHint()+' <span aria-hidden="true">·</span> Drag to fill</span>'+
       '<span data-camera-zoom aria-label="Sheet zoom">100%</span>'+
-      '<div data-camera-text-size></div><div data-camera-columns></div>'+
+      '<div data-camera-text-size></div>'+cameraViewControl(deviceId)+'<div data-camera-columns title="Choose which settings this tab shows"></div>'+
       '</div>';
   }
 
@@ -179,14 +187,15 @@
     value.textContent='';
     value.removeAttribute('title');
     if(!cell){location.textContent='Select a cell';return;}
-    const input=cell.querySelector('[data-field]'),column=cell.dataset.hubbleColumn;
-    const row=cameras.find(camera=>camera.id===cell.dataset.hubbleRow);
+    const input=cell.querySelector('[data-field]'),column=cell.dataset.column;
+    const row=cameras.find(camera=>camera.id===cell.dataset.camera);
     const choice=input?.hasAttribute('data-camera-choice');
     const axisSetup=column.endsWith('Summary');
-    const label=choice?choiceLabel(input.dataset.field):axisSetup?axisName(column.replace(/Summary$/,''))+' setup':cameraSortLabels[column]||column;
+    const label=choice?choiceLabel(input.dataset.field):axisSetup?'Use '+axisName(column.replace(/Summary$/,'')):cameraSortLabels[column]||column;
     location.textContent='Camera '+(row?.number||'—')+' · '+label;
     if(column==='password')value.textContent=input?.value?'••••••••':'';
     else if(axisSetup&&cell.classList.contains('hc-axis-inactive'))value.textContent='Unavailable for this camera';
+    else if(cell.querySelector('[role="checkbox"]'))value.textContent=cell.querySelector('[role="checkbox"]').getAttribute('aria-checked')==='true'?'On':'Off';
     else value.textContent=input?.disabled?'':choice?input.textContent:input?.value??cell.textContent.trim();
     if(value.textContent&&column!=='password')value.title=value.textContent;
     search.hidden=!choice||input.disabled;

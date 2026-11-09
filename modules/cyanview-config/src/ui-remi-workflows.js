@@ -221,10 +221,9 @@
         remiDraw(item.id,panel);
       }
       for (const row of cameras.filter(row => row.device===item.id&&importedCamera(row))) {
-        const tr = group.querySelector('tr[data-id="'+row.id+'"]');
-        if (!tr) continue;
-        for (const field of tr.querySelectorAll('[data-field]:not([data-field="controlEnabled"])')) field.disabled = true;
-        const model = tr.querySelector('[data-column="model"]');
+        const selector = 'td[data-camera="'+CSS.escape(row.id)+'"]';
+        for (const field of group.querySelectorAll(selector+' [data-field]:not([data-field="controlEnabled"])')) field.disabled = true;
+        const model = group.querySelector(selector+'[data-column="model"]');
         if (model) {
           const origin = row.remi?.origin, camera = remiModelName(row);
           const source = remiDeviceName(origin?.serial || row.remi?.peer || row.remiPeer);

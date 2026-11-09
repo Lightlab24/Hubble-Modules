@@ -68,20 +68,31 @@
     let request;
     let warning = '';
     let reported = false;
-    return async (_query, signal) => {
-      request ??= moduleBridge.options({device:camera.device,rowId:camera.id,field:cameraChoiceSources[field]})
-        .then(({key,entries,saved}) => {
-          if(key&&entries.length)cameraChoiceCatalogs.set(key,{entries,saved});
-          if(key!==context) warning = 'Controller is using a different configuration';
-          else if(!entries.length) warning = 'Controller returned no choices';
-          else if(!saved) warning = 'Live choices could not be saved for offline use';
-        }).catch(() => {
-          const available = cameraChoiceCatalogs.get(context);
-          warning = (available?.saved ? 'Using saved choices' : 'Showing available choices') + ' · controller unavailable';
-        });
-      await request;
-      signal.throwIfAborted();
-      if(warning&&!reported) { reported = true; toast(warning); }
-      return cameraCellChoices(camera,field);
+    const tell = message => { if(message&&!reported) { reported = true; toast(message); } };
+    const ask = () => request ??= moduleBridge.options({device:camera.device,rowId:camera.id,field:cameraChoiceSources[field]})
+      .then(({key,entries,saved}) => {
+        if(key&&entries.length)cameraChoiceCatalogs.set(key,{entries,saved});
+        if(key!==context) warning = 'Controller is using a different configuration';
+        else if(!entries.length) warning = 'Controller returned no choices';
+        else if(!saved) warning = 'Live choices could not be saved for offline use';
+      }).catch(() => {
+        const available = cameraChoiceCatalogs.get(context);
+        warning = (available?.saved ? 'Using saved choices' : 'Showing available choices') + ' · controller unavailable';
+      });
+    // Asking the controller opens a new connection, and an unreachable one takes 5 seconds to give up.
+    // So a list we already have shows straight away and the controller only freshens it for next time.
+    return (_query, signal) => {
+      const known = field !== 'lensPort' || cameraChoiceCatalogs.has(context);
+      if(device(camera.device)?.online === false) {
+        if(!known) tell('Controller offline · its lens connections will list once it is reachable');
+        return cameraCellChoices(camera,field);
+      }
+      const answered = ask();
+      if(known) return cameraCellChoices(camera,field);
+      return answered.then(() => {
+        signal.throwIfAborted();
+        tell(warning);
+        return cameraCellChoices(camera,field);
+      });
     };
   }

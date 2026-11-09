@@ -23,8 +23,7 @@
   function cameraControlFlags(){return cameraControlProjection().enabled;}
   function cameraControlEnabled(camera){return cameraControlFlags()[camera.id]===true;}
   function cameraControlCell(camera){
-    const controller=device(camera.device),disabled=camera.deleting||!cameraControlDevice(controller);
-    return '<input type="checkbox" class="hc-control-check" value="'+(cameraControlEnabled(camera)?'TRUE':'FALSE')+'" data-row="'+esc(camera.id)+'" data-field="controlEnabled" aria-label="Camera Control Enabled for camera '+esc(camera.number)+' on '+esc(controller?.name||'controller')+'"'+(cameraControlEnabled(camera)?' checked':'')+(disabled?' disabled':'')+'>';
+    return '<span data-hubble-boolean data-field="controlEnabled" data-row="'+esc(camera.id)+'"></span>';
   }
   function cameraRecordingText(id){
     const recording=cameraControlState.cameras?.[id]?.recording;
@@ -61,9 +60,12 @@
     return '<label class="hc-control-single"><input type="checkbox" data-control-single="'+esc(d.id)+'" aria-label="Single switch for '+esc(d.name)+'"'+(singleSwitch[d.id]===true?' checked':'')+'>Single switch</label>'+
       '<button class="hc-button" data-action="control-enable-all" data-id="'+esc(d.id)+'" aria-label="'+label+' cameras on '+esc(d.name)+'"'+(cameraControlRows(d.id).length?'':' disabled')+'>'+label+'</button>';
   }
+  let paintedCameraFlags='';
   function paintCameraControl(){
     const {enabled,singleSwitch}=cameraControlProjection();
-    root.querySelectorAll('input[data-field="controlEnabled"]').forEach(input=>{input.checked=enabled[input.dataset.row]===true;input.value=input.checked?'TRUE':'FALSE';});
+    // The host draws these checkboxes from getCell, so it only needs telling when one changed.
+    const flags=JSON.stringify(enabled);
+    if(flags!==paintedCameraFlags){paintedCameraFlags=flags;for(const sheet of cameraSheets.values())sheet.controls?.refresh();}
     root.querySelectorAll('input[data-control-single]').forEach(input=>{input.checked=singleSwitch[input.dataset.controlSingle]===true;});
     root.querySelectorAll('button[data-action="control-enable-all"]').forEach(button=>{
       const id=button.dataset.id,label=cameraControlAllLabel(id,enabled);
@@ -74,7 +76,7 @@
       if(count.innerHTML!==markup)count.innerHTML=markup;
     });
     root.querySelectorAll('td[data-column="recording"],td[data-column="cameraStatus"]').forEach(cell=>{
-      const id=cell.dataset.hubbleRow,markup=cell.dataset.column==='recording'?cameraRecordingCell(id):cameraStatusCell(id);
+      const id=cell.dataset.camera,markup=cell.dataset.column==='recording'?cameraRecordingCell(id):cameraStatusCell(id);
       if(cell.innerHTML!==markup)cell.innerHTML=markup;
     });
   }
@@ -119,8 +121,7 @@
   }
   root.addEventListener('change',event=>{
     const input=event.target;
-    if(input.matches('input[data-field="controlEnabled"]'))editCameraControl([{rowId:input.dataset.row,value:input.checked}]);
-    else if(input.matches('input[data-control-single]'))submitCameraControl([{kind:'single',controllerId:input.dataset.controlSingle,enabled:input.checked}]);
+    if(input.matches('input[data-control-single]'))submitCameraControl([{kind:'single',controllerId:input.dataset.controlSingle,enabled:input.checked}]);
   });
   root.addEventListener('click',event=>{
     const button=event.target.closest('button[data-action="control-enable-all"]');if(!button)return;

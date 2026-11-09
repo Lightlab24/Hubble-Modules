@@ -10,13 +10,19 @@
       delete item.lensParamsEditable;
       initializeLensFields(item);
       for(const setting of [...Object.values(axisDefinitions).flatMap(definitions=>definitions.map(definition=>definition.id)),'lensIp','lensPort']){
-        if(lensFieldUsed(item,setting)&&(setting!=='lensPort'||item.lensPort&&item.lensPort!=='None')){
+        const blankAxis=lensAxisForField(setting)&&!item[setting];
+        if(!blankAxis&&lensFieldUsed(item,setting)&&(setting!=='lensPort'||item.lensPort&&item.lensPort!=='None')){
           item.dirty.add(setting);
           fields.push(setting);
         }
       }
       for(const dirty of item.dirty)if(isLensSetting(dirty)&&!lensFieldUsed(item,dirty))item.dirty.delete(dirty);
-      if(item.lens==='None')item.lensPort='None';
+      if(item.lens==='None'){
+        item.lensPort='None';
+        // No lens leaves nothing to set up, so choosing one later starts clean.
+        item.enabledLensAxes=[];
+        for(const definition of Object.values(axisDefinitions).flat())item[definition.id]='';
+      }
     }
     if(isLan){
       if(field==='dhcp'){

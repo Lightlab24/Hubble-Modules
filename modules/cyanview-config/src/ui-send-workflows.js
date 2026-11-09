@@ -3,14 +3,18 @@
     for(const item of items){
       if(item.deleting)continue;
       const selectedFields=fields instanceof Map?fields.get(item.id):fields;
-      const sentFields=(selectedFields||[...item.dirty]).filter(field=>kind==='lan'||!isLensSetting(field)||lensFieldUsed(item,field));
+      const sendable=field=>kind==='lan'||!isLensSetting(field)||lensFieldUsed(item,field)||lensAxisBeingCleared(item,field);
+      const sentFields=(selectedFields||[...item.dirty]).filter(sendable);
+      // An axis reaches the controller whole, so parts held back while it was incomplete go with the last one.
+      if(kind==='camera')for(const field of item.dirty)if(lensAxisForField(field)&&sendable(field)&&!sentFields.includes(field)&&sentFields.some(sent=>lensAxisForField(sent)===lensAxisForField(field)))sentFields.push(field);
       if(!sentFields.length&&!deleting)continue;
       const error=deleting?'':valid(item,kind,sentFields);
       if(error){item.result=error;paintItem(item);continue;}
       const captured={...item};
       jobs.push({item,captured,sentFields});item.jobs++;if(deleting)item.deleting=true;item.result='Sending';paintItem(item);
     }
-    if(!jobs.length){toast('Complete the pending rows before sending');return;}
+    // A single auto-sent edit says so in its Sync cell, and more typing is usually on the way.
+    if(!jobs.length){if(!fields)toast('Complete the pending rows before sending');return;}
     remember();
     let results;
     try{
@@ -23,7 +27,7 @@
       }
     }catch(error){results=jobs.map(({item})=>({id:item.id,error:error.message||'Settings could not be confirmed'}));}
     const errors=[], remiWarnings=[];
-    let remiChanged=false;
+    let remiChanged=false,axisCleared=false;
     for(const {item,captured,sentFields} of jobs){
       const report=results?.find(result=>result.id===item.id)||{error:'Settings could not be confirmed'};
       if(report.remiRefresh)remiChanged=true;
@@ -37,13 +41,14 @@
         else{
           if(kind==='lan'&&sentFields.some(field=>['planned','dhcp'].includes(field))){item.current=captured.planned;const cell=root.querySelector('[data-current="'+item.id+'"]');if(cell)cell.textContent=item.current;if(item.type==='LAN')device(item.device).alias=captured.planned.split('/')[0];}
           for(const field of sentFields)if(item[field]===captured[field])item.dirty.delete(field);
+          if(kind==='camera'&&settleClearedLensAxes(item,captured,sentFields))axisCleared=true;
           if(item.isNew){item.isNew=false;for(const field of [...item.dirty])if(kind==='camera'&&isLensSetting(field)&&!lensFieldUsed(item,field))item.dirty.delete(field);}
           item.pending=item.dirty.size>0;item.result=item.pending?'Pending':'Verified';
         }
       }
       item.jobs=Math.max(0,item.jobs-1);if(item.deleting)item.result='Sending';paintItem(item);
     }
-    if(deleting)renderCameras();
+    if(deleting||axisCleared)renderCameras();
     if(errors.length)toast(errors.length+' '+(errors.length===1?'change':'changes')+' could not be confirmed: '+errors[0]);
     remember();
     if(remiChanged){

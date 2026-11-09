@@ -1,6 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { createModuleDocumentClient, type ModuleHostServices, type ModuleDocumentSnapshot, type ModuleJsonValue } from '@hubble/module-sdk';
-import { controlDevice, object, type Plan } from '../model.js';
+import { controlDevice, object, type Plan, type RecordValue } from '../model.js';
 
 export type Selection = { enabled: Record<string, boolean>; singleSwitch: Record<string, boolean> };
 export type SelectionMutation = { controllerId: string } & (
@@ -61,6 +61,34 @@ export function applySelection(current: Selection, plan: Plan, mutations: readon
     next.singleSwitch = Object.fromEntries(Object.entries(next.singleSwitch).filter(([id]) => ids.has(id)));
   }
   return next;
+}
+
+/** With no controller named, a selection action covers them all. Each press goes one way everywhere, so controllers can't drift apart. */
+export function everyControllerMutations(current: Selection, plan: Plan, command: string, cameraNumber: unknown): SelectionMutation[] {
+  const devices = plan.devices.filter(controlDevice);
+  if (!devices.length) throw new Error('Add a controller on Cyanview’s Devices page first');
+  const rows = plan.cameras.filter(row => devices.some(device => device.id === row.device));
+  const ticked = (row: RecordValue) => current.enabled[row.id] === true;
+  if (command === 'toggle-camera-enabled') {
+    const matches = rows.filter(row => Number(row.number) === cameraNumber);
+    if (!matches.length) throw new Error('No controller has this camera number');
+    if (new Set(matches.map(row => row.device)).size !== matches.length) throw new Error('Choose a camera number that is unique on each controller');
+    const enabled = !matches.every(ticked);
+    // Under Single switch a press picks that camera, as it does with a controller named.
+    return matches.map(row => ({ kind: 'camera', controllerId: row.device, cameraId: row.id, enabled: current.singleSwitch[row.device] === true || enabled }));
+  }
+  if (command === 'enable-all-cameras') {
+    const enabled = rows.length > 0 && !rows.every(ticked);
+    return devices.map(device => ({ kind: 'all', controllerId: device.id, enabled }));
+  }
+  if (devices.every(device => current.singleSwitch[device.id])) return devices.map(device => ({ kind: 'single', controllerId: device.id, enabled: false }));
+  // The same camera number stays ticked on each controller, not whichever each one lists first.
+  const kept = rows.find(ticked);
+  return devices.flatMap((device): SelectionMutation[] => {
+    const row = kept && rows.find(candidate => candidate.device === device.id && Number(candidate.number) === Number(kept.number));
+    return [{ kind: 'all', controllerId: device.id, enabled: false }, { kind: 'single', controllerId: device.id, enabled: true },
+      ...(row ? [{ kind: 'camera' as const, controllerId: device.id, cameraId: row.id as string, enabled: true }] : [])];
+  });
 }
 
 /** Ordered document writes with an immediate optimistic projection shared by all views. */

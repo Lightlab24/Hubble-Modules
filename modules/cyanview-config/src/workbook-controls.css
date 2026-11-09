@@ -123,10 +123,13 @@
 #cyanview-design .hc-grid[data-camera-device] td.hc-changed::after {
   pointer-events: none;
 }
-#cyanview-design .hc-grid[data-camera-device] input[data-field].hc-control-check {
-  pointer-events: auto;
-  cursor: pointer;
+/* approved-ui.css styles every button by ID, which outranks the host's checkbox, so restate what it overrides. */
+#cyanview-design .hc-grid button.hubble-spreadsheet-checkbox {
+  display: grid; gap: 0; padding: 0;
+  border: 1px solid #73737a; border-radius: 3px; background: #3a3a40; color: white;
 }
+#cyanview-design .hc-grid button.hubble-spreadsheet-checkbox[aria-checked='true'] { background: #2f6bff; border-color: #2f6bff; }
+#cyanview-design .hc-grid button.hubble-spreadsheet-checkbox:disabled { opacity: .65; }
 
 #cyanview-design .hc-camera-selection > :is([data-camera-columns], [data-camera-text-size]) { flex: 0 0 auto; }
 #cyanview-design .hc-control-single { display: inline-flex; align-items: center; gap: 5px; margin-left: 7px; font-size: 11px; white-space: nowrap; cursor: pointer; }
@@ -167,3 +170,15 @@
   flex: 0 0 16px; padding: 0; margin: 0; aspect-ratio: 1;
 }
 #cyanview-design .hc-grid[data-camera-device] .hc-empty-axis { background: var(--hc-window); }
+
+#cyanview-design .hc-camera-selection > .hc-camera-view { flex: 0 0 auto; }
+#cyanview-design .hc-camera-view button { white-space: nowrap; }
+#cyanview-design .hc-sheet-tabs:has(> [data-camera-sheets]) { padding: 0 8px 0 0; gap: 12px; }
+#cyanview-design .hc-sheet-tabs > [data-camera-sheets] { flex: 1 1 auto; min-width: 0; }
+#cyanview-design .hc-sheet-tabs:has(> [data-camera-sheets]) .hc-sheet-caption { flex: 0 0 auto; margin-left: 0; }
+#cyanview-design .hc-grid[data-camera-device] th[data-camera-header] { padding: 0 8px; }
+#cyanview-design .hc-camera-heading { display: flex; align-items: baseline; gap: 6px; min-width: 0; white-space: nowrap; }
+#cyanview-design .hc-camera-heading span { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 400; color: var(--hc-secondary); }
+#cyanview-design .hc-controller .hc-grid[data-camera-device] tbody tr.hc-camera-section-row td { height: 26px; padding: 0 8px; background: var(--hc-chrome); font-size: 11px; font-weight: 600; color: var(--hc-secondary); }
+#cyanview-design .hc-controller .hc-grid[data-camera-device] tbody tr.hc-camera-section-row td.hc-camera-section-label { padding: 0 4px 0 8px; }
+#cyanview-design .hc-controller .hc-grid[data-camera-device] tbody td.hc-camera-setting-label { background: var(--hc-matrix-heading); font-weight: 500; white-space: nowrap; overflow: hidden; }

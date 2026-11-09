@@ -26,7 +26,7 @@ export async function buildUiAdapter() {
   replace("selectedCameras=new Set(),selectedResults=new Set(),deviceQueues=new Map()", "selectedResults=new Set()");
   replaceBetween("  function sendItems(", "  function showReview(", await readFile(path.join(root, 'src/ui-send-workflows.js'), 'utf8'));
   replace("group.querySelector('[data-action=\"delete-controller\"]').disabled=!cameras.some(c=>c.device===d.id&&selectedCameras.has(c.id));", "syncCameraDeleteButton(group);");
-  replace("    syncSummary();icons();\n  }\n  function inputCell", "    if(item.deleting&&row)row.querySelectorAll('[data-field],input[data-lens-axis]').forEach(el=>el.disabled=true);\n    syncSummary();icons();\n  }\n  function inputCell");
+  replace("    syncSummary();icons();\n  }\n  function inputCell", "    if(item.deleting&&row)row.querySelectorAll('[data-field],input[data-lens-axis]').forEach(el=>el.disabled=true);\n    paintCameraColumn(item);\n    syncSummary();icons();\n  }\n  function inputCell");
   replace("row.querySelectorAll('input[data-field],select[data-field]')", "row.querySelectorAll('[data-field]')");
   replace("+' for '+(device(row.device)?.name||'new row'))+'\"'+(disabled?' disabled':'')", "+' for '+(device(row.device)?.name||'new row'))+'\"'+(disabled||row.deleting?' disabled':'')");
   replace("if(!item)return;\n    if(!isLan&&isLensSetting", "if(!item||item.deleting)return;\n    if(!isLan&&isLensSetting");
@@ -40,7 +40,7 @@ export async function buildUiAdapter() {
   replace("restoreDeviceWorkflow(data);", "restoreDeviceWorkflow(data);restoreCameraSorting(data);restoreCameraLayouts(data);restoreRemiDrafts(data);");
   replace("discoveryOpen:discoveryCard?.open,", "discoveryOpen:discoveryCard?.open,remiDrafts:saveRemiDrafts(),");
   replace("remiSharing:'Deferred until a later capture'", "remiSharing:'Managed camera sources'");
-  replace("openNetworkDevices:[...openNetworkDevices],", "openNetworkDevices:[...openNetworkDevices],cameraSortByDevice:JSON.parse(JSON.stringify(cameraSortByDevice)),cameraLayouts:saveCameraLayouts(),");
+  replace("openNetworkDevices:[...openNetworkDevices],", "openNetworkDevices:[...openNetworkDevices],cameraSortByDevice:JSON.parse(JSON.stringify(cameraSortByDevice)),cameraLayouts:saveCameraLayouts(),cameraSheetsByDevice:saveCameraSheets(),");
   replace("  function cameraGrid(rows,deviceId){", "  function cameraGrid(rows,deviceId){rows=sortCameraRows(rows,deviceId);");
   replace("    const groups=axisGroups(deviceId);\n", "");
   replaceBetween("{id:'selected',label:", "{id:'number',", "");
@@ -74,13 +74,14 @@ export async function buildUiAdapter() {
   replace("else if(field==='control')content=status(camera.online);", "else if(field==='control')content=status(camera.online);\n      else if(field==='recording')content=cameraRecordingCell(camera.id);\n      else if(field==='cameraStatus')content=cameraStatusCell(camera.id);");
   replace("      else if(field==='number'||field==='name')", "      else if(field==='controlEnabled'){classes.push('hc-check');content=cameraControlCell(camera);}\n      else if(field==='number'||field==='name')");
   replace("    function cell(camera,column,index){", "    function cell(camera,column){\n      if(column.placeholder)return '<td class=\"hc-empty-axis\" aria-hidden=\"true\"></td>';");
-  replaceBetween("    return header+'<tbody>'+rows.map((camera,index)=>{", "\n  }\n  function renderCameras", `    return header+'<tbody>'+rows.map(camera=>{
+  replaceBetween("    return header+'<tbody>'+rows.map((camera,index)=>{", "\n  }\n  function renderCameras", `    if(cameraSheetView(deviceId)==='columns')return flippedCameraGrid(rows,columns,deviceId,cell);
+    return header+'<tbody>'+rows.map(camera=>{
       initializeLensFields(camera);
       return '<tr data-id="'+esc(camera.id)+'">'+columns.map(column=>cell(camera,column)).join('')+'</tr>';
     }).join('')+'</tbody>';`);
   replace('<table class="hc-grid" data-camera-device=', '<table class="hc-grid" role="grid" data-camera-device=');
   replace("changed=camera.dirty.has(field)", "changed=camera.dirty.has(cameraField(camera,field))");
-  replace("attrs=' data-column=\"'+field+'\"'", "attrs=' data-column=\"'+field+'\"'+(field==='row'?' role=\"rowheader\" aria-label=\"Camera '+esc(camera.number)+'\"':' role=\"gridcell\" data-hubble-column=\"'+field+'\" data-hubble-row=\"'+esc(camera.id)+'\"')");
+  replace("attrs=' data-column=\"'+field+'\"'", "attrs=' data-column=\"'+field+'\"'+(field==='row'?' role=\"rowheader\" aria-label=\"Camera '+esc(camera.number)+'\"':' role=\"gridcell\"'+cameraCellPosition(deviceId,camera.id,field))");
   replace("id:'number',label:'#',width:28", "id:'number',label:'#',width:42");
   replace("id:'name',label:'Camera name',width:100", "id:'name',label:'Camera name',width:160");
   replace("id:'connection',label:'Lens connection',width:100", "id:'connection',label:'Lens connection',width:116");
@@ -117,11 +118,15 @@ export async function buildUiAdapter() {
   replace("function lensCapabilities(camera){const torque=camera.lens==='ARRI - cforce'||camera.lens==='cmotion cGate',motor=camera.lens==='Tilta - Nucleus-M';", "function lensCapabilities(camera){const editable=camera.lensParamsEditable!==false,torque=editable&&(camera.lens==='ARRI - cforce'||camera.lens==='cmotion cGate'),motor=editable&&camera.lens==='Tilta - Nucleus-M';");
   replace("    if(field.endsWith('Motor'))return p.motor;", "    const axis=lensAxisForField(field);if(axis&&!lensAxisEnabled(camera,axis))return false;\n    if(field.endsWith('Motor'))return p.motor;");
   replaceBetween("  function lensParameters(camera){", "  function cameraGrid(", "");
-  replace("      else if(column.summary){classes.push('hc-axis-summary');if(!p.iris)classes.push('hc-axis-inactive');content=esc(axisSummary(camera,column.group));}", "      else if(column.summary){classes.push('hc-axis-summary');if(!lensAxisAvailable(camera))classes.push('hc-axis-inactive');content=lensAxisControl(camera,column.group,column.summary);}");
-  replace("Expand Iris, Zoom or Focus in the sheet headers to edit each axis.", "Expand Iris, Zoom or Focus, then check Setup on a camera row to configure that axis.");
+  replace("      else if(column.summary){classes.push('hc-axis-summary');if(!p.iris)classes.push('hc-axis-inactive');content=esc(axisSummary(camera,column.group));}", "      else if(column.summary){classes.push('hc-axis-summary');if(!lensAxisAvailable(camera))classes.push('hc-axis-inactive');content=lensAxisControl(camera,column.group,!axisGroups(deviceId)[column.group]);}");
+  replace("Expand Iris, Zoom or Focus in the sheet headers to edit each axis.", "Expand Iris, Zoom or Focus, then tick Use Iris, Use Zoom or Use Focus for a camera to configure that axis.");
+  replace("    const defaults={irisMotor:'3',zoomMotor:'5',focusMotor:'2',irisMin:'1.6',irisMax:'32',irisTorque:'2',zoomTorque:'2',focusTorque:'2',irisDirection:'left',zoomDirection:'left',focusDirection:'left',lensIp:''};\n    for(const [field,value] of Object.entries(defaults))if(camera[field]===undefined)camera[field]=value;", "    // Blank until someone enters a value or the controller reports one.\n    for(const field of ['irisMotor','zoomMotor','focusMotor','irisMin','irisMax','irisTorque','zoomTorque','focusTorque','irisDirection','zoomDirection','focusDirection','lensIp'])if(camera[field]===undefined)camera[field]='';");
+  replace("if(axis==='iris'&&p.iris)return camera.irisMin+'–'+camera.irisMax;", "if(axis==='iris'&&p.iris)return camera.irisMin&&camera.irisMax?camera.irisMin+'–'+camera.irisMax:'';");
+  replace("if(p.motor)return 'Motor '+camera[axis+'Motor'];", "if(p.motor)return camera[axis+'Motor']?'Motor '+camera[axis+'Motor']:'';");
+  replace("if(p.torque)return 'T'+camera[axis+'Torque']+' '+(camera[axis+'Direction']==='left'?'Left':'Right');", "if(p.torque)return camera[axis+'Torque']&&camera[axis+'Direction']?'T'+camera[axis+'Torque']+' '+(camera[axis+'Direction']==='left'?'Left':'Right'):'';");
   replace("  function valid(item,kind){", "  function valid(item,kind,fields=[]){");
-  replace("    if(p.iris&&(!(Number(item.irisMin)>0)||!(Number(item.irisMax)>Number(item.irisMin))))return 'Incomplete';", "    if(fields.some(field=>field==='irisMin'||field==='irisMax')&&(!(Number(item.irisMin)>0)||!(Number(item.irisMax)>Number(item.irisMin))))return 'Incomplete';");
-  replace("    if(p.motor){const ids=[item.irisMotor,item.zoomMotor,item.focusMotor];if(ids.some(id=>!/^\\d+$/.test(id)||Number(id)<1)||new Set(ids.map(Number)).size!==3)return 'Incomplete';}", "    const ids=fields.filter(field=>lensAxisForField(field)&&field.endsWith('Motor')).map(field=>item[field]);\n    if(ids.some(id=>!/^\\d+$/.test(id)||Number(id)<1)||new Set(ids.map(Number)).size!==ids.length)return 'Incomplete';");
+  replace("    if(p.iris&&(!(Number(item.irisMin)>0)||!(Number(item.irisMax)>Number(item.irisMin))))return 'Incomplete';", "    const filled=fields.filter(field=>!lensAxisBeingCleared(item,field));\n    if(filled.some(field=>field==='irisMin'||field==='irisMax')&&(!(Number(item.irisMin)>0)||!(Number(item.irisMax)>Number(item.irisMin))))return 'Incomplete';");
+  replace("    if(p.motor){const ids=[item.irisMotor,item.zoomMotor,item.focusMotor];if(ids.some(id=>!/^\\d+$/.test(id)||Number(id)<1)||new Set(ids.map(Number)).size!==3)return 'Incomplete';}", "    const ids=filled.filter(field=>lensAxisForField(field)&&field.endsWith('Motor')).map(field=>item[field]);\n    if(ids.some(id=>!/^\\d+$/.test(id)||Number(id)<1)||new Set(ids.map(Number)).size!==ids.length)return 'Incomplete';\n    for(const axis of new Set(filled.map(lensAxisForField).filter(Boolean)))if(axisDefinitions[axis].some(definition=>lensFieldUsed(item,definition.id)&&!item[definition.id]))return 'Incomplete';");
   replace("if(!isLan&&field==='lens'){initializeLensFields(item);", "if(!isLan&&field==='lens'){delete item.lensParamsEditable;initializeLensFields(item);for(const setting of [...Object.values(axisDefinitions).flatMap(definitions=>definitions.map(definition=>definition.id)),'lensIp','lensPort'])if(lensFieldUsed(item,setting)&&(setting!=='lensPort'||item.lensPort&&item.lensPort!=='None')){item.dirty.add(setting);fields.push(setting);}");
   replace("else if(field==='lens'&&item.lens==='None'){item.lensPort='None';item.dirty.add('lensPort');fields.push('lensPort');}", "else if(field==='lens'&&item.lens==='None'){item.lensPort='None';}");
   replace("selectCell(camera,'usb',['USB · Automatic','USB · FX3A 00421'])", "cameraChoiceCell(camera,'usb')");
@@ -136,10 +141,12 @@ export async function buildUiAdapter() {
   replace("if(el.dataset.row&&el.dataset.field)commitCell(el);", "if(el.dataset.row&&el.dataset.field&&!el.closest('table[data-camera-device]'))commitCell(el);");
   replaceBetween("  function cameraColumnSections(){", "  function hiddenCameraColumns", "  function cameraColumnSections(){return cameraSheetSections();}\n");
   replace("function cameraColumnVisible(id,field){return !hiddenCameraColumns(id).has(field);}", "function cameraColumnVisible(id,field){return cameraFieldVisible(id,field);}");
-  const hooks = (await Promise.all(['src/ui-camera-control.js','src/ui-device-workflows.js','src/ui-camera-grid-layout.js','src/ui-camera-sorting.js','src/ui-backend-hooks.js','src/ui-remi-workflows.js','src/ui-lens-axes.js','src/ui-camera-choices.js','src/ui-sheet-history.js','src/ui-camera-workbook.js'].map(file=>readFile(path.join(root,file),'utf8')))).join('\n');
+  replace("<span class=\"hc-sheet-tab\">'+esc(d.name)+' cameras</span>", "<div class=\"hc-camera-sheet-tabs\" data-camera-sheets></div>");
+  replace("if(Array.isArray(data.deviceOrder))", "restoreCameraSheets(data);if(Array.isArray(data.deviceOrder))");
+  const hooks = (await Promise.all(['src/ui-camera-control.js','src/ui-device-workflows.js','src/ui-camera-grid-layout.js','src/ui-camera-sheets.js','src/ui-camera-sorting.js','src/ui-backend-hooks.js','src/ui-remi-workflows.js','src/ui-lens-axes.js','src/ui-camera-choices.js','src/ui-sheet-history.js','src/ui-camera-workbook.js'].map(file=>readFile(path.join(root,file),'utf8')))).join('\n');
   replace("  syncFilter();renderLans();renderCameras();setTab('cameras',false);restore(window.openai?.widgetState);", hooks + "\n  initializeDeviceWorkflow();syncFilter();renderLans();renderCameras();setTab('devices',false);restore(window.openai?.widgetState);\n  if(moduleBridge)void initializeBackend();else root.hidden=false;");
   const imports = [
-    "import { createSpreadsheetContextMenu, mountSpreadsheetControls, mountSpreadsheetColumnGroup, mountSpreadsheetResize, mountSpreadsheetColumnEditor, mountSpreadsheetToolbar, mountSpreadsheetViewport } from '@hubble/module-sdk/spreadsheet-controls';",
+    "import { createSpreadsheetContextMenu, mountSpreadsheetControls, mountSpreadsheetColumnGroup, mountSpreadsheetResize, mountSpreadsheetColumnEditor, mountSpreadsheetSheets, mountSpreadsheetToolbar, mountSpreadsheetViewport } from '@hubble/module-sdk/spreadsheet-controls';",
     "import { cameraChoiceKey } from './choice-context.js';",
     "import { PresentationLedger } from './presentation-ledger.js';",
   ].join('\n');

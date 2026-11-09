@@ -27,7 +27,7 @@ test('adding and renaming a RIO camera updates a chain in Camera Configuration',
   await expect(ui.getByRole('dialog')).toContainText('Import 1 · Wide · Stage RIO');
   await ui.locator('[data-remi-apply]').click();
   await expectImported('CY-RCP-1-20','Stage RIO');
-  const controlFlag=sheet('CY-RCP-1-20').locator('input[data-field="controlEnabled"]');
+  const controlFlag=sheet('CY-RCP-1-20').locator('[data-field="controlEnabled"] [role="checkbox"]');
   await expect(controlFlag).toBeEnabled();
   const beforeControl=(await(await request.get('/__inspect')).json()).fleet[1].actions.length;
   await controlFlag.check();await expect(controlFlag).toBeChecked();

@@ -1,5 +1,5 @@
 import { ModuleMatrixSchema } from '@hubble/module-sdk';
-import { commands, cameraCommands, feedbackCommands } from './config.js';
+import { commands, cameraCommands, feedbackCommands, localCommands } from './config.js';
 
 export const matrix = ModuleMatrixSchema.parse({
   id: 'camera-control', label: 'Cyanview', actionId: 'camera-control', feedbackId: 'camera-control', primaryField: 'actionType',
@@ -12,7 +12,9 @@ export const matrix = ModuleMatrixSchema.parse({
     // The shared Matrix stores dynamic references as text and presents the provider's labels.
     { id: 'module.controllerId', label: 'Cyanview controller', type: 'text', default: '', required: true, fill: 'copy', width: 240,
       choiceProvider: 'control-controllers', emptyMessage: 'Add a controller on Cyanview’s Devices page.',
-      enabledWhen: [{ field: 'actionType', values: commands.map(([value]) => value) }] },
+      enabledWhen: [{ field: 'actionType', values: commands.map(([value]) => value) }],
+      // These only change the saved ticks, so nothing needs a controller. Left blank, they cover every controller.
+      rules: [{ when: [{ field: 'actionType', values: [...localCommands] }], set: { required: false } }] },
     { id: 'module.cameraNumber', label: 'Camera', type: 'number', default: null, required: true, integer: true, min: 1, max: 999999,
       formula: true, fill: 'series', width: 240, choiceProvider: 'control-cameras', choiceFields: ['module.cameraNumber'],
       enabledWhen: [{ field: 'actionType', values: [...cameraCommands] }] },
@@ -27,6 +29,6 @@ const controller = { id: 'controllerId', label: 'Cyanview controller', type: 'ch
 export const controlActions = commands.map(([id, label]) => ({
   id, label, description: 'Control cameras on one named Cyanview controller.',
   completion: 'response' as const, completionAlternatives: ['local' as const, 'state-confirmed' as const], timeoutMs: 120000,
-  fields: [{ ...controller, choiceProvider: id === 'select-camera' ? 'control-rcps' : 'control-controllers' }, ...(cameraCommands.includes(id) ? [{ id: 'cameraNumber', label: 'Camera number', type: 'number' as const,
+  fields: [{ ...controller, required: !localCommands.includes(id), choiceProvider: id === 'select-camera' ? 'control-rcps' : 'control-controllers' }, ...(cameraCommands.includes(id) ? [{ id: 'cameraNumber', label: 'Camera number', type: 'number' as const,
     default: 1, required: true, integer: true, min: 1, max: 999999 }] : [])],
 }));

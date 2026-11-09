@@ -169,28 +169,28 @@ test('the grouped sheet distinguishes unavailable axis setup from unchecked cont
   await group.getByRole('button', { name: 'Expand Zoom', exact: true }).click();
   await expect(group.getByRole('button', { name: 'Expand Focus', exact: true })).toBeVisible();
   let row = group.locator('tr[data-id="cam1"]');
-  await expect(group.locator('th[data-field-header="irisSummary"]')).toHaveText('Setup');
+  await expect(group.locator('th[data-field-header="irisSummary"]')).toHaveText('Use Iris');
   const setup = row.locator('[data-column="irisSummary"]');
   await expect(setup).toHaveText('—');
   await expect(setup.getByRole('checkbox')).toHaveCount(0);
   await setup.click();
-  await expect(group.locator('[data-camera-location]')).toHaveText('Camera 1 · Iris setup');
+  await expect(group.locator('[data-camera-location]')).toHaveText('Camera 1 · Use Iris');
   await expect(group.locator('[data-camera-value]')).toHaveText('Unavailable for this camera');
   await expect(row.locator('[data-field="irisMotor"]')).toBeDisabled();
   await expect(row.locator('[data-field="irisMotor"]')).toHaveValue('');
   await expect(row.locator('[data-field="irisTorque"]')).toHaveAttribute('value', '');
   await chooseCameraCell(f, row.locator('[data-field="lens"]'), 'ARRI - cforce');
   row = group.locator('tr[data-id="cam1"]');
-  const iris = row.getByRole('checkbox', { name: 'Configure Iris for camera 1', exact: true });
+  const iris = row.locator('[data-lens-axis="iris"] [role="checkbox"]');
   await expect(iris).not.toBeChecked();
-  await expect(setup).toHaveText('Off');
+  await expect(setup).toHaveText('');
   await expect(row.locator('[data-field="irisTorque"]')).toBeDisabled();
   await iris.check();
   await chooseCameraCell(f, row.locator('[data-field="irisTorque"]'), '4');
   await chooseCameraCell(f, row.locator('[data-field="lens"]'), 'Tilta - Nucleus-M');
   await expect(row.locator('[data-field="irisTorque"]')).toBeDisabled();
   await expect(row.locator('[data-field="irisTorque"]')).toHaveAttribute('value', '');
-  await expect(row.locator('[data-field="irisMotor"]')).toHaveValue('3');
+  await expect(row.locator('[data-field="irisMotor"]')).toHaveValue('');
   await chooseCameraCell(f, row.locator('[data-field="lens"]'), 'ARRI - cforce');
   await expect(row.locator('[data-field="irisTorque"]')).toHaveAttribute('value', '4');
   await group.getByRole('button', { name: 'Choose visible columns', exact: true }).click();
@@ -263,13 +263,13 @@ test('each camera opts into lens axes and only sends the selected settings', asy
   const first = rows.first(), second = rows.nth(1);
   const send = group.locator('[data-action="send-controller"]');
   await group.getByRole('button', { name: 'Choose visible columns' }).click();
-  await f.getByRole('searchbox', { name: 'Search columns' }).fill('setup');
-  for (const axis of ['Iris', 'Zoom', 'Focus']) await f.getByRole('menuitemcheckbox', { name: axis + ' setup', exact: true }).click();
+  await f.getByRole('searchbox', { name: 'Search columns' }).fill('Use');
+  for (const axis of ['Iris', 'Zoom', 'Focus']) await f.getByRole('menuitemcheckbox', { name: 'Use ' + axis, exact: true }).click();
   await f.getByRole('searchbox', { name: 'Search columns' }).press('Escape');
   for (const row of [first, second]) {
     await group.locator('[data-new-camera]').selectOption('Alpha-USB');
     await chooseCameraCell(f, row.locator('[data-field="lens"]'), 'Tilta - Nucleus-M');
-    for (const axis of ['iris', 'zoom', 'focus']) await expect(row.locator('[data-lens-axis="' + axis + '"]')).not.toBeChecked();
+    for (const axis of ['iris', 'zoom', 'focus']) await expect(row.locator('[data-lens-axis="' + axis + '"] [role="checkbox"]')).not.toBeChecked();
   }
   await send.click();
   await expect(rows.locator('[data-column="sync"]')).toHaveText(['Verified', 'Verified']);
@@ -278,19 +278,25 @@ test('each camera opts into lens axes and only sends the selected settings', asy
     .map((camera: any) => camera.LensParams);
   expect(await params()).toEqual(['', '']);
 
-  await first.locator('[data-lens-axis="iris"]').check();
-  await expect(second.locator('[data-lens-axis="iris"]')).not.toBeChecked();
+  const enter = async (name: string, value: string) => { await first.locator('[data-field="' + name + '"]').fill(value); await first.locator('[data-field="' + name + '"]').press('Enter'); };
+  await first.locator('[data-lens-axis="iris"] [role="checkbox"]').check();
+  await expect(second.locator('[data-lens-axis="iris"] [role="checkbox"]')).not.toBeChecked();
+  await group.getByRole('button', { name: 'Expand Iris', exact: true }).click();
+  await expect(first.locator('[data-field="irisMotor"]')).toHaveValue('');
+  await enter('irisMotor', '3'); await enter('irisMin', '1.6'); await enter('irisMax', '32');
   await send.click();
   await expect(first.locator('[data-column="sync"]')).toHaveText('Verified');
   expect(await params()).toEqual(['3:I:1.6:32', '']);
 
-  await first.locator('[data-lens-axis="iris"]').uncheck();
-  await first.locator('[data-lens-axis="zoom"]').check();
-  await first.locator('[data-lens-axis="focus"]').check();
+  await first.locator('[data-lens-axis="iris"] [role="checkbox"]').uncheck();
+  await first.locator('[data-lens-axis="zoom"] [role="checkbox"]').check();
+  await group.getByRole('button', { name: 'Expand Zoom', exact: true }).click();
+  await enter('zoomMotor', '5');
+  await first.locator('[data-lens-axis="focus"] [role="checkbox"]').check();
   await group.getByRole('button', { name: 'Expand Focus', exact: true }).click();
   await first.locator('[data-field="focusMotor"]').fill('8');
   await first.locator('[data-field="focusMotor"]').press('Enter');
-  await first.locator('[data-lens-axis="focus"]').uncheck();
+  await first.locator('[data-lens-axis="focus"] [role="checkbox"]').uncheck();
   await expect(first.locator('[data-field="focusMotor"]')).toBeDisabled();
   await expect(first.locator('[data-field="focusMotor"]')).toHaveValue('');
   await send.click();
@@ -298,11 +304,11 @@ test('each camera opts into lens axes and only sends the selected settings', asy
   expect(await params()).toEqual(['3:I:1.6:32,5:Z', '']);
   await expect.poll(async () => (await saved(request))?.cameras?.[0]?.enabledLensAxes).toEqual(['zoom']);
   await page.reload();
-  await expect(first.locator('[data-lens-axis="iris"]')).not.toBeChecked();
-  await expect(first.locator('[data-lens-axis="zoom"]')).toBeChecked();
-  await expect(first.locator('[data-lens-axis="focus"]')).not.toBeChecked();
+  await expect(first.locator('[data-lens-axis="iris"] [role="checkbox"]')).not.toBeChecked();
+  await expect(first.locator('[data-lens-axis="zoom"] [role="checkbox"]')).toBeChecked();
+  await expect(first.locator('[data-lens-axis="focus"] [role="checkbox"]')).not.toBeChecked();
   await f.locator('[data-action="send-mode"][data-mode="Auto send"]').click();
-  await first.locator('[data-lens-axis="focus"]').check();
+  await first.locator('[data-lens-axis="focus"] [role="checkbox"]').check();
   await expect(first.locator('[data-field="focusMotor"]')).toHaveValue('8');
   await expect(first.locator('[data-column="sync"]')).toHaveText('Verified');
   expect(await params()).toEqual(['3:I:1.6:32,5:Z,8:F', '']);
@@ -698,7 +704,8 @@ test('a multi-row camera paste sends one Auto send batch without replaying stage
   await sheet.press('Enter');
   const choices = f.getByRole('dialog', { name: 'Select Lens model' });
   const lensSearch = choices.getByRole('combobox');
-  await expect(choices.getByText('Loading choices…')).toBeVisible();
+  // The built-in list shows while the controller is still being asked.
+  await expect(choices.getByRole('option', { name: 'B4 Generic', exact: true })).toBeVisible();
   await lensSearch.fill('generic');
   releaseChoices();
   await expect(choices.getByText('Loading choices…')).toHaveCount(0);
@@ -748,7 +755,7 @@ test('live lens connection choices can be selected and saved offline after reloa
   });
   await page.reload();
   await (await selectCameraCell(port)).press('Enter');
-  await expect(f.locator('[data-role="toast"]')).toHaveText('Using saved choices · controller unavailable');
+  await expect(dialog.getByRole('option', { name: 'RIO-1-10 : 2', exact: true })).toBeVisible();
   await dialog.getByRole('combobox').fill('rio 2');
   await dialog.getByRole('option', { name: 'RIO-1-10 : 2', exact: true }).click();
   await expect(port).toHaveAttribute('value', 'RIO-1-10 : 2');

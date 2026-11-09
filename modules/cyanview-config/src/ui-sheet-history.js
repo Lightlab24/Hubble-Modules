@@ -6,24 +6,26 @@
     return cameraHistories.get(id);
   }
   function cameraPresentation(id) {
-    return copyPresentation({ layout: cameraLayout(id), hidden: [...hiddenCameraColumns(id)], expanded: axisGroups(id) });
+    return copyPresentation({ sheets: cameraSheetList(id) });
   }
-  function applyCameraPresentation(id, value) {
-    cameraLayouts.set(id, copyPresentation(value.layout));
-    hiddenCameraColumnsByDevice[id] = new Set(value.hidden);
-    axisGroupsByDevice[id] = { ...value.expanded };
+  function applyCameraPresentation(id, value, preferred) {
+    const state = cameraSheetState(id), sheets = copyPresentation(value.sheets);
+    const find = sheetId => sheets.find(sheet => sheet.id === sheetId);
+    state.sheets = sheets;
+    showCameraSheet(id, find(preferred) ?? find(state.activeSheetId) ?? find(value.activeSheetId) ?? sheets[0]);
   }
   function recordCameraHistory(id, entry) {
     const history = cameraHistory(id);
     history.undo.push(entry); history.undo = history.undo.slice(-200); history.redo = [];
   }
   function changeCameraPresentation(id, change, redraw = true, record = true) {
-    const before = cameraPresentation(id);
+    const before = cameraPresentation(id), activeBefore = cameraSheetState(id).activeSheetId;
     change();
     const after = cameraPresentation(id);
     if (JSON.stringify(before) === JSON.stringify(after)) return;
-    const epoch = presentationLedger.change('camera:' + id, before, after);
-    if (record) recordCameraHistory(id, { kind: 'layout', before, after, epoch });
+    // Which tab was open only matters if the change that opened another one fails.
+    const epoch = presentationLedger.change('camera:' + id, { ...before, activeSheetId: activeBefore }, after);
+    if (record) recordCameraHistory(id, { kind: 'layout', before, after, epoch, activeBefore, activeAfter: cameraSheetState(id).activeSheetId });
     if (redraw) renderCameras();
     else for (const [table, sheet] of cameraSheets) if (table.dataset.cameraDevice === id) sheet.refresh?.();
     remember();
@@ -35,9 +37,11 @@
     for (const { key, value } of presentationLedger.repairs(ticket)) {
       const id = key.slice(key.indexOf(':') + 1);
       if (key.startsWith('camera:')) {
-        (data.cameraLayouts ??= {})[id] = copyPresentation(value.layout);
-        (data.hiddenCameraColumnsByDevice ??= {})[id] = [...value.hidden];
-        (data.axisGroupsByDevice ??= {})[id] = { ...value.expanded };
+        const active = value.sheets.find(sheet => sheet.id === data.cameraSheetsByDevice?.[id]?.activeSheetId) ?? value.sheets[0];
+        (data.cameraLayouts ??= {})[id] = copyPresentation(active.layout);
+        (data.hiddenCameraColumnsByDevice ??= {})[id] = [...active.hidden];
+        (data.axisGroupsByDevice ??= {})[id] = { ...active.expanded };
+        (data.cameraSheetsByDevice ??= {})[id] = copyPresentation(cameraSheetsRecord(id, value.sheets, active.id));
       }
     }
     return plan;
@@ -79,7 +83,7 @@
     const source = forward ? 'before' : 'after', target = forward ? 'after' : 'before';
     if (entry.kind === 'layout') {
       if (JSON.stringify(cameraPresentation(id)) !== JSON.stringify(entry[source])) { toast('The sheet layout has changed; this history entry is no longer available'); return; }
-      entry.epoch = changeCameraPresentation(id, () => applyCameraPresentation(id, entry[target]), true, false);
+      entry.epoch = changeCameraPresentation(id, () => applyCameraPresentation(id, entry[target], forward ? entry.activeAfter : entry.activeBefore), true, false);
     } else {
       for (const patch of entry.patches) {
         const row = cameras.find(row => row.id === patch[source].id);

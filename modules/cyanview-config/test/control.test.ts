@@ -8,9 +8,9 @@ import { RcpSession } from '../src/control/rcp-session.js';
 import { RecordingCoordinator } from '../src/control/recording-coordinator.js';
 import { feedbackTimeout } from '../src/control/service.js';
 import { matrix } from '../src/control/matrix.js';
-import { commands } from '../src/control/config.js';
+import { commands, localCommands } from '../src/control/config.js';
 import manifest from '../src/manifest.js';
-import { createModuleDocumentClient, moduleMatrixMatches, parseModuleMatrixValue } from '@hubble/module-sdk';
+import { createModuleDocumentClient, moduleMatrixMatches, parseModuleMatrixValue, resolveModuleMatrixField } from '@hubble/module-sdk';
 import { object, type Plan } from '../src/model.js';
 
 afterEach(closeBrokers);
@@ -75,7 +75,7 @@ test('new Matrix descriptor requires a named controller and declares camera seri
   assert.equal(manifest.actions.some(action => 'legacy' in action && action.legacy), false);
 });
 
-test('a row with no action is empty rather than incomplete, and any chosen action needs a controller', () => {
+test('a row with no action is empty rather than incomplete, and only actions that reach equipment need a controller', () => {
   const field = (id: string) => matrix.fields.find(row => row.id === id)!;
   assert.equal(field('actionType').default, '');
   assert.equal(field('actionType').required, false);
@@ -85,9 +85,12 @@ test('a row with no action is empty rather than incomplete, and any chosen actio
   assert.equal(moduleMatrixMatches(controller.enabledWhen!, { actionType: '' }), false, 'Nothing is missing on an empty row');
   for (const [command] of commands) {
     assert.equal(moduleMatrixMatches(matrix.inactiveWhen!, { actionType: command }), false);
-    assert.equal(moduleMatrixMatches(controller.enabledWhen!, { actionType: command }), true, `${command} needs a controller`);
+    assert.equal(moduleMatrixMatches(controller.enabledWhen!, { actionType: command }), true, `${command} can name a controller`);
+    assert.equal(resolveModuleMatrixField(controller, { actionType: command }).required, !localCommands.includes(command), `${command} requiredness`);
     assert.equal(parseModuleMatrixValue(field('actionType'), command), command, 'Saved actions stay valid');
   }
+  for (const action of manifest.actions.filter(item => commands.some(([command]) => command === item.id)))
+    assert.equal(action.fields.find(item => item.id === 'controllerId')!.required, !localCommands.includes(action.id), `${action.id} in Advanced`);
 });
 
 test('named choices are offline, distinguish duplicate names, filter camera numbers, and survive rename/address changes', async () => {
@@ -206,6 +209,135 @@ test('local quick groups, Enable All and Single switch are scoped to the named c
     assert.equal(s.networks[0]!.commands.length, 0);
     assert.equal((await s.run('select-camera', 1, 1)).status, 'failure');
   } finally { await s.close(); }
+});
+
+/** A press from a Matrix row with its Cyanview controller cell left blank. */
+const blankController = (s: Awaited<ReturnType<typeof fleet>>, actionType: string, cameraNumber: number | null = null) =>
+  s.f.instance.execute('camera-control', { values: { enabled: true, actionType, 'module.controllerId': '', 'module.cameraNumber': cameraNumber } }, s.f.execution());
+
+test('with no controller named, the selection actions cover every controller and contact none', async () => {
+  const s = await fleet();
+  try {
+    const ticks = async () => { const { enabled } = await s.state(); return s.plan.cameras.map(row => !!enabled[row.id]); };
+    const opened = [s.a.opened, s.b.opened];
+    const first = await blankController(s, 'toggle-camera-enabled', 2);
+    assert.equal(first.status, 'success', JSON.stringify(first));
+    assert.equal(first.status === 'success' && first.evidence?.kind, 'local');
+    assert.deepEqual(await ticks(), [false, true, false, true], 'That number on both controllers');
+    await blankController(s, 'toggle-camera-enabled', 2);
+    assert.deepEqual(await ticks(), [false, false, false, false]);
+    await s.run('toggle-camera-enabled', 0, 1);
+    await blankController(s, 'toggle-camera-enabled', 1);
+    assert.deepEqual(await ticks(), [true, false, true, false], 'A controller that disagrees is brought into line, not flipped the other way');
+    await blankController(s, 'enable-all-cameras');
+    assert.deepEqual(await ticks(), [true, true, true, true]);
+    await blankController(s, 'enable-all-cameras');
+    assert.deepEqual(await ticks(), [false, false, false, false]);
+    await blankController(s, 'toggle-camera-enabled', 2);
+    await blankController(s, 'single-switch');
+    let state = await s.state();
+    assert.deepEqual(s.ids.map(id => state.singleSwitch[id]), [true, true]);
+    assert.deepEqual(await ticks(), [false, true, false, true]);
+    await blankController(s, 'toggle-camera-enabled', 1);
+    assert.deepEqual(await ticks(), [true, false, true, false], 'Single switch moves to that number everywhere');
+    await blankController(s, 'toggle-camera-enabled', 1);
+    assert.deepEqual(await ticks(), [true, false, true, false], 'Pressing the picked camera keeps it, as it does with a controller named');
+    await blankController(s, 'single-switch');
+    state = await s.state();
+    assert.deepEqual(s.ids.map(id => state.singleSwitch[id]), [false, false]);
+    assert.deepEqual([s.a.opened, s.b.opened], opened, 'No configuration read');
+    assert.deepEqual(s.networks.map(network => network.commands.length), [0, 0], 'Nothing sent');
+    assert.equal(s.a.actions.length + s.b.actions.length, 0);
+  } finally { await s.close(); }
+});
+
+test('Single switch with no controller keeps one camera number even when controllers list cameras in a different order', async () => {
+  const s = await fleet();
+  try {
+    const [wide, tight, otherWide, otherTight] = s.plan.cameras;
+    s.plan.cameras = [wide!, tight!, otherTight!, otherWide!]; await s.save();
+    await blankController(s, 'enable-all-cameras');
+    await blankController(s, 'single-switch');
+    const { enabled } = await s.state();
+    assert.deepEqual([wide, tight, otherWide, otherTight].map(row => !!enabled[row!.id]), [true, false, true, false]);
+  } finally { await s.close(); }
+});
+
+test('a blank controller still works with no controller reachable, and a press that needs one still refuses', async () => {
+  const controller = new FakeController();
+  controller.config.Product = { Serial: 'CY-RCP-1-10', Name: 'RCP' };
+  controller.config.Camera = { a: { Number: '1', Name: 'Wide', Model: 'Sony - Venice-IP' } };
+  const snapshot = controller.snapshot(), f = fixture();
+  try {
+    await f.instance.start();
+    await f.call('save-plan', { revision: null, plan: { formatVersion: 1, devices: [snapshot.device], cameras: snapshot.cameras, lans: [], uiState: null } });
+    const press = (actionType: string, cameraNumber: number | null = null) => f.instance.execute('camera-control', { values: { enabled: true, actionType, 'module.controllerId': '', 'module.cameraNumber': cameraNumber } }, f.execution());
+    const result = await press('toggle-camera-enabled', 1);
+    assert.equal(result.status, 'success', JSON.stringify(result));
+    assert.equal((await f.call('camera-control-state')).enabled[snapshot.cameras[0]!.id], true);
+    assert.equal((await press('toggle-camera-enabled', 99)).status, 'failure', 'A number no controller has');
+    for (const [command, number] of [['select-camera', 1], ['record-camera', 1], ['roll-enabled-cameras', null]] as const) {
+      const refused = await press(command, number);
+      assert.equal(refused.status, 'failure', command);
+      assert.match(String((refused as { message?: string }).message), /Choose a named Cyanview controller/);
+    }
+  } finally { await f.instance.dispose(); }
+});
+
+test('a controller left blank offers each camera number once, and an unsent camera can still be ticked', async () => {
+  const s = await fleet();
+  try {
+    const query = async (draft: Record<string, string>) => (await s.f.instance.discoverChoices!({ version: 2, provider: 'control-cameras', draft, search: '', cursor: null, limit: 128, requestRevision: 1 }, { signal: s.f.signal })).choices.map(choice => choice.values?.['module.cameraNumber']);
+    assert.deepEqual(await query({ actionType: 'toggle-camera-enabled', 'module.controllerId': '' }), [1, 2]);
+    assert.deepEqual(await query({ actionType: 'select-camera', 'module.controllerId': '' }), [], 'Select camera still needs its controller first');
+    s.plan.cameras.push({ ...s.plan.cameras[0]!, id: 'unsent', elementKey: '', isNew: true, number: '7', name: 'New' }); await s.save();
+    assert.deepEqual(await query({ actionType: 'toggle-camera-enabled', 'module.controllerId': '' }), [1, 2, 7]);
+    assert.deepEqual(await query({ actionType: 'toggle-camera-enabled', 'module.controllerId': s.ids[0]! }), [1, 2, 7]);
+    assert.deepEqual(await query({ actionType: 'record-camera', 'module.controllerId': s.ids[0]! }), [1, 2], 'Anything sent to a camera needs one that is on its controller');
+    assert.equal((await blankController(s, 'toggle-camera-enabled', 7)).status, 'success');
+  } finally { await s.close(); }
+});
+
+test('button feedback with no controller named follows every controller', async () => {
+  const s = await fleet();
+  try {
+    const fields = (id: string, actionType: string, cameraNumber: number | null = null) => ({ actionId: id, actionColumnId: 'column-one', values: { enabled: true, actionType,
+      'module.controllerId': '', 'module.cameraNumber': cameraNumber, 'module.feedbackEnabled': true, 'module.feedbackColor': '#333333 | #00FF00' } });
+    await s.f.instance.subscribeFeedback!([
+      { id: 'camera-control', fields: fields('camera', 'toggle-camera-enabled', 1) },
+      { id: 'camera-control', fields: fields('all', 'enable-all-cameras') },
+      { id: 'camera-control', fields: fields('single', 'single-switch') },
+    ], { signal: s.f.signal });
+    const latest = (id: string) => object(s.f.feedback.filter(item => object(object(item).fields).actionId === id).at(-1));
+    await eventually(() => latest('camera').state === 'inactive' && latest('all').state === 'inactive' && latest('single').state === 'inactive');
+    assert.equal(object(object(latest('camera').appearance).cells)['module.cameraNumber'].label, '1 · Wide');
+    await s.run('toggle-camera-enabled', 0, 1);
+    await delay(30);
+    assert.equal(latest('camera').state, 'inactive', 'Camera 1 is only ticked on one controller');
+    await blankController(s, 'enable-all-cameras');
+    await eventually(() => latest('camera').state === 'active' && latest('all').state === 'active');
+    await blankController(s, 'single-switch');
+    await eventually(() => latest('single').state === 'active');
+  } finally { await s.close(); }
+});
+
+test('a held save with no controller named shows at once, takes a second press, and rolls back whole', async () => {
+  const s = await fleet(); let release = () => {};
+  try {
+    const live = () => object(object(object(s.f.states.at(-1)).values).cameraControl).enabled ?? {};
+    const shown = () => s.plan.cameras.map(row => !!live()[row.id]);
+    release = s.f.holdWrites('camera-control');
+    const first = blankController(s, 'toggle-camera-enabled', 1);
+    await eventually(() => shown()[0] === true && shown()[2] === true);
+    const second = blankController(s, 'toggle-camera-enabled', 2);
+    await eventually(() => shown().every(Boolean));
+    assert.equal(s.f.records.has('camera-control'), false, 'Still waiting on the save');
+    s.f.failNextWrite('camera-control'); release();
+    assert.equal((await first).status, 'failure'); assert.equal((await second).status, 'failure');
+    const { enabled } = await s.state();
+    assert.deepEqual(s.plan.cameras.map(row => !!enabled[row.id]), [false, false, false, false]);
+    assert.equal((await blankController(s, 'toggle-camera-enabled', 1)).status, 'success', 'Works again after the failure');
+  } finally { release(); await s.close(); }
 });
 
 test('held selection writes publish immediately, accept second edits, roll back dependents and preserve other controllers', async () => {

@@ -39,7 +39,7 @@ test('portable presentation state preserves legacy layouts, credentials and stag
   try {
     const plan = { formatVersion: 1 as const, devices: [{ id: 'rcp', serial: 'CY-RCP-test', address: '192.0.2.10' }],
       cameras: [{ id: 'camera', device: 'rcp', number: '7', name: 'Staged name', password: 'local-test-password', dirty: ['name'], pending: true, lens: 'ARRI - cforce', enabledLensAxes: ['iris'], irisTorque: '4' }], lans: [],
-      uiState: { privateContent: { revision: 6, cameraLayouts: { rcp: { columns: { name: 217 }, rows: { camera: 62 }, groups: { iris: { order: ['irisTorque', 'irisSummary'], collapsed: ['irisTorque'] } }, textSize: 19, hiddenGroups: ['lens'] } }, hiddenCameraColumnsByDevice: { rcp: ['password'] }, axisGroupsByDevice: { rcp: { iris: false, zoom: true, focus: false } }, deviceOrder: ['rcp'], hiddenNetworkColumnsByDevice: { rcp: ['dns1'] } } } };
+      uiState: { privateContent: { revision: 6, cameraLayouts: { rcp: { columns: { name: 217 }, rows: { camera: 62 }, groups: { iris: { order: ['irisTorque', 'irisSummary'], collapsed: ['irisTorque'] } }, textSize: 19, hiddenGroups: ['lens'] } }, hiddenCameraColumnsByDevice: { rcp: ['password'] }, axisGroupsByDevice: { rcp: { iris: false, zoom: true, focus: false } }, deviceOrder: ['rcp'], hiddenNetworkColumnsByDevice: { rcp: ['dns1'] }, cameraSheetsByDevice: { rcp: { activeSheetId: 'network', sheets: [{ id: 'settings', name: 'Settings', view: 'rows', layout: { version: 2, columns: { name: 180 }, rows: {}, groups: {}, hiddenGroups: [], textSize: 15, cameraWidths: { camera: 240 }, settingHeights: { port: 50 }, settingWidth: 260 }, hidden: ['login'], expanded: { iris: true, zoom: false, focus: false } }, { id: 'network', name: 'Network', view: 'columns' }] } } } } };
     await f.repository.write(null, plan, f.signal);
     const exported = JSON.stringify([...f.records]);
     const transferred = fixture({ sampleData: false }, {}, new Map(JSON.parse(exported)));
@@ -47,6 +47,7 @@ test('portable presentation state preserves legacy layouts, credentials and stag
       const restored = (await transferred.repository.read(transferred.signal)).plan;
       assert.deepEqual(restored, plan);
       assert.deepEqual(restored.uiState?.privateContent.cameraLayouts.rcp.groups.iris.collapsed, ['irisTorque']);
+      assert.deepEqual(restored.uiState?.privateContent.cameraSheetsByDevice.rcp.sheets.map((sheet: { name: string; view: string }) => [sheet.name, sheet.view]), [['Settings', 'rows'], ['Network', 'columns']]);
       assert.equal(restored.cameras[0]?.pending, true);
     } finally { await transferred.instance.dispose(); }
   } finally { await f.instance.dispose(); }

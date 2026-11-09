@@ -4,7 +4,7 @@ import type { ModuleContext, ModuleExecutionContext, ModuleFeedbackSubscription,
 import { controlDevice, controllerLabel, emptyPlan, object, selectsCamera, type Plan, type RecordValue } from '../model.js';
 import type { PlanRepository } from '../repository.js';
 import { commands, commandGroup, cameraCommands, localCommands, feedbackCommands, type Command, type CyanViewRcpConnectionDefinition } from './config.js';
-import { ControlSelection, type SelectionMutation } from './selection.js';
+import { ControlSelection, everyControllerMutations, type SelectionMutation } from './selection.js';
 import { RcpSession, type CyanViewCameraTarget, type CyanViewCameraParameterStep } from './rcp-session.js';
 import { RecordingCoordinator } from './recording-coordinator.js';
 import { recordingCheckpoint } from './recording-checkpoint.js';
@@ -144,10 +144,10 @@ export class CameraControl {
     return this.state();
   }
   /** Edits apply in the order they were made. Only the wait for the save is left outside the queue, so edits stay immediate. */
-  private async acceptSelection(id: string, mutations: () => SelectionMutation[], signal: AbortSignal) {
+  private async acceptSelection(id: string, mutations: () => SelectionMutation[] | Promise<SelectionMutation[]>, signal: AbortSignal) {
     const { saved } = await this.accept(SELECTION_QUEUE, async () => {
       await this.refreshPlan(signal);
-      return { saved: this.selection.mutate(id, mutations(), signal) };
+      return { saved: this.selection.mutate(id, await mutations(), signal) };
     });
     return saved;
   }
@@ -164,7 +164,12 @@ export class CameraControl {
       }));
     } else if (provider === 'control-cameras') {
       const id = draft['module.controllerId'] ?? draft.controllerId;
-      choices = plan.cameras.filter(camera => camera.device === id && this.appliedRow(camera)).map(camera => ({
+      const local = localCommands.includes(String(draft.actionType)), everywhere = !id && local;
+      const controllers = plan.devices.filter(controlDevice).map(device => device.id);
+      // A tick is only a saved value, so a camera that hasn't been sent to its controller can have one too.
+      const rows = plan.cameras.filter(camera => (everywhere ? controllers.includes(camera.device) : camera.device === id) && (local ? number(Number(camera.number)) : this.appliedRow(camera)));
+      // A row covering every controller has one choice per camera number.
+      choices = rows.filter((camera, index) => !everywhere || rows.findIndex(row => Number(row.number) === Number(camera.number)) === index).map(camera => ({
         id: camera.id, label: `${camera.number} · ${camera.name || 'Camera'}`,
         values: { 'module.cameraNumber': Number(camera.number) },
       })).sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }));
@@ -187,7 +192,8 @@ export class CameraControl {
       const cameraNumber = values['module.cameraNumber'] ?? values.cameraNumber;
       if (cameraCommands.includes(command) && !number(cameraNumber)) throw new Error('Enter a camera number from 1 to 999999');
       if (localCommands.includes(command)) {
-        await this.acceptSelection(randomUUID(), () => {
+        await this.acceptSelection(randomUUID(), async () => {
+          if (!controllerId) return everyControllerMutations(await this.selection.current(execution.signal), this.plan, command, cameraNumber);
           const device = this.controller(controllerId);
           if (command === 'single-switch') return [{ kind: 'single', controllerId: device.id, enabled: 'toggle' }];
           if (command !== 'toggle-camera-enabled') return [{ kind: 'all', controllerId: device.id }];
@@ -314,17 +320,21 @@ export class CameraControl {
       if (subscription.id !== 'camera-control') continue;
       const values = object(subscription.fields?.values), command = String(values.actionType);
       const device = this.plan.devices.find(row => row.id === values['module.controllerId']);
-      const rows = this.plan.cameras.filter(row => row.device === device?.id);
+      // With no controller named, a selection action covers every controller.
+      const everywhere = !values['module.controllerId'] && localCommands.includes(command);
+      const devices = everywhere ? this.plan.devices.filter(controlDevice) : device ? [device] : [];
+      const rows = this.plan.cameras.filter(row => devices.some(item => item.id === row.device));
       const matches = rows.filter(row => Number(row.number) === values['module.cameraNumber']);
+      const resolved = everywhere ? matches.length > 0 : matches.length === 1;
       const selected = this.selection.value();
       const session = device && this.sessions.get(device.id);
       const cells: RecordValue = {};
       if (device) cells['module.controllerId'] = { label: controllerLabel(device), color: null };
-      if (matches.length === 1) cells['module.cameraNumber'] = { label: `${matches[0]!.number} · ${matches[0]!.name || 'Camera'}`, color: null };
+      if (resolved) cells['module.cameraNumber'] = { label: `${matches[0]!.number} · ${matches[0]!.name || 'Camera'}`, color: null };
       let active: boolean | null = null;
-      if (device && command === 'toggle-camera-enabled' && matches.length === 1) active = selected.enabled[matches[0]!.id] === true;
-      if (device && command === 'enable-all-cameras') active = rows.length > 0 && rows.every(row => selected.enabled[row.id]);
-      if (device && command === 'single-switch') active = selected.singleSwitch[device.id] === true;
+      if (command === 'toggle-camera-enabled' && resolved) active = matches.every(row => selected.enabled[row.id] === true);
+      if (devices.length && command === 'enable-all-cameras') active = rows.length > 0 && rows.every(row => selected.enabled[row.id]);
+      if (devices.length && command === 'single-switch') active = devices.every(item => selected.singleSwitch[item.id] === true);
       if (session?.snapshot().phase === 'ready') {
         if (command === 'select-camera' && session.snapshot().activeCameraNumber !== null) active = session.snapshot().activeCameraNumber === values['module.cameraNumber'];
         if (['roll-enabled-cameras', 'stop-enabled-cameras', 'roll-toggle-enabled-cameras'].includes(command)) {

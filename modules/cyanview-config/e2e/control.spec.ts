@@ -12,7 +12,7 @@ async function openFleet(page: Page, request: APIRequestContext) {
   };
   await page.goto('/');await show();
   return {ui,rio,row,show,rcp:ui.locator('[data-controller="CY-RCP-1-20"]'),control:row.locator('[data-column="control"]'),status:row.locator('[data-column="cameraStatus"]'),
-    tick:row.locator('input[data-field="controlEnabled"]'),live:ui.locator('[data-role="live-summary"]'),note:rio.locator('[data-connection-note]')};
+    tick:row.locator('[data-field="controlEnabled"] [role="checkbox"]'),live:ui.locator('[data-role="live-summary"]'),note:rio.locator('[data-connection-note]')};
 }
 const mark=(group:Locator)=>group.locator('.hc-controller-header > .hc-status');
 const inspect=async(request:APIRequestContext)=>(await request.get('/__inspect')).json();
@@ -27,7 +27,7 @@ test('Camera Control Enabled is immediate through held saves and retains configu
   await expect(ui.locator('[data-role="saved-label"]')).toContainText('Sample data');
   await ui.locator('[data-tab="cameras"]').click();
   const rows=ui.locator('[data-controller="rcp1"] tr[data-id]');
-  const flags=rows.locator('input[data-field="controlEnabled"]');
+  const flags=rows.locator('[data-field="controlEnabled"] [role="checkbox"]');
   await expect(flags).toHaveCount(4);
   await request.post('/__simulate',{data:{holdControlWrites:true}});
   await flags.nth(0).check(); await expect(flags.nth(0)).toBeChecked();
@@ -56,7 +56,7 @@ test('control checkmarks use shared clipboard and fill without staging camera wr
   const ui=page.frameLocator('iframe');await expect(ui.locator('[data-role="saved-label"]')).toContainText('Sample data');
   await ui.locator('[data-tab="cameras"]').click();
   const group=ui.locator('[data-controller="rcp1"]'),rows=group.locator('tr[data-id]'),table=group.getByRole('grid');
-  const cells=rows.locator('[data-column="controlEnabled"]'),flags=cells.locator('input');
+  const cells=rows.locator('[data-column="controlEnabled"]'),flags=cells.locator('[role="checkbox"]');
   await expect(table).toHaveAttribute('tabindex','0');await cells.first().click({position:{x:10,y:15}});
   await table.evaluate(element=>{const data=new DataTransfer();data.setData('text/plain','TRUE\nFALSE\nTRUE');element.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}));});
   await expect(flags.nth(0)).toBeChecked();await expect(flags.nth(1)).not.toBeChecked();await expect(flags.nth(2)).toBeChecked();
@@ -78,9 +78,9 @@ test('Enable all and Single switch show at once through held saves, take further
   await request.post('/__reset',{data:{sample:true}});await page.goto('/');
   const ui=page.frameLocator('iframe');await expect(ui.locator('[data-role="saved-label"]')).toContainText('Sample data');
   await ui.locator('[data-tab="cameras"]').click();
-  const group=ui.locator('[data-controller="rcp1"]'),rows=group.locator('tr[data-id]'),flags=rows.locator('input[data-field="controlEnabled"]');
+  const group=ui.locator('[data-controller="rcp1"]'),rows=group.locator('tr[data-id]'),flags=rows.locator('[data-field="controlEnabled"] [role="checkbox"]');
   const single=group.locator('input[data-control-single]'),all=group.locator('button[data-action="control-enable-all"]'),count=group.locator('[data-control-count]');
-  const ticks=async()=>flags.evaluateAll(inputs=>inputs.map(input=>(input as HTMLInputElement).checked));
+  const ticks=async()=>flags.evaluateAll(inputs=>inputs.map(input=>input.getAttribute('aria-checked')==='true'));
   await expect(flags).toHaveCount(4);await expect(count).toHaveText('0 enabled');await expect(all).toHaveText('Enable all');await expect(single).not.toBeChecked();
   await request.post('/__simulate',{data:{holdControlWrites:true}});
   await all.click();
@@ -126,7 +126,7 @@ test('Recording and Status follow the camera live and stay read-only', async ({p
   const mqtt=(topic:string,value:string)=>request.post('/__simulate',{data:{mqtt:{topic,value}}});
   // Every managed RCP and RIO is watched from the start, ticked or not.
   await expect(recording).toHaveText('Stopped');await expect(status).toHaveText('Ready');await expect(count).toHaveText('0 enabled');
-  await row.locator('input[data-field="controlEnabled"]').check();
+  await row.locator('[data-field="controlEnabled"] [role="checkbox"]').check();
   await expect(count).toHaveText('1 enabled');
   await expect(recording).toHaveText('Stopped');await expect(status).toHaveText('Ready');
   await mqtt('unit/a/camhead/status/volatile/recording','1');
@@ -277,7 +277,7 @@ test('a Gateway is watched over MQTT like an RCP, and its cameras can be ticked'
   await request.post('/__reset',{data:{sample:false,gateway:true}});await page.goto('/');
   const ui=page.frameLocator('iframe'),refresh=ui.getByRole('button',{name:'Refresh all',exact:true});
   const group=ui.locator('[data-controller="CY-GWY-1-10"]'),row=group.locator('tr[data-id]').first(),control=row.locator('[data-column="control"]'),note=group.locator('[data-connection-note]');
-  const tick=row.locator('input[data-field="controlEnabled"]');
+  const tick=row.locator('[data-field="controlEnabled"] [role="checkbox"]');
   const show=async()=>{
     await expect(ui.locator('[data-role="saved-label"]')).toContainText('Workspace saved');
     await ui.locator('[data-tab="cameras"]').click();

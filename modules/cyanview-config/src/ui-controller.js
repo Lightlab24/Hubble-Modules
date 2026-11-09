@@ -1,4 +1,4 @@
-import { createSpreadsheetContextMenu, mountSpreadsheetControls, mountSpreadsheetColumnGroup, mountSpreadsheetResize, mountSpreadsheetColumnEditor, mountSpreadsheetToolbar, mountSpreadsheetViewport } from '@hubble/module-sdk/spreadsheet-controls';
+import { createSpreadsheetContextMenu, mountSpreadsheetControls, mountSpreadsheetColumnGroup, mountSpreadsheetResize, mountSpreadsheetColumnEditor, mountSpreadsheetSheets, mountSpreadsheetToolbar, mountSpreadsheetViewport } from '@hubble/module-sdk/spreadsheet-controls';
 import { cameraChoiceKey } from './choice-context.js';
 import { PresentationLedger } from './presentation-ledger.js';
 (() => {
@@ -59,7 +59,7 @@ import { PresentationLedger } from './presentation-ledger.js';
   function toast(message){clearTimeout(toastTimer);$('toast').textContent=message;$('toast').hidden=false;toastTimer=setTimeout(()=>{$('toast').hidden=true;},2800);}
   let lastSavedPrivateContent='';
   function remember(){
-    try{const snapshot={modelContent:{activeTab:tab,layout:'Fleet LAN sheet',cameraOrganization:'Expandable spreadsheet per RCP/RIO',sendMode:ui.sendMode,sendModeScope:'Camera/lens and LAN',density:ui.density,lensColumns:ui.lensColumns,deviceOrder:orderedDevices().slice(0,16).map(d=>d.name),lensPresentation:'Inline Iris, Zoom and Focus column groups',axisGroups:axisGroups('rcp1'),reordering:'Drag handles with Alt+Up/Down keyboard support',columnVisibility:'Individual column checkboxes per sheet',hiddenCameraColumns:[...hiddenCameraColumns('rcp1')],hiddenLanColumns:[...hiddenLanColumns],remiSharing:'Managed camera sources'},privateContent:{revision:6,hiddenCameraColumnsByDevice:Object.fromEntries(Object.entries(hiddenCameraColumnsByDevice).map(([id,fields])=>[id,[...fields]])),hiddenLanColumns:[...hiddenLanColumns],tab,ui:{...ui},axisGroupsByDevice:JSON.parse(JSON.stringify(axisGroupsByDevice)),deviceOrder:orderedDevices().map(d=>d.id),openControllers:[...openControllers],openNetworkDevices:[...openNetworkDevices],cameraSortByDevice:JSON.parse(JSON.stringify(cameraSortByDevice)),cameraLayouts:saveCameraLayouts(),hiddenNetworkColumnsByDevice:Object.fromEntries(Object.entries(hiddenNetworkColumnsByDevice).map(([id,fields])=>[id,[...fields]])),discoveryOpen:discoveryCard?.open,remiDrafts:saveRemiDrafts(),scanRange:$('scan-range').value,deviceFilter:$('device-filter').value}};lastSavedPrivateContent=JSON.stringify(snapshot.privateContent);if(moduleBridge){return persistPlan(snapshot);}const p=window.openai?.setWidgetState?.(snapshot);if(p?.catch)p.catch(()=>{});}catch{}
+    try{const snapshot={modelContent:{activeTab:tab,layout:'Fleet LAN sheet',cameraOrganization:'Expandable spreadsheet per RCP/RIO',sendMode:ui.sendMode,sendModeScope:'Camera/lens and LAN',density:ui.density,lensColumns:ui.lensColumns,deviceOrder:orderedDevices().slice(0,16).map(d=>d.name),lensPresentation:'Inline Iris, Zoom and Focus column groups',axisGroups:axisGroups('rcp1'),reordering:'Drag handles with Alt+Up/Down keyboard support',columnVisibility:'Individual column checkboxes per sheet',hiddenCameraColumns:[...hiddenCameraColumns('rcp1')],hiddenLanColumns:[...hiddenLanColumns],remiSharing:'Managed camera sources'},privateContent:{revision:6,hiddenCameraColumnsByDevice:Object.fromEntries(Object.entries(hiddenCameraColumnsByDevice).map(([id,fields])=>[id,[...fields]])),hiddenLanColumns:[...hiddenLanColumns],tab,ui:{...ui},axisGroupsByDevice:JSON.parse(JSON.stringify(axisGroupsByDevice)),deviceOrder:orderedDevices().map(d=>d.id),openControllers:[...openControllers],openNetworkDevices:[...openNetworkDevices],cameraSortByDevice:JSON.parse(JSON.stringify(cameraSortByDevice)),cameraLayouts:saveCameraLayouts(),cameraSheetsByDevice:saveCameraSheets(),hiddenNetworkColumnsByDevice:Object.fromEntries(Object.entries(hiddenNetworkColumnsByDevice).map(([id,fields])=>[id,[...fields]])),discoveryOpen:discoveryCard?.open,remiDrafts:saveRemiDrafts(),scanRange:$('scan-range').value,deviceFilter:$('device-filter').value}};lastSavedPrivateContent=JSON.stringify(snapshot.privateContent);if(moduleBridge){return persistPlan(snapshot);}const p=window.openai?.setWidgetState?.(snapshot);if(p?.catch)p.catch(()=>{});}catch{}
   }
   function syncFilter(){const select=$('device-filter'),old=select.value;select.innerHTML='<option value="all">All devices</option>'+options(orderedDevices().map(d=>({id:d.id,label:d.name+' · '+d.serial})),old);select.value=devices.some(d=>d.id===old)?old:'all';}
   function syncOrganization(){
@@ -98,7 +98,7 @@ import { PresentationLedger } from './presentation-ledger.js';
     $('saved-label').textContent=(moduleBridge?.preview||!moduleBridge?'Sample data · ':persistence==='saving'?'Saving… · ':persistence==='failed'?'Changes not saved · ':persistence==='draft'?'Unsaved edits · ':'Workspace saved · ')+ui.sendMode;action('add-lan').disabled=!devices.length;
     $('lan-foot').textContent=ui.sendMode==='Manual'?'Manual · edit, then Send settings.':'Auto send · Enter, Tab, or leave a cell to send.';
     $('camera-foot').textContent=nc+' pending · '+cameras.filter(c=>c.online===false).length+' cameras offline'+uncheckedCount(cameras,' · ');
-    $('camera-mode-note').textContent=ui.sendMode==='Manual'?"Expand Iris, Zoom or Focus, then check Setup on a camera row to configure that axis.":'Auto send · committed cell edits send to that device. Existing staged edits stay pending.';
+    $('camera-mode-note').textContent=ui.sendMode==='Manual'?"Expand Iris, Zoom or Focus, then tick Use Iris, Use Zoom or Use Focus for a camera to configure that axis.":'Auto send · committed cell edits send to that device. Existing staged edits stay pending.';
     action('review-lan').disabled=!nl;
     root.style.setProperty('--hc-row',ui.density==='Compact'?'37px':'47px');
     root.querySelectorAll('[data-design]').forEach(el=>{el.checked=!!ui[el.dataset.design];});
@@ -117,6 +117,7 @@ import { PresentationLedger } from './presentation-ledger.js';
     const row=root.querySelector('tr[data-id="'+item.id+'"]');
     if(row)row.querySelectorAll('[data-field]').forEach(el=>el.closest('td').classList.toggle('hc-changed',item.dirty.has(el.dataset.field)));
     if(item.deleting&&row)row.querySelectorAll('[data-field],input[data-lens-axis]').forEach(el=>el.disabled=true);
+    paintCameraColumn(item);
     syncSummary();icons();
   }
   function inputCell(row,key,value,cls='',disabled=false){return '<input class="hc-cell-input '+cls+'" data-row="'+row.id+'" data-field="'+key+'" value="'+(disabled?'':esc(value))+'" aria-label="'+esc(key+' for '+(device(row.device)?.name||'new row'))+'"'+(disabled||row.deleting?' disabled':'')+'>';}
@@ -208,8 +209,8 @@ import { PresentationLedger } from './presentation-ledger.js';
   const axisName=axis=>axis[0].toUpperCase()+axis.slice(1);
   function axisGroups(deviceId){return axisGroupsByDevice[deviceId]||(axisGroupsByDevice[deviceId]={iris:false,zoom:false,focus:false});}
   function initializeLensFields(camera){
-    const defaults={irisMotor:'3',zoomMotor:'5',focusMotor:'2',irisMin:'1.6',irisMax:'32',irisTorque:'2',zoomTorque:'2',focusTorque:'2',irisDirection:'left',zoomDirection:'left',focusDirection:'left',lensIp:''};
-    for(const [field,value] of Object.entries(defaults))if(camera[field]===undefined)camera[field]=value;
+    // Blank until someone enters a value or the controller reports one.
+    for(const field of ['irisMotor','zoomMotor','focusMotor','irisMin','irisMax','irisTorque','zoomTorque','focusTorque','irisDirection','zoomDirection','focusDirection','lensIp'])if(camera[field]===undefined)camera[field]='';
   }
   function lensCapabilities(camera){const editable=camera.lensParamsEditable!==false,torque=editable&&(camera.lens==='ARRI - cforce'||camera.lens==='cmotion cGate'),motor=editable&&camera.lens==='Tilta - Nucleus-M';return {torque,direction:torque,motor,iris:torque||motor,ip:camera.lens==='cmotion cGate',port:camera.lens!=='None'&&camera.lens!=='cmotion cGate'};}
   function lensFieldUsed(camera,field){
@@ -225,9 +226,9 @@ import { PresentationLedger } from './presentation-ledger.js';
   function isLensSetting(field){return ['lensIp','lensPort','irisMin','irisMax'].includes(field)||/^(iris|zoom|focus)(Motor|Torque|Direction)$/.test(field);}
   function axisSummary(camera,axis){
     const p=lensCapabilities(camera);
-    if(axis==='iris'&&p.iris)return camera.irisMin+'–'+camera.irisMax;
-    if(p.motor)return 'Motor '+camera[axis+'Motor'];
-    if(p.torque)return 'T'+camera[axis+'Torque']+' '+(camera[axis+'Direction']==='left'?'Left':'Right');
+    if(axis==='iris'&&p.iris)return camera.irisMin&&camera.irisMax?camera.irisMin+'–'+camera.irisMax:'';
+    if(p.motor)return camera[axis+'Motor']?'Motor '+camera[axis+'Motor']:'';
+    if(p.torque)return camera[axis+'Torque']&&camera[axis+'Direction']?'T'+camera[axis+'Torque']+' '+(camera[axis+'Direction']==='left'?'Left':'Right'):'';
     return '';
   }
   function cameraGrid(rows,deviceId){rows=sortCameraRows(rows,deviceId);
@@ -254,7 +255,7 @@ import { PresentationLedger } from './presentation-ledger.js';
     function cell(camera,column){
       if(column.placeholder)return '<td class="hc-empty-axis" aria-hidden="true"></td>';
       const p=lensCapabilities(camera),field=column.id,changed=camera.dirty.has(cameraField(camera,field)),inactive=isLensSetting(field)&&!lensFieldUsed(camera,field);
-      let content='',attrs=' data-column="'+field+'"'+(field==='row'?' role="rowheader" aria-label="Camera '+esc(camera.number)+'"':' role="gridcell" data-hubble-column="'+field+'" data-hubble-row="'+esc(camera.id)+'"'),classes=[];
+      let content='',attrs=' data-column="'+field+'"'+(field==='row'?' role="rowheader" aria-label="Camera '+esc(camera.number)+'"':' role="gridcell"'+cameraCellPosition(deviceId,camera.id,field)),classes=[];
       if(column.frozen!==undefined){classes.push('hc-camera-frozen');attrs+=' style="left:'+column.frozen+'px"';}
       if(changed)classes.push('hc-changed');if(inactive)classes.push('hc-axis-inactive');
       if(field==='row')classes.push('hc-camera-row-gutter');
@@ -271,7 +272,7 @@ import { PresentationLedger } from './presentation-ledger.js';
         else content=cameraChoiceCell(camera,'lensPort',!p.port);
         if(!p.ip&&!p.port)classes.push('hc-axis-inactive');
       }
-      else if(column.summary){classes.push('hc-axis-summary');if(!lensAxisAvailable(camera))classes.push('hc-axis-inactive');content=lensAxisControl(camera,column.group,column.summary);}
+      else if(column.summary){classes.push('hc-axis-summary');if(!lensAxisAvailable(camera))classes.push('hc-axis-inactive');content=lensAxisControl(camera,column.group,!axisGroups(deviceId)[column.group]);}
       else if(field.endsWith('Torque'))content=cameraChoiceCell(camera,field,inactive);
       else if(field.endsWith('Direction'))content=cameraChoiceCell(camera,field,inactive);
       else if(isLensSetting(field))content=inputCell(camera,field,camera[field],'hc-mono',inactive);
@@ -279,6 +280,7 @@ import { PresentationLedger } from './presentation-ledger.js';
       else if(field==='sync'){attrs+=' data-sync-id="'+camera.id+'"';content=resultMark(camera.result);}
       return '<td'+attrs+(classes.length?' class="'+classes.join(' ')+'"':'')+'>'+content+'</td>';
     }
+    if(cameraSheetView(deviceId)==='columns')return flippedCameraGrid(rows,columns,deviceId,cell);
     return header+'<tbody>'+rows.map(camera=>{
       initializeLensFields(camera);
       return '<tr data-id="'+esc(camera.id)+'">'+columns.map(column=>cell(camera,column)).join('')+'</tr>';
@@ -288,7 +290,7 @@ import { PresentationLedger } from './presentation-ledger.js';
     const scrolls=new Map([...root.querySelectorAll('[data-controller]')].map(el=>[el.dataset.controller,el.querySelector('.hc-scroll')?.scrollLeft||0]));
     $('controllers').innerHTML=orderedDevices().map(d=>{
       const rows=cameras.filter(c=>c.device===d.id),open=openControllers.has(d.id),selection=cellSelections.get(d.id)||['C2',rows[0]?.name||''];
-      return '<section class="hc-controller" data-controller="'+d.id+'"><div class="hc-controller-header"><button class="hc-controller-handle" draggable="true" data-reorder-handle="'+d.id+'" aria-label="Reorder '+esc(d.name)+'" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" data-tooltip="Drag to reorder; Alt + up/down also moves this device">'+icon('grip-vertical')+'</button><button class="hc-controller-expander" data-action="toggle-controller" data-id="'+d.id+'" aria-expanded="'+open+'" aria-controls="hc-controller-'+d.id+'">'+icon(open?'chevron-down':'chevron-right')+'<strong>'+esc(d.name)+'</strong><span class="hc-device-type">'+d.kind+'</span><span class="hc-controller-serial">'+esc(d.serial)+'</span></button><span class="hc-controller-camera-count">'+rows.length+' camera'+(rows.length===1?'':'s')+'</span>'+cameraControlCount(d)+status(d.online)+'<span class="hc-controller-pending" data-controller-pending></span></div><div id="hc-controller-'+d.id+'"'+(!open?' hidden':'')+'><div class="hc-controller-tools"><select data-new-camera="'+d.id+'" aria-label="Add camera to '+esc(d.name)+'"><option value="">+ Add camera…</option><option value="Venice-IP">Sony · Venice-IP</option><option value="Alpha-USB">Sony · Alpha-USB</option><option value="Alpha-IP">Sony · Alpha-IP</option><option value="Choose model…">Blank camera row</option></select><button class="hc-danger" data-action="delete-controller" data-id="'+d.id+'" disabled>'+icon('trash-2')+'<span data-camera-delete-label>Delete camera</span></button>'+cameraControlTools(d)+'<span class="hc-right"></span><button class="hc-danger" data-action="remove-device" data-id="'+d.id+'" aria-label="Remove '+esc(d.name)+' from managed list">'+icon('trash-2')+'Remove device</button><button class="hc-button" data-action="send-controller" data-id="'+d.id+'">'+icon('send')+'Send changes <span>0</span></button></div><div class="hc-sheet">'+cameraSelectionStrip(d.id)+'<div class="hc-scroll"><table class="hc-grid" role="grid" data-camera-device="'+d.id+'" aria-label="Camera and lens spreadsheet for '+esc(d.name)+'">'+cameraGrid(rows,d.id)+'</table></div><div class="hc-sheet-tabs"><span class="hc-sheet-tab">'+esc(d.name)+' cameras</span><span class="hc-sheet-caption">'+esc(d.alias||d.base)+'</span></div></div><div class="hc-controller-bottom"><span>Camera &amp; lens settings</span><span data-connection-note>'+esc(connectionNote(d))+'</span></div></div></section>';
+      return '<section class="hc-controller" data-controller="'+d.id+'"><div class="hc-controller-header"><button class="hc-controller-handle" draggable="true" data-reorder-handle="'+d.id+'" aria-label="Reorder '+esc(d.name)+'" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" data-tooltip="Drag to reorder; Alt + up/down also moves this device">'+icon('grip-vertical')+'</button><button class="hc-controller-expander" data-action="toggle-controller" data-id="'+d.id+'" aria-expanded="'+open+'" aria-controls="hc-controller-'+d.id+'">'+icon(open?'chevron-down':'chevron-right')+'<strong>'+esc(d.name)+'</strong><span class="hc-device-type">'+d.kind+'</span><span class="hc-controller-serial">'+esc(d.serial)+'</span></button><span class="hc-controller-camera-count">'+rows.length+' camera'+(rows.length===1?'':'s')+'</span>'+cameraControlCount(d)+status(d.online)+'<span class="hc-controller-pending" data-controller-pending></span></div><div id="hc-controller-'+d.id+'"'+(!open?' hidden':'')+'><div class="hc-controller-tools"><select data-new-camera="'+d.id+'" aria-label="Add camera to '+esc(d.name)+'"><option value="">+ Add camera…</option><option value="Venice-IP">Sony · Venice-IP</option><option value="Alpha-USB">Sony · Alpha-USB</option><option value="Alpha-IP">Sony · Alpha-IP</option><option value="Choose model…">Blank camera row</option></select><button class="hc-danger" data-action="delete-controller" data-id="'+d.id+'" disabled>'+icon('trash-2')+'<span data-camera-delete-label>Delete camera</span></button>'+cameraControlTools(d)+'<span class="hc-right"></span><button class="hc-danger" data-action="remove-device" data-id="'+d.id+'" aria-label="Remove '+esc(d.name)+' from managed list">'+icon('trash-2')+'Remove device</button><button class="hc-button" data-action="send-controller" data-id="'+d.id+'">'+icon('send')+'Send changes <span>0</span></button></div><div class="hc-sheet">'+cameraSelectionStrip(d.id)+'<div class="hc-scroll"><table class="hc-grid" role="grid" data-camera-device="'+d.id+'" aria-label="Camera and lens spreadsheet for '+esc(d.name)+'">'+cameraGrid(rows,d.id)+'</table></div><div class="hc-sheet-tabs"><div class="hc-camera-sheet-tabs" data-camera-sheets></div><span class="hc-sheet-caption">'+esc(d.alias||d.base)+'</span></div></div><div class="hc-controller-bottom"><span>Camera &amp; lens settings</span><span data-connection-note>'+esc(connectionNote(d))+'</span></div></div></section>';
     }).join('');syncSummary();icons();
     for(const [id,left] of scrolls){const scroll=root.querySelector('[data-controller="'+id+'"] .hc-scroll');if(scroll)scroll.scrollLeft=left;}
   }
@@ -303,9 +305,11 @@ import { PresentationLedger } from './presentation-ledger.js';
     if(!item.number||!item.name||item.model==='Choose model…')return 'Incomplete';
     if(item.model!=='Alpha-USB'&&!ipv4(item.ip))return 'Incomplete';
     initializeLensFields(item);const p=lensCapabilities(item);
-    if(fields.some(field=>field==='irisMin'||field==='irisMax')&&(!(Number(item.irisMin)>0)||!(Number(item.irisMax)>Number(item.irisMin))))return 'Incomplete';
-    const ids=fields.filter(field=>lensAxisForField(field)&&field.endsWith('Motor')).map(field=>item[field]);
+    const filled=fields.filter(field=>!lensAxisBeingCleared(item,field));
+    if(filled.some(field=>field==='irisMin'||field==='irisMax')&&(!(Number(item.irisMin)>0)||!(Number(item.irisMax)>Number(item.irisMin))))return 'Incomplete';
+    const ids=filled.filter(field=>lensAxisForField(field)&&field.endsWith('Motor')).map(field=>item[field]);
     if(ids.some(id=>!/^\d+$/.test(id)||Number(id)<1)||new Set(ids.map(Number)).size!==ids.length)return 'Incomplete';
+    for(const axis of new Set(filled.map(lensAxisForField).filter(Boolean)))if(axisDefinitions[axis].some(definition=>lensFieldUsed(item,definition.id)&&!item[definition.id]))return 'Incomplete';
     if(p.ip&&!ipv4(item.lensIp))return 'Incomplete';return '';
   }
   async function sendItems(items,kind,deleting=false,fields=null){
@@ -313,14 +317,18 @@ import { PresentationLedger } from './presentation-ledger.js';
     for(const item of items){
       if(item.deleting)continue;
       const selectedFields=fields instanceof Map?fields.get(item.id):fields;
-      const sentFields=(selectedFields||[...item.dirty]).filter(field=>kind==='lan'||!isLensSetting(field)||lensFieldUsed(item,field));
+      const sendable=field=>kind==='lan'||!isLensSetting(field)||lensFieldUsed(item,field)||lensAxisBeingCleared(item,field);
+      const sentFields=(selectedFields||[...item.dirty]).filter(sendable);
+      // An axis reaches the controller whole, so parts held back while it was incomplete go with the last one.
+      if(kind==='camera')for(const field of item.dirty)if(lensAxisForField(field)&&sendable(field)&&!sentFields.includes(field)&&sentFields.some(sent=>lensAxisForField(sent)===lensAxisForField(field)))sentFields.push(field);
       if(!sentFields.length&&!deleting)continue;
       const error=deleting?'':valid(item,kind,sentFields);
       if(error){item.result=error;paintItem(item);continue;}
       const captured={...item};
       jobs.push({item,captured,sentFields});item.jobs++;if(deleting)item.deleting=true;item.result='Sending';paintItem(item);
     }
-    if(!jobs.length){toast('Complete the pending rows before sending');return;}
+    // A single auto-sent edit says so in its Sync cell, and more typing is usually on the way.
+    if(!jobs.length){if(!fields)toast('Complete the pending rows before sending');return;}
     remember();
     let results;
     try{
@@ -333,7 +341,7 @@ import { PresentationLedger } from './presentation-ledger.js';
       }
     }catch(error){results=jobs.map(({item})=>({id:item.id,error:error.message||'Settings could not be confirmed'}));}
     const errors=[], remiWarnings=[];
-    let remiChanged=false;
+    let remiChanged=false,axisCleared=false;
     for(const {item,captured,sentFields} of jobs){
       const report=results?.find(result=>result.id===item.id)||{error:'Settings could not be confirmed'};
       if(report.remiRefresh)remiChanged=true;
@@ -347,13 +355,14 @@ import { PresentationLedger } from './presentation-ledger.js';
         else{
           if(kind==='lan'&&sentFields.some(field=>['planned','dhcp'].includes(field))){item.current=captured.planned;const cell=root.querySelector('[data-current="'+item.id+'"]');if(cell)cell.textContent=item.current;if(item.type==='LAN')device(item.device).alias=captured.planned.split('/')[0];}
           for(const field of sentFields)if(item[field]===captured[field])item.dirty.delete(field);
+          if(kind==='camera'&&settleClearedLensAxes(item,captured,sentFields))axisCleared=true;
           if(item.isNew){item.isNew=false;for(const field of [...item.dirty])if(kind==='camera'&&isLensSetting(field)&&!lensFieldUsed(item,field))item.dirty.delete(field);}
           item.pending=item.dirty.size>0;item.result=item.pending?'Pending':'Verified';
         }
       }
       item.jobs=Math.max(0,item.jobs-1);if(item.deleting)item.result='Sending';paintItem(item);
     }
-    if(deleting)renderCameras();
+    if(deleting||axisCleared)renderCameras();
     if(errors.length)toast(errors.length+' '+(errors.length===1?'change':'changes')+' could not be confirmed: '+errors[0]);
     remember();
     if(remiChanged){
@@ -409,13 +418,19 @@ import { PresentationLedger } from './presentation-ledger.js';
       delete item.lensParamsEditable;
       initializeLensFields(item);
       for(const setting of [...Object.values(axisDefinitions).flatMap(definitions=>definitions.map(definition=>definition.id)),'lensIp','lensPort']){
-        if(lensFieldUsed(item,setting)&&(setting!=='lensPort'||item.lensPort&&item.lensPort!=='None')){
+        const blankAxis=lensAxisForField(setting)&&!item[setting];
+        if(!blankAxis&&lensFieldUsed(item,setting)&&(setting!=='lensPort'||item.lensPort&&item.lensPort!=='None')){
           item.dirty.add(setting);
           fields.push(setting);
         }
       }
       for(const dirty of item.dirty)if(isLensSetting(dirty)&&!lensFieldUsed(item,dirty))item.dirty.delete(dirty);
-      if(item.lens==='None')item.lensPort='None';
+      if(item.lens==='None'){
+        item.lensPort='None';
+        // No lens leaves nothing to set up, so choosing one later starts clean.
+        item.enabledLensAxes=[];
+        for(const definition of Object.values(axisDefinitions).flat())item[definition.id]='';
+      }
     }
     if(isLan){
       if(field==='dhcp'){
@@ -451,7 +466,7 @@ import { PresentationLedger } from './presentation-ledger.js';
     remember();
   }
   function updateDesign(){renderLans();renderCameras();remember();}
-  function restore(snapshot){const data=snapshot?.privateContent;if(!data||![2,3,4,5,6].includes(data.revision))return;if(data.ui)for(const k of Object.keys(ui))if(typeof data.ui[k]===typeof ui[k])ui[k]=data.ui[k];if(data.revision<5){ui.cameraCore=true;ui.cameraCredentials=true;}restoreColumnVisibility(data);restoreDeviceWorkflow(data);restoreCameraSorting(data);restoreCameraLayouts(data);restoreRemiDrafts(data);if(data.axisGroupsByDevice&&typeof data.axisGroupsByDevice==='object'){for(const [id,groups] of Object.entries(data.axisGroupsByDevice)){if(!device(id)||!groups||typeof groups!=='object')continue;for(const axis of ['iris','zoom','focus'])if(typeof groups[axis]==='boolean')axisGroups(id)[axis]=groups[axis];}}if(Array.isArray(data.deviceOrder)){const known=new Set(devices.map(d=>d.id));deviceOrder=[...new Set(data.deviceOrder.filter(id=>known.has(id)))];devices.forEach(d=>{if(!deviceOrder.includes(d.id))deviceOrder.push(d.id);});}if(Array.isArray(data.openControllers)){openControllers.clear();data.openControllers.forEach(id=>{if(device(id))openControllers.add(id);});}if(['devices','discovery','cameras'].includes(data.tab))setTab(data.tab,false);if(['','10.192.0.0/16','10.20.0.0/16','custom'].includes(data.scanRange))$('scan-range').value=data.scanRange;$('custom-range-field').hidden=$('scan-range').value!=='custom';action('scan').disabled=!$('scan-range').value;syncFilter();if(data.deviceFilter==='all'||devices.some(item=>item.id===data.deviceFilter))$('device-filter').value=data.deviceFilter;renderLans();renderCameras();}
+  function restore(snapshot){const data=snapshot?.privateContent;if(!data||![2,3,4,5,6].includes(data.revision))return;if(data.ui)for(const k of Object.keys(ui))if(typeof data.ui[k]===typeof ui[k])ui[k]=data.ui[k];if(data.revision<5){ui.cameraCore=true;ui.cameraCredentials=true;}restoreColumnVisibility(data);restoreDeviceWorkflow(data);restoreCameraSorting(data);restoreCameraLayouts(data);restoreRemiDrafts(data);if(data.axisGroupsByDevice&&typeof data.axisGroupsByDevice==='object'){for(const [id,groups] of Object.entries(data.axisGroupsByDevice)){if(!device(id)||!groups||typeof groups!=='object')continue;for(const axis of ['iris','zoom','focus'])if(typeof groups[axis]==='boolean')axisGroups(id)[axis]=groups[axis];}}restoreCameraSheets(data);if(Array.isArray(data.deviceOrder)){const known=new Set(devices.map(d=>d.id));deviceOrder=[...new Set(data.deviceOrder.filter(id=>known.has(id)))];devices.forEach(d=>{if(!deviceOrder.includes(d.id))deviceOrder.push(d.id);});}if(Array.isArray(data.openControllers)){openControllers.clear();data.openControllers.forEach(id=>{if(device(id))openControllers.add(id);});}if(['devices','discovery','cameras'].includes(data.tab))setTab(data.tab,false);if(['','10.192.0.0/16','10.20.0.0/16','custom'].includes(data.scanRange))$('scan-range').value=data.scanRange;$('custom-range-field').hidden=$('scan-range').value!=='custom';action('scan').disabled=!$('scan-range').value;syncFilter();if(data.deviceFilter==='all'||devices.some(item=>item.id===data.deviceFilter))$('device-filter').value=data.deviceFilter;renderLans();renderCameras();}
   root.addEventListener('click',event=>{
     const b=event.target.closest('button');if(!b||!root.contains(b))return;
     if(b.dataset.tab){setTab(b.dataset.tab);return;}if(b.dataset.device){showDevice(b.dataset.device);return;}
@@ -510,8 +525,7 @@ import { PresentationLedger } from './presentation-ledger.js';
   function cameraControlFlags(){return cameraControlProjection().enabled;}
   function cameraControlEnabled(camera){return cameraControlFlags()[camera.id]===true;}
   function cameraControlCell(camera){
-    const controller=device(camera.device),disabled=camera.deleting||!cameraControlDevice(controller);
-    return '<input type="checkbox" class="hc-control-check" value="'+(cameraControlEnabled(camera)?'TRUE':'FALSE')+'" data-row="'+esc(camera.id)+'" data-field="controlEnabled" aria-label="Camera Control Enabled for camera '+esc(camera.number)+' on '+esc(controller?.name||'controller')+'"'+(cameraControlEnabled(camera)?' checked':'')+(disabled?' disabled':'')+'>';
+    return '<span data-hubble-boolean data-field="controlEnabled" data-row="'+esc(camera.id)+'"></span>';
   }
   function cameraRecordingText(id){
     const recording=cameraControlState.cameras?.[id]?.recording;
@@ -548,9 +562,12 @@ import { PresentationLedger } from './presentation-ledger.js';
     return '<label class="hc-control-single"><input type="checkbox" data-control-single="'+esc(d.id)+'" aria-label="Single switch for '+esc(d.name)+'"'+(singleSwitch[d.id]===true?' checked':'')+'>Single switch</label>'+
       '<button class="hc-button" data-action="control-enable-all" data-id="'+esc(d.id)+'" aria-label="'+label+' cameras on '+esc(d.name)+'"'+(cameraControlRows(d.id).length?'':' disabled')+'>'+label+'</button>';
   }
+  let paintedCameraFlags='';
   function paintCameraControl(){
     const {enabled,singleSwitch}=cameraControlProjection();
-    root.querySelectorAll('input[data-field="controlEnabled"]').forEach(input=>{input.checked=enabled[input.dataset.row]===true;input.value=input.checked?'TRUE':'FALSE';});
+    // The host draws these checkboxes from getCell, so it only needs telling when one changed.
+    const flags=JSON.stringify(enabled);
+    if(flags!==paintedCameraFlags){paintedCameraFlags=flags;for(const sheet of cameraSheets.values())sheet.controls?.refresh();}
     root.querySelectorAll('input[data-control-single]').forEach(input=>{input.checked=singleSwitch[input.dataset.controlSingle]===true;});
     root.querySelectorAll('button[data-action="control-enable-all"]').forEach(button=>{
       const id=button.dataset.id,label=cameraControlAllLabel(id,enabled);
@@ -561,7 +578,7 @@ import { PresentationLedger } from './presentation-ledger.js';
       if(count.innerHTML!==markup)count.innerHTML=markup;
     });
     root.querySelectorAll('td[data-column="recording"],td[data-column="cameraStatus"]').forEach(cell=>{
-      const id=cell.dataset.hubbleRow,markup=cell.dataset.column==='recording'?cameraRecordingCell(id):cameraStatusCell(id);
+      const id=cell.dataset.camera,markup=cell.dataset.column==='recording'?cameraRecordingCell(id):cameraStatusCell(id);
       if(cell.innerHTML!==markup)cell.innerHTML=markup;
     });
   }
@@ -606,8 +623,7 @@ import { PresentationLedger } from './presentation-ledger.js';
   }
   root.addEventListener('change',event=>{
     const input=event.target;
-    if(input.matches('input[data-field="controlEnabled"]'))editCameraControl([{rowId:input.dataset.row,value:input.checked}]);
-    else if(input.matches('input[data-control-single]'))submitCameraControl([{kind:'single',controllerId:input.dataset.controlSingle,enabled:input.checked}]);
+    if(input.matches('input[data-control-single]'))submitCameraControl([{kind:'single',controllerId:input.dataset.controlSingle,enabled:input.checked}]);
   });
   root.addEventListener('click',event=>{
     const button=event.target.closest('button[data-action="control-enable-all"]');if(!button)return;
@@ -739,7 +755,7 @@ import { PresentationLedger } from './presentation-ledger.js';
       ] },
       { id: 'lens', label: 'Lens', fields: [{ id: 'lens', label: 'Lens model' }, { id: 'connection', label: 'Lens connection' }] },
       ...cameraAxes.map(axis => ({ id: axis, axis, label: axisName(axis), fields: [
-        { id: axis + 'Summary', label: 'Setup', width: 78, summary: true }, ...axisDefinitions[axis],
+        { id: axis + 'Summary', label: 'Use ' + axisName(axis), width: 88, summary: true }, ...axisDefinitions[axis],
       ] })),
     ];
   }
@@ -764,29 +780,37 @@ import { PresentationLedger } from './presentation-ledger.js';
     return columns.length ? columns : [{ id: axis + 'Placeholder', group: axis, placeholder: true, label: '', width: Math.max(130, axisName(axis).length * 12 + 50) }];
   }
   function cameraColumnWidth(id, column) { return cameraLayouts.get(id)?.columns[column.id] ?? column.width; }
+  function pruneCameraLayout(id, layout) {
+    const ids = new Set(cameras.filter(camera => camera.device === id).map(camera => camera.id));
+    const kept = sizes => Object.fromEntries(Object.entries(sizes).filter(([cameraId]) => ids.has(cameraId)));
+    return { ...layout, rows: kept(layout.rows), ...(layout.cameraWidths && { cameraWidths: kept(layout.cameraWidths) }) };
+  }
   function saveCameraLayouts() {
-    return Object.fromEntries([...cameraLayouts].filter(([id]) => device(id)).map(([id, layout]) => {
-      const ids = new Set(cameras.filter(camera => camera.device === id).map(camera => camera.id));
-      return [id, { ...layout, rows: Object.fromEntries(Object.entries(layout.rows).filter(([rowId]) => ids.has(rowId))) }];
-    }));
+    return Object.fromEntries([...cameraLayouts].filter(([id]) => device(id)).map(([id, layout]) => [id, pruneCameraLayout(id, layout)]));
   }
   function restoreCameraLayouts(data) {
     cameraLayouts.clear();
-    for (const d of devices) {
-      const id = d.id, saved = data.cameraLayouts?.[id] ?? {}, layout = cameraLayout(id);
-      const columnIds = cameraSheetSections().flatMap(section => section.fields.map(field => field.id));
-      for (const [column, size] of Object.entries(saved.columns ?? {})) if (columnIds.includes(column) && Number.isInteger(size) && size >= 36 && size <= 640) layout.columns[column] = size;
-      const rowIds = new Set(cameras.filter(camera => camera.device === id).map(camera => camera.id));
-      for (const [rowId, size] of Object.entries(saved.rows ?? {})) if (rowIds.has(rowId) && Number.isInteger(size) && size >= 30 && size <= 240) layout.rows[rowId] = size;
-      for (const axis of cameraAxes) {
-        const group = saved.groups?.[axis], ids = [axis + 'Summary', ...axisDefinitions[axis].map(field => field.id)];
-        const valid = values => [...new Set(values.filter(value => ids.includes(value)))];
-        if (Array.isArray(group?.order) && Array.isArray(group.collapsed)) layout.groups[axis] = { order: valid(group.order), collapsed: valid(group.collapsed) };
-        else if (saved.version !== 2) layout.groups[axis] = { order: ids, collapsed: [axis + 'Summary'] };
-      }
-      if (Array.isArray(saved.hiddenGroups)) layout.hiddenGroups = [...new Set(saved.hiddenGroups.filter(group => cameraSheetSections().some(section => section.id === group)))];
-      if (Number.isInteger(saved.textSize) && saved.textSize >= 9 && saved.textSize <= 24) layout.textSize = saved.textSize;
+    for (const d of devices) cameraLayouts.set(d.id, cleanCameraLayout(d.id, data.cameraLayouts?.[d.id]));
+  }
+  function cleanCameraLayout(id, saved = {}) {
+    const layout = { version: 2, columns: {}, rows: {}, groups: {}, hiddenGroups: [], textSize: 13 };
+    const columnIds = cameraSheetSections().flatMap(section => section.fields.map(field => field.id));
+    const cameraIds = new Set(cameras.filter(camera => camera.device === id).map(camera => camera.id));
+    const within = (value, least, most) => Number.isInteger(value) && value >= least && value <= most;
+    for (const [column, size] of Object.entries(saved.columns ?? {})) if (columnIds.includes(column) && within(size, 36, 640)) layout.columns[column] = size;
+    for (const [rowId, size] of Object.entries(saved.rows ?? {})) if (cameraIds.has(rowId) && within(size, 30, 240)) layout.rows[rowId] = size;
+    for (const [camera, size] of Object.entries(saved.cameraWidths ?? {})) if (cameraIds.has(camera) && within(size, 72, 640)) (layout.cameraWidths ??= {})[camera] = size;
+    for (const [field, size] of Object.entries(saved.settingHeights ?? {})) if (columnIds.includes(field) && within(size, 30, 240)) (layout.settingHeights ??= {})[field] = size;
+    if (within(saved.settingWidth, 100, 640)) layout.settingWidth = saved.settingWidth;
+    for (const axis of cameraAxes) {
+      const group = saved.groups?.[axis], ids = [axis + 'Summary', ...axisDefinitions[axis].map(field => field.id)];
+      const valid = values => [...new Set(values.filter(value => ids.includes(value)))];
+      if (Array.isArray(group?.order) && Array.isArray(group.collapsed)) layout.groups[axis] = { order: valid(group.order), collapsed: valid(group.collapsed) };
+      else if (saved.version !== 2) layout.groups[axis] = { order: ids, collapsed: [axis + 'Summary'] };
     }
+    if (Array.isArray(saved.hiddenGroups)) layout.hiddenGroups = [...new Set(saved.hiddenGroups.filter(group => cameraSheetSections().some(section => section.id === group)))];
+    if (within(saved.textSize, 9, 24)) layout.textSize = saved.textSize;
+    return layout;
   }
   function cameraGridHeader(columns, deviceId) {
     const hasGroups = columns.some(column => column.group), top = [], fields = [];
@@ -807,7 +831,7 @@ import { PresentationLedger } from './presentation-ledger.js';
   function cameraColumnItems(id) {
     return cameraSheetSections().map(section => ({
       id: 'section:' + section.id, label: section.label, visible: !cameraLayout(id).hiddenGroups.includes(section.id),
-      fields: section.fields.map(field => ({ id: field.id, label: field.id.endsWith('Summary') ? section.label + ' setup' : field.label, visible: cameraFieldVisible(id, field.id, true) && (!section.axis || axisGroups(id)[section.axis] || cameraAxisGroup(id, section.axis).collapsedColumnIds.includes(field.id)) })),
+      fields: section.fields.map(field => ({ id: field.id, label: field.label, visible: cameraFieldVisible(id, field.id, true) && (!section.axis || axisGroups(id)[section.axis] || cameraAxisGroup(id, section.axis).collapsedColumnIds.includes(field.id)) })),
     }));
   }
   function changeCameraVisibility(id, changes) {
@@ -858,10 +882,10 @@ import { PresentationLedger } from './presentation-ledger.js';
       resize?.refresh();
     }
     void mountSpreadsheetResize({ root: table, viewport, getScale: () => sheet.scale ?? 1,
-      getItems: () => [
-        ...[...table.querySelectorAll('th[data-field-header]:not([data-field-header="row"])')].map(header => ({ id: header.dataset.fieldHeader, header, axis: 'column', label: cameraSortLabels[header.dataset.fieldHeader] ?? axisName(header.dataset.fieldHeader.replace(/Summary$/, '')) + ' setup', size: header.offsetWidth, min: header.dataset.fieldHeader.endsWith('Summary') ? 72 : 36, max: 640 })),
+      getItems: () => cameraSheetView(id) === 'columns' ? flippedResizeItems(table) : [
+        ...[...table.querySelectorAll('th[data-field-header]:not([data-field-header="row"])')].map(header => ({ id: header.dataset.fieldHeader, header, axis: 'column', label: cameraSortLabels[header.dataset.fieldHeader] ?? 'Use ' + axisName(header.dataset.fieldHeader.replace(/Summary$/, '')), size: header.offsetWidth, min: header.dataset.fieldHeader.endsWith('Summary') ? 72 : 36, max: 640 })),
         ...[...table.tBodies[0].rows].map(row => ({ id: row.dataset.id, header: row.cells[0], axis: 'row', label: 'camera ' + (cameras.find(item => item.id === row.dataset.id)?.number ?? row.sectionRowIndex + 1) + ' row', size: row.offsetHeight, min: 30, max: 240 })),
-      ], onResize({ id: item, axis }, size) { changeCameraPresentation(id, () => { cameraLayout(id)[axis === 'row' ? 'rows' : 'columns'][item] = size; }); },
+      ], onResize({ id: item, axis }, size) { changeCameraPresentation(id, () => { if (cameraSheetView(id) === 'columns') resizeFlippedSheet(id, item, axis, size); else cameraLayout(id)[axis === 'row' ? 'rows' : 'columns'][item] = size; }); },
     }).then(controls => { if (disposed) controls.dispose(); else { resize = controls; resize.refresh(); } }).catch(error => { if (!disposed) toast(error.message); });
     refresh();
     return { refresh, dispose() { disposed = true; for (const group of groups.values()) group.controls?.dispose(); resize?.dispose(); } };
@@ -885,7 +909,7 @@ import { PresentationLedger } from './presentation-ledger.js';
       '<span class="hc-camera-value" data-camera-value></span>'+
       '<span class="hc-camera-grid-shortcuts"><span data-camera-search-hint hidden>Type to search <span aria-hidden="true">·</span> </span>'+cameraClipboardHint()+' <span aria-hidden="true">·</span> Drag to fill</span>'+
       '<span data-camera-zoom aria-label="Sheet zoom">100%</span>'+
-      '<div data-camera-text-size></div><div data-camera-columns></div>'+
+      '<div data-camera-text-size></div>'+cameraViewControl(deviceId)+'<div data-camera-columns title="Choose which settings this tab shows"></div>'+
       '</div>';
   }
 
@@ -901,18 +925,204 @@ import { PresentationLedger } from './presentation-ledger.js';
     value.textContent='';
     value.removeAttribute('title');
     if(!cell){location.textContent='Select a cell';return;}
-    const input=cell.querySelector('[data-field]'),column=cell.dataset.hubbleColumn;
-    const row=cameras.find(camera=>camera.id===cell.dataset.hubbleRow);
+    const input=cell.querySelector('[data-field]'),column=cell.dataset.column;
+    const row=cameras.find(camera=>camera.id===cell.dataset.camera);
     const choice=input?.hasAttribute('data-camera-choice');
     const axisSetup=column.endsWith('Summary');
-    const label=choice?choiceLabel(input.dataset.field):axisSetup?axisName(column.replace(/Summary$/,''))+' setup':cameraSortLabels[column]||column;
+    const label=choice?choiceLabel(input.dataset.field):axisSetup?'Use '+axisName(column.replace(/Summary$/,'')):cameraSortLabels[column]||column;
     location.textContent='Camera '+(row?.number||'—')+' · '+label;
     if(column==='password')value.textContent=input?.value?'••••••••':'';
     else if(axisSetup&&cell.classList.contains('hc-axis-inactive'))value.textContent='Unavailable for this camera';
+    else if(cell.querySelector('[role="checkbox"]'))value.textContent=cell.querySelector('[role="checkbox"]').getAttribute('aria-checked')==='true'?'On':'Off';
     else value.textContent=input?.disabled?'':choice?input.textContent:input?.value??cell.textContent.trim();
     if(value.textContent&&column!=='password')value.title=value.textContent;
     search.hidden=!choice||input.disabled;
   }
+
+  // A tab is a saved way of looking at one controller's cameras: which settings it
+  // shows, their sizes, and which way round the sheet is. The cameras and their values
+  // are the same on every tab. The page's layout stores always hold the tab on screen,
+  // so nothing else on the page needs to know that tabs exist.
+  const cameraSheetsByDevice = {};
+  const settingHeaderId = 'hc:setting';
+  let cameraSheetSequence = 0;
+  function cameraSheetState(id) {
+    return cameraSheetsByDevice[id] ??= { activeSheetId: 'settings', sheets: [{ id: 'settings', name: 'Settings', view: 'rows' }] };
+  }
+  function activeCameraSheet(id) {
+    const state = cameraSheetState(id);
+    return state.sheets.find(sheet => sheet.id === state.activeSheetId) ?? state.sheets[0];
+  }
+  function cameraSheetView(id) { return activeCameraSheet(id).view; }
+  function liveCameraSheet(id) {
+    return { layout: cameraLayout(id), hidden: [...hiddenCameraColumns(id)], expanded: axisGroups(id) };
+  }
+  function cameraSheetList(id) {
+    const active = activeCameraSheet(id);
+    return cameraSheetState(id).sheets.map(sheet => ({ ...sheet, ...(sheet === active ? liveCameraSheet(id) : {}) }));
+  }
+  function parkCameraSheet(id) { Object.assign(activeCameraSheet(id), copyPresentation(liveCameraSheet(id))); }
+  function showCameraSheet(id, sheet) {
+    cameraSheetState(id).activeSheetId = sheet.id;
+    cameraLayouts.set(id, copyPresentation(sheet.layout));
+    hiddenCameraColumnsByDevice[id] = new Set(sheet.hidden);
+    axisGroupsByDevice[id] = { ...sheet.expanded };
+  }
+  function selectCameraSheet(id, sheetId) {
+    const state = cameraSheetState(id), next = state.sheets.find(sheet => sheet.id === sheetId);
+    if (!next || next.id === state.activeSheetId) return;
+    parkCameraSheet(id);
+    showCameraSheet(id, next);
+    renderCameras();
+    remember();
+  }
+  function createCameraSheet(id, name) {
+    changeCameraPresentation(id, () => {
+      const current = activeCameraSheet(id);
+      parkCameraSheet(id);
+      // A new tab starts as a copy of the one you're on.
+      const sheet = { id: 'sheet-' + Date.now() + '-' + (++cameraSheetSequence), name, view: current.view, ...copyPresentation({ layout: current.layout, hidden: current.hidden, expanded: current.expanded }) };
+      cameraSheetState(id).sheets.push(sheet);
+      showCameraSheet(id, sheet);
+    });
+  }
+  function renameCameraSheet(id, sheetId, name) {
+    changeCameraPresentation(id, () => {
+      const sheet = cameraSheetState(id).sheets.find(item => item.id === sheetId);
+      if (sheet) sheet.name = name;
+    });
+  }
+  function removeCameraSheet(id, sheetId) {
+    changeCameraPresentation(id, () => {
+      const state = cameraSheetState(id), index = state.sheets.findIndex(sheet => sheet.id === sheetId);
+      if (index < 0 || state.sheets.length < 2) return;
+      if (state.activeSheetId === sheetId) showCameraSheet(id, state.sheets[index + 1] ?? state.sheets[index - 1]);
+      state.sheets.splice(index, 1);
+    });
+  }
+  function moveCameraSheet(id, sheetId, beforeId) {
+    changeCameraPresentation(id, () => {
+      const state = cameraSheetState(id), sheet = state.sheets.find(item => item.id === sheetId);
+      if (!sheet) return;
+      const rest = state.sheets.filter(item => item !== sheet), index = rest.findIndex(item => item.id === beforeId);
+      rest.splice(index < 0 ? rest.length : index, 0, sheet);
+      state.sheets = rest;
+    });
+  }
+  function setCameraSheetView(id, view) {
+    if (cameraSheetView(id) !== view) changeCameraPresentation(id, () => { activeCameraSheet(id).view = view; });
+  }
+  // The host calls every count "rows", so a tab counts the rows it actually has.
+  function cameraSheetRowCount(id, sheet) {
+    if (sheet.view !== 'columns') return cameras.filter(camera => camera.device === id).length;
+    const hidden = new Set(sheet.hidden);
+    return cameraSheetSections().filter(section => !sheet.layout.hiddenGroups.includes(section.id)).reduce((count, section) => {
+      const collapsed = sheet.layout.groups[section.axis]?.collapsed ?? [];
+      return count + section.fields.filter(field => section.axis && !sheet.expanded[section.axis] ? collapsed.includes(field.id) : !hidden.has(field.id)).length;
+    }, 0);
+  }
+  function cameraSheetBarState(id) {
+    const { activeSheetId } = cameraSheetState(id), sheets = cameraSheetList(id);
+    return { sheets: sheets.map(sheet => ({ id: sheet.id, name: sheet.name })), activeSheetId, counts: new Map(sheets.map(sheet => [sheet.id, cameraSheetRowCount(id, sheet)])) };
+  }
+  // The tab on screen is saved in the existing layout fields, so an older version of
+  // this module still opens the workspace showing that tab.
+  function cameraSheetsRecord(id, sheets, activeSheetId) {
+    return { activeSheetId, sheets: sheets.map(({ layout, hidden, expanded, ...sheet }) => sheet.id === activeSheetId ? sheet : { ...sheet, layout: pruneCameraLayout(id, layout), hidden, expanded }) };
+  }
+  function saveCameraSheets() {
+    return Object.fromEntries(devices.map(d => [d.id, cameraSheetsRecord(d.id, cameraSheetList(d.id), cameraSheetState(d.id).activeSheetId)]));
+  }
+  function restoreCameraSheets(data) {
+    for (const id of Object.keys(cameraSheetsByDevice)) delete cameraSheetsByDevice[id];
+    const known = new Set(cameraSheetSections().flatMap(section => section.fields.map(field => field.id)));
+    for (const d of devices) {
+      const saved = data.cameraSheetsByDevice?.[d.id];
+      if (!Array.isArray(saved?.sheets)) continue;
+      const sheets = [];
+      for (const sheet of saved.sheets) {
+        const name = typeof sheet?.name === 'string' ? sheet.name.trim() : '';
+        if (typeof sheet?.id !== 'string' || !sheet.id || !name || sheets.some(item => item.id === sheet.id)) continue;
+        const expanded = Object.fromEntries(cameraAxes.map(axis => [axis, sheet.expanded?.[axis] === true]));
+        sheets.push({ id: sheet.id, name, view: sheet.view === 'columns' ? 'columns' : 'rows', layout: cleanCameraLayout(d.id, sheet.layout), hidden: Array.isArray(sheet.hidden) ? sheet.hidden.filter(field => known.has(field)) : [], expanded });
+      }
+      if (!sheets.length) continue;
+      const active = sheets.find(sheet => sheet.id === saved.activeSheetId);
+      cameraSheetsByDevice[d.id] = { activeSheetId: (active ?? sheets[0]).id, sheets };
+      if (!active) showCameraSheet(d.id, sheets[0]);
+    }
+  }
+  function cameraCellPosition(deviceId, cameraId, field) {
+    const flipped = cameraSheetView(deviceId) === 'columns';
+    return ' data-camera="' + esc(cameraId) + '" data-hubble-column="' + esc(flipped ? cameraId : field) + '" data-hubble-row="' + esc(flipped ? field : cameraId) + '"';
+  }
+  function cameraViewControl(id) {
+    const button = (view, label) => '<button type="button" data-action="camera-view" data-id="' + esc(id) + '" data-view="' + view + '" aria-pressed="' + (cameraSheetView(id) === view) + '">' + label + '</button>';
+    return '<div class="hc-segment hc-camera-view" role="group" aria-label="Sheet layout for this tab">' + button('rows', 'Cameras in rows') + button('columns', 'Cameras in columns') + '</div>';
+  }
+  function paintCameraView(strip, id) {
+    const view = cameraSheetView(id);
+    strip.querySelectorAll('[data-action="camera-view"]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.view === view)));
+  }
+  const cameraHeading = camera => '<strong>' + esc(camera.number) + '</strong><span>' + esc(camera.name) + '</span>';
+  function cameraColumnSection(field) {
+    if (field.group) return { id: field.group, label: axisName(field.group), axis: field.group };
+    if (field.id === 'sync') return { id: 'sync', label: 'Sync' };
+    if (field.id === 'lens' || field.id === 'connection') return { id: 'lens', label: 'Lens' };
+    return { id: 'camera', label: 'Camera' };
+  }
+  function flippedCameraGrid(rows, columns, deviceId, cell) {
+    const layout = cameraLayout(deviceId), width = camera => layout.cameraWidths?.[camera.id] ?? 168;
+    const fields = columns.filter(column => column.id !== 'row').map(({ frozen, ...field }) => ({ ...field, label: cameraSortLabels[field.id] ?? field.label }));
+    const frozen = ' class="hc-camera-frozen" style="left:0"';
+    const head = '<colgroup><col style="width:' + (layout.settingWidth ?? 190) + 'px">' + rows.map(camera => '<col data-hubble-column="' + esc(camera.id) + '" data-label="Camera ' + esc(camera.number) + '" style="width:' + width(camera) + 'px">').join('') + '</colgroup>' +
+      '<thead><tr><th scope="col"' + frozen + ' data-setting-header>Setting</th>' + rows.map(camera => '<th scope="col" data-camera-header="' + esc(camera.id) + '" title="' + esc(camera.name) + '"><div class="hc-camera-heading" data-camera-heading="' + esc(camera.id) + '">' + cameraHeading(camera) + '</div></th>').join('') + '</tr></thead>';
+    let section = null, body = '';
+    for (const field of fields) {
+      const band = cameraColumnSection(field);
+      if (band.id !== section) {
+        section = band.id;
+        body += '<tr class="hc-camera-section-row"><td class="hc-camera-frozen hc-camera-section-label" style="left:0" role="rowheader">' + (band.axis ? '<div data-axis-header="' + band.axis + '"></div>' : esc(band.label)) + '</td>' + (rows.length ? '<td class="hc-camera-section-rest" colspan="' + rows.length + '"></td>' : '') + '</tr>';
+      }
+      if (field.placeholder) continue;
+      body += '<tr data-setting="' + field.id + '"><td class="hc-camera-frozen hc-camera-setting-label" style="left:0" role="rowheader"' + cameraSortAria(field, deviceId) + '>' + cameraSortHeading(field, deviceId) + '</td>' + rows.map(camera => { initializeLensFields(camera); return cell(camera, field); }).join('') + '</tr>';
+    }
+    return head + '<tbody>' + body + '</tbody>';
+  }
+  // Cameras as columns have no row of their own, so their cells are found by camera.
+  function paintCameraColumn(item) {
+    const id = CSS.escape(item.id);
+    root.querySelectorAll('tr[data-setting] td[data-camera="' + id + '"]').forEach(cell => {
+      const control = cell.querySelector('[data-field]');
+      if (control) cell.classList.toggle('hc-changed', item.dirty.has(control.dataset.field));
+      if (item.deleting) cell.querySelectorAll('[data-field],input[data-lens-axis]').forEach(element => { element.disabled = true; });
+    });
+    root.querySelectorAll('[data-camera-heading="' + id + '"]').forEach(heading => {
+      const markup = cameraHeading(item);
+      if (heading.innerHTML !== markup) heading.innerHTML = markup;
+      heading.closest('th').title = item.name;
+    });
+  }
+  function flippedResizeItems(table) {
+    return [
+      ...[...table.querySelectorAll('th[data-setting-header],th[data-camera-header]')].map(header => {
+        const camera = header.dataset.cameraHeader;
+        return { id: camera ?? settingHeaderId, header, axis: 'column', label: camera ? 'camera ' + (cameras.find(item => item.id === camera)?.number ?? '') : 'setting names', size: header.offsetWidth, min: camera ? 72 : 100, max: 640 };
+      }),
+      ...[...table.tBodies[0].querySelectorAll('tr[data-setting]')].map(row => ({ id: row.dataset.setting, header: row.cells[0], axis: 'row', label: (cameraSortLabels[row.dataset.setting] ?? 'Use ' + axisName(row.dataset.setting.replace(/Summary$/, ''))) + ' row', size: row.offsetHeight, min: 30, max: 240 })),
+    ];
+  }
+  function resizeFlippedSheet(id, item, axis, size) {
+    const layout = cameraLayout(id);
+    if (axis === 'row') (layout.settingHeights ??= {})[item] = size;
+    else if (item === settingHeaderId) layout.settingWidth = size;
+    else (layout.cameraWidths ??= {})[item] = size;
+  }
+  root.querySelector('#hc-cameras .hc-panel-foot .hc-caption').textContent = 'Each tab keeps its own settings and layout';
+  root.addEventListener('click', event => {
+    const button = event.target.closest('[data-action="camera-view"]');
+    if (button) setCameraSheetView(button.dataset.id, button.dataset.view);
+  });
 
   const cameraSortByDevice={};
   const cameraSortFields=cameraColumnSections().flatMap(section=>section.fields.filter(field=>!field.summary).map(field=>field.id));
@@ -973,6 +1183,14 @@ import { PresentationLedger } from './presentation-ledger.js';
     }
     return restored;
   }
+  // Earlier versions stored made-up motor and limit values on every camera, even with the axis off.
+  const formerLensDefaults={irisMotor:'3',zoomMotor:'5',focusMotor:'2',irisMin:'1.6',irisMax:'32',irisTorque:'2',zoomTorque:'2',focusTorque:'2',irisDirection:'left',zoomDirection:'left',focusDirection:'left'};
+  function withoutFormerLensDefaults(row){
+    for(const [field,value] of Object.entries(formerLensDefaults)){
+      if(row[field]===value&&!row.dirty.has(field)&&!row.enabledLensAxes?.includes(lensAxisForField(field)))delete row[field];
+    }
+    return row;
+  }
   const manualDiscoveries=new Map();let scanDiscoveries=[],addingDiscovered=false;
   function mergeDiscoveries(){
     const merged=new Map();
@@ -1008,7 +1226,7 @@ import { PresentationLedger } from './presentation-ledger.js';
     const rows=new Map();
     for(const camera of cameras){camera.online=cameraConnection(camera,device(camera.device));rows.set(camera.id,camera);}
     root.querySelectorAll('td[data-column="control"]').forEach(cell=>{
-      const camera=rows.get(cell.dataset.hubbleRow);if(!camera)return;
+      const camera=rows.get(cell.dataset.camera);if(!camera)return;
       const markup=status(camera.online);if(cell.innerHTML!==markup)cell.innerHTML=markup;
     });
   }
@@ -1020,7 +1238,7 @@ import { PresentationLedger } from './presentation-ledger.js';
       const plan=await moduleBridge.read();
       applyCameraControlState(await moduleBridge.controlState());
       await restoreCameraChoiceCatalogs();
-      if(plan){devices.splice(0,devices.length,...plan.devices);cameras=(plan.cameras||[]).map(restoredRow);lans=(plan.lans||[]).map(restoredRow);deviceOrder=devices.map(item=>item.id);openControllers.clear();openNetworkDevices.clear();if(devices[0]){openControllers.add(devices[0].id);openNetworkDevices.add(devices[0].id);}discoveryCard.open=!devices.length;syncConnections();syncFilter();renderLans();renderCameras();if(plan.uiState)restore(plan.uiState);}
+      if(plan){devices.splice(0,devices.length,...plan.devices);cameras=(plan.cameras||[]).map(row=>withoutFormerLensDefaults(restoredRow(row)));lans=(plan.lans||[]).map(restoredRow);deviceOrder=devices.map(item=>item.id);openControllers.clear();openNetworkDevices.clear();if(devices[0]){openControllers.add(devices[0].id);openNetworkDevices.add(devices[0].id);}discoveryCard.open=!devices.length;syncConnections();syncFilter();renderLans();renderCameras();if(plan.uiState)restore(plan.uiState);}
       moduleBridge.onReceipt(applyReceipts);
       moduleBridge.subscribe(applyLiveState);
       if(plan?.uiState?.privateContent?.ui?.discoveryVersion!==2&&ui.discoveryMethod==='broadcast')ui.discoveryMethod='ping';
@@ -1325,10 +1543,9 @@ import { PresentationLedger } from './presentation-ledger.js';
         remiDraw(item.id,panel);
       }
       for (const row of cameras.filter(row => row.device===item.id&&importedCamera(row))) {
-        const tr = group.querySelector('tr[data-id="'+row.id+'"]');
-        if (!tr) continue;
-        for (const field of tr.querySelectorAll('[data-field]:not([data-field="controlEnabled"])')) field.disabled = true;
-        const model = tr.querySelector('[data-column="model"]');
+        const selector = 'td[data-camera="'+CSS.escape(row.id)+'"]';
+        for (const field of group.querySelectorAll(selector+' [data-field]:not([data-field="controlEnabled"])')) field.disabled = true;
+        const model = group.querySelector(selector+'[data-column="model"]');
         if (model) {
           const origin = row.remi?.origin, camera = remiModelName(row);
           const source = remiDeviceName(origin?.serial || row.remi?.peer || row.remiPeer);
@@ -1428,6 +1645,9 @@ import { PresentationLedger } from './presentation-ledger.js';
   function lensAxisForField(field){
     return /^(iris|zoom|focus)(Motor|Min|Max|Torque|Direction)$/.exec(field)?.[1];
   }
+  function lensAxisForUseColumn(column){
+    return /^(iris|zoom|focus)Summary$/.exec(column)?.[1];
+  }
   function lensAxisAvailable(camera){
     return lensCapabilities(camera).iris&&camera.lens!=='cmotion cGate'&&!importedCamera(camera);
   }
@@ -1436,30 +1656,49 @@ import { PresentationLedger } from './presentation-ledger.js';
   }
   function lensAxisControl(camera,axis,summary){
     if(!lensAxisAvailable(camera))return '<span title="Unavailable for this camera">—</span>';
-    const enabled=lensAxisEnabled(camera,axis);
-    const label='Configure '+axisName(axis)+' for camera '+camera.number;
-    return '<label class="hc-axis-toggle"><input type="checkbox" data-lens-axis="'+axis+'" aria-label="'+esc(label)+'"'+(enabled?' checked':'')+(camera.deleting?' disabled':'')+'>'+(summary?'<span>'+esc(enabled?axisSummary(camera,axis):'Off')+'</span>':'')+'</label>';
+    const text=summary?(lensAxisEnabled(camera,axis)?axisSummary(camera,axis):'Off'):'';
+    return '<div class="hc-axis-toggle"><span data-hubble-boolean data-lens-axis="'+axis+'"></span>'+(text?'<span>'+esc(text)+'</span>':'')+'</div>';
   }
-  root.addEventListener('change',event=>{
-    const input=event.target,axis=input.dataset.lensAxis;
-    if(!axis)return;
-    const id=input.closest('tr').dataset.id,camera=cameras.find(row=>row.id===id);
-    if(!camera||camera.deleting||!lensAxisAvailable(camera))return;
+  // The settings this lens has for an axis, whether or not the axis is in use.
+  function lensAxisSettings(camera,axis){
+    const p=lensCapabilities(camera);
+    return axisDefinitions[axis].map(field=>field.id).filter(field=>field.endsWith('Motor')?p.motor:field==='irisMin'||field==='irisMax'?p.iris:p.torque);
+  }
+  // Someone deleted a setting of this axis. One that was never filled in doesn't count.
+  function lensAxisBeingCleared(camera,field){
+    const axis=lensAxisForField(field);
+    return !!axis&&lensAxisAvailable(camera)&&lensAxisSettings(camera,axis).some(setting=>camera.dirty.has(setting)&&!camera[setting]);
+  }
+  // The controller can't hold part of an axis, so once a deletion lands the sheet shows what's left of it.
+  // Only a Tilta iris can lose part: it keeps its motor without limits. Returns whether a cell changed.
+  function settleClearedLensAxes(item,captured,sentFields){
+    let changed=false;
+    for(const axis of new Set(sentFields.map(lensAxisForField).filter(Boolean))){
+      const settings=lensAxisSettings(captured,axis);
+      if(!settings.some(setting=>sentFields.includes(setting)&&!captured[setting]))continue;
+      const keepsMotor=captured.lens==='Tilta - Nucleus-M'&&axis==='iris'&&captured.irisMotor;
+      for(const setting of settings)if(!(keepsMotor&&setting==='irisMotor')&&item[setting]&&item[setting]===captured[setting]){item[setting]='';changed=true;}
+    }
+    return changed;
+  }
+  // Returns the settings to send, or null when the axis was already that way.
+  function setLensAxis(camera,axis,on){
     const enabled=new Set(camera.enabledLensAxes);
-    if(input.checked)enabled.add(axis);
+    if(enabled.has(axis)===on)return null;
+    // Turning an axis off drops its pending edits, unless one of them deleted a setting.
+    const deleted=!on&&lensAxisSettings(camera,axis).some(field=>camera.dirty.has(field)&&!camera[field]);
+    if(on)enabled.add(axis);
     else enabled.delete(axis);
     camera.enabledLensAxes=[...enabled];
-    const fields=axisDefinitions[axis].map(field=>field.id).filter(field=>lensFieldUsed(camera,field));
-    for(const field of axisDefinitions[axis])camera.dirty.delete(field.id);
+    if(!deleted)for(const field of axisDefinitions[axis])camera.dirty.delete(field.id);
+    // A setting nobody has filled in has nothing to send yet.
+    const fields=axisDefinitions[axis].map(field=>field.id).filter(field=>lensFieldUsed(camera,field)&&camera[field]);
     for(const field of fields)camera.dirty.add(field);
     camera.revision++;
     camera.pending=camera.dirty.size>0;
     camera.result=camera.jobs?'Sending':camera.pending?'Pending':'In sync';
-    renderCameras();
-    root.querySelector('tr[data-id="'+id+'"] [data-lens-axis="'+axis+'"]')?.focus({preventScroll:true});
-    if(fields.length&&ui.sendMode==='Auto send')sendItems([camera],'camera',false,camera.isNew?[...camera.dirty]:fields);
-    remember();
-  });
+    return fields;
+  }
 
   const cameraChoiceSources={model:'Model',lens:'LensModel',lensPort:'LensInterface',usb:'Interface'};
   const cameraChoiceCatalogs=new Map();
@@ -1531,21 +1770,32 @@ import { PresentationLedger } from './presentation-ledger.js';
     let request;
     let warning = '';
     let reported = false;
-    return async (_query, signal) => {
-      request ??= moduleBridge.options({device:camera.device,rowId:camera.id,field:cameraChoiceSources[field]})
-        .then(({key,entries,saved}) => {
-          if(key&&entries.length)cameraChoiceCatalogs.set(key,{entries,saved});
-          if(key!==context) warning = 'Controller is using a different configuration';
-          else if(!entries.length) warning = 'Controller returned no choices';
-          else if(!saved) warning = 'Live choices could not be saved for offline use';
-        }).catch(() => {
-          const available = cameraChoiceCatalogs.get(context);
-          warning = (available?.saved ? 'Using saved choices' : 'Showing available choices') + ' · controller unavailable';
-        });
-      await request;
-      signal.throwIfAborted();
-      if(warning&&!reported) { reported = true; toast(warning); }
-      return cameraCellChoices(camera,field);
+    const tell = message => { if(message&&!reported) { reported = true; toast(message); } };
+    const ask = () => request ??= moduleBridge.options({device:camera.device,rowId:camera.id,field:cameraChoiceSources[field]})
+      .then(({key,entries,saved}) => {
+        if(key&&entries.length)cameraChoiceCatalogs.set(key,{entries,saved});
+        if(key!==context) warning = 'Controller is using a different configuration';
+        else if(!entries.length) warning = 'Controller returned no choices';
+        else if(!saved) warning = 'Live choices could not be saved for offline use';
+      }).catch(() => {
+        const available = cameraChoiceCatalogs.get(context);
+        warning = (available?.saved ? 'Using saved choices' : 'Showing available choices') + ' · controller unavailable';
+      });
+    // Asking the controller opens a new connection, and an unreachable one takes 5 seconds to give up.
+    // So a list we already have shows straight away and the controller only freshens it for next time.
+    return (_query, signal) => {
+      const known = field !== 'lensPort' || cameraChoiceCatalogs.has(context);
+      if(device(camera.device)?.online === false) {
+        if(!known) tell('Controller offline · its lens connections will list once it is reachable');
+        return cameraCellChoices(camera,field);
+      }
+      const answered = ask();
+      if(known) return cameraCellChoices(camera,field);
+      return answered.then(() => {
+        signal.throwIfAborted();
+        tell(warning);
+        return cameraCellChoices(camera,field);
+      });
     };
   }
 
@@ -1557,24 +1807,26 @@ import { PresentationLedger } from './presentation-ledger.js';
     return cameraHistories.get(id);
   }
   function cameraPresentation(id) {
-    return copyPresentation({ layout: cameraLayout(id), hidden: [...hiddenCameraColumns(id)], expanded: axisGroups(id) });
+    return copyPresentation({ sheets: cameraSheetList(id) });
   }
-  function applyCameraPresentation(id, value) {
-    cameraLayouts.set(id, copyPresentation(value.layout));
-    hiddenCameraColumnsByDevice[id] = new Set(value.hidden);
-    axisGroupsByDevice[id] = { ...value.expanded };
+  function applyCameraPresentation(id, value, preferred) {
+    const state = cameraSheetState(id), sheets = copyPresentation(value.sheets);
+    const find = sheetId => sheets.find(sheet => sheet.id === sheetId);
+    state.sheets = sheets;
+    showCameraSheet(id, find(preferred) ?? find(state.activeSheetId) ?? find(value.activeSheetId) ?? sheets[0]);
   }
   function recordCameraHistory(id, entry) {
     const history = cameraHistory(id);
     history.undo.push(entry); history.undo = history.undo.slice(-200); history.redo = [];
   }
   function changeCameraPresentation(id, change, redraw = true, record = true) {
-    const before = cameraPresentation(id);
+    const before = cameraPresentation(id), activeBefore = cameraSheetState(id).activeSheetId;
     change();
     const after = cameraPresentation(id);
     if (JSON.stringify(before) === JSON.stringify(after)) return;
-    const epoch = presentationLedger.change('camera:' + id, before, after);
-    if (record) recordCameraHistory(id, { kind: 'layout', before, after, epoch });
+    // Which tab was open only matters if the change that opened another one fails.
+    const epoch = presentationLedger.change('camera:' + id, { ...before, activeSheetId: activeBefore }, after);
+    if (record) recordCameraHistory(id, { kind: 'layout', before, after, epoch, activeBefore, activeAfter: cameraSheetState(id).activeSheetId });
     if (redraw) renderCameras();
     else for (const [table, sheet] of cameraSheets) if (table.dataset.cameraDevice === id) sheet.refresh?.();
     remember();
@@ -1586,9 +1838,11 @@ import { PresentationLedger } from './presentation-ledger.js';
     for (const { key, value } of presentationLedger.repairs(ticket)) {
       const id = key.slice(key.indexOf(':') + 1);
       if (key.startsWith('camera:')) {
-        (data.cameraLayouts ??= {})[id] = copyPresentation(value.layout);
-        (data.hiddenCameraColumnsByDevice ??= {})[id] = [...value.hidden];
-        (data.axisGroupsByDevice ??= {})[id] = { ...value.expanded };
+        const active = value.sheets.find(sheet => sheet.id === data.cameraSheetsByDevice?.[id]?.activeSheetId) ?? value.sheets[0];
+        (data.cameraLayouts ??= {})[id] = copyPresentation(active.layout);
+        (data.hiddenCameraColumnsByDevice ??= {})[id] = [...active.hidden];
+        (data.axisGroupsByDevice ??= {})[id] = { ...active.expanded };
+        (data.cameraSheetsByDevice ??= {})[id] = copyPresentation(cameraSheetsRecord(id, value.sheets, active.id));
       }
     }
     return plan;
@@ -1630,7 +1884,7 @@ import { PresentationLedger } from './presentation-ledger.js';
     const source = forward ? 'before' : 'after', target = forward ? 'after' : 'before';
     if (entry.kind === 'layout') {
       if (JSON.stringify(cameraPresentation(id)) !== JSON.stringify(entry[source])) { toast('The sheet layout has changed; this history entry is no longer available'); return; }
-      entry.epoch = changeCameraPresentation(id, () => applyCameraPresentation(id, entry[target]), true, false);
+      entry.epoch = changeCameraPresentation(id, () => applyCameraPresentation(id, entry[target], forward ? entry.activeAfter : entry.activeBefore), true, false);
     } else {
       for (const patch of entry.patches) {
         const row = cameras.find(row => row.id === patch[source].id);
@@ -1659,10 +1913,11 @@ import { PresentationLedger } from './presentation-ledger.js';
   const cameraCellSelector = '[data-hubble-row][data-hubble-column]';
   const activeCameraCell = cameraCellSelector + '[data-hubble-spreadsheet-active="true"]';
   const cameraCellKey = ({ rowId, columnId }) => JSON.stringify([rowId, columnId]);
+  const seriesFields = ['number', 'name', 'ip'];
 
   function activeCamera(table) {
     const cell = table?.querySelector(activeCameraCell);
-    return cell && cameras.find(camera => camera.device === table.dataset.cameraDevice && camera.id === cell.dataset.hubbleRow);
+    return cell && cameras.find(camera => camera.device === table.dataset.cameraDevice && camera.id === cell.dataset.camera);
   }
 
   function syncCameraDeleteButton(group) {
@@ -1705,6 +1960,8 @@ import { PresentationLedger } from './presentation-ledger.js';
 
   function cameraSheetFocus() {
     const element = document.activeElement;
+    // Tabs and view buttons survive a redraw, but moving them drops their focus.
+    if (element?.closest('[data-camera-selection],[data-camera-sheets]')) return { chrome: element };
     const table = element?.closest('table[data-camera-device]');
     if (!table) return null;
     const cell = element.closest(cameraCellSelector);
@@ -1727,6 +1984,7 @@ import { PresentationLedger } from './presentation-ledger.js';
         const viewport = replacement.closest('.hc-scroll');
         const scrollLeft = viewport.scrollLeft;
         replacement.closest('.hc-sheet').querySelector('[data-camera-selection]').replaceWith(sheet.strip);
+        replacement.closest('.hc-sheet').querySelector('[data-camera-sheets]').replaceWith(sheet.tabs);
         table.setAttribute('aria-label', replacement.getAttribute('aria-label'));
         table.replaceChildren(...replacement.childNodes);
         viewport.replaceWith(sheet.viewport);
@@ -1744,6 +2002,7 @@ import { PresentationLedger } from './presentation-ledger.js';
       cameraSheets.delete(table);
     }
     for (const id of cameraAddresses.keys()) if (!device(id)) cameraAddresses.delete(id);
+    if (focus?.chrome?.isConnected) focus.chrome.focus({ preventScroll: true });
     if (spreadsheetUnavailable) return;
     for (const table of tables.values()) {
       if (!cameraSheets.has(table)) void mountCameraSheet(table, focus);
@@ -1755,22 +2014,23 @@ import { PresentationLedger } from './presentation-ledger.js';
     let rows, columns, cells, cameraById;
     const providers = new Map();
     const listeners = new AbortController();
-    const sheet = { listeners, controls: null, viewport: table.closest('.hc-scroll'), strip: table.closest('.hc-sheet').querySelector('[data-camera-selection]'), presentation: [], scale: 1 };
+    const sheet = { listeners, controls: null, viewport: table.closest('.hc-scroll'), strip: table.closest('.hc-sheet').querySelector('[data-camera-selection]'), tabs: table.closest('.hc-sheet').querySelector('[data-camera-sheets]'), presentation: [], scale: 1 };
     cameraSheets.set(table, sheet);
 
     function indexSheet() {
-      const visibleRows = [...table.tBodies[0].rows];
+      const flipped = cameraSheetView(deviceId) === 'columns';
+      const visibleRows = [...table.tBodies[0].rows].filter(row => flipped ? row.dataset.setting : row.dataset.id);
       const visibleColumns = [...table.querySelectorAll('col[data-hubble-column]')];
-      rows = visibleRows.map(row => row.dataset.id);
+      rows = visibleRows.map(row => flipped ? row.dataset.setting : row.dataset.id);
       columns = visibleColumns.filter(col => col.dataset.hubbleColumn !== 'row').map(col => ({
         id: col.dataset.hubbleColumn,
         label: col.dataset.label,
-        fill: ['number', 'name', 'ip'].includes(col.dataset.hubbleColumn) ? 'series' : 'copy',
+        fill: seriesFields.includes(col.dataset.hubbleColumn) ? 'series' : 'copy',
       }));
       table.style.width = [...table.querySelectorAll('col')].reduce((width, col) => width + Number.parseInt(col.style.width, 10), 0) + 'px';
-      const heights = cameraLayouts.get(deviceId)?.rows;
+      const heights = flipped ? cameraLayouts.get(deviceId)?.settingHeights : cameraLayouts.get(deviceId)?.rows;
       for (const row of visibleRows) {
-        const height = heights?.[row.dataset.id];
+        const height = heights?.[flipped ? row.dataset.setting : row.dataset.id];
         if (height) row.style.setProperty('--hc-camera-row-height', height + 'px');
       }
       cells = new Map([...table.querySelectorAll(cameraCellSelector)].map(cell => [cameraCellKey(cameraAddress(cell)), cell]));
@@ -1778,7 +2038,7 @@ import { PresentationLedger } from './presentation-ledger.js';
       for (const cell of cells.values()) {
         const input = cell.querySelector('input[data-field]');
         if (input) input.tabIndex = -1;
-        if (!cell.querySelector('[data-field]:enabled')) cell.setAttribute('aria-readonly', 'true');
+        if (!cell.querySelector('[data-field]:enabled,[data-hubble-boolean]')) cell.setAttribute('aria-readonly', 'true');
       }
       providers.clear();
     }
@@ -1790,20 +2050,43 @@ import { PresentationLedger } from './presentation-ledger.js';
       syncCameraDeleteButton(table.closest('[data-controller]'));
     }
 
+    // Across cameras the host fills per column, but here it's the setting that decides.
+    function selectedFill() {
+      const selected = [...table.querySelectorAll('[data-hubble-spreadsheet-selected]')];
+      return selected.length && selected.every(cell => seriesFields.includes(cell.dataset.column)) ? 'series' : 'copy';
+    }
+    // The host names a dropdown after its column, but across cameras that should be the setting.
+    function flippedColumns() {
+      const fill = selectedFill(), open = sheet.selected && cameraSortLabels[sheet.selected.field];
+      return columns.map(column => ({ ...column, fill, label: open && column.id === sheet.selected.camera ? open : column.label }));
+    }
+    function logicalEdits(edits) {
+      return cameraSheetView(deviceId) === 'columns' ? edits.map(({ rowId, columnId, ...edit }) => ({ ...edit, rowId: columnId, columnId: rowId })) : edits;
+    }
+    // Keep the same camera and setting selected when the sheet flips or changes tab.
+    function followSelection() {
+      if (!sheet.selected) return;
+      const cell = table.querySelector('td[data-camera="' + CSS.escape(sheet.selected.camera) + '"][data-column="' + sheet.selected.field + '"]');
+      const address = cell && cameraAddress(cell), current = cameraAddresses.get(deviceId);
+      if (address && (!current || cameraCellKey(address) !== cameraCellKey(current))) sheet.controls.select(address, address, { focus: false });
+    }
+
     function getCell(address) {
       const key = cameraCellKey(address);
       const cell = cells.get(key);
-      const camera = cameraById.get(address.rowId);
+      const camera = cell && cameraById.get(cell.dataset.camera);
       if (!cell || !camera || cell.classList.contains('hc-axis-inactive')) return null;
+      const axis = lensAxisForUseColumn(cell.dataset.column);
+      if (axis) return { kind: 'boolean', value: lensAxisEnabled(camera, axis) ? 'TRUE' : 'FALSE', readOnly: !!camera.deleting };
       const control = cell.querySelector('[data-field]');
       if (!control) {
-        return ['control', 'recording', 'cameraStatus', 'sync'].includes(address.columnId)
+        return ['control', 'recording', 'cameraStatus', 'sync'].includes(cell.dataset.column)
           ? { value: cell.textContent.trim(), readOnly: true }
           : null;
       }
       if (control.disabled) return null;
       const field = control.dataset.field;
-      if (field === 'controlEnabled') return { value: cameraControlEnabled(camera) ? 'TRUE' : 'FALSE' };
+      if (field === 'controlEnabled') return { kind: 'boolean', value: cameraControlEnabled(camera) ? 'TRUE' : 'FALSE', readOnly: !!camera.deleting || !cameraControlDevice(device(camera.device)) };
       const value = String(camera[field] ?? (field === 'usb' ? 'USB · Automatic' : ''));
       if (camera.deleting || importedCamera(camera)) return { value, readOnly: true };
       if (!control.hasAttribute('data-camera-choice')) return { value };
@@ -1823,16 +2106,21 @@ import { PresentationLedger } from './presentation-ledger.js';
       sheet.controls = await mountSpreadsheetControls({
         root: table,
         viewport: sheet.viewport,
+        extendedEditing: true,
         getRows: () => rows,
-        getColumns: () => columns,
+        getColumns: () => cameraSheetView(deviceId) === 'columns' ? flippedColumns() : columns,
         getCell,
         onHistory(direction) { cameraHistoryStep(deviceId, direction); },
         onSelection(address) {
+          const cell = address && cells.get(cameraCellKey(address));
           if (address) cameraAddresses.set(deviceId, address);
           else cameraAddresses.delete(deviceId);
+          if (cell) sheet.selected = { camera: cell.dataset.camera, field: cell.dataset.column };
+          else if (!address) sheet.selected = null;
+          if (cameraSheetView(deviceId) === 'columns') sheet.controls?.refresh();
           showSelection(address);
         },
-        onEdit({ edits }) { applyCameraGridEdits(edits, cameraById); },
+        onEdit({ edits }) { applyCameraGridEdits(logicalEdits(edits), cameraById); },
         onError(error) { toast(error.message); },
       });
     } catch (error) {
@@ -1854,7 +2142,9 @@ import { PresentationLedger } from './presentation-ledger.js';
     sheet.refresh = (reindex = false) => {
       if (reindex) indexSheet();
       table.style.setProperty('--hc-camera-text-size', (cameraLayout(deviceId).textSize ?? 13) + 'px');
+      paintCameraView(sheet.strip, deviceId);
       controls.refresh();
+      if (reindex) followSelection();
       for (const control of sheet.presentation) control.refresh?.();
       if (table.closest('.hc-panel[hidden], [id^="hc-controller-"][hidden]')) {
         sheet.layout?.dispose();
@@ -1866,6 +2156,7 @@ import { PresentationLedger } from './presentation-ledger.js';
     sheet.refresh();
     const presentation = await Promise.all([
       mountSpreadsheetColumnEditor({ root: sheet.strip.querySelector('[data-camera-columns]'), getItems: () => cameraColumnItems(deviceId), onVisibilityChange: (id, visible) => changeCameraVisibility(deviceId, [{ id, visible }]), onVisibilityChanges: changes => changeCameraVisibility(deviceId, changes) }),
+      mountSpreadsheetSheets({ root: sheet.tabs, getState: () => cameraSheetBarState(deviceId), onSelect: sheetId => selectCameraSheet(deviceId, sheetId), onCreate: name => createCameraSheet(deviceId, name), onRename: (sheetId, name) => renameCameraSheet(deviceId, sheetId, name), onRemove: sheetId => removeCameraSheet(deviceId, sheetId), onReorder: (sheetId, beforeId) => moveCameraSheet(deviceId, sheetId, beforeId) }),
       mountSpreadsheetToolbar({ root: sheet.strip.querySelector('[data-camera-text-size]'), textSize: { get: () => cameraLayout(deviceId).textSize ?? 13, onChange: size => changeCameraPresentation(deviceId, () => { cameraLayout(deviceId).textSize = size; }, false) } }),
       mountSpreadsheetViewport({ root: table, viewport: sheet.viewport, getFrozen: () => [...table.querySelectorAll('.hc-camera-frozen')].map(element => ({ element, left: Number.parseFloat(element.style.left) || 0 })), onZoom(ratio) { sheet.scale = ratio; sheet.strip.querySelector('[data-camera-zoom]').textContent = Math.round(ratio * 100) + '%'; controls.refresh(); sheet.layout?.refresh(); } }),
     ]);
@@ -1873,9 +2164,7 @@ import { PresentationLedger } from './presentation-ledger.js';
     sheet.presentation = presentation;
 
     let menuReady;
-    function openCameraMenu(row, cell, x, y) {
-      const rowId = row?.dataset.id;
-      const camera = cameraById.get(rowId);
+    function openCameraMenu(camera, cell, x, y) {
       if (!camera) return;
       if (cell) {
         const address = cameraAddress(cell);
@@ -1896,7 +2185,7 @@ import { PresentationLedger } from './presentation-ledger.js';
           x, y, label: 'Camera ' + camera.number + ' · ' + camera.name,
           items: [{
             id: 'delete-camera', label: 'Delete camera', icon: 'delete', danger: true, disabled: !!camera.deleting,
-            run: () => reviewCameraDeletion(cameraById.get(rowId)),
+            run: () => reviewCameraDeletion(cameraById.get(camera.id)),
           }],
         });
       });
@@ -1923,7 +2212,7 @@ import { PresentationLedger } from './presentation-ledger.js';
       const address = cameraAddress(input.closest(cameraCellSelector));
       const value = getCell(address)?.value ?? '';
       if (cancel) input.value = value;
-      else if (input.value !== value) applyCameraGridEdits([{ ...address, value: input.value }], cameraById);
+      else if (input.value !== value) applyCameraGridEdits(logicalEdits([{ ...address, value: input.value }]), cameraById);
     }
 
     table.addEventListener('dblclick', event => {
@@ -1931,11 +2220,11 @@ import { PresentationLedger } from './presentation-ledger.js';
       if (cell && table.contains(cell)) editText(cell);
     }, options);
     table.addEventListener('contextmenu', event => {
-      const row = event.target.closest('tbody tr[data-id]');
-      if (!row) return;
+      const cell = event.target.closest(cameraCellSelector) ?? event.target.closest('tbody tr[data-id]')?.querySelector(cameraCellSelector);
+      const camera = cameraById.get(cell?.dataset.camera ?? event.target.closest('th[data-camera-header]')?.dataset.cameraHeader);
+      if (!camera) return;
       event.preventDefault();
-      const cell = event.target.closest(cameraCellSelector) ?? row.querySelector(cameraCellSelector);
-      openCameraMenu(row, cell, event.clientX, event.clientY);
+      openCameraMenu(camera, cell, event.clientX, event.clientY);
     }, options);
     table.addEventListener('focusin', event => {
       const input = event.target;
@@ -1967,15 +2256,16 @@ import { PresentationLedger } from './presentation-ledger.js';
         const { left, bottom } = cell.getBoundingClientRect();
         event.preventDefault();
         event.stopPropagation();
-        openCameraMenu(cell.closest('tr'), cell, left, bottom);
+        openCameraMenu(cameraById.get(cell.dataset.camera), cell, left, bottom);
         return;
       }
       const address = cameraAddresses.get(deviceId);
       if (!address) return;
-      if (address.columnId === 'controlEnabled' && [' ', 'Enter'].includes(event.key)) {
-        event.preventDefault();event.stopPropagation();
-        const camera=cameraById.get(address.rowId);
-        if(camera)editCameraControl([{rowId:camera.id,value:!cameraControlEnabled(camera)}]);
+      const selected = getCell(address);
+      if (selected?.kind === 'boolean' && event.key === 'Enter') {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!selected.readOnly) applyCameraGridEdits(logicalEdits([{ ...address, value: selected.value === 'TRUE' ? 'FALSE' : 'TRUE' }]), cameraById);
         return;
       }
       const replacement = event.key.length === 1 ? event.key : undefined;
@@ -2001,6 +2291,9 @@ import { PresentationLedger } from './presentation-ledger.js';
     sheet.restoreFocus(focus);
   }
 
+  // What pressing Delete leaves behind in a choice cell that always holds something.
+  const clearedCameraChoices = { model: 'Choose model…', usb: 'USB · Automatic', lens: 'None', lensPort: 'None' };
+
   function applyCameraGridEdits(edits, cameraById) {
     const controlEdits=edits.filter(edit=>edit.columnId==='controlEnabled');
     if(controlEdits.length)editCameraControl(controlEdits);
@@ -2008,25 +2301,42 @@ import { PresentationLedger } from './presentation-ledger.js';
     const historyRows = [...new Set(edits.map(edit => cameraById.get(edit.rowId)).filter(Boolean))];
     const historyBefore = cameraDraftSnapshot(historyRows);
     const changed = new Map();
-    const priority = { model: 0, lens: 1 };
+    // Model and lens change what the other columns mean. A Use box going on has to land before its
+    // settings, and one going off after them, so a Delete across both still empties the settings.
+    const order = ({ columnId, value }) => ({ model: 0, lens: 1 })[columnId] ??
+      (!lensAxisForUseColumn(columnId) ? 3 : value.trim().toUpperCase() === 'TRUE' ? 2 : 4);
     let invalid = 0;
     let redraw = false;
-    // Model and lens changes can change the meaning of other columns in the batch.
-    for (const { rowId, columnId, value } of [...edits].sort((a, b) =>
-      (priority[a.columnId] ?? 2) - (priority[b.columnId] ?? 2))) {
+    for (const { rowId, columnId, value } of [...edits].sort((a, b) => order(a) - order(b))) {
       const camera = cameraById.get(rowId);
       if (!camera || camera.deleting || importedCamera(camera)) continue;
+      const axis = lensAxisForUseColumn(columnId);
+      if (axis) {
+        if (!lensAxisAvailable(camera)) continue;
+        const text = value.trim().toUpperCase();
+        if (!['', 'TRUE', 'FALSE'].includes(text)) { invalid++; continue; }
+        const staged = setLensAxis(camera, axis, text === 'TRUE');
+        if (!staged) continue;
+        const fields = changed.get(camera) ?? new Set();
+        for (const edited of staged) fields.add(edited);
+        changed.set(camera, fields);
+        redraw = true;
+        continue;
+      }
       const field = cameraField(camera, columnId);
       if (isLensSetting(field) && !lensFieldUsed(camera, field)) continue;
       if (camera.model === 'Alpha-USB' && ['port', 'login', 'password'].includes(field)) continue;
       let next = value;
       if (cameraChoiceSources[field] || field.endsWith('Torque') || field.endsWith('Direction')) {
-        const choices = cameraCellChoices(camera, field);
         const text = value.trim().toLocaleLowerCase();
-        const choice = choices.find(option => option.value === value) ??
-          choices.find(option => option.value.toLocaleLowerCase() === text || option.label.toLocaleLowerCase() === text);
-        if (!choice) { if (value) invalid++; continue; }
-        next = choice.value;
+        if (!text) next = clearedCameraChoices[field] ?? '';
+        else {
+          const choices = cameraCellChoices(camera, field);
+          const choice = choices.find(option => option.value === value) ??
+            choices.find(option => option.value.toLocaleLowerCase() === text || option.label.toLocaleLowerCase() === text);
+          if (!choice) { invalid++; continue; }
+          next = choice.value;
+        }
       }
       if (String(camera[field] ?? '') === next) continue;
       const fields = changed.get(camera) ?? new Set();
@@ -2039,9 +2349,8 @@ import { PresentationLedger } from './presentation-ledger.js';
       if (redraw) renderCameras();
       else {
         for (const [camera, fields] of changed) {
-          const row = root.querySelector('table[data-camera-device] tr[data-id="' + CSS.escape(camera.id) + '"]');
           for (const field of fields) {
-            const control = row?.querySelector('[data-field="' + field + '"]');
+            const control = root.querySelector('table[data-camera-device] [data-row="' + CSS.escape(camera.id) + '"][data-field="' + field + '"]');
             if (!control) continue;
             if (control.hasAttribute('data-camera-choice')) {
               control.closest('td').innerHTML = cameraChoiceCell(camera, field);
@@ -2053,9 +2362,9 @@ import { PresentationLedger } from './presentation-ledger.js';
       }
       remember();
       if (ui.sendMode === 'Auto send') {
-        const jobs = [...changed.keys()];
+        const jobs = [...changed.keys()].filter(camera => changed.get(camera).size);
         const fields = new Map(jobs.map(camera => [camera.id, [...(camera.isNew ? camera.dirty : changed.get(camera))]]));
-        void sendItems(jobs, 'camera', false, fields);
+        if (jobs.length) void sendItems(jobs, 'camera', false, fields);
       }
     }
     if (invalid) toast(invalid + ' ' + (invalid === 1 ? 'choice is' : 'choices are') + ' unavailable for the destination');
