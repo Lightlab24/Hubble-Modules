@@ -33,7 +33,7 @@ it.each([
     );
     expect(
       moduleCompatibility(manifest, {
-        version: "2.0.15",
+        version: "2.0.18",
         apiVersions: [1],
         features,
       }),
@@ -41,10 +41,11 @@ it.each([
     for (const feature of [
       "module-matrix-field-presentation-v1",
       "module-matrix-quiet-incomplete-v1",
+      "module-spreadsheet-controls-v1",
     ])
       expect(
         moduleCompatibility(manifest, {
-          version: "2.0.15",
+          version: "2.0.18",
           apiVersions: [1],
           features: features.filter((item) => item !== feature),
         }),
@@ -64,7 +65,7 @@ it.each([
     ]);
     expect(
       moduleCompatibility(manifest, {
-        version: "2.0.15",
+        version: "2.0.18",
         apiVersions: [1],
         features: features.filter(
           (item) => item !== "module-settings-pages-v1",

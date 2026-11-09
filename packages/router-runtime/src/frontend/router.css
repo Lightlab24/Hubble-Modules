@@ -18,7 +18,7 @@
   display: grid;
   min-width: 0;
   min-height: 0;
-  grid-template-rows: minmax(50px, max-content) minmax(0, 1fr);
+  grid-template-rows: minmax(50px, max-content) max-content minmax(0, 1fr);
   overflow: hidden;
   color: var(--text);
   background: var(--router-canvas);
@@ -1702,4 +1702,156 @@
   .router-fed-filter {
     height: 30px;
   }
+}
+
+.router-view-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--chrome);
+}
+
+.router-view-tab {
+  min-height: var(--control-height);
+  padding: 0 12px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-control);
+  color: var(--quiet);
+  background: var(--control);
+  cursor: pointer;
+  font-size: var(--control-font-size);
+  font-weight: var(--control-font-weight);
+}
+
+.router-view-tab:hover {
+  color: var(--text);
+  background: var(--control-hover);
+}
+
+.router-view-tab[aria-selected="true"] {
+  color: var(--text-strong);
+  background: var(--active);
+}
+
+.router-sheet-pane {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-direction: column;
+}
+
+.router-sheet-viewport {
+  position: absolute;
+  overflow: auto;
+  inset: 0;
+  scrollbar-color: var(--line-strong) var(--router-canvas);
+  scrollbar-width: thin;
+  /* Keep keyboard moves clear of the frozen header and destination columns. */
+  scroll-padding: 26px 0 0 176px;
+}
+
+.router-sheet {
+  width: max-content;
+  border-collapse: separate;
+  border-spacing: 0;
+  color: var(--text);
+  background: var(--router-canvas);
+  font-size: var(--font-size-ui);
+  outline: none;
+  table-layout: fixed;
+}
+
+.router-sheet-gutter-column {
+  width: 44px;
+}
+
+.router-sheet-name-column {
+  width: 132px;
+}
+
+.router-sheet-route-column {
+  width: 112px;
+}
+
+.router-sheet th,
+.router-sheet td {
+  overflow: hidden;
+  height: 26px;
+  box-sizing: border-box;
+  padding: 0 7px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  font-weight: 400;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.router-sheet thead th {
+  position: sticky;
+  z-index: 3;
+  top: 0;
+  background: var(--surface);
+  font-weight: 500;
+}
+
+.router-sheet .router-sheet-gutter {
+  position: sticky;
+  z-index: 2;
+  left: 0;
+  color: var(--quiet);
+  background: var(--surface);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.router-sheet .router-sheet-name {
+  position: sticky;
+  z-index: 2;
+  left: 44px;
+  border-right-color: var(--line-strong);
+  color: var(--text-strong);
+  background: var(--router-canvas);
+}
+
+.router-sheet thead .router-sheet-gutter,
+.router-sheet thead .router-sheet-name {
+  z-index: 4;
+  background: var(--surface);
+}
+
+.router-sheet td[data-hubble-row] {
+  cursor: cell;
+}
+
+.router-sheet .router-sheet-spacer {
+  height: auto;
+  padding: 0;
+  border: 0;
+}
+
+.router-sheet-number {
+  margin-right: 2px;
+  color: var(--quiet);
+  font-variant-numeric: tabular-nums;
+}
+
+.router-sheet td[data-route-kind="unknown"],
+.router-sheet td[data-route-kind="mixed"],
+.router-sheet[data-editable="false"] td {
+  color: var(--ui-text-disabled);
+}
+
+.router-sheet td[data-route-phase="queued"],
+.router-sheet td[data-route-phase="sending"],
+.router-sheet td[data-route-phase="confirming"] {
+  color: var(--router-pending);
+}
+
+.router-sheet td[data-route-phase="staged"] {
+  color: var(--router-staged);
+}
+
+.router-sheet td[data-route-phase] .router-sheet-number {
+  color: inherit;
 }

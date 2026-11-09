@@ -12,6 +12,7 @@ import {
   RouteCrosspointsRequestSchema,
   RouterResourcePageQuerySchema,
   type InterrogateRouterTarget,
+  type RouteCrosspointsResult,
   type RouterDestinationPageQuery,
   type RouterSourcePageQuery,
 } from "../page-contract.js";
@@ -30,6 +31,7 @@ import {
   replaceStagedSource as replaceRouterStagedSource,
   selectDestination as selectRouterDestination,
   selectSource as selectRouterSource,
+  sourceAt,
   stageMapping as stageRouterMapping,
   type RouterDraftMapping,
   type RouterSelections,
@@ -108,6 +110,13 @@ export interface RouterConnection {
   removeStagedMapping(mappingId: string): void;
   clearStaged(): void;
   submitTake(): Promise<void>;
+  /**
+   * Send one route now, leaving anything staged for Take alone. Resolves to
+   * null when the page changed or a target's current route isn't known yet.
+   */
+  sendRoute(
+    input: StageRouterMappingInput,
+  ): Promise<RouteCrosspointsResult | null>;
   refreshSelectedDestinations(): void;
 }
 
@@ -847,6 +856,35 @@ export function useRouterState(
     }
   }, [api, commitState, currentSession, sessionMatches]);
 
+  const sendRoute = useCallback(
+    async (
+      input: StageRouterMappingInput,
+    ): Promise<RouteCrosspointsResult | null> => {
+      const session = currentSession();
+      if (session === null) return null;
+      const { state: current } = session;
+      const request = RouteCrosspointsRequestSchema.safeParse({
+        operationId: randomUuidRef.current(),
+        connectionId: current.connectionId,
+        version: current.version,
+        mappings: [
+          {
+            mappingId: randomUuidRef.current(),
+            source: input.source,
+            destination: input.destination,
+            levels: input.levels,
+            expected: input.levels.map((level) => ({
+              level,
+              source: sourceAt(current, input.destination, level),
+            })),
+          },
+        ],
+      });
+      return request.success ? api.routeCrosspoints(request.data) : null;
+    },
+    [api, currentSession],
+  );
+
   const refreshSelectedDestinations = useCallback((): void => {
     const session = currentSession();
     if (session !== null)
@@ -884,6 +922,7 @@ export function useRouterState(
     removeStagedMapping,
     clearStaged,
     submitTake,
+    sendRoute,
     refreshSelectedDestinations,
   };
 }

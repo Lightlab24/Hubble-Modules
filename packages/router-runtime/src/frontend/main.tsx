@@ -88,6 +88,7 @@ function RouterPage({
         selectedConnectionId={connection.connectionId}
         onConnectionChange={() => {}}
         router={router}
+        onRouteFailure={failed}
         automaticTake={automaticTake}
         onAutomaticTakeChange={(enabled) => {
           void automaticTakeQueue.set(enabled);

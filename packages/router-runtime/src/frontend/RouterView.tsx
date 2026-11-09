@@ -35,6 +35,7 @@ import {
 import {
   canTake,
   draftCounts,
+  MAX_ROUTER_CACHED_PAGES_PER_RESOURCE,
   sourceAt,
   type RouterDraftMapping,
   type RouterLoadedPage,
@@ -57,6 +58,16 @@ import {
   type VirtualRouterSelectionGesture,
 } from "./VirtualRouterList.js";
 import { SettingSwitch } from "./SettingSwitch.js";
+import { RouteSendQueue } from "./route-send-queue.js";
+import { RoutesSheet } from "./RoutesSheet.js";
+import {
+  draftRouteOverlays,
+  routeCellKey,
+  routeSendOutcome,
+  routesSheetColumns,
+  sourceChoices,
+  type RoutePick,
+} from "./routes-sheet-model.js";
 import "./router.css";
 import { routerZoomStorage } from "./zoom-storage.js";
 
@@ -66,6 +77,16 @@ const ROUTER_SEARCH_DELAY_MS = 50;
 const ROUTER_SOURCE_ROW_HEIGHT = 44;
 const ROUTER_DESTINATION_ROW_HEIGHT = 36;
 const ROUTER_LIST_OVERSCAN = 6;
+
+type RouterPageView = "patch" | "routes";
+
+const ROUTER_PAGE_VIEWS: readonly {
+  readonly id: RouterPageView;
+  readonly label: string;
+}[] = [
+  { id: "patch", label: "Patch" },
+  { id: "routes", label: "Routes" },
+];
 
 type OperatingRouterConnectionView =
   | Extract<
@@ -88,6 +109,8 @@ export interface RouterViewProps {
   readonly automaticTake?: boolean;
   /** Omit to hide the Router page Automatic Take switch. */
   readonly onAutomaticTakeChange?: (enabled: boolean) => void;
+  /** Show why a route from the Routes sheet didn't happen. */
+  readonly onRouteFailure?: (message: string) => void;
 }
 
 interface RouterListModel<T> {
@@ -126,7 +149,9 @@ export function RouterView({
   router,
   automaticTake = false,
   onAutomaticTakeChange,
+  onRouteFailure,
 }: RouterViewProps): React.JSX.Element {
+  const [pageView, setPageView] = useState<RouterPageView>("patch");
   const [routerViewZoom, setRouterViewZoom] = useState<RouterViewZoom>(() =>
     loadRouterViewZoom(routerZoomStorage),
   );
@@ -314,8 +339,31 @@ export function RouterView({
         </button>
       </header>
 
+      <div
+        className="router-view-tabs"
+        role="tablist"
+        aria-label="Router views"
+      >
+        {ROUTER_PAGE_VIEWS.map(({ id, label }) => (
+          <button
+            key={id}
+            className="router-view-tab"
+            type="button"
+            role="tab"
+            aria-selected={pageView === id}
+            onClick={() => {
+              setPageView(id);
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       <RouterBody
         automaticTake={automaticTake}
+        onRouteFailure={onRouteFailure}
+        view={pageView}
         connectionCount={routerConnections.length}
         selectedConnection={selectedConnection}
         router={router}
@@ -378,11 +426,15 @@ function RouterBody({
   automaticTake,
   connectionCount,
   onAutomaticTakeChange,
+  onRouteFailure,
   selectedConnection,
   router,
   state,
+  view,
 }: {
   readonly automaticTake: boolean;
+  readonly onRouteFailure: ((message: string) => void) | undefined;
+  readonly view: RouterPageView;
   readonly onAutomaticTakeChange: ((enabled: boolean) => void) | undefined;
   readonly connectionCount: number;
   readonly selectedConnection: OperatingRouterConnectionView | undefined;
@@ -437,6 +489,8 @@ function RouterBody({
       key={state.connectionId}
       automaticTake={automaticTake}
       onAutomaticTakeChange={onAutomaticTakeChange}
+      onRouteFailure={onRouteFailure}
+      view={view}
       destinationLocks={
         selectedConnection.type === "evertz-quartz"
           ? selectedConnection.destinationLocks
@@ -548,11 +602,15 @@ function RouterWorkspace({
   automaticTake,
   destinationLocks,
   onAutomaticTakeChange,
+  onRouteFailure,
   router,
   showsLevels,
   state,
+  view,
 }: {
   readonly automaticTake: boolean;
+  readonly onRouteFailure: ((message: string) => void) | undefined;
+  readonly view: RouterPageView;
   readonly onAutomaticTakeChange: ((enabled: boolean) => void) | undefined;
   readonly destinationLocks?:
     | readonly { destination: number; owner: number }[]
@@ -595,12 +653,16 @@ function RouterWorkspace({
   >(null);
   const [clearStagedOpen, setClearStagedOpen] = useState(false);
   const destinationSelectionAnchorRef = useRef<number | null>(null);
-  const sourceSearch = normalizedSearch(
+  const sheetActive = view === "routes";
+  const debouncedSourceSearch = normalizedSearch(
     useDebouncedValue(sourceSearchInput, ROUTER_SEARCH_DELAY_MS),
   );
-  const destinationSearch = normalizedSearch(
+  const debouncedDestinationSearch = normalizedSearch(
     useDebouncedValue(destinationSearchInput, ROUTER_SEARCH_DELAY_MS),
   );
+  // The sheet lists everything, so a search left in the Patch view must not filter it.
+  const sourceSearch = sheetActive ? null : debouncedSourceSearch;
+  const destinationSearch = sheetActive ? null : debouncedDestinationSearch;
   const selectedSource = state.selection.source;
   const truthReady = routeTruthIsReady(state);
 
@@ -630,7 +692,8 @@ function RouterWorkspace({
   useEffect(() => {
     if (!truthReady) destinationSelectionAnchorRef.current = null;
   }, [truthReady]);
-  const fedOnlyActive = fedOnly && selectedSource !== null && truthReady;
+  const fedOnlyActive =
+    !sheetActive && fedOnly && selectedSource !== null && truthReady;
   const destinationSourceFilter = fedOnlyActive ? selectedSource : null;
   const destinationQueryLevels = useMemo(
     () =>
@@ -850,7 +913,13 @@ function RouterWorkspace({
         router.clearStaged();
       }
     },
-    [batchSource, hasActiveTake, routePair, router, state.selection.destination],
+    [
+      batchSource,
+      hasActiveTake,
+      routePair,
+      router,
+      state.selection.destination,
+    ],
   );
 
   const activateDestination = useCallback(
@@ -995,6 +1064,151 @@ function RouterWorkspace({
     destinationLoader.loadPage,
   );
 
+  const sheetColumns = useMemo(
+    () => routesSheetColumns(state.levels, showsLevels),
+    [showsLevels, state.levels],
+  );
+  const sheetEditable = state.transport === "connected" && truthReady;
+  const [routeQueueRevision, setRouteQueueRevision] = useState(0);
+  const routeQueueContext = useRef({ onRouteFailure, router, state });
+  useLayoutEffect(() => {
+    routeQueueContext.current = { onRouteFailure, router, state };
+  });
+  const [routeQueue] = useState(
+    () =>
+      new RouteSendQueue({
+        send: async (pick) =>
+          routeSendOutcome(
+            pick,
+            await routeQueueContext.current.router.sendRoute(pick),
+          ),
+        read: (destination, level) =>
+          sourceAt(routeQueueContext.current.state, destination, level),
+        confirmTimeoutMs: () =>
+          Math.max(2000, routeQueueContext.current.state.requestTimeoutMs * 2),
+        onChange: () => {
+          setRouteQueueRevision((revision) => revision + 1);
+        },
+        onFailure: (message) => {
+          routeQueueContext.current.onRouteFailure?.(message);
+        },
+      }),
+  );
+  useEffect(() => {
+    routeQueue.observe();
+  }, [routeQueue, state.destinations]);
+  useEffect(() => {
+    if (!sheetEditable)
+      routeQueue.cancel(
+        "Routes waiting to send were dropped because the router isn't ready.",
+      );
+  }, [routeQueue, sheetEditable]);
+  useEffect(
+    () => () => {
+      routeQueue.cancel(
+        "Routes waiting to send were dropped because the router restarted.",
+      );
+    },
+    [routeQueue, state.version.generation],
+  );
+  const routeFromSheet = useCallback(
+    (pick: RoutePick): void => {
+      if (automaticTake) {
+        routeQueue.enqueue(pick);
+        return;
+      }
+      if (
+        !truthReady ||
+        state.drafts.some(({ status }) => status !== "staged")
+      ) {
+        onRouteFailure?.(
+          "Finish or clear the routes below before staging another.",
+        );
+        return;
+      }
+      router.clearStaged();
+      router.stageMapping({
+        source: pick.source,
+        destination: pick.destination,
+        levels: pick.levels,
+      });
+    },
+    [
+      automaticTake,
+      onRouteFailure,
+      routeQueue,
+      router,
+      state.drafts,
+      truthReady,
+    ],
+  );
+  const draftOverlays = useMemo(
+    () => draftRouteOverlays(state.drafts),
+    [state.drafts],
+  );
+  const sheetOverlay = useCallback(
+    (destination: number, level: number) =>
+      routeQueue.overlay(destination, level) ??
+      draftOverlays.get(routeCellKey(destination, level)),
+    // The queue is mutable; its revision says when its answers change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [draftOverlays, routeQueue, routeQueueRevision],
+  );
+  const sheetLabels = useMemo(
+    () => sourceLabelMap(state),
+    // Only names matter here, so route changes must not rebuild this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.pages.sources, state.sources],
+  );
+  const sheetChoices = useMemo(
+    () =>
+      sourceChoices(
+        [...sheetLabels]
+          .map(([address, label]) => ({ address, label }))
+          .sort((left, right) => left.address - right.address),
+      ),
+    [sheetLabels],
+  );
+  const sheetRows = useMemo(
+    () =>
+      destinationModel.items.map(({ address, label }) => ({ address, label })),
+    // Row identity comes from the loaded pages, not from each route change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.pages.destinations, destinationSearch, destinationSourceFilter],
+  );
+
+  // The sheet shows every destination and names every source, so load all pages.
+  const loadSourcesForSheet =
+    sheetActive &&
+    !state.pageReloads.sources &&
+    sourceModel.hasMore &&
+    sourceLoader.phase === "idle" &&
+    state.pages.sources.length < MAX_ROUTER_CACHED_PAGES_PER_RESOURCE;
+  const loadDestinationsForSheet =
+    sheetActive &&
+    !state.pageReloads.destinations &&
+    destinationModel.hasMore &&
+    destinationLoader.phase === "idle" &&
+    state.pages.destinations.length < MAX_ROUTER_CACHED_PAGES_PER_RESOURCE;
+  const loadSourcePageForSheet = sourceLoader.loadPage;
+  const nextSheetSourcePage = sourceModel.nextAfterAddress;
+  const loadDestinationPageForSheet = destinationLoader.loadPage;
+  const nextSheetDestinationPage = destinationModel.nextAfterAddress;
+  useEffect(() => {
+    if (loadSourcesForSheet)
+      void loadSourcePageForSheet(nextSheetSourcePage).catch(() => undefined);
+  }, [loadSourcePageForSheet, loadSourcesForSheet, nextSheetSourcePage]);
+  useEffect(() => {
+    if (loadDestinationsForSheet)
+      void loadDestinationPageForSheet(nextSheetDestinationPage).catch(
+        () => undefined,
+      );
+  }, [
+    loadDestinationPageForSheet,
+    loadDestinationsForSheet,
+    nextSheetDestinationPage,
+  ]);
+
   const sourceFocusAddress =
     focusedSource ??
     state.focusedSource ??
@@ -1039,216 +1253,270 @@ function RouterWorkspace({
         setLevelSelectorOpen(false);
       }}
     >
-      <section
-        className="router-pane router-resource-pane router-source-pane"
-        aria-labelledby="router-sources-title"
-      >
-        <RouterPaneHeading
-          id="router-sources-title"
-          label="Sources"
-          loadedCount={sourceModel.items.length}
-          side="source"
-          totalCount={sourceModel.totalCount}
-        />
-        <div className="router-pane-toolbar">
-          <RouterSearchField
-            label="Search sources"
-            placeholder="Search label or address"
-            value={sourceSearchInput}
-            onChange={setSourceSearchInput}
-          />
-        </div>
-        <div className="router-list-frame">
-          <VirtualRouterList
-            activeAddress={sourceFocusAddress}
-            ariaLabel="Sources"
-            busy={sourceBusy}
-            className="router-virtual-list"
-            hasMore={!state.pageReloads.sources && sourceModel.hasMore}
-            itemOffset={sourceModel.itemOffset}
-            items={sourceModel.items}
-            loadPage={sourceLoader.loadPage}
-            nextAfterAddress={sourceModel.nextAfterAddress}
-            onActiveAddressChange={setFocusedSource}
-            onActivateAddress={activateSource}
-            onToggleAddress={activateSource}
-            overscan={ROUTER_LIST_OVERSCAN}
-            pageIdentity={sourceListIdentity}
-            renderRow={(source) => (
-              <SourceRow
-                currentForSelectedDestination={selectedDestinationSources.has(
-                  source.address,
-                )}
-                destinations={sourceRouteDestinations.get(source.address) ?? []}
-                routeDelta={sourceRouteDeltas.get(source.address)}
-                selected={state.selection.source === source.address}
-                source={source}
-                stagedSource={state.drafts.some(
-                  (draft) => draft.source === source.address,
-                )}
-              />
-            )}
-            rowHeight={ROUTER_SOURCE_ROW_HEIGHT}
-            selectedAddress={state.selection.source}
-            totalCount={sourceVirtualTotal}
-          />
-          <RouterListStatus
-            busy={sourceBusy}
-            hasPage={sourceModel.hasPage}
-            itemCount={sourceModel.items.length}
-            label="sources"
-            phase={sourceLoader.phase}
-            search={sourceSearch}
-            totalCount={sourceModel.totalCount}
-            onRetry={() =>
-              sourceLoader.loadPage(sourceLoader.failedAfterAddress)
-            }
-          />
-        </div>
-      </section>
-
-      <section
-        className="router-pane router-resource-pane router-destination-pane"
-        aria-labelledby="router-destinations-title"
-      >
-        <RouterPaneHeading
-          id="router-destinations-title"
-          label="Destinations"
-          loadedCount={destinationModel.items.length}
-          side="destination"
-          totalCount={destinationModel.totalCount}
-        />
-        <div className="router-pane-toolbar">
-          <RouterSearchField
-            label="Search destinations"
-            placeholder="Search label or address"
-            value={destinationSearchInput}
-            onChange={setDestinationSearchInput}
-          />
-          {showsLevels ? (
-            <label className="router-view-level-filter">
-              <span>View routes</span>
-              <select
-                aria-label="View routing level"
-                value={viewLevel === null ? "all" : String(viewLevel)}
-                onChange={(event) => {
-                  const nextValue = event.currentTarget.value;
-                  setViewLevelSelection(
-                    nextValue === "all" ? null : Number(nextValue),
-                  );
-                }}
-              >
-                <option value="all">All levels</option>
-                {configuredLevels.map((level) => (
-                  <option key={level} value={level}>
-                    Level {level}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-          <label className="router-fed-filter">
-            <input
-              type="checkbox"
-              aria-label="Fed by selected source"
-              checked={fedOnlyActive}
-              disabled={selectedSource === null || !truthReady}
-              onChange={(event) => {
-                setFedOnly(event.currentTarget.checked);
+      {sheetActive ? (
+        <section
+          className="router-pane router-sheet-pane"
+          aria-label="Routes by destination and level"
+        >
+          <div className="router-list-frame">
+            <RoutesSheet
+              state={state}
+              columns={sheetColumns}
+              rows={sheetRows}
+              labels={sheetLabels}
+              choices={sheetChoices}
+              editable={sheetEditable}
+              overlay={sheetOverlay}
+              overlayRevision={`${String(routeQueueRevision)}|${state.drafts
+                .map(({ mappingId, status }) => `${mappingId}:${status}`)
+                .join(",")}`}
+              onPick={routeFromSheet}
+              onRefusedEdit={() => {
+                onRouteFailure?.(
+                  "Paste and fill don't send routes. Type in a cell to pick a source.",
+                );
+              }}
+              onError={(message) => {
+                onRouteFailure?.(message);
               }}
             />
-            <span className="router-toggle-track" aria-hidden="true">
-              <span />
-            </span>
-            <span>Fed only</span>
-            <span className="router-visually-hidden">
-              Fed by selected source
-            </span>
-          </label>
-        </div>
-        <div className="router-list-frame">
-          <VirtualRouterList
-            activeAddress={destinationFocusAddress}
-            ariaLabel="Destinations"
-            busy={destinationBusy}
-            className="router-virtual-list"
-            hasMore={
-              !state.pageReloads.destinations && destinationModel.hasMore
-            }
-            itemOffset={destinationModel.itemOffset}
-            items={destinationModel.items}
-            isAddressChecked={(address) =>
-              state.drafts.some((draft) => draft.destination === address)
-            }
-            loadPage={destinationLoader.loadPage}
-            nextAfterAddress={destinationModel.nextAfterAddress}
-            onActiveAddressChange={setFocusedDestination}
-            onActivateAddress={activateDestination}
-            overscan={ROUTER_LIST_OVERSCAN}
-            pageIdentity={destinationListIdentity}
-            renderRow={(destination) => (
-              <DestinationRow
-                destination={destination}
-                lockOwner={
-                  destinationLocks === undefined
-                    ? undefined
-                    : (destinationLocks.find(
-                        (lock) => lock.destination === destination.address,
-                      )?.owner ?? null)
-                }
-                draft={state.drafts.find(
-                  (candidate) => candidate.destination === destination.address,
-                )}
-                selected={state.selection.destination === destination.address}
-                selectedSource={selectedSource}
-                showsLevels={showsLevels}
-                sourceLabels={sourceLabels}
-                stageDisabled={stageDisabled}
-                state={state}
-                visibleLevels={visibleLevels}
+            <RouterListStatus
+              busy={destinationBusy}
+              hasPage={destinationModel.hasPage}
+              itemCount={destinationModel.items.length}
+              label="destinations"
+              phase={destinationLoader.phase}
+              search={null}
+              totalCount={destinationModel.totalCount}
+              onRetry={() =>
+                destinationLoader.loadPage(destinationLoader.failedAfterAddress)
+              }
+            />
+          </div>
+        </section>
+      ) : (
+        <>
+          <section
+            className="router-pane router-resource-pane router-source-pane"
+            aria-labelledby="router-sources-title"
+          >
+            <RouterPaneHeading
+              id="router-sources-title"
+              label="Sources"
+              loadedCount={sourceModel.items.length}
+              side="source"
+              totalCount={sourceModel.totalCount}
+            />
+            <div className="router-pane-toolbar">
+              <RouterSearchField
+                label="Search sources"
+                placeholder="Search label or address"
+                value={sourceSearchInput}
+                onChange={setSourceSearchInput}
               />
-            )}
-            rowHeight={ROUTER_DESTINATION_ROW_HEIGHT}
-            selectedAddress={state.selection.destination}
-            totalCount={destinationVirtualTotal}
-            onToggleAddress={activateDestination}
-          />
-          <RouterListStatus
-            busy={destinationBusy}
-            hasPage={destinationModel.hasPage}
-            itemCount={destinationModel.items.length}
-            label="destinations"
-            phase={destinationLoader.phase}
-            search={destinationSearch}
-            totalCount={destinationModel.totalCount}
-            onRetry={() =>
-              destinationLoader.loadPage(destinationLoader.failedAfterAddress)
-            }
-          />
-        </div>
-      </section>
+            </div>
+            <div className="router-list-frame">
+              <VirtualRouterList
+                activeAddress={sourceFocusAddress}
+                ariaLabel="Sources"
+                busy={sourceBusy}
+                className="router-virtual-list"
+                hasMore={!state.pageReloads.sources && sourceModel.hasMore}
+                itemOffset={sourceModel.itemOffset}
+                items={sourceModel.items}
+                loadPage={sourceLoader.loadPage}
+                nextAfterAddress={sourceModel.nextAfterAddress}
+                onActiveAddressChange={setFocusedSource}
+                onActivateAddress={activateSource}
+                onToggleAddress={activateSource}
+                overscan={ROUTER_LIST_OVERSCAN}
+                pageIdentity={sourceListIdentity}
+                renderRow={(source) => (
+                  <SourceRow
+                    currentForSelectedDestination={selectedDestinationSources.has(
+                      source.address,
+                    )}
+                    destinations={
+                      sourceRouteDestinations.get(source.address) ?? []
+                    }
+                    routeDelta={sourceRouteDeltas.get(source.address)}
+                    selected={state.selection.source === source.address}
+                    source={source}
+                    stagedSource={state.drafts.some(
+                      (draft) => draft.source === source.address,
+                    )}
+                  />
+                )}
+                rowHeight={ROUTER_SOURCE_ROW_HEIGHT}
+                selectedAddress={state.selection.source}
+                totalCount={sourceVirtualTotal}
+              />
+              <RouterListStatus
+                busy={sourceBusy}
+                hasPage={sourceModel.hasPage}
+                itemCount={sourceModel.items.length}
+                label="sources"
+                phase={sourceLoader.phase}
+                search={sourceSearch}
+                totalCount={sourceModel.totalCount}
+                onRetry={() =>
+                  sourceLoader.loadPage(sourceLoader.failedAfterAddress)
+                }
+              />
+            </div>
+          </section>
 
-      <RouteComposer
-        mutationsAvailable={truthReady}
-        pendingRouteReplacement={truthReady ? pendingRouteReplacement : null}
-        selectedLevels={stagingLevels}
-        showsLevels={showsLevels}
-        sourceLabels={sourceLabels}
-        state={state}
-        onCancelRouteReplacement={() => {
-          setPendingRouteReplacement(null);
-        }}
-        onConfirmRouteReplacement={confirmRouteReplacement}
-        onRequestRouteReplacement={(destination) => {
-          if (truthReady) setPendingRouteReplacement(destination);
-        }}
-        onRebaseMapping={(mappingId) => {
-          if (truthReady) router.rebaseMapping(mappingId);
-        }}
-        onRemoveMapping={(mappingId) => {
-          router.removeStagedMapping(mappingId);
-        }}
-      />
+          <section
+            className="router-pane router-resource-pane router-destination-pane"
+            aria-labelledby="router-destinations-title"
+          >
+            <RouterPaneHeading
+              id="router-destinations-title"
+              label="Destinations"
+              loadedCount={destinationModel.items.length}
+              side="destination"
+              totalCount={destinationModel.totalCount}
+            />
+            <div className="router-pane-toolbar">
+              <RouterSearchField
+                label="Search destinations"
+                placeholder="Search label or address"
+                value={destinationSearchInput}
+                onChange={setDestinationSearchInput}
+              />
+              {showsLevels ? (
+                <label className="router-view-level-filter">
+                  <span>View routes</span>
+                  <select
+                    aria-label="View routing level"
+                    value={viewLevel === null ? "all" : String(viewLevel)}
+                    onChange={(event) => {
+                      const nextValue = event.currentTarget.value;
+                      setViewLevelSelection(
+                        nextValue === "all" ? null : Number(nextValue),
+                      );
+                    }}
+                  >
+                    <option value="all">All levels</option>
+                    {configuredLevels.map((level) => (
+                      <option key={level} value={level}>
+                        Level {level}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              <label className="router-fed-filter">
+                <input
+                  type="checkbox"
+                  aria-label="Fed by selected source"
+                  checked={fedOnlyActive}
+                  disabled={selectedSource === null || !truthReady}
+                  onChange={(event) => {
+                    setFedOnly(event.currentTarget.checked);
+                  }}
+                />
+                <span className="router-toggle-track" aria-hidden="true">
+                  <span />
+                </span>
+                <span>Fed only</span>
+                <span className="router-visually-hidden">
+                  Fed by selected source
+                </span>
+              </label>
+            </div>
+            <div className="router-list-frame">
+              <VirtualRouterList
+                activeAddress={destinationFocusAddress}
+                ariaLabel="Destinations"
+                busy={destinationBusy}
+                className="router-virtual-list"
+                hasMore={
+                  !state.pageReloads.destinations && destinationModel.hasMore
+                }
+                itemOffset={destinationModel.itemOffset}
+                items={destinationModel.items}
+                isAddressChecked={(address) =>
+                  state.drafts.some((draft) => draft.destination === address)
+                }
+                loadPage={destinationLoader.loadPage}
+                nextAfterAddress={destinationModel.nextAfterAddress}
+                onActiveAddressChange={setFocusedDestination}
+                onActivateAddress={activateDestination}
+                overscan={ROUTER_LIST_OVERSCAN}
+                pageIdentity={destinationListIdentity}
+                renderRow={(destination) => (
+                  <DestinationRow
+                    destination={destination}
+                    lockOwner={
+                      destinationLocks === undefined
+                        ? undefined
+                        : (destinationLocks.find(
+                            (lock) => lock.destination === destination.address,
+                          )?.owner ?? null)
+                    }
+                    draft={state.drafts.find(
+                      (candidate) =>
+                        candidate.destination === destination.address,
+                    )}
+                    selected={
+                      state.selection.destination === destination.address
+                    }
+                    selectedSource={selectedSource}
+                    showsLevels={showsLevels}
+                    sourceLabels={sourceLabels}
+                    stageDisabled={stageDisabled}
+                    state={state}
+                    visibleLevels={visibleLevels}
+                  />
+                )}
+                rowHeight={ROUTER_DESTINATION_ROW_HEIGHT}
+                selectedAddress={state.selection.destination}
+                totalCount={destinationVirtualTotal}
+                onToggleAddress={activateDestination}
+              />
+              <RouterListStatus
+                busy={destinationBusy}
+                hasPage={destinationModel.hasPage}
+                itemCount={destinationModel.items.length}
+                label="destinations"
+                phase={destinationLoader.phase}
+                search={destinationSearch}
+                totalCount={destinationModel.totalCount}
+                onRetry={() =>
+                  destinationLoader.loadPage(
+                    destinationLoader.failedAfterAddress,
+                  )
+                }
+              />
+            </div>
+          </section>
+        </>
+      )}
+
+      {sheetActive && state.drafts.length === 0 ? null : (
+        <RouteComposer
+          mutationsAvailable={truthReady}
+          pendingRouteReplacement={truthReady ? pendingRouteReplacement : null}
+          selectedLevels={stagingLevels}
+          showsLevels={showsLevels}
+          sourceLabels={sourceLabels}
+          state={state}
+          onCancelRouteReplacement={() => {
+            setPendingRouteReplacement(null);
+          }}
+          onConfirmRouteReplacement={confirmRouteReplacement}
+          onRequestRouteReplacement={(destination) => {
+            if (truthReady) setPendingRouteReplacement(destination);
+          }}
+          onRebaseMapping={(mappingId) => {
+            if (truthReady) router.rebaseMapping(mappingId);
+          }}
+          onRemoveMapping={(mappingId) => {
+            router.removeStagedMapping(mappingId);
+          }}
+        />
+      )}
 
       <RouterActionBar
         automaticTake={automaticTake}
@@ -1261,7 +1529,7 @@ function RouterWorkspace({
         replaceSourceCandidate={truthReady ? replaceSourceCandidate : null}
         router={router}
         selectedLevels={stagingLevels}
-        showsLevels={showsLevels}
+        showsLevels={sheetActive ? false : showsLevels}
         sourceLabels={sourceLabels}
         state={state}
         truthReady={truthReady}

@@ -149,7 +149,7 @@ export function withRouterInterface(
     ...base,
     lifecycle: { runWhenDisabled: true },
     host: {
-      minimumVersion: "2.0.15",
+      minimumVersion: "2.0.18",
       requiredFeatures: [
         ...new Set([
           ...("requiredFeatures" in base.host
@@ -173,6 +173,7 @@ export function withRouterInterface(
           "module-choice-bindings-v1",
           "module-pages-v1",
           "module-custom-pages-v1",
+          "module-spreadsheet-controls-v1",
           "module-settings-pages-v1",
           "module-page-navigation-v1",
           "module-disabled-state-v1",
