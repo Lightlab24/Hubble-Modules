@@ -593,29 +593,181 @@ export function stageMapping(
   ) {
     return state;
   }
-  const batchSource = state.drafts[0]?.source;
-  if (batchSource !== undefined && batchSource !== input.source) return state;
-  const expected = levels.map((level) => ({
+  const batchSource = stagedBatchSource(state.drafts);
+  if (batchSource !== null && batchSource !== input.source) return state;
+  const mapping = newStagedDraft(
+    state,
+    { source: input.source, destination: input.destination, levels },
+    idFactory,
+    allowUnassigned,
+  );
+  if (mapping === null) return state;
+  const drafts = [
+    ...state.drafts.filter(
+      ({ destination }) => destination !== input.destination,
+    ),
+    mapping,
+  ];
+  if (!draftsFitOneTake(drafts)) return state;
+  return freezeState({ ...state, drafts: Object.freeze(drafts) });
+}
+
+export interface StagedRouteChange {
+  readonly destination: number;
+  readonly levels: readonly number[];
+  /** Null takes these levels back out of what is staged. */
+  readonly source: number | null;
+}
+
+export type StagedRouteChangeOutcome =
+  | "changed"
+  | "unchanged"
+  /** A Take is running or route truth can't be trusted. */
+  | "unavailable"
+  | "invalid"
+  | "capacity";
+
+/**
+ * The source every staged route shares. Null when nothing is staged, or when
+ * the Routes sheet has staged routes from different sources.
+ */
+export function stagedBatchSource(
+  drafts: readonly RouterDraftMapping[],
+): number | null {
+  const source = drafts[0]?.source ?? null;
+  return drafts.every((draft) => draft.source === source) ? source : null;
+}
+
+/**
+ * Applies one Routes sheet gesture to the staged routes, all of it or none of
+ * it. Each cell is its own target, so routes may use different sources and one
+ * destination may hold different sources on different levels. A level already
+ * on the chosen source has nothing to take, so it isn't staged.
+ */
+export function changeStagedRoutes(
+  state: RouterState,
+  changes: readonly StagedRouteChange[],
+  idFactory: () => string = randomUuid,
+  allowUnassigned = false,
+): {
+  readonly state: RouterState;
+  readonly outcome: StagedRouteChangeOutcome;
+} {
+  const refuse = (outcome: StagedRouteChangeOutcome) => ({ state, outcome });
+  if (
+    !routerTruthIsEditable(state) ||
+    state.drafts.some((draft) => !draftCanBeEdited(draft))
+  ) {
+    return refuse("unavailable");
+  }
+
+  // Later cells in the gesture win, as they would if typed one at a time.
+  const wanted = new Map<
+    string,
+    { destination: number; level: number; source: number | null }
+  >();
+  for (const { destination, levels, source } of changes) {
+    if (
+      !addressFitsMode(state, destination) ||
+      (source !== null && !addressFitsMode(state, source))
+    ) {
+      return refuse("invalid");
+    }
+    for (const level of levels) {
+      if (!levelFitsMode(state, level)) return refuse("invalid");
+      wanted.set(routeIntentKey(destination, level), {
+        destination,
+        level,
+        source,
+      });
+    }
+  }
+
+  const kept: RouterDraftMapping[] = [];
+  let removedLevels = false;
+  for (const draft of state.drafts) {
+    const levels = draft.levels.filter(
+      (level) => !wanted.has(routeIntentKey(draft.destination, level)),
+    );
+    if (levels.length === draft.levels.length) {
+      kept.push(draft);
+      continue;
+    }
+    removedLevels = true;
+    if (levels.length > 0) kept.push(draftForLevels(draft, levels));
+  }
+
+  const additions = new Map<
+    string,
+    { destination: number; source: number; levels: number[] }
+  >();
+  for (const { destination, level, source } of wanted.values()) {
+    if (source === null || sourceAt(state, destination, level) === source)
+      continue;
+    const key = routeIntentKey(destination, source);
+    const addition = additions.get(key);
+    if (addition === undefined)
+      additions.set(key, { destination, source, levels: [level] });
+    else addition.levels.push(level);
+  }
+  if (additions.size === 0 && !removedLevels) return refuse("unchanged");
+
+  // One source on several levels of a destination is one route to Take.
+  const drafts: RouterDraftMapping[] = [];
+  for (const draft of kept) {
+    const addition =
+      draft.status === "staged"
+        ? additions.get(routeIntentKey(draft.destination, draft.source))
+        : undefined;
+    if (addition === undefined) drafts.push(draft);
+    else addition.levels.push(...draft.levels);
+  }
+  for (const addition of additions.values()) {
+    const draft = newStagedDraft(
+      state,
+      { ...addition, levels: uniqueSorted(addition.levels) },
+      idFactory,
+      allowUnassigned,
+    );
+    if (draft === null) return refuse("invalid");
+    drafts.push(draft);
+  }
+  if (!draftsFitOneTake(drafts)) return refuse("capacity");
+  return {
+    state: freezeState({ ...state, drafts: Object.freeze(drafts) }),
+    outcome: "changed",
+  };
+}
+
+function newStagedDraft(
+  state: RouterState,
+  route: {
+    readonly source: number;
+    readonly destination: number;
+    readonly levels: readonly number[];
+  },
+  idFactory: () => string,
+  allowUnassigned: boolean,
+): RouterDraftMapping | null {
+  const expected = route.levels.map((level) => ({
     level,
-    source: sourceAt(state, input.destination, level),
+    source: sourceAt(state, route.destination, level),
   }));
   if (!allowUnassigned && expected.some(({ source }) => source === null))
-    return state;
-
+    return null;
   const mappingId = RouterMappingIdSchema.safeParse(idFactory());
-  if (!mappingId.success) return state;
-  const normalizedExpected = expected;
-  const mapping = freezeDraft({
+  if (!mappingId.success) return null;
+  return freezeDraft({
     mappingId: mappingId.data,
-    source: input.source,
-    destination: input.destination,
-    levels,
-    expected: normalizedExpected,
+    source: route.source,
+    destination: route.destination,
+    levels: route.levels,
+    expected,
     baselineGeneration: state.version.generation,
     operationId: null,
     observedDesiredLevels: [],
     observedContradictoryLevels: [],
-    targets: normalizedExpected.map(({ level, source }) => ({
+    targets: expected.map(({ level, source }) => ({
       level,
       expectedSource: source,
       status: "staged" as const,
@@ -625,20 +777,37 @@ export function stageMapping(
     dispatchOutcomes: [],
     status: "staged",
   });
-  const drafts = [
-    ...state.drafts.filter(
-      ({ destination }) => destination !== input.destination,
-    ),
-    mapping,
-  ];
-  if (
-    drafts.length > MAX_ROUTER_TAKE_MAPPINGS ||
-    drafts.reduce((count, draft) => count + draft.levels.length, 0) >
+}
+
+function draftForLevels(
+  draft: RouterDraftMapping,
+  levels: readonly number[],
+): RouterDraftMapping {
+  const keep = new Set(levels);
+  return withTargetAggregate(
+    freezeDraft({
+      ...draft,
+      levels,
+      expected: draft.expected.filter(({ level }) => keep.has(level)),
+      observedDesiredLevels: draft.observedDesiredLevels.filter((level) =>
+        keep.has(level),
+      ),
+      observedContradictoryLevels: draft.observedContradictoryLevels.filter(
+        (level) => keep.has(level),
+      ),
+    }),
+    draft.targets.filter(({ level }) => keep.has(level)),
+    draft.dispatchDiagnostics,
+    draft.dispatchOutcomes.filter(({ level }) => keep.has(level)),
+  );
+}
+
+function draftsFitOneTake(drafts: readonly RouterDraftMapping[]): boolean {
+  return (
+    drafts.length <= MAX_ROUTER_TAKE_MAPPINGS &&
+    drafts.reduce((count, draft) => count + draft.levels.length, 0) <=
       MAX_ROUTER_TAKE_CROSSPOINTS
-  ) {
-    return state;
-  }
-  return freezeState({ ...state, drafts: Object.freeze(drafts) });
+  );
 }
 
 export function clearStaged(state: RouterState): RouterState {

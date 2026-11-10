@@ -174,6 +174,7 @@ export function withRouterInterface(
           "module-pages-v1",
           "module-custom-pages-v1",
           "module-spreadsheet-controls-v1",
+          "module-spreadsheet-extended-editing-v1",
           "module-settings-pages-v1",
           "module-page-navigation-v1",
           "module-disabled-state-v1",

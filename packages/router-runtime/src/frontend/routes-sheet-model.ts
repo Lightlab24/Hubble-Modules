@@ -2,7 +2,7 @@ import {
   resourceMatchesSearch,
   type RouteCrosspointsResult,
 } from "../page-contract.js";
-import type { RouterDraftMapping } from "./router-state.js";
+import type { RouterDraftMapping, StagedRouteChange } from "./router-state.js";
 
 /** What the sheet shows for a cell whose route has been requested but not observed. */
 export type RouteCellPhase = "staged" | "queued" | "sending" | "confirming";
@@ -138,9 +138,68 @@ export interface RouteEditBatch {
   }[];
 }
 
+/** Routes the sheet can't show as a cell change, so they stay listed below it. */
+export function draftsNeedingAttention(
+  drafts: readonly RouterDraftMapping[],
+): readonly RouterDraftMapping[] {
+  return drafts.filter(({ status }) =>
+    ["conflict", "failed", "stale", "unconfirmed"].includes(status),
+  );
+}
+
+/** What a staged cell will replace, for its hover text. */
+export function stagedCellReplaces(
+  column: RoutesSheetColumn,
+  truth: (level: number) => number | null | undefined,
+  overlay: (level: number) => RouteCellOverlay | undefined,
+  labels: ReadonlyMap<number, string | null>,
+): string | undefined {
+  const replaced = new Set<number | null>();
+  for (const level of column.levels) {
+    if (overlay(level)?.phase === "staged") replaced.add(truth(level) ?? null);
+  }
+  if (replaced.size === 0) return undefined;
+  if (replaced.size > 1) return "Replaces mixed sources";
+  const [source = null] = replaced;
+  return source === null
+    ? "Replaces nothing routed"
+    : `Replaces ${String(source)} ${labels.get(source) ?? ""}`.trimEnd();
+}
+
 /**
- * Only a single pick from a cell's source list is a route. Paste and fill can
- * span hundreds of live crosspoints, so they never send anything.
+ * What a sheet gesture stages while Take is held back. Null means the gesture
+ * has a value that can't be a route here, so none of it should apply. A blank
+ * in a paste or fill leaves its cell alone; only Delete takes a route back out.
+ */
+export function stagedChangesFromEdit(
+  batch: RouteEditBatch,
+  columns: readonly RoutesSheetColumn[],
+  isSource: (source: number) => boolean,
+): readonly StagedRouteChange[] | null {
+  if (!["choice", "paste", "fill", "clear"].includes(batch.source)) return null;
+  const columnsById = new Map(columns.map((column) => [column.id, column]));
+  const changes: StagedRouteChange[] = [];
+  for (const edit of batch.edits) {
+    const column = columnsById.get(edit.columnId);
+    const destination = Number(edit.rowId);
+    if (column === undefined || !Number.isInteger(destination)) return null;
+    if (batch.source === "clear") {
+      changes.push({ destination, levels: column.levels, source: null });
+      continue;
+    }
+    const text = edit.value.trim();
+    if (text === "" && batch.source !== "choice") continue;
+    const source = /^\d+$/u.test(text) ? Number(text) : Number.NaN;
+    if (!isSource(source)) return null;
+    changes.push({ destination, levels: column.levels, source });
+  }
+  return changes;
+}
+
+/**
+ * With Automatic Take on, only a single pick from a cell's source list is a
+ * route. Paste and fill can span hundreds of live crosspoints, so they never
+ * send anything.
  */
 export function routePickFromEdit(
   batch: RouteEditBatch,

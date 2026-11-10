@@ -15,10 +15,10 @@ import {
 
 import type { RouterDestinationRow, RouterState } from "./router-state.js";
 import {
-  routePickFromEdit,
   routesSheetCell,
+  stagedCellReplaces,
   type RouteCellOverlay,
-  type RoutePick,
+  type RouteEditBatch,
   type RoutesSheetColumn,
 } from "./routes-sheet-model.js";
 
@@ -53,9 +53,8 @@ export interface RoutesSheetProps {
   readonly overlay: Overlay;
   /** Changes whenever `overlay` would return something new. */
   readonly overlayRevision: string;
-  readonly onPick: (pick: RoutePick) => void;
-  /** A paste or fill was refused because only a single pick sends a route. */
-  readonly onRefusedEdit: () => void;
+  /** One pick, paste, fill or Delete. The page decides what it does to routes. */
+  readonly onEdit: (batch: RouteEditBatch) => void;
   readonly onError: (message: string) => void;
 }
 
@@ -74,8 +73,7 @@ export function RoutesSheet({
   unassignedRoutable,
   overlay,
   overlayRevision,
-  onPick,
-  onRefusedEdit,
+  onEdit,
   onError,
 }: RoutesSheetProps): React.JSX.Element {
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -102,8 +100,7 @@ export function RoutesSheet({
     editable,
     unassignedRoutable,
     overlay,
-    onPick,
-    onRefusedEdit,
+    onEdit,
     onError,
   });
   useLayoutEffect(() => {
@@ -116,8 +113,7 @@ export function RoutesSheet({
       editable,
       unassignedRoutable,
       overlay,
-      onPick,
-      onRefusedEdit,
+      onEdit,
       onError,
     };
   });
@@ -131,6 +127,7 @@ export function RoutesSheet({
     void mountSpreadsheetControls({
       root,
       viewport,
+      extendedEditing: true,
       getRows: () => latest.current.rowIds,
       getColumns: () => latest.current.hostColumns,
       getCell: ({ rowId, columnId }): SpreadsheetCell | null => {
@@ -154,10 +151,7 @@ export function RoutesSheet({
         };
       },
       onEdit: (batch) => {
-        const current = latest.current;
-        const pick = routePickFromEdit(batch, current.columns);
-        if (pick === null) current.onRefusedEdit();
-        else current.onPick(pick);
+        latest.current.onEdit(batch);
       },
       onError: (error) => {
         latest.current.onError(error.message);
@@ -346,6 +340,12 @@ const RoutesSheetRow = memo(
               data-hubble-column={column.id}
               data-route-phase={cell.phase ?? undefined}
               data-route-kind={cell.kind}
+              title={stagedCellReplaces(
+                column,
+                (level) => row?.routes.get(level),
+                (level) => overlay(address, level),
+                labels,
+              )}
             >
               <RouteCellText
                 cell={cell}

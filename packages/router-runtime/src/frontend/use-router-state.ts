@@ -33,10 +33,13 @@ import {
   selectSource as selectRouterSource,
   sourceAt,
   stageMapping as stageRouterMapping,
+  changeStagedRoutes as changeRouterStagedRoutes,
   type RouterDraftMapping,
   type RouterSelections,
   type RouterState,
   type StageRouterMappingInput,
+  type StagedRouteChange,
+  type StagedRouteChangeOutcome,
 } from "./router-state.js";
 
 export type RouterConnectionStatus =
@@ -107,6 +110,10 @@ export interface RouterConnection {
   selectDestination(destination: number | null): void;
   clearSelection(): void;
   stageMapping(input: StageRouterMappingInput): void;
+  /** Add, replace or remove staged routes for one Routes sheet gesture. */
+  changeStagedRoutes(
+    changes: readonly StagedRouteChange[],
+  ): StagedRouteChangeOutcome;
   replaceStagedSource(source: number): void;
   rebaseMapping(mappingId: string): void;
   removeStagedMapping(mappingId: string): void;
@@ -780,6 +787,22 @@ export function useRouterState(
     [allowUnassigned, commitState, currentSession],
   );
 
+  const changeStagedRoutes = useCallback(
+    (changes: readonly StagedRouteChange[]): StagedRouteChangeOutcome => {
+      const session = currentSession();
+      if (session === null) return "unavailable";
+      const result = changeRouterStagedRoutes(
+        session.state,
+        changes,
+        randomUuidRef.current,
+        allowUnassigned,
+      );
+      if (result.outcome === "changed") commitState(result.state);
+      return result.outcome;
+    },
+    [allowUnassigned, commitState, currentSession],
+  );
+
   const clearStaged = useCallback((): void => {
     const session = currentSession();
     if (session === null) return;
@@ -925,6 +948,7 @@ export function useRouterState(
     selectDestination,
     clearSelection,
     stageMapping,
+    changeStagedRoutes,
     replaceStagedSource,
     rebaseMapping,
     removeStagedMapping,

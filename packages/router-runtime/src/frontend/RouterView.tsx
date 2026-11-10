@@ -39,9 +39,11 @@ import {
   draftCounts,
   MAX_ROUTER_CACHED_PAGES_PER_RESOURCE,
   sourceAt,
+  stagedBatchSource,
   type RouterDraftMapping,
   type RouterLoadedPage,
   type RouterState,
+  type StagedRouteChangeOutcome,
 } from "./router-state.js";
 import {
   MAXIMUM_ROUTER_VIEW_ZOOM,
@@ -64,15 +66,29 @@ import { RouteSendQueue } from "./route-send-queue.js";
 import { RoutesSheet } from "./RoutesSheet.js";
 import {
   draftRouteOverlays,
+  draftsNeedingAttention,
   routeCellKey,
+  routePickFromEdit,
   routeSendOutcome,
   routesSheetColumns,
   routesSheetRowsMatching,
   sourceChoices,
+  stagedChangesFromEdit,
+  type RouteEditBatch,
   type RoutePick,
 } from "./routes-sheet-model.js";
 import "./router.css";
 import { routerZoomStorage } from "./zoom-storage.js";
+
+const SHEET_STAGING_REFUSALS: Partial<
+  Record<StagedRouteChangeOutcome, string>
+> = {
+  unavailable:
+    "Routes are still being sent. Wait for them to finish before staging more.",
+  invalid: "Those values aren't sources on this router, so nothing was staged.",
+  capacity:
+    "One Take can send up to 256 routes and 4,096 crosspoints, so nothing was staged.",
+};
 
 const ROUTER_PAGE_SIZE = MAX_ROUTER_PAGE_ENTRIES;
 const ROUTER_FILTER_REFRESH_DELAY_MS = 50;
@@ -785,7 +801,7 @@ function RouterWorkspace({
     source: destinationSourceFilter,
   });
   const destinationPageSize = destinationPageLimit(state.levels);
-  const batchSource = state.drafts[0]?.source ?? null;
+  const batchSource = stagedBatchSource(state.drafts);
   const counts = draftCounts(state);
   const hasActiveTake = state.drafts.some((draft) =>
     draft.targets.some(
@@ -1137,37 +1153,6 @@ function RouterWorkspace({
     },
     [routeQueue, state.version.generation],
   );
-  const routeFromSheet = useCallback(
-    (pick: RoutePick): void => {
-      if (automaticTake) {
-        routeQueue.enqueue(pick);
-        return;
-      }
-      if (
-        !truthReady ||
-        state.drafts.some(({ status }) => status !== "staged")
-      ) {
-        onRouteFailure?.(
-          "Finish or clear the routes below before staging another.",
-        );
-        return;
-      }
-      router.clearStaged();
-      router.stageMapping({
-        source: pick.source,
-        destination: pick.destination,
-        levels: pick.levels,
-      });
-    },
-    [
-      automaticTake,
-      onRouteFailure,
-      routeQueue,
-      router,
-      state.drafts,
-      truthReady,
-    ],
-  );
   const draftOverlays = useMemo(
     () => draftRouteOverlays(state.drafts),
     [state.drafts],
@@ -1185,6 +1170,40 @@ function RouterWorkspace({
     // Only names matter here, so route changes must not rebuild this.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state.pages.sources, state.sources],
+  );
+  const editRoutesFromSheet = useCallback(
+    (batch: RouteEditBatch): void => {
+      if (automaticTake && batch.source !== "clear") {
+        const pick = routePickFromEdit(batch, sheetColumns);
+        if (pick === null) {
+          onRouteFailure?.(
+            "Paste and fill don't send routes. Type in a cell to pick a source.",
+          );
+          return;
+        }
+        // A later Take must not put back what this cell held before this route.
+        router.changeStagedRoutes([
+          { destination: pick.destination, levels: pick.levels, source: null },
+        ]);
+        routeQueue.enqueue(pick);
+        return;
+      }
+      const changes = stagedChangesFromEdit(batch, sheetColumns, (source) =>
+        sheetLabels.has(source),
+      );
+      const outcome =
+        changes === null ? "invalid" : router.changeStagedRoutes(changes);
+      const refusal = SHEET_STAGING_REFUSALS[outcome];
+      if (refusal !== undefined) onRouteFailure?.(refusal);
+    },
+    [
+      automaticTake,
+      onRouteFailure,
+      routeQueue,
+      router,
+      sheetColumns,
+      sheetLabels,
+    ],
   );
   const sheetChoices = useMemo(
     () =>
@@ -1239,6 +1258,11 @@ function RouterWorkspace({
     loadDestinationsForSheet,
     nextSheetDestinationPage,
   ]);
+
+  // On the sheet the cells show what is staged, so only trouble needs a card.
+  const listedDrafts = sheetActive
+    ? draftsNeedingAttention(state.drafts)
+    : state.drafts;
 
   const sourceFocusAddress =
     focusedSource ??
@@ -1309,14 +1333,12 @@ function RouterWorkspace({
               unassignedRoutable={unassignedRoutable}
               overlay={sheetOverlay}
               overlayRevision={`${String(routeQueueRevision)}|${state.drafts
-                .map(({ mappingId, status }) => `${mappingId}:${status}`)
+                .map(
+                  ({ mappingId, status, levels }) =>
+                    `${mappingId}:${status}:${levels.join("+")}`,
+                )
                 .join(",")}`}
-              onPick={routeFromSheet}
-              onRefusedEdit={() => {
-                onRouteFailure?.(
-                  "Paste and fill don't send routes. Type in a cell to pick a source.",
-                );
-              }}
+              onEdit={editRoutesFromSheet}
               onError={(message) => {
                 onRouteFailure?.(message);
               }}
@@ -1543,8 +1565,9 @@ function RouterWorkspace({
         </>
       )}
 
-      {sheetActive && state.drafts.length === 0 ? null : (
+      {sheetActive && listedDrafts.length === 0 ? null : (
         <RouteComposer
+          drafts={listedDrafts}
           mutationsAvailable={truthReady}
           pendingRouteReplacement={truthReady ? pendingRouteReplacement : null}
           selectedLevels={stagingLevels}
@@ -1570,7 +1593,7 @@ function RouterWorkspace({
       <RouterActionBar
         automaticTake={automaticTake}
         onAutomaticTakeChange={onAutomaticTakeChange}
-        batchSource={batchSource}
+        batchSource={sheetActive ? null : batchSource}
         clearStagedOpen={truthReady && clearStagedOpen}
         configuredLevels={configuredLevels}
         counts={counts}
@@ -2112,6 +2135,7 @@ function DestinationSummary({
 }
 
 function RouteComposer({
+  drafts,
   mutationsAvailable,
   onCancelRouteReplacement,
   onConfirmRouteReplacement,
@@ -2124,6 +2148,7 @@ function RouteComposer({
   sourceLabels,
   state,
 }: {
+  readonly drafts: readonly RouterDraftMapping[];
   readonly mutationsAvailable: boolean;
   readonly onCancelRouteReplacement: () => void;
   readonly onConfirmRouteReplacement: () => void;
@@ -2146,6 +2171,7 @@ function RouteComposer({
             draft.source === selectedSourceAddress &&
             draft.destination === selectedDestinationAddress,
         );
+  const batchSource = stagedBatchSource(state.drafts);
   let patchGuidance = "Choose a source or destination to begin a route.";
   if (selectedSourceAddress !== null && selectedDestinationAddress === null) {
     patchGuidance = `${sourceDisplayName(sourceLabels, selectedSourceAddress)} selected. Choose one or more destinations.`;
@@ -2173,11 +2199,8 @@ function RouteComposer({
     } else if (selectedLevels.length === 0) {
       patchGuidance =
         "Choose at least one routing level before staging this route.";
-    } else if (
-      state.drafts[0] !== undefined &&
-      state.drafts[0].source !== selectedSourceAddress
-    ) {
-      patchGuidance = `Staged routes use ${sourceDisplayName(sourceLabels, state.drafts[0].source)}. Replace the staged source or clear staged routes first.`;
+    } else if (batchSource !== null && batchSource !== selectedSourceAddress) {
+      patchGuidance = `Staged routes use ${sourceDisplayName(sourceLabels, batchSource)}. Replace the staged source or clear staged routes first.`;
     } else if (
       selectedLevels.some(
         (level) => sourceAt(state, selectedDestinationAddress, level) === null,
@@ -2188,7 +2211,7 @@ function RouteComposer({
       patchGuidance = `${sourceDisplayName(sourceLabels, selectedSourceAddress)} and ${destinationDisplayName(state, selectedDestinationAddress)} selected. Choose another endpoint or retry.`;
     }
   }
-  const expanded = state.drafts.length > 0;
+  const expanded = drafts.length > 0;
 
   return (
     <section
@@ -2213,6 +2236,7 @@ function RouteComposer({
           </div>
           {expanded ? (
             <StagedRouteList
+              drafts={drafts}
               mutationsAvailable={mutationsAvailable}
               onCancelRouteReplacement={onCancelRouteReplacement}
               onConfirmRouteReplacement={onConfirmRouteReplacement}
@@ -2233,6 +2257,7 @@ function RouteComposer({
 }
 
 function StagedRouteList({
+  drafts,
   mutationsAvailable,
   onCancelRouteReplacement,
   onConfirmRouteReplacement,
@@ -2245,6 +2270,7 @@ function StagedRouteList({
   sourceLabels,
   state,
 }: {
+  readonly drafts: readonly RouterDraftMapping[];
   readonly mutationsAvailable: boolean;
   readonly onCancelRouteReplacement: () => void;
   readonly onConfirmRouteReplacement: () => void;
@@ -2290,7 +2316,7 @@ function StagedRouteList({
     else document.querySelector<HTMLElement>(".router-action-bar")?.focus();
   }, [pendingRouteReplacement, state.drafts]);
 
-  if (state.drafts.length === 0) return null;
+  if (drafts.length === 0) return null;
   return (
     <section
       className="router-staged-section"
@@ -2302,7 +2328,7 @@ function StagedRouteList({
         Staged routes
       </h4>
       <ul className="router-staged-list" aria-label="Staged routes">
-        {state.drafts.map((draft) => {
+        {drafts.map((draft) => {
           const sourceName = sourceDisplayName(sourceLabels, draft.source);
           const destinationName = destinationDisplayName(
             state,
