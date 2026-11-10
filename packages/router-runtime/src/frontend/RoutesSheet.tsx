@@ -20,6 +20,8 @@ import {
   type RouteCellOverlay,
   type RoutePick,
   type RoutesSheetColumn,
+  isDisconnectEdit,
+  type RouteChoice,
 } from "./routes-sheet-model.js";
 
 const ROW_HEIGHT = 26;
@@ -43,10 +45,11 @@ export interface RoutesSheetProps {
   readonly search: string | null;
   /** Source names by address. */
   readonly labels: ReadonlyMap<number, string | null>;
-  readonly choices: readonly {
-    readonly value: string;
-    readonly label: string;
-  }[];
+  readonly choices:
+    | readonly RouteChoice[]
+    | ((query: string) => readonly RouteChoice[]);
+  /** The source a typed dash routes, or null if this router has none. */
+  readonly disconnectAddress: number | null;
   readonly editable: boolean;
   /** An empty cell still offers its source list on a router that reports them. */
   readonly unassignedRoutable: boolean;
@@ -56,6 +59,8 @@ export interface RoutesSheetProps {
   readonly onPick: (pick: RoutePick) => void;
   /** A paste or fill was refused because only a single pick sends a route. */
   readonly onRefusedEdit: () => void;
+  /** A dash was typed on a router with no Disconnect source. */
+  readonly onNoDisconnect: () => void;
   readonly onError: (message: string) => void;
 }
 
@@ -70,12 +75,14 @@ export function RoutesSheet({
   search,
   labels,
   choices,
+  disconnectAddress,
   editable,
   unassignedRoutable,
   overlay,
   overlayRevision,
   onPick,
   onRefusedEdit,
+  onNoDisconnect,
   onError,
 }: RoutesSheetProps): React.JSX.Element {
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -99,11 +106,13 @@ export function RoutesSheet({
     rowIds,
     hostColumns,
     choices,
+    disconnectAddress,
     editable,
     unassignedRoutable,
     overlay,
     onPick,
     onRefusedEdit,
+    onNoDisconnect,
     onError,
   });
   useLayoutEffect(() => {
@@ -113,11 +122,13 @@ export function RoutesSheet({
       rowIds,
       hostColumns,
       choices,
+      disconnectAddress,
       editable,
       unassignedRoutable,
       overlay,
       onPick,
       onRefusedEdit,
+      onNoDisconnect,
       onError,
     };
   });
@@ -155,9 +166,14 @@ export function RoutesSheet({
       },
       onEdit: (batch) => {
         const current = latest.current;
-        const pick = routePickFromEdit(batch, current.columns);
-        if (pick === null) current.onRefusedEdit();
-        else current.onPick(pick);
+        const pick = routePickFromEdit(
+          batch,
+          current.columns,
+          current.disconnectAddress,
+        );
+        if (pick !== null) current.onPick(pick);
+        else if (isDisconnectEdit(batch)) current.onNoDisconnect();
+        else current.onRefusedEdit();
       },
       onError: (error) => {
         latest.current.onError(error.message);

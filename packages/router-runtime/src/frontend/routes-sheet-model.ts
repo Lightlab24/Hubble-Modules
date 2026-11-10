@@ -145,15 +145,18 @@ export interface RouteEditBatch {
 export function routePickFromEdit(
   batch: RouteEditBatch,
   columns: readonly RoutesSheetColumn[],
+  disconnectAddress: number | null = null,
 ): RoutePick | null {
   if (batch.source !== "choice" || batch.edits.length !== 1) return null;
   const edit = batch.edits[0];
   if (edit === undefined) return null;
   const column = columns.find(({ id }) => id === edit.columnId);
   const destination = Number(edit.rowId);
-  const source = Number(edit.value);
+  const source =
+    edit.value === DISCONNECT_CHOICE ? disconnectAddress : Number(edit.value);
   if (
     column === undefined ||
+    source === null ||
     !Number.isInteger(destination) ||
     !Number.isInteger(source) ||
     destination < 1 ||
@@ -161,6 +164,60 @@ export function routePickFromEdit(
   )
     return null;
   return { destination, source, levels: column.levels };
+}
+
+/** What a typed dash picks. It stands for the router's Disconnect source. */
+export const DISCONNECT_CHOICE = "disconnect";
+
+const DISCONNECT_NAME =
+  /^(?:disc|discon|disconn|disconnect|disconnected|discnct|dscnct)$/u;
+
+/**
+ * A Ross can't clear a route. It disconnects a destination by routing a source
+ * set up for that in its database, so find that source by name.
+ */
+export function disconnectSourceAddress(
+  labels: ReadonlyMap<number, string | null>,
+): number | null {
+  const found = [...labels]
+    .filter(([, label]) =>
+      DISCONNECT_NAME.test((label ?? "").toLowerCase().replace(/[^a-z]/gu, "")),
+    )
+    .map(([address]) => address);
+  return found.length === 0 ? null : Math.min(...found);
+}
+
+export function isDisconnectEdit(batch: RouteEditBatch): boolean {
+  return (
+    batch.source === "choice" &&
+    batch.edits.length === 1 &&
+    batch.edits[0]?.value === DISCONNECT_CHOICE
+  );
+}
+
+export interface RouteChoice {
+  readonly value: string;
+  readonly label: string;
+}
+
+/**
+ * Puts Disconnect first. A lone dash offers only Disconnect, so a source with a
+ * hyphen in its name can't take the Enter.
+ */
+export function routeChoicesWithDisconnect(
+  choices: readonly RouteChoice[],
+  disconnectAddress: number | null,
+): (query: string) => readonly RouteChoice[] {
+  const disconnect: RouteChoice = {
+    value: DISCONNECT_CHOICE,
+    label:
+      disconnectAddress === null
+        ? "- Disconnect"
+        : `- Disconnect · ${String(disconnectAddress)}`,
+  };
+  const dashOnly = [disconnect];
+  const all = [disconnect, ...choices];
+  return (query) => (query.trim() === "-" ? dashOnly : all);
 }
 
 export function sourceChoices(
