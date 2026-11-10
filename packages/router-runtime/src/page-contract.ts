@@ -1428,7 +1428,7 @@ function versionsEqual(
   );
 }
 
-function resourceMatchesSearch(
+export function resourceMatchesSearch(
   address: number,
   label: string | null,
   search: string | null,

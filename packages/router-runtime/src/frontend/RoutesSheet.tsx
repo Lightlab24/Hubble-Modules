@@ -39,6 +39,8 @@ export interface RoutesSheetProps {
   readonly state: RouterState;
   readonly columns: readonly RoutesSheetColumn[];
   readonly rows: readonly RoutesSheetRowEntry[];
+  /** The destination search narrowing `rows`. */
+  readonly search: string | null;
   /** Source names by address. */
   readonly labels: ReadonlyMap<number, string | null>;
   readonly choices: readonly {
@@ -63,6 +65,7 @@ export function RoutesSheet({
   state,
   columns,
   rows,
+  search,
   labels,
   choices,
   editable,
@@ -187,6 +190,12 @@ export function RoutesSheet({
       observer.disconnect();
     };
   }, []);
+
+  // A new search starts at its first match.
+  useLayoutEffect(() => {
+    if (viewportRef.current !== null) viewportRef.current.scrollTop = 0;
+    setFirstVisible(0);
+  }, [search]);
 
   const start = Math.max(0, firstVisible - OVERSCAN_ROWS);
   const end = Math.min(

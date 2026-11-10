@@ -5,6 +5,7 @@ import {
   routeSendOutcome,
   routesSheetCell,
   routesSheetColumns,
+  routesSheetRowsMatching,
   sourceChoices,
   type RoutePick,
   type RouteSendOutcome,
@@ -67,6 +68,34 @@ describe("routes sheet cells", () => {
         () => ({ source: 9, phase: "sending" }),
       ),
     ).toEqual({ kind: "source", source: 9, phase: "sending" });
+  });
+});
+
+describe("routes sheet destination search", () => {
+  const rows = [
+    { address: 1, label: "Program" },
+    { address: 12, label: "Camera 1" },
+    { address: 30, label: null },
+  ];
+  const matching = (search: string | null): readonly number[] =>
+    routesSheetRowsMatching(rows, search).map(({ address }) => address);
+
+  it("keeps the same rows when there is no search", () => {
+    expect(routesSheetRowsMatching(rows, null)).toBe(rows);
+  });
+
+  it("finds a destination by any part of its name, ignoring case", () => {
+    expect(matching("PROG")).toEqual([1]);
+    expect(matching("camera")).toEqual([12]);
+  });
+
+  it("finds a destination by any part of its number", () => {
+    expect(matching("30")).toEqual([30]);
+    expect(matching("1")).toEqual([1, 12]);
+  });
+
+  it("returns nothing when no destination matches", () => {
+    expect(matching("audio")).toEqual([]);
   });
 });
 

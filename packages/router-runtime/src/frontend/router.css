@@ -1740,6 +1740,16 @@
   flex-direction: column;
 }
 
+/* One field, so it doesn't need the narrow layout's second toolbar row. */
+.router-sheet-pane .router-pane-toolbar {
+  height: 31px;
+  flex-basis: 31px;
+}
+
+.router-sheet-pane .router-search-field {
+  flex: 0 1 320px;
+}
+
 .router-sheet-viewport {
   position: absolute;
   overflow: auto;

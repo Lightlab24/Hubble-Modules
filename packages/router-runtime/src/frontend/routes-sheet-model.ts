@@ -1,4 +1,7 @@
-import type { RouteCrosspointsResult } from "../page-contract.js";
+import {
+  resourceMatchesSearch,
+  type RouteCrosspointsResult,
+} from "../page-contract.js";
 import type { RouterDraftMapping } from "./router-state.js";
 
 /** What the sheet shows for a cell whose route has been requested but not observed. */
@@ -61,6 +64,20 @@ export function routesSheetColumns(
   return count > 1
     ? [{ id: ALL_LEVELS_COLUMN_ID, label: "All", levels }, ...perLevel]
     : perLevel;
+}
+
+/**
+ * The sheet has every destination loaded, so its search runs here on each key
+ * press, using the same number-or-name rule as the Patch view's search.
+ */
+export function routesSheetRowsMatching<
+  Row extends { readonly address: number; readonly label: string | null },
+>(rows: readonly Row[], search: string | null): readonly Row[] {
+  return search === null
+    ? rows
+    : rows.filter(({ address, label }) =>
+        resourceMatchesSearch(address, label, search),
+      );
 }
 
 export function routesSheetCell(

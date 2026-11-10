@@ -65,6 +65,7 @@ import {
   routeCellKey,
   routeSendOutcome,
   routesSheetColumns,
+  routesSheetRowsMatching,
   sourceChoices,
   type RoutePick,
 } from "./routes-sheet-model.js";
@@ -621,6 +622,7 @@ function RouterWorkspace({
 }): React.JSX.Element {
   const [sourceSearchInput, setSourceSearchInput] = useState("");
   const [destinationSearchInput, setDestinationSearchInput] = useState("");
+  const [sheetSearchInput, setSheetSearchInput] = useState("");
   const [fedOnly, setFedOnly] = useState(false);
   const [focusedSource, setFocusedSource] = useState<number | null>(null);
   const [focusedDestination, setFocusedDestination] = useState<number | null>(
@@ -660,7 +662,7 @@ function RouterWorkspace({
   const debouncedDestinationSearch = normalizedSearch(
     useDebouncedValue(destinationSearchInput, ROUTER_SEARCH_DELAY_MS),
   );
-  // The sheet lists everything, so a search left in the Patch view must not filter it.
+  // The sheet has its own search, so one left in the Patch view must not filter it.
   const sourceSearch = sheetActive ? null : debouncedSourceSearch;
   const destinationSearch = sheetActive ? null : debouncedDestinationSearch;
   const selectedSource = state.selection.source;
@@ -1176,6 +1178,11 @@ function RouterWorkspace({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state.pages.destinations, destinationSearch, destinationSourceFilter],
   );
+  const sheetSearch = normalizedSearch(sheetSearchInput);
+  const sheetMatches = useMemo(
+    () => routesSheetRowsMatching(sheetRows, sheetSearch),
+    [sheetRows, sheetSearch],
+  );
 
   // The sheet shows every destination and names every source, so load all pages.
   const loadSourcesForSheet =
@@ -1258,11 +1265,20 @@ function RouterWorkspace({
           className="router-pane router-sheet-pane"
           aria-label="Routes by destination and level"
         >
+          <div className="router-pane-toolbar">
+            <RouterSearchField
+              label="Search destinations"
+              placeholder="Search DST name or number"
+              value={sheetSearchInput}
+              onChange={setSheetSearchInput}
+            />
+          </div>
           <div className="router-list-frame">
             <RoutesSheet
               state={state}
               columns={sheetColumns}
-              rows={sheetRows}
+              rows={sheetMatches}
+              search={sheetSearch}
               labels={sheetLabels}
               choices={sheetChoices}
               editable={sheetEditable}
@@ -1282,12 +1298,20 @@ function RouterWorkspace({
             />
             <RouterListStatus
               busy={destinationBusy}
-              hasPage={destinationModel.hasPage}
-              itemCount={destinationModel.items.length}
+              // A match may still be on a page that hasn't loaded.
+              hasPage={
+                destinationModel.hasPage &&
+                (sheetSearch === null || !destinationModel.hasMore)
+              }
+              itemCount={sheetMatches.length}
               label="destinations"
               phase={destinationLoader.phase}
-              search={null}
-              totalCount={destinationModel.totalCount}
+              search={sheetSearch}
+              totalCount={
+                sheetSearch === null
+                  ? destinationModel.totalCount
+                  : sheetMatches.length
+              }
               onRetry={() =>
                 destinationLoader.loadPage(destinationLoader.failedAfterAddress)
               }
