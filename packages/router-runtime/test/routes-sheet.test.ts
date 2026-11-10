@@ -3,10 +3,6 @@ import { RouteSendQueue } from "../src/frontend/route-send-queue.js";
 import {
   routePickFromEdit,
   routeSendOutcome,
-  DISCONNECT_CHOICE,
-  disconnectSourceAddress,
-  isDisconnectEdit,
-  routeChoicesWithDisconnect,
   routesSheetCell,
   routesSheetColumns,
   routesSheetRowsMatching,
@@ -106,60 +102,6 @@ describe("routes sheet on a router that reports unassigned destinations", () => 
       routesSheetCell(all, (level) => (level === 1 ? 4 : undefined), none, true)
         .kind,
     ).toBe("mixed");
-  });
-});
-
-describe("disconnecting a destination with a typed dash", () => {
-  const one = { id: "level:1", label: "L1", levels: [1] };
-  const dash = {
-    source: "choice",
-    edits: [{ rowId: "13", columnId: "level:1", value: DISCONNECT_CHOICE }],
-  };
-
-  it("finds the Disconnect source by name", () => {
-    const named = (label: string | null) => new Map([[97, label]]);
-    for (const label of ["Disconnect", "DISCONNECT", "Disc", "DISCNCT", "Disconnect 1"])
-      expect(disconnectSourceAddress(named(label))).toBe(97);
-    for (const label of ["DISC PLYR", "Disco", "CAM 1", null])
-      expect(disconnectSourceAddress(named(label))).toBeNull();
-    expect(
-      disconnectSourceAddress(
-        new Map([
-          [40, "Disconnect 2"],
-          [12, "Disconnect 1"],
-        ]),
-      ),
-    ).toBe(12);
-  });
-
-  it("offers only Disconnect for a lone dash", () => {
-    const choices = routeChoicesWithDisconnect(
-      [{ value: "3", label: "3 — HDR 1-1" }],
-      97,
-    );
-    expect(choices("-").map(({ value }) => value)).toEqual([DISCONNECT_CHOICE]);
-    expect(choices(" - ").map(({ value }) => value)).toEqual([DISCONNECT_CHOICE]);
-    expect(choices("").map(({ value }) => value)).toEqual([
-      DISCONNECT_CHOICE,
-      "3",
-    ]);
-    expect(choices("").at(0)?.label).toBe("- Disconnect · 97");
-  });
-
-  it("routes the dash to the Disconnect source", () => {
-    expect(routePickFromEdit(dash, [one], 97)).toEqual({
-      destination: 13,
-      source: 97,
-      levels: [1],
-    });
-  });
-
-  it("sends nothing when the router has no Disconnect source", () => {
-    expect(routePickFromEdit(dash, [one], null)).toBeNull();
-    expect(isDisconnectEdit(dash)).toBe(true);
-    expect(
-      isDisconnectEdit({ ...dash, source: "paste" }),
-    ).toBe(false);
   });
 });
 

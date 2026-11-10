@@ -68,8 +68,6 @@ import {
   routeSendOutcome,
   routesSheetColumns,
   routesSheetRowsMatching,
-  disconnectSourceAddress,
-  routeChoicesWithDisconnect,
   sourceChoices,
   type RoutePick,
 } from "./routes-sheet-model.js";
@@ -1188,20 +1186,15 @@ function RouterWorkspace({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state.pages.sources, state.sources],
   );
-  const sheetDisconnect = useMemo(
-    () => (unassignedRoutable ? disconnectSourceAddress(sheetLabels) : null),
-    [sheetLabels, unassignedRoutable],
+  const sheetChoices = useMemo(
+    () =>
+      sourceChoices(
+        [...sheetLabels]
+          .map(([address, label]) => ({ address, label }))
+          .sort((left, right) => left.address - right.address),
+      ),
+    [sheetLabels],
   );
-  const sheetChoices = useMemo(() => {
-    const sources = sourceChoices(
-      [...sheetLabels]
-        .map(([address, label]) => ({ address, label }))
-        .sort((left, right) => left.address - right.address),
-    );
-    return unassignedRoutable
-      ? routeChoicesWithDisconnect(sources, sheetDisconnect)
-      : sources;
-  }, [sheetDisconnect, sheetLabels, unassignedRoutable]);
   const sheetRows = useMemo(
     () =>
       destinationModel.items.map(({ address, label }) => ({ address, label })),
@@ -1319,12 +1312,6 @@ function RouterWorkspace({
                 .map(({ mappingId, status }) => `${mappingId}:${status}`)
                 .join(",")}`}
               onPick={routeFromSheet}
-              disconnectAddress={sheetDisconnect}
-              onNoDisconnect={() => {
-                onRouteFailure?.(
-                  "This router has no source named Disconnect. Add one in the Ross database first.",
-                );
-              }}
               onRefusedEdit={() => {
                 onRouteFailure?.(
                   "Paste and fill don't send routes. Type in a cell to pick a source.",
