@@ -43,7 +43,8 @@ export type RouterTargetStatus =
 
 export interface RouterDraftTarget {
   readonly level: number;
-  readonly expectedSource: number;
+  /** Null when the router reported nothing routed to this level. */
+  readonly expectedSource: number | null;
   readonly status: RouterTargetStatus;
   readonly dispatchOutcome: string | null;
 }
@@ -55,7 +56,7 @@ export interface RouterDraftMapping {
   readonly levels: readonly number[];
   readonly expected: readonly {
     readonly level: number;
-    readonly source: number;
+    readonly source: number | null;
   }[];
   readonly baselineGeneration: string;
   readonly operationId: string | null;
@@ -575,6 +576,7 @@ export function stageMapping(
   state: RouterState,
   input: StageRouterMappingInput,
   idFactory: () => string = randomUuid,
+  allowUnassigned = false,
 ): RouterState {
   const levels = uniqueSorted(input.levels);
   if (
@@ -597,14 +599,12 @@ export function stageMapping(
     level,
     source: sourceAt(state, input.destination, level),
   }));
-  if (expected.some(({ source }) => source === null)) return state;
+  if (!allowUnassigned && expected.some(({ source }) => source === null))
+    return state;
 
   const mappingId = RouterMappingIdSchema.safeParse(idFactory());
   if (!mappingId.success) return state;
-  const normalizedExpected = expected.map(({ level, source }) => ({
-    level,
-    source: source as number,
-  }));
+  const normalizedExpected = expected;
   const mapping = freezeDraft({
     mappingId: mappingId.data,
     source: input.source,
@@ -779,14 +779,16 @@ function rebuildStagedDraft(
     level,
     source: sourceAt(state, draft.destination, level),
   }));
-  if (expected.some(({ source: currentSource }) => currentSource === null))
+  // A level may only be empty if it was already empty when this was staged.
+  if (
+    expected.some(
+      ({ level, source: currentSource }) =>
+        currentSource === null &&
+        draft.expected.find((entry) => entry.level === level)?.source !== null,
+    )
+  )
     return null;
-  const normalizedExpected = expected.map(
-    ({ level, source: currentSource }) => ({
-      level,
-      source: currentSource as number,
-    }),
-  );
+  const normalizedExpected = expected;
   return freezeDraft({
     ...draft,
     source,

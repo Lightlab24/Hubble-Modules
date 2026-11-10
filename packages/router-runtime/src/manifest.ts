@@ -236,6 +236,7 @@ export function withRouterInterface(
               "refresh",
               "settings",
               "set-zoom",
+              "set-view",
               "set-automatic-take",
               "groups",
               "edit-group",

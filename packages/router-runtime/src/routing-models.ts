@@ -44,7 +44,7 @@ export interface RossSwp08RouteMapping {
   readonly source: number
   readonly destination: number
   readonly levels: readonly number[]
-  readonly expected: readonly Readonly<{ level: number; source: number }>[]
+  readonly expected: readonly Readonly<{ level: number; source: number | null }>[]
 }
 
 export interface RossSwp08RouteCrosspointsRequest {

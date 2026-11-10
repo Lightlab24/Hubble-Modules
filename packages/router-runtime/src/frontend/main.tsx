@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { connectModuleFrontend } from "@hubble/module-sdk/frontend";
-import { RouterView } from "./RouterView.js";
+import { RouterView, type RouterPageView } from "./RouterView.js";
 import { useRouterState } from "./use-router-state.js";
 import { createRouterPageApi } from "./page-client.js";
 import {
@@ -30,10 +30,12 @@ function RouterPage({
   bridge,
   initial,
   initialAutomaticTake,
+  initialView,
 }: {
   bridge: ButtonMatrixSettingsBridge;
   initial: ConnectionView;
   initialAutomaticTake: boolean;
+  initialView: RouterPageView;
 }) {
   const [connection, setConnection] = useState(initial);
   const [revision, setRevision] = useState("initial");
@@ -57,6 +59,17 @@ function RouterPage({
         (reason) => failed(`Router page Automatic Take wasn't saved: ${reason}`),
       ),
   );
+  // A failed save must not pull the operator off the view they just opened, so
+  // it only explains that this choice won't be remembered.
+  const viewSaves = useRef<Promise<unknown>>(Promise.resolve());
+  const saveView = useCallback(
+    (view: RouterPageView) => {
+      viewSaves.current = viewSaves.current
+        .then(() => bridge.call("set-view", view))
+        .catch((error) => failed(`Router page view wasn't saved: ${String(error)}`));
+    },
+    [bridge, failed],
+  );
   const api = useMemo(
     () =>
       createRouterPageApi(bridge, (next, revision) => {
@@ -67,6 +80,7 @@ function RouterPage({
   );
   const router = useRouterState(api, true, connection.connectionId, {
     randomUUID: uuid,
+    allowUnassigned: connection.type === "ross-ultrix-ogp",
   });
   return (
     <main className="router-page">
@@ -89,6 +103,8 @@ function RouterPage({
         onConnectionChange={() => {}}
         router={router}
         onRouteFailure={failed}
+        initialPageView={initialView}
+        onPageViewChange={saveView}
         automaticTake={automaticTake}
         onAutomaticTakeChange={(enabled) => {
           void automaticTakeQueue.set(enabled);
@@ -140,6 +156,7 @@ async function start() {
     connection: ConnectionView;
     zoom: number;
     automaticTake?: boolean;
+    view?: RouterPageView;
   };
   let zoomTail: Promise<unknown> = Promise.resolve();
   initializeRouterZoom(
@@ -164,6 +181,7 @@ async function start() {
       bridge={bridge}
       initial={settings.connection}
       initialAutomaticTake={settings.automaticTake === true}
+      initialView={settings.view ?? "patch"}
     />,
   );
   window.addEventListener(

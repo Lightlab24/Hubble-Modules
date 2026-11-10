@@ -1706,32 +1706,32 @@
 
 .router-view-tabs {
   display: flex;
-  gap: 2px;
-  padding: 4px 10px;
+  gap: 18px;
+  padding: 0 10px;
   border-bottom: 1px solid var(--line);
   background: var(--chrome);
 }
 
 .router-view-tab {
-  min-height: var(--control-height);
-  padding: 0 12px;
-  border: 1px solid var(--control-border);
-  border-radius: var(--radius-control);
+  padding: 9px 0 11px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
   color: var(--quiet);
-  background: var(--control);
+  background: transparent;
   cursor: pointer;
   font-size: var(--control-font-size);
   font-weight: var(--control-font-weight);
 }
 
 .router-view-tab:hover {
-  color: var(--text);
-  background: var(--control-hover);
+  color: var(--text-strong);
 }
 
 .router-view-tab[aria-selected="true"] {
+  border-bottom-color: var(--text-strong);
   color: var(--text-strong);
-  background: var(--active);
+  font-weight: 500;
 }
 
 .router-sheet-pane {

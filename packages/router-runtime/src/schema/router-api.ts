@@ -48,7 +48,8 @@ const RouterRequiredLevelsSchema = z
 export const RouterExpectedSourceSchema = z
   .strictObject({
     level: RouterLevelSchema,
-    source: RouterAddressSchema,
+    /** Null means the router reported nothing routed to this level. */
+    source: RouterAddressSchema.nullable(),
   })
   .readonly()
 

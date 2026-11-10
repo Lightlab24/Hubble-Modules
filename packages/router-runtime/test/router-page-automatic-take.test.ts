@@ -88,17 +88,25 @@ it("reads the Router page preferences with safe defaults", () => {
   expect(routerViewPreferences({ zoom: 100 })).toEqual({
     zoom: 100,
     automaticTake: false,
+    view: "patch",
   });
-  expect(routerViewPreferences({ zoom: 125, automaticTake: true })).toEqual({
+  expect(
+    routerViewPreferences({ zoom: 125, automaticTake: true, view: "routes" }),
+  ).toEqual({
     zoom: 125,
     automaticTake: true,
+    view: "routes",
   });
-  expect(routerViewPreferences({ zoom: "big", automaticTake: 1 })).toEqual({
+  expect(
+    routerViewPreferences({ zoom: "big", automaticTake: 1, view: "other" }),
+  ).toEqual({
     zoom: 100,
     automaticTake: false,
+    view: "patch",
   });
   expect(routerViewPreferences(null)).toEqual({
     zoom: 100,
     automaticTake: false,
+    view: "patch",
   });
 });

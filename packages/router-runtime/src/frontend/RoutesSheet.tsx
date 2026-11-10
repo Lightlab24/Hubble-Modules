@@ -48,6 +48,8 @@ export interface RoutesSheetProps {
     readonly label: string;
   }[];
   readonly editable: boolean;
+  /** An empty cell still offers its source list on a router that reports them. */
+  readonly unassignedRoutable: boolean;
   readonly overlay: Overlay;
   /** Changes whenever `overlay` would return something new. */
   readonly overlayRevision: string;
@@ -69,6 +71,7 @@ export function RoutesSheet({
   labels,
   choices,
   editable,
+  unassignedRoutable,
   overlay,
   overlayRevision,
   onPick,
@@ -97,6 +100,7 @@ export function RoutesSheet({
     hostColumns,
     choices,
     editable,
+    unassignedRoutable,
     overlay,
     onPick,
     onRefusedEdit,
@@ -110,6 +114,7 @@ export function RoutesSheet({
       hostColumns,
       choices,
       editable,
+      unassignedRoutable,
       overlay,
       onPick,
       onRefusedEdit,
@@ -138,10 +143,13 @@ export function RoutesSheet({
           column,
           (level) => row?.routes.get(level),
           (level) => current.overlay(destination, level),
+          current.unassignedRoutable,
         );
         return {
           value: cell.kind === "source" ? String(cell.source) : "",
-          readOnly: !current.editable || cell.kind === "unknown",
+          readOnly:
+            !current.editable ||
+            (cell.kind === "unknown" && !current.unassignedRoutable),
           choices: current.choices,
         };
       },
@@ -261,6 +269,7 @@ export function RoutesSheet({
               columns={columns}
               labels={labels}
               editable={editable}
+              unassignedRoutable={unassignedRoutable}
               overlay={overlay}
               overlayRevision={overlayRevision}
             />
@@ -290,6 +299,7 @@ interface RoutesSheetRowProps {
   readonly columns: readonly RoutesSheetColumn[];
   readonly labels: ReadonlyMap<number, string | null>;
   readonly editable: boolean;
+  readonly unassignedRoutable: boolean;
   readonly overlay: Overlay;
   readonly overlayRevision: string;
 }
@@ -303,6 +313,7 @@ const RoutesSheetRow = memo(
     columns,
     labels,
     editable,
+    unassignedRoutable,
     overlay,
   }: RoutesSheetRowProps): React.JSX.Element {
     return (
@@ -322,12 +333,15 @@ const RoutesSheetRow = memo(
             column,
             (level) => row?.routes.get(level),
             (level) => overlay(address, level),
+            unassignedRoutable,
           );
           return (
             <td
               key={column.id}
               role="gridcell"
-              aria-readonly={!editable || cell.kind === "unknown"}
+              aria-readonly={
+                !editable || (cell.kind === "unknown" && !unassignedRoutable)
+              }
               data-hubble-row={String(address)}
               data-hubble-column={column.id}
               data-route-phase={cell.phase ?? undefined}
@@ -353,6 +367,7 @@ const RoutesSheetRow = memo(
     previous.labels === next.labels &&
     previous.columns === next.columns &&
     previous.editable === next.editable &&
+    previous.unassignedRoutable === next.unassignedRoutable &&
     previous.name === next.name &&
     previous.address === next.address &&
     previous.rowIndex === next.rowIndex,

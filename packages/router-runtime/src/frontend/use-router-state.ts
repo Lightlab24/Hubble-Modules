@@ -54,6 +54,8 @@ export interface RouterStateHookOptions {
   readonly clock?: RouterClock;
   readonly presentationScheduler?: RouterPresentationScheduler;
   readonly randomUUID?: () => string;
+  /** The router reports empty destinations, so a route may be staged onto one. */
+  readonly allowUnassigned?: boolean;
 }
 
 export interface RouterPresentationScheduler {
@@ -168,6 +170,7 @@ export function useRouterState(
   connectionId: string | null,
   options: RouterStateHookOptions = {},
 ): RouterConnection {
+  const allowUnassigned = options.allowUnassigned === true;
   const [restart, setRestart] = useState(0);
   const [state, setState] = useState<RouterState | null>(null);
   const [presentedSession, setPresentedSession] =
@@ -766,10 +769,15 @@ export function useRouterState(
       const session = currentSession();
       if (session === null) return;
       commitState(
-        stageRouterMapping(session.state, input, randomUuidRef.current),
+        stageRouterMapping(
+          session.state,
+          input,
+          randomUuidRef.current,
+          allowUnassigned,
+        ),
       );
     },
-    [commitState, currentSession],
+    [allowUnassigned, commitState, currentSession],
   );
 
   const clearStaged = useCallback((): void => {

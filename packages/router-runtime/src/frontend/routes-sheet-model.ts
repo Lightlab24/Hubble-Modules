@@ -84,21 +84,26 @@ export function routesSheetCell(
   column: RoutesSheetColumn,
   truth: (level: number) => number | null | undefined,
   overlay: (level: number) => RouteCellOverlay | undefined,
+  unassignedRoutable = false,
 ): RoutesSheetCell {
+  let first = true;
   let shared: number | null = null;
   let mixed = false;
   let phase: RouteCellPhase | null = null;
   for (const level of column.levels) {
-    if ((truth(level) ?? null) === null)
-      return { kind: "unknown", phase: null };
     const pending = overlay(level);
-    const source = pending?.source ?? (truth(level) as number);
+    const observed = truth(level) ?? null;
+    if (observed === null && pending === undefined && !unassignedRoutable)
+      return { kind: "unknown", phase: null };
+    const source = pending?.source ?? observed;
     phase ??= pending?.phase ?? null;
-    if (shared === null) shared = source;
+    if (first) shared = source;
     else if (shared !== source) mixed = true;
+    first = false;
   }
-  return mixed || shared === null
-    ? { kind: "mixed", phase }
+  if (mixed) return { kind: "mixed", phase };
+  return shared === null
+    ? { kind: "unknown", phase: null }
     : { kind: "source", source: shared, phase };
 }
 

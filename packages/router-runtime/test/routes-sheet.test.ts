@@ -71,6 +71,40 @@ describe("routes sheet cells", () => {
   });
 });
 
+describe("routes sheet on a router that reports unassigned destinations", () => {
+  const all = { id: "all", label: "All", levels: [1, 2] };
+  const one = { id: "level:1", label: "L1", levels: [1] };
+  const none = () => undefined;
+
+  it("keeps an unassigned cell empty but routable", () => {
+    expect(routesSheetCell(one, () => undefined, none, true)).toEqual({
+      kind: "unknown",
+      phase: null,
+    });
+    expect(routesSheetCell(all, () => undefined, none, true).kind).toBe(
+      "unknown",
+    );
+  });
+
+  it("shows a chosen source on an unassigned cell at once", () => {
+    expect(
+      routesSheetCell(
+        one,
+        () => undefined,
+        () => ({ source: 9, phase: "sending" }),
+        true,
+      ),
+    ).toEqual({ kind: "source", source: 9, phase: "sending" });
+  });
+
+  it("calls an All cell mixed when only some levels are unassigned", () => {
+    expect(
+      routesSheetCell(all, (level) => (level === 1 ? 4 : undefined), none, true)
+        .kind,
+    ).toBe("mixed");
+  });
+});
+
 describe("routes sheet destination search", () => {
   const rows = [
     { address: 1, label: "Program" },

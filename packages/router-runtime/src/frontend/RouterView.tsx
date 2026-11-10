@@ -12,7 +12,9 @@ import {
 } from "lucide-react";
 import {
   type CSSProperties,
+  createContext,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -79,7 +81,11 @@ const ROUTER_SOURCE_ROW_HEIGHT = 44;
 const ROUTER_DESTINATION_ROW_HEIGHT = 36;
 const ROUTER_LIST_OVERSCAN = 6;
 
-type RouterPageView = "patch" | "routes";
+export type RouterPageView = "patch" | "routes";
+
+/** What this router's Patch view calls a level with no reported source. */
+const NoRouteLabelContext = createContext("Unknown");
+const UNASSIGNED_LABEL = "Unassigned";
 
 const ROUTER_PAGE_VIEWS: readonly {
   readonly id: RouterPageView;
@@ -112,6 +118,10 @@ export interface RouterViewProps {
   readonly onAutomaticTakeChange?: (enabled: boolean) => void;
   /** Show why a route from the Routes sheet didn't happen. */
   readonly onRouteFailure?: (message: string) => void;
+  /** The view this page opens on. */
+  readonly initialPageView?: RouterPageView;
+  /** Called when the operator picks a different view. */
+  readonly onPageViewChange?: (view: RouterPageView) => void;
 }
 
 interface RouterListModel<T> {
@@ -151,8 +161,10 @@ export function RouterView({
   automaticTake = false,
   onAutomaticTakeChange,
   onRouteFailure,
+  initialPageView = "patch",
+  onPageViewChange,
 }: RouterViewProps): React.JSX.Element {
-  const [pageView, setPageView] = useState<RouterPageView>("patch");
+  const [pageView, setPageView] = useState<RouterPageView>(initialPageView);
   const [routerViewZoom, setRouterViewZoom] = useState<RouterViewZoom>(() =>
     loadRouterViewZoom(routerZoomStorage),
   );
@@ -353,7 +365,9 @@ export function RouterView({
             role="tab"
             aria-selected={pageView === id}
             onClick={() => {
+              if (id === pageView) return;
               setPageView(id);
+              onPageViewChange?.(id);
             }}
           >
             {label}
@@ -361,16 +375,24 @@ export function RouterView({
         ))}
       </div>
 
-      <RouterBody
-        automaticTake={automaticTake}
-        onRouteFailure={onRouteFailure}
-        view={pageView}
-        connectionCount={routerConnections.length}
-        selectedConnection={selectedConnection}
-        router={router}
-        state={state}
-        onAutomaticTakeChange={onAutomaticTakeChange}
-      />
+      <NoRouteLabelContext.Provider
+        value={
+          selectedConnection?.type === "ross-ultrix-ogp"
+            ? UNASSIGNED_LABEL
+            : "Unknown"
+        }
+      >
+        <RouterBody
+          automaticTake={automaticTake}
+          onRouteFailure={onRouteFailure}
+          view={pageView}
+          connectionCount={routerConnections.length}
+          selectedConnection={selectedConnection}
+          router={router}
+          state={state}
+          onAutomaticTakeChange={onAutomaticTakeChange}
+        />
+      </NoRouteLabelContext.Provider>
     </section>
   );
 }
@@ -1071,6 +1093,8 @@ function RouterWorkspace({
     [showsLevels, state.levels],
   );
   const sheetEditable = state.transport === "connected" && truthReady;
+  const unassignedRoutable =
+    useContext(NoRouteLabelContext) === UNASSIGNED_LABEL;
   const [routeQueueRevision, setRouteQueueRevision] = useState(0);
   const routeQueueContext = useRef({ onRouteFailure, router, state });
   useLayoutEffect(() => {
@@ -1282,6 +1306,7 @@ function RouterWorkspace({
               labels={sheetLabels}
               choices={sheetChoices}
               editable={sheetEditable}
+              unassignedRoutable={unassignedRoutable}
               overlay={sheetOverlay}
               overlayRevision={`${String(routeQueueRevision)}|${state.drafts
                 .map(({ mappingId, status }) => `${mappingId}:${status}`)
@@ -1943,7 +1968,9 @@ function DestinationRouteDelta({
         .filter(({ level }) => visibleLevels.includes(level))
         .map(({ source }) => source),
     ),
-  ].filter((source) => source !== draft.source);
+  ].filter(
+    (source): source is number => source !== null && source !== draft.source,
+  );
   return (
     <span
       className="router-destination-delta"
@@ -1993,6 +2020,7 @@ function DestinationSummary({
   readonly visibleLevels: readonly number[];
 }): React.JSX.Element {
   const truthReady = routeTruthIsReady(state);
+  const noRouteLabel = useContext(NoRouteLabelContext);
   const summary = destinationSummaryForEntry(destination, visibleLevels);
   const routeTruthLabel = destinationRouteTruthLabel(
     destination,
@@ -2000,6 +2028,7 @@ function DestinationSummary({
     sourceLabels,
     truthReady,
     showsLevels,
+    noRouteLabel,
   );
   const staleQualifier = truthReady ? null : (
     <span aria-hidden="true" data-kind="status">
@@ -2070,7 +2099,7 @@ function DestinationSummary({
           title={routeTruthLabel}
         >
           {truthReady ? (
-            "Unknown"
+            noRouteLabel
           ) : (
             <>
               <span className="router-visually-hidden">{routeTruthLabel}</span>
@@ -2228,6 +2257,7 @@ function StagedRouteList({
   readonly sourceLabels: ReadonlyMap<number, string | null>;
   readonly state: RouterState;
 }): React.JSX.Element | null {
+  const noRouteLabel = useContext(NoRouteLabelContext);
   const sectionRef = useRef<HTMLElement | null>(null);
   const cardRefs = useRef(new Map<number, HTMLLIElement>());
   const focusAfterUpdateRef = useRef<number | null>(null);
@@ -2281,12 +2311,14 @@ function StagedRouteList({
           const baseline = routeSourceSummary(
             draft.expected.map(({ source }) => source),
             sourceLabels,
+            noRouteLabel,
           );
           const current = routeSourceSummary(
             draft.levels.map((level) =>
               sourceAt(state, draft.destination, level),
             ),
             sourceLabels,
+            noRouteLabel,
           );
           const activityLabel = draftActivityLabel(draft);
           const targetDetails = draft.targets.map((target) => {
@@ -2297,9 +2329,12 @@ function StagedRouteList({
             );
             const currentLabel =
               currentSource === null
-                ? "Unknown"
+                ? noRouteLabel
                 : `${sourceDisplayName(sourceLabels, currentSource)} · ${String(currentSource)}`;
-            const expectedLabel = `${sourceDisplayName(sourceLabels, target.expectedSource)} · ${String(target.expectedSource)}`;
+            const expectedLabel =
+              target.expectedSource === null
+                ? noRouteLabel
+                : `${sourceDisplayName(sourceLabels, target.expectedSource)} · ${String(target.expectedSource)}`;
             const targetStatus = `${draftStatusLabel(target.status)}, expected ${expectedLabel}, current ${currentLabel}, dispatch ${dispatchOutcomeLabel(target.dispatchOutcome)}`;
             return showsLevels
               ? `Level ${String(target.level)}, ${targetStatus}`
@@ -3108,7 +3143,7 @@ function sourceRouteDeltaMap(
     }
     for (const { level, source } of draft.expected) {
       if (!visibleLevels.includes(level)) continue;
-      if (source !== draft.source)
+      if (source !== null && source !== draft.source)
         addDelta(removals, source, draft.destination);
     }
   }
@@ -3196,6 +3231,7 @@ function destinationRouteTruthLabel(
   sourceLabels: ReadonlyMap<number, string | null>,
   truthReady = true,
   showsLevels = true,
+  noRouteLabel = "Unknown",
 ): string {
   const routesByLevel = new Map(
     destination.routes.map((route) => [route.level, route.source]),
@@ -3209,7 +3245,7 @@ function destinationRouteTruthLabel(
       ? "Current route"
       : "Route truth is stale. Last observed route";
     return source === undefined
-      ? `${prefix}: unknown`
+      ? `${prefix}: ${noRouteLabel.toLowerCase()}`
       : `${prefix}: ${sourceDisplayName(sourceLabels, source)}, source address ${String(source)}`;
   }
   const prefix = truthReady
@@ -3219,7 +3255,7 @@ function destinationRouteTruthLabel(
     .map((level): string => {
       const source = routesByLevel.get(level);
       return source === undefined
-        ? `Level ${String(level)}, unknown`
+        ? `Level ${String(level)}, ${noRouteLabel.toLowerCase()}`
         : `Level ${String(level)}, ${sourceDisplayName(
             sourceLabels,
             source,
@@ -3238,11 +3274,13 @@ function destinationDisplayName(state: RouterState, address: number): string {
 function routeSourceSummary(
   sources: readonly (number | null)[],
   sourceLabels: ReadonlyMap<number, string | null>,
+  noRouteLabel = "Unknown",
 ): string {
   const known = [
     ...new Set(sources.filter((source): source is number => source !== null)),
   ].sort((left, right) => left - right);
-  if (known.length === 0) return "Unknown route truth";
+  if (known.length === 0)
+    return noRouteLabel === "Unknown" ? "Unknown route truth" : noRouteLabel;
   if (known.length === 1 && !sources.includes(null)) {
     const source = known[0] as number;
     return `${sourceDisplayName(sourceLabels, source)} · ${String(source)}`;
@@ -3343,8 +3381,9 @@ function takeUnavailableReason(state: RouterState): string {
   if (state.drafts.length === 0) return "No routes staged";
   if (
     state.drafts.some((draft) =>
-      draft.levels.some(
-        (level) => sourceAt(state, draft.destination, level) === null,
+      draft.expected.some(
+        ({ level, source }) =>
+          source !== null && sourceAt(state, draft.destination, level) === null,
       ),
     )
   ) {

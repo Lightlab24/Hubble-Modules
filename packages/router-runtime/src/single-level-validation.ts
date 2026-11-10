@@ -103,6 +103,7 @@ export function validateRouteRequest(
     if (
       mapping.expected.length !== 1 ||
       mapping.expected[0]?.level !== VIDEO_LEVEL ||
+      mapping.expected[0].source === null ||
       !validAddress(mapping.expected[0].source, entry.effectiveSourceCount ?? 0)
     ) {
       return 'target_conflict'

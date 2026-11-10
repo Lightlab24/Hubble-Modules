@@ -115,7 +115,12 @@ export function validateRouteRequest(
       previousLevel = level
       const expected = mapping.expected[index]
       if (expected === undefined || expected.level !== level) return 'target_conflict'
-      if (!validAddress(expected.source, entry.definition.sourceLimit)) return 'invalid_source'
+      if (expected.source === null) {
+        // Only Ross reports a destination as having nothing routed to it.
+        if (entry.definition.type !== 'ross-ultrix-ogp') return 'invalid_source'
+      } else if (!validAddress(expected.source, entry.definition.sourceLimit)) {
+        return 'invalid_source'
+      }
       const key = `${String(mapping.destination)}:${String(level)}`
       if (targets.has(key)) return 'duplicate_target'
       targets.add(key)

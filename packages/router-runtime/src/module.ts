@@ -602,9 +602,11 @@ export function routerModule(
                   connection: connectionView(snapshot),
                   zoom: view.zoom,
                   automaticTake: view.automaticTake,
+                  view: view.view,
                 });
               }
               case "set-zoom":
+              case "set-view":
               case "set-automatic-take": {
                 const change: Record<string, ModuleJsonValue> =
                   input.commandId === "set-zoom"
@@ -620,13 +622,15 @@ export function routerModule(
                           ])
                           .parse(input.value),
                       }
-                    : { automaticTake: z.boolean().parse(input.value) };
+                    : input.commandId === "set-view"
+                      ? { view: RouterPageViewSchema.parse(input.value) }
+                      : { automaticTake: z.boolean().parse(input.value) };
                 for (let attempt = 0; attempt < 3; attempt++) {
                   const current = await documents.read(
                     "router-view",
                     execution.signal,
                   );
-                  // Keep the other preference; zoom and Automatic Take share this document.
+                  // Keep the other preferences; they all share this document.
                   const base =
                     typeof current.value === "object" &&
                     current.value !== null &&
@@ -685,17 +689,25 @@ export function routerModule(
   };
 }
 
+const RouterPageViewSchema = z.enum(["patch", "routes"]);
+
 /** Router page preferences; Automatic Take here is the page's own, not the Button Matrix's. */
 export function routerViewPreferences(value: unknown): {
   readonly zoom: number;
   readonly automaticTake: boolean;
+  readonly view: "patch" | "routes";
 } {
   const view = z
     .object({
       zoom: z.number().catch(100),
       automaticTake: z.boolean().catch(false),
+      view: RouterPageViewSchema.catch("patch"),
     })
-    .catch({ zoom: 100, automaticTake: false })
+    .catch({ zoom: 100, automaticTake: false, view: "patch" as const })
     .parse(value ?? {});
-  return { zoom: view.zoom, automaticTake: view.automaticTake };
+  return {
+    zoom: view.zoom,
+    automaticTake: view.automaticTake,
+    view: view.view,
+  };
 }
