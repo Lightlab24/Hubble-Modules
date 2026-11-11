@@ -1,16 +1,56 @@
 import { CyanviewClient } from './transport.js';
 import { PlanRepository } from './repository.js';
-import { addressParts, lensParameters, normalizedLabel, object, validIp, type RecordValue } from './model.js';
+import { addressParts, lensParameters, normalizedLabel, object, validIp, type Plan, type RecordValue } from './model.js';
 import { optionEntries } from './normalize.js';
-import { isRemiModel, remiCamera } from './remi-model.js';
+import { isRemiModel, remiCamera, remiEntries } from './remi-model.js';
 import type { RemiOperations } from './remi.js';
 
 export type ClientFactory = (address: string) => CyanviewClient;
 const enabled = (value: unknown) => value === true || value === 1 || value === '1' || value === 'true';
 const advanced = (field: string) => /^(iris|zoom|focus)(Motor|Min|Max|Torque|Direction)$/.test(field) || field === 'lensIp';
 const protectedLan = (row: RecordValue) => enabled(row.ReadOnly) || enabled(row.NoDelete) || String(row.IP).startsWith('10.192.');
+/**
+ * One socket per controller for a whole send. A controller pushes its entire configuration to every
+ * open socket after every change, so a socket per row multiplies that work by the number of rows.
+ */
+class ControllerSession {
+  private clients = new Map<string, { address: string; client: Promise<CyanviewClient> }>();
+  private saved: Promise<Plan> | undefined;
+  readonly deleted = new Set<string>();
+  /** What each sent camera leaves on its saved row. They are written together when the send ends. */
+  readonly receipts: { item: RecordValue; patch: RecordValue }[] = [];
+  /** How long each controller took to open, so a slow send can be told apart from a slow controller. */
+  readonly opened: number[] = [];
+  constructor(private open: (device: RecordValue, signal: AbortSignal) => Promise<CyanviewClient>, private read: (signal: AbortSignal) => Promise<Plan>) {}
+  /** The saved plan, read once for the whole send. */
+  plan(signal: AbortSignal) { return this.saved ??= this.read(signal); }
+  async client(device: RecordValue, signal: AbortSignal): Promise<CyanviewClient> {
+    const address = String(device.address || device.base), held = this.clients.get(device.id);
+    if (held?.address === address) {
+      // Cameras sent together share the one opening. A controller that couldn't be opened fails
+      // each of them at once and isn't tried again for every row.
+      const client = await held.client;
+      if (client.connected) return client;
+      if (this.clients.get(device.id) !== held) return this.client(device, signal);
+      client.close();
+    } else void held?.client.then(client => client.close(), () => undefined);
+    const began = performance.now(), opening = this.open(device, signal);
+    opening.then(() => this.opened.push(Math.round(performance.now() - began)), () => undefined);
+    this.clients.set(device.id, { address, client: opening });
+    return opening;
+  }
+  close() { for (const { client } of this.clients.values()) void client.then(open => open.close(), () => undefined); this.clients.clear(); }
+}
+const controllersAtOnce = 8;
+// A controller's socket takes one request at a time whatever this is. It bounds how many cameras
+// are waiting on the controller's confirmation together.
+const camerasAtOnce = 6;
+// What a REMI copy shows of the camera it was made from. Nothing else on the camera reaches a copy.
+const copiedFields = ['Number', 'Name', 'Model'];
 export class ConfigurationOperations {
   private queues = new Map<string, Promise<unknown>>();
+  // Sends still working through a controller, which a network change has to wait for.
+  private batches = new Map<string, Set<Promise<void>>>();
   private rowQueues = new Map<string, Map<string, Promise<unknown>>>();
   private cameraNumbers = new Map<string, Set<number>>();
   constructor(private repository: PlanRepository, private client: ClientFactory = address => new CyanviewClient(address), private remi?: RemiOperations) {}
@@ -27,7 +67,7 @@ export class ConfigurationOperations {
       Object.assign(row, patch);
     }, signal);
   }
-  run(input: RecordValue, signal: AbortSignal): Promise<RecordValue> {
+  run(input: RecordValue, signal: AbortSignal, session?: ControllerSession): Promise<RecordValue> {
     if (Array.isArray(input.items)) return this.batch(input.items, signal);
     const item = object(input.item), deviceId = String(item.device ?? '');
     if (!deviceId || !item.id || !['camera', 'lan'].includes(input.kind)) return Promise.reject(new Error('Choose a valid configuration row'));
@@ -35,11 +75,14 @@ export class ConfigurationOperations {
     const exclusive = input.kind === 'lan' && item.operation !== 'Add';
     // Independent rows start together. Replacing network settings waits for
     // writes that still use the controller's previous connection address.
-    const previous = [this.queues.get(deviceId), ...(exclusive ? rows.values() : [rows.get(rowKey)])];
+    // A send already holds its place on the controller, and a network change queued behind it waits for it.
+    const previous = session ? [rows.get(rowKey)] : [this.queues.get(deviceId), ...(exclusive ? [...rows.values(), ...(this.batches.get(deviceId) ?? [])] : [rows.get(rowKey)])];
+    // A row an earlier send is still working on is read again once that send has left it.
+    const settled = !rows.has(rowKey);
     const task = Promise.all(previous.map(task => task?.catch(() => undefined))).then(async () => {
       signal.throwIfAborted();
       if (input.kind === 'camera' && !input.deleting && this.repository.cameraWasDeleted(item.id)) throw new Error('This camera was deleted; add a new camera before sending more edits');
-      const { plan } = await this.repository.read(signal), device = plan.devices.find(device => device.id === deviceId);
+      const plan = session && settled ? await session.plan(signal) : (await this.repository.read(signal)).plan, device = plan.devices.find(device => device.id === deviceId);
       if (!device) throw new Error('Controller is no longer in the managed list');
       const saved = (input.kind === 'camera' ? plan.cameras : plan.lans).find(row => row.id === item.id);
       const target = { ...item, ...(saved?.elementKey ? { elementKey: saved.elementKey } : {}), ...(saved?.newElementKey ? { newElementKey: saved.newElementKey } : {}), needsInitialization: saved?.needsInitialization ?? item.needsInitialization, createState: saved?.createState ?? item.createState };
@@ -49,14 +92,14 @@ export class ConfigurationOperations {
       if (number !== null) { numbers.add(number); this.cameraNumbers.set(deviceId, numbers); }
       let client: CyanviewClient | undefined;
       try {
-        client = await this.connect(device, signal);
-        return input.kind === 'camera' ? await this.camera(client, device, target, input, signal) : await this.lan(client, device, target, input, signal);
+        client = session ? await session.client(device, signal) : await this.connect(device, signal);
+        return input.kind === 'camera' ? await this.camera(client, device, target, input, signal, session) : await this.lan(client, device, target, input, signal);
       } finally {
-        client?.close();
+        if (!session) client?.close();
         if (number !== null) { numbers.delete(number); if (!numbers.size) this.cameraNumbers.delete(deviceId); }
       }
     });
-    if (exclusive) this.queues.set(deviceId, task);
+    if (exclusive && !session) this.queues.set(deviceId, task);
     else { rows.set(rowKey, task); this.rowQueues.set(deviceId, rows); }
     const cleanup = () => {
       if (rows.get(rowKey) === task) rows.delete(rowKey);
@@ -74,26 +117,89 @@ export class ConfigurationOperations {
       if (Array.isArray(input.items) || ids.has(id)) throw new Error('Each configuration row can only appear once in a send');
       ids.add(id);
     }
-    const results = await Promise.all(items.map(async value => {
-      const input = object(value), item = object(input.item);
-      try { return { ...await this.run(input, signal), kind: input.kind, id: item.id }; }
-      catch (error) { return { kind: input.kind, id: item.id, error: error instanceof Error ? error.message : 'Settings could not be confirmed' }; }
-    }));
-    const saved = await this.repository.read(signal);
+    // Controllers work side by side, and each takes its rows in turn over its one socket.
+    const started = performance.now();
+    const session = new ControllerSession((device, opening) => this.connect(device, opening), async reading => (await this.repository.read(reading)).plan);
+    const groups = new Map<string, number[]>();
+    items.forEach((value, index) => { const device = String(object(object(value).item).device ?? ''); groups.set(device, [...(groups.get(device) ?? []), index]); });
+    const work = [...groups.values()], results: RecordValue[] = new Array(items.length);
+    let next = 0, finished = () => {};
+    const running = new Promise<void>(resolve => { finished = resolve; });
+    for (const device of groups.keys()) this.batches.set(device, new Set([...(this.batches.get(device) ?? []), running]));
+    try {
+      await Promise.all([...groups.keys()].map(device => this.queues.get(device)?.catch(() => undefined)));
+      await Promise.all(Array.from({ length: Math.min(controllersAtOnce, work.length) }, async () => {
+        while (next < work.length) {
+          const rows = work[next++]!;
+          const send = async (index: number) => {
+            const input = object(items[index]), item = object(input.item), began = performance.now();
+            try { results[index] = { ...await this.run(input, signal, session), kind: input.kind, id: item.id }; }
+            catch (error) { results[index] = { kind: input.kind, id: item.id, error: error instanceof Error ? error.message : 'Settings could not be confirmed' }; }
+            results[index]!.ms = Math.round(performance.now() - began);
+          };
+          // A network change, a new camera and a changed camera number each take their turn, since the
+          // next row can depend on what they leave. Other cameras on the controller go together.
+          const inTurn = (index: number) => {
+            const input = object(items[index]), item = object(input.item);
+            return input.kind !== 'camera' || (!input.deleting && (!item.elementKey || item.needsInitialization === true || !Array.isArray(input.fields) || input.fields.includes('number')));
+          };
+          for (let at = 0; at < rows.length;) {
+            if (inTurn(rows[at]!)) { await send(rows[at++]!); continue; }
+            let end = at;
+            while (end < rows.length && !inTurn(rows[end]!)) end++;
+            const together = rows.slice(at, end);
+            at = end;
+            let turn = 0;
+            await Promise.all(Array.from({ length: Math.min(camerasAtOnce, together.length) }, async () => { while (turn < together.length) await send(together[turn++]!); }));
+          }
+        }
+      }));
+    } finally {
+      session.close();
+      finished();
+      for (const device of groups.keys()) {
+        const open = this.batches.get(device);
+        open?.delete(running);
+        if (!open?.size) this.batches.delete(device);
+      }
+    }
+    // One save for the whole send, however many cameras went, and none when nothing on a saved row changed.
+    const current = await this.repository.read(signal);
+    const unsettled = session.receipts.some(({ item, patch }) => {
+      const row = current.plan.cameras.find(row => row.id === item.id);
+      return !row || row.elementKey !== patch.elementKey || !!row.createState || row.needsInitialization === true || row.isNew === true;
+    });
+    const saved = !session.deleted.size && !unsettled ? current : await this.repository.update(plan => {
+      plan.cameras = plan.cameras.filter(row => !session.deleted.has(String(row.id)));
+      for (const { item, patch } of session.receipts) {
+        let row = plan.cameras.find(row => row.id === item.id);
+        if (!row) { row = { ...item }; plan.cameras.push(row); }
+        Object.assign(row, patch);
+      }
+    }, signal);
     for (const result of results) {
       const row = (result.kind === 'camera' ? saved.plan.cameras : saved.plan.lans).find(row => row.id === result.id);
       if (row) for (const field of ['elementKey', 'newElementKey', 'createState', 'needsInitialization']) if (row[field] !== undefined) Object.assign(result, { [field]: row[field] });
     }
-    return { results, revision: saved.revision };
+    return { results, revision: saved.revision, elapsedMs: Math.round(performance.now() - started), controllers: groups.size, openMs: Math.max(0, ...session.opened) };
   }
-  private async camera(client: CyanviewClient, device: RecordValue, item: RecordValue, input: RecordValue, signal: AbortSignal): Promise<RecordValue> {
+  private async camera(client: CyanviewClient, device: RecordValue, item: RecordValue, input: RecordValue, signal: AbortSignal, session?: ControllerSession): Promise<RecordValue> {
     let key = String(item.elementKey ?? ''), created = item.needsInitialization === true;
     const fields: string[] = Array.isArray(input.fields) ? input.fields.filter((field: unknown) => typeof field === 'string') : [];
     const before = client.config.Camera?.[key] as RecordValue | undefined;
-    if (isRemiModel(before?.Model)) throw new Error('Use REMI to remove an imported camera or edit it on its source');
+    if (isRemiModel(before?.Model)) {
+      // A copy with nothing importing it any more is only an element left behind, and clearing a controller may delete it.
+      const imported = remiEntries(client.config).some(entry => entry.localKey === key && entry.enabled);
+      if (!input.deleting || input.orphan !== true || imported) throw new Error('Use REMI to remove an imported camera or edit it on its source');
+    }
     if (before) await this.remi?.assertCameraReady(device.id, key, signal);
     if (input.deleting) {
       if (key && client.config.Camera?.[key]) await client.action({ delete: [key] }, signal);
+      if (session) {
+        if (key) await client.waitFor(config => !config.Camera?.[key], signal);
+        session.deleted.add(String(item.id));
+        return { deleted: true };
+      }
       const fresh = await this.connect(device, signal);
       try { if (key && fresh.config.Camera?.[key]) throw new Error('Camera deletion could not be verified'); }
       finally { fresh.close(); }
@@ -168,33 +274,43 @@ export class ConfigurationOperations {
       const mapping = await client.mapping(key, 'LensParams', signal);
       await client.update(mapping.key, { [mapping.property]: parameters }, signal); expected.LensParams = parameters;
     }
-    const fresh = await this.connect(device, signal);
-    let changed = false;
+    const matches = (row: RecordValue, field: string, value: unknown) => {
+      if (field === 'usb') return String(object(row.Interface).port) === value;
+      if (field === 'lensDisconnected') return !object(row.LensInterface).port;
+      if (field === 'lensConnection') return ['device', 'port'].every(part => String(object(row.LensInterface)[part]) === String(object(value)[part]));
+      if (field === 'Model') return normalizedLabel(row.Model) === normalizedLabel(value);
+      return String(row[field] ?? '') === String(value);
+    };
+    // The socket a send shares gets the controller's own push of what changed.
+    const waited = performance.now();
+    if (session) await client.waitFor(config => Object.entries(expected).every(([field, value]) => matches(object(config.Camera?.[key]), field, value)), signal).catch(() => signal.throwIfAborted());
+    const fresh = session ? client : await this.connect(device, signal);
+    let copiesStale = false;
     let verifiedCamera: ReturnType<typeof remiCamera>;
     try {
       const observed = object(fresh.config.Camera?.[key]);
-      const matches = (row: RecordValue, field: string, value: unknown) => {
-        if (field === 'usb') return String(object(row.Interface).port) === value;
-        if (field === 'lensDisconnected') return !object(row.LensInterface).port;
-        if (field === 'lensConnection') return ['device', 'port'].every(part => String(object(row.LensInterface)[part]) === String(object(value)[part]));
-        if (field === 'Model') return normalizedLabel(row.Model) === normalizedLabel(value);
-        return String(row[field] ?? '') === String(value);
-      };
       for (const [field, value] of Object.entries(expected)) {
         if (!matches(observed, field, value)) throw new Error('Camera configuration could not be verified through a fresh connection');
-        if (before && !matches(before, field, value)) changed = true;
+        if (before && copiedFields.includes(field) && !matches(before, field, value)) copiesStale = true;
       }
       verifiedCamera = remiCamera(key, fresh.config);
-    } finally { fresh.close(); }
-    const saved = await this.receipt('camera', item, { elementKey: key, createState: null, needsInitialization: false, isNew: false }, signal);
-    const result: RecordValue = { elementKey: key, revision: saved.revision, verified: true };
-    if (before && changed && this.remi) {
-      const previous = { key, name: String(before.Name ?? ''), number: String(before.Number ?? '') };
+    } finally { if (!session) fresh.close(); }
+    const patch = { elementKey: key, createState: null, needsInitialization: false, isNew: false };
+    const result: RecordValue = { elementKey: key, verified: true };
+    // How long the controller took to report the change back, which is its own time and not the send's.
+    if (session) result.confirmMs = Math.round(performance.now() - waited);
+    if (session) session.receipts.push({ item, patch });
+    else result.revision = (await this.receipt('camera', item, patch, signal)).revision;
+    // An address, login or lens change never reaches a copy, so the copies and their controllers are left alone.
+    if (before && copiesStale && this.remi) {
+      const previous = { key, name: String(before.Name ?? ''), number: String(before.Number ?? '') }, rebuilding = performance.now();
       try { Object.assign(result, await this.remi.cameraChanged(device, previous, verifiedCamera, signal)); }
       catch (error) {
         result.remiRefresh = true;
         result.remiError = error instanceof Error ? error.message : 'REMI refresh could not be completed';
       }
+      // Each controller holding a copy takes it off and imports it again, which is those controllers' time.
+      if (result.remiRefresh) result.copiesMs = Math.round(performance.now() - rebuilding);
     }
     return result;
   }

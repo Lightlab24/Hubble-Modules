@@ -1,10 +1,12 @@
   const cameraSortByDevice={};
-  const cameraSortFields=cameraColumnSections().flatMap(section=>section.fields.filter(field=>!field.summary).map(field=>field.id));
+  const cameraSortFields=cameraColumnSections().flatMap(section=>section.fields.filter(field=>!field.summary&&!field.id.startsWith('remi:')).map(field=>field.id));
   const cameraSortLabels=Object.fromEntries(cameraColumnSections().flatMap(section=>section.fields.filter(field=>!field.summary).map(field=>[field.id,field.label])));
   function cameraSort(id){return cameraSortByDevice[id]||(cameraSortByDevice[id]={field:'number',direction:'asc'});}
   function sortCameraValue(camera,field){
     if(field==='controlEnabled')return cameraControlEnabled(camera)?'1':'0';
+    if(isAssignmentField(field))return assignmentSortValue(camera,field);
     if(field==='model'&&importedCamera(camera))return remiModelName(camera);
+    if(irisSwapCell(camera,field))return irisSwapValue(camera);
     if(isLensSetting(field)&&!lensFieldUsed(camera,field))return '';
     if(field==='control')return connectionText(camera.online);
     if(field==='recording')return cameraRecordingText(camera.id);
@@ -28,12 +30,12 @@
     const sort=cameraSort(id);return ' data-sort-header="'+column.id+'" aria-sort="'+(sort.field===column.id?(sort.direction==='asc'?'ascending':'descending'):'none')+'"';
   }
   function cameraSortHeading(column,id){
-    if(!cameraSortFields.includes(column.id))return column.label;
+    if(!cameraSortFields.includes(column.id))return esc(column.label);
     const sort=cameraSort(id),label=cameraSortLabels[column.id]||column.label;
     return '<button class="hc-sort-heading" data-action="sort-cameras" data-id="'+id+'" data-sort-field="'+column.id+'" aria-label="Sort by '+esc(label)+'">'+column.label+(sort.field===column.id?'<span aria-hidden="true">'+(sort.direction==='asc'?'↑':'↓')+'</span>':'')+'</button>';
   }
   function restoreCameraSorting(data){
-    for(const[id,sort]of Object.entries(data.cameraSortByDevice||{}))if(device(id)&&sort&&cameraSortFields.includes(sort.field)&&['asc','desc'].includes(sort.direction))cameraSortByDevice[id]={field:sort.field,direction:sort.direction};
+    for(const[id,sort]of Object.entries(data.cameraSortByDevice||{}))if(sheetOwner(id)&&sort&&cameraSortFields.includes(sort.field)&&['asc','desc'].includes(sort.direction))cameraSortByDevice[id]={field:sort.field,direction:sort.direction};
   }
   root.addEventListener('click',event=>{
     const button=event.target.closest('[data-action="sort-cameras"]');if(!button)return;

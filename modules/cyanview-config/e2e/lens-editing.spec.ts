@@ -18,21 +18,31 @@ async function choose(frame: FrameLocator, row: Locator, column: string, label: 
   await frame.getByRole('grid').press('Enter');
   await frame.getByRole('dialog').getByRole('option', { name: label, exact: true }).click();
 }
+// The count box adds a row at the end; the Add camera menu it replaced also chose the model.
+async function addCamera(frame: FrameLocator, group: Locator, model: string) {
+  const rows = group.locator('tbody tr[data-id]'), before = await rows.count();
+  await group.locator('[data-count-step="1"]').click();
+  await expect(rows).toHaveCount(before + 1);
+  const added = rows.last();
+  if (!(await cell(added, 'model').innerText()).includes(model)) await choose(frame, added, 'model', model);
+  await expect(cell(added, 'model')).toContainText(model);
+}
 // A real controller, a camera the controller knows about, and a Tilta lens already sent.
 async function sentCamera(page: Page, request: APIRequestContext) {
   await request.post('/__reset', { data: { sample: false } });
   await page.goto('/');
   const f = ui(page);
   await expect(f.locator('[data-role="saved-label"]')).toContainText('Workspace saved');
+  await f.locator('[data-device-view="details"]').click();
   await f.locator('[data-role="manual-ip"]').fill('10.192.1.10');
   await f.getByRole('button', { name: 'Find', exact: true }).click();
   await expect(f.locator('[data-action="add-discovered"]')).toBeEnabled();
   await f.locator('[data-action="add-discovered"]').click();
   await expect(f.locator('[data-role="device-count"]')).toHaveText('1');
-  await f.locator('[data-tab="cameras"]').click();
+  await f.locator('[data-tab="assignment"]').click().then(() => f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   await f.getByRole('button', { name: 'Expand all device spreadsheets', exact: true }).click();
   const group = f.locator('[data-controller]'), row = group.locator('tr[data-id]').first();
-  await group.locator('[data-new-camera]').selectOption('Alpha-USB');
+  await addCamera(f, group, 'Alpha-USB');
   await expect(row).toBeVisible();
   await choose(f, row, 'lens', 'Tilta - Nucleus-M');
   const send = group.locator('[data-action="send-controller"]');
@@ -119,6 +129,60 @@ test('deleting one motor setting clears it from the controller too', async ({ pa
   expect(await lensParams(request)).toEqual(['7:I']);
   await expect(field(row, 'irisMotor')).toHaveValue('7');
   await expect(field(row, 'irisMax')).toHaveValue('');
+});
+
+test('a Tilta iris is reversed from its Direction cell, which swaps Open and Closed', async ({ page, request }) => {
+  const { f, row, send, sheet } = await sentCamera(page, request);
+  await use(row, 'iris').click();
+  // The cell is live for a Tilta, and with no numbers there is nothing to say or swap.
+  await expect(cell(row, 'irisDirection')).not.toHaveClass(/hc-axis-inactive/);
+  await expect(cell(row, 'irisTorque')).toHaveClass(/hc-axis-inactive/);
+  await expect(field(row, 'irisDirection')).toHaveText('');
+  await type(row, 'irisMotor', '7');
+  await type(row, 'irisMin', '2.8');
+  await type(row, 'irisMax', '22');
+  await expect(field(row, 'irisDirection')).toHaveText('Normal');
+  await send.click();
+  await expect(cell(row, 'sync')).toHaveText('Verified');
+  expect(await lensParams(request)).toEqual(['7:I:2.8:22']);
+
+  // Picking the direction it already has changes nothing.
+  await choose(f, row, 'irisDirection', 'Normal');
+  await expect(field(row, 'irisMin')).toHaveValue('2.8');
+  await expect(cell(row, 'irisMin')).not.toHaveClass(/hc-changed/);
+
+  await choose(f, row, 'irisDirection', 'Swapped');
+  await expect(field(row, 'irisMin')).toHaveValue('22');
+  await expect(field(row, 'irisMax')).toHaveValue('2.8');
+  await expect(field(row, 'irisDirection')).toHaveText('Swapped');
+  await expect(cell(row, 'irisMin')).toHaveClass(/hc-changed/);
+  await expect(cell(row, 'irisMax')).toHaveClass(/hc-changed/);
+  await expect(field(row, 'irisMotor')).toHaveValue('7');
+  expect(await lensParams(request)).toEqual(['7:I:2.8:22']);
+  await send.click();
+  await expect(cell(row, 'sync')).toHaveText('Verified');
+  expect(await lensParams(request)).toEqual(['7:I:22:2.8']);
+  await expect(field(row, 'irisDirection')).toHaveText('Swapped');
+
+  // Undo puts the numbers back, and the cell follows them.
+  await choose(f, row, 'irisDirection', 'Normal');
+  await expect(field(row, 'irisMin')).toHaveValue('2.8');
+  await expect(field(row, 'irisDirection')).toHaveText('Normal');
+  await sheet.press('ControlOrMeta+z');
+  await expect(field(row, 'irisMin')).toHaveValue('22');
+  await expect(field(row, 'irisMax')).toHaveValue('2.8');
+  await expect(field(row, 'irisDirection')).toHaveText('Swapped');
+
+  // Typing the numbers the other way round is the same thing, and sends.
+  await type(row, 'irisMin', '4');
+  await type(row, 'irisMax', '16');
+  await expect(field(row, 'irisDirection')).toHaveText('Normal');
+  await type(row, 'irisMin', '16');
+  await type(row, 'irisMax', '4');
+  await expect(field(row, 'irisDirection')).toHaveText('Swapped');
+  await send.click();
+  await expect(cell(row, 'sync')).toHaveText('Verified');
+  expect(await lensParams(request)).toEqual(['7:I:16:4']);
 });
 
 test('deleting Lens connection goes to None and Send reports when the controller has no disconnect', async ({ page, request }) => {
@@ -226,7 +290,7 @@ test('values an earlier version made up are gone on load, and ones in use stay',
 
   await page.reload();
   const f = ui(page);
-  await f.locator('[data-tab="cameras"]').click();
+  await f.locator('[data-tab="assignment"]').click().then(() => f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   await f.getByRole('button', { name: 'Expand Zoom', exact: true }).click();
   await use(row, 'iris').click();
   await expect(use(row, 'iris')).toBeChecked();

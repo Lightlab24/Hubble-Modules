@@ -15,6 +15,7 @@
     }catch{ /* Built-in options and any choices already loaded remain usable. */ }
   }
   function choiceLabel(field){
+    if(isAssignmentField(field))return assignmentLabel(field);
     return ({model:'Camera model',lens:'Lens model',lensPort:'Lens connection',usb:'Camera interface'})[field]
       ||axisDefinitions[lensAxisForField(field)]?.find(item=>item.id===field)?.label||field;
   }
@@ -52,15 +53,16 @@
     }else if(field.endsWith('Torque')){
       entries=['1','2','3','4'].map(value=>choiceEntry(value));
     }else if(field.endsWith('Direction')){
-      entries=[choiceEntry('left','Left'),choiceEntry('right','Right')];
+      entries=irisSwapCell(camera,field)?irisSwapChoices.map(option=>choiceEntry(option.value,option.label)):[choiceEntry('left','Left'),choiceEntry('right','Right')];
     }
-    const current=camera[field];
+    // A swap cell shows which way round the numbers are, not a saved value.
+    const current=irisSwapCell(camera,field)?'':camera[field];
     if(current&&current!=='Choose model…'&&!entries.some(option=>option.value===current))entries=[...entries,choiceEntry(current)];
     return [...new Map(entries.map(option=>[option.value,option])).values()];
   }
   function cameraChoiceCell(camera,field,disabled=false){
     const inactive=disabled||camera.deleting||importedCamera(camera);
-    const value=inactive?'':camera[field]??(field==='usb'?'USB · Automatic':'');
+    const value=inactive?'':irisSwapCell(camera,field)?irisSwapValue(camera):camera[field]??(field==='usb'?'USB · Automatic':'');
     const label=cameraCellChoices(camera,field).find(option=>option.value===value)?.label??value;
     return '<button type="button" tabindex="-1" class="hc-cell-input hc-choice-cell" data-row="'+esc(camera.id)+'" data-field="'+field+'" data-camera-choice value="'+esc(value)+'" aria-label="'+esc(choiceLabel(field)+' for camera '+camera.number+(label?' · '+label:''))+'"'+(inactive?' disabled':'')+'>'+esc(label)+'</button>';
   }

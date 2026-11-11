@@ -1,5 +1,5 @@
   function plainRow(item){const {deleting,...saved}=item;return {...saved,dirty:[...(item.dirty||[])],jobs:0};}
-  function snapshotPlan(uiState){return {formatVersion:1,devices:devices.map(({modelCatalog,models,lensOptions,snapshot,...item})=>({...item})),cameras:cameras.map(plainRow),lans:lans.map(plainRow),uiState};}
+  function snapshotPlan(uiState){return {formatVersion:1,devices:devices.map(({modelCatalog,models,lensOptions,snapshot,...item})=>({...item})),cameras:cameras.filter(row=>row.device!=='').map(plainRow),lans:lans.map(plainRow),uiState};}
   function persistPlan(uiState){
     const sequence=++saveSequence;persistence='saving';syncSummary();
     const plan=copyPresentation(snapshotPlan(uiState)),ticket=presentationLedger.ticket();
@@ -73,7 +73,7 @@
       moduleBridge.subscribe(applyLiveState);
       if(plan?.uiState?.privateContent?.ui?.discoveryVersion!==2&&ui.discoveryMethod==='broadcast')ui.discoveryMethod='ping';
       $('discovery-method').value=['ping','ip','broadcast'].includes(ui.discoveryMethod)?ui.discoveryMethod:'ping';
-      persistence='saved';syncSummary();
+      persistence='saved';syncSummary();preferBaseAddresses();
     }catch(error){devices.splice(0);cameras=[];lans=[];renderLans();renderCameras();toast(error.message||'Configuration could not be loaded');}
     root.hidden=false;icons();
   }
@@ -145,7 +145,7 @@
   }
   async function refreshLive(){
     action('refresh-all').disabled=true;
-    try{const reply=await moduleBridge.refresh();for(const snapshot of reply.snapshots||[])mergeSnapshot(snapshot);await restoreCameraChoiceCatalogs();renderLans();renderCameras();applyLiveState({observations:reply.observations});const failed=(reply.failed||[]).map(id=>device(id)?.name||id);toast(failed.length?'Could not read '+(failed.length===1?failed[0]:failed.length+' controllers')+' · edits retained':'Settings refreshed · edits retained');remember();}
+    try{const reply=await moduleBridge.refresh();const cleared=clearPendingSends();for(const snapshot of reply.snapshots||[])mergeSnapshot(snapshot);await restoreCameraChoiceCatalogs();renderLans();renderCameras();applyLiveState({observations:reply.observations});const failed=(reply.failed||[]).map(id=>device(id)?.name||id);const clearedText=cleared?' · '+cleared+(cleared===1?' pending change':' pending changes')+' cleared':'';toast((failed.length?'Could not read '+(failed.length===1?failed[0]:failed.length+' controllers'):'Settings refreshed')+clearedText);remember();}
     catch(error){toast(error.message);}
     finally{action('refresh-all').disabled=false;}
   }

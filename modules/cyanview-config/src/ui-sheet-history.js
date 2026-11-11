@@ -59,7 +59,7 @@
     if (rejected.length) renderCameras();
   }
   function cameraDraftSnapshot(rows) {
-    const skipped = new Set(['id', 'device', 'dirty', 'pending', 'result', 'revision', 'jobs', 'online', 'deleting', 'elementKey', 'newElementKey', 'createState', 'needsInitialization']);
+    const skipped = new Set(['id', 'dirty', 'pending', 'result', 'revision', 'jobs', 'online', 'deleting', 'elementKey', 'newElementKey', 'createState', 'needsInitialization', 'sentValues']);
     return rows.map(row => ({ id: row.id, values: copyPresentation(Object.fromEntries(Object.entries(row).filter(([key]) => !skipped.has(key)))), dirty: [...row.dirty], pending: row.pending, result: row.result }));
   }
   function recordCameraDrafts(before, rows) {
@@ -69,7 +69,11 @@
       if (!next) continue;
       const fields = [...new Set([...Object.keys(old.values), ...Object.keys(next.values)])].filter(key => JSON.stringify(old.values[key]) !== JSON.stringify(next.values[key]));
       if (!fields.length) continue;
-      const id = rows.find(row => row.id === old.id).device;
+      // What it was before the first edit since the last send, which is what Cancel goes back to.
+      const row = rows.find(item => item.id === old.id);
+      for (const field of fields) if (!['routeDraft', 'device', 'remiMaster', 'removeStaged'].includes(field) && !(field in (row.sentValues ??= {}))) row.sentValues[field] = old.values[field] ?? null;
+      // Undo belongs to the sheet the edit was made on.
+      const id = virtualSheet(tab) ?? row.device;
       if (!byDevice.has(id)) byDevice.set(id, []);
       byDevice.get(id).push({ before: old, after: next, fields });
     }
@@ -81,7 +85,8 @@
     const entry = from.at(-1);
     if (!entry) return;
     const source = forward ? 'before' : 'after', target = forward ? 'after' : 'before';
-    if (entry.kind === 'layout') {
+    if (entry.kind === 'cleared') setClearedRows(entry.rows, forward);
+    else if (entry.kind === 'layout') {
       if (JSON.stringify(cameraPresentation(id)) !== JSON.stringify(entry[source])) { toast('The sheet layout has changed; this history entry is no longer available'); return; }
       entry.epoch = changeCameraPresentation(id, () => applyCameraPresentation(id, entry[target], forward ? entry.activeAfter : entry.activeBefore), true, false);
     } else {

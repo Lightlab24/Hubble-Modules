@@ -12,6 +12,7 @@ import { ModuleFrontendValueSchema } from '@hubble/module-sdk/frontend';
 import { parseAnnouncement } from '../src/announcements.js';
 import { parseNeighbors } from '../src/neighbors.js';
 import { CyanviewClient } from '../src/transport.js';
+import { baseFromSerial } from '../src/service.js';
 import { cameraChoiceKey } from '../src/choice-context.js';
 import { setTimeout as delay } from 'node:timers/promises';
 
@@ -132,7 +133,7 @@ test('partial camera failure retains the create receipt and retries the same obj
   } finally { await f.instance.dispose(); await fake.close(); }
 });
 
-test('one send starts all camera additions before any create reply, and LAN replacement waits for them', async () => {
+test('one send takes a controller\'s camera additions in turn over one socket, and LAN replacement waits for them', async () => {
   const fake = new FakeController(); await fake.start();
   const f = fixture({}, { client: address => new CyanviewClient(address, { socket: fake.socket, timeout: 2000 }) });
   try {
@@ -141,8 +142,9 @@ test('one send starts all camera additions before any create reply, and LAN repl
     await f.repository.write(null, plan, f.signal);
     fake.holdAction = 'new';
     const sending = f.call('send', { items: plan.cameras.map(item => ({ kind: 'camera', item, fields: ['number', 'name', 'model', 'ip'] })) });
-    await waitFor(() => fake.heldActionReplies.length === 3);
-    assert.equal(fake.actions.filter(action => action.new?.[0] === 'CyElement.Camera').length, 3);
+    await waitFor(() => fake.heldActionReplies.length === 1);
+    assert.equal(fake.actions.filter(action => action.new?.[0] === 'CyElement.Camera').length, 1);
+    assert.equal(fake.sockets.size, 1, 'One socket for the whole send');
     const old = plan.lans.find(row => row.elementKey === 'old')!;
     const networking = f.call('send', { kind: 'lan', item: { ...old, operation: 'Replace', planned: '10.20.101.201/16' }, fields: ['planned'] });
     await delay(20);
@@ -157,7 +159,7 @@ test('one send starts all camera additions before any create reply, and LAN repl
   } finally { fake.releaseActionReplies(); await f.instance.dispose(); await fake.close(); }
 });
 
-test('independent pending LAN additions start together', async () => {
+test('pending LAN additions on one controller go in turn', async () => {
   const fake = new FakeController(); await fake.start();
   const f = fixture({}, { client: address => new CyanviewClient(address, { socket: fake.socket, timeout: 2000 }) });
   try {
@@ -166,7 +168,8 @@ test('independent pending LAN additions start together', async () => {
     plan.lans.push(...added); await f.repository.write(null, plan, f.signal);
     fake.holdAction = 'new';
     const sending = f.call('send', { items: added.map(item => ({ kind: 'lan', item, fields: ['planned'] })) });
-    await waitFor(() => fake.heldActionReplies.length === 2);
+    await waitFor(() => fake.heldActionReplies.length === 1);
+    assert.equal(fake.actions.filter(action => action.new?.[0] === 'CyElement.LanIp').length, 1);
     fake.releaseActionReplies();
     const result = await sending;
     assert.equal(result.results.filter((row: RecordValue) => row.verified).length, 2);
@@ -196,7 +199,7 @@ test('a large send is transferred completely before its camera operations start'
   } finally { await f.instance.dispose(); await fake.close(); }
 });
 
-test('one send starts all camera deletions before any delete reply', async () => {
+test('one send takes a controller\'s camera deletions in turn over one socket', async () => {
   const fake = new FakeController(); await fake.start();
   const f = fixture({}, { client: address => new CyanviewClient(address, { socket: fake.socket, timeout: 2000 }) });
   try {
@@ -205,8 +208,9 @@ test('one send starts all camera deletions before any delete reply', async () =>
     await f.repository.write(null, plan, f.signal);
     fake.holdAction = 'delete';
     const sending = f.call('send', { items: plan.cameras.slice(0, 2).map(item => ({ kind: 'camera', deleting: true, item })) });
-    await waitFor(() => fake.heldActionReplies.length === 2);
-    assert.equal(fake.actions.filter(action => action.delete).length, 2);
+    await waitFor(() => fake.heldActionReplies.length === 1);
+    assert.equal(fake.actions.filter(action => action.delete).length, 1);
+    assert.equal(fake.sockets.size, 1, 'One socket for the whole send');
     fake.releaseActionReplies();
     const result = await sending;
     assert.equal(result.results.filter((row: RecordValue) => row.deleted).length, 2);
@@ -389,6 +393,20 @@ test('existing lens parameter values are restored without inventing values for u
   assert.throws(() => lensParameters({ lens: 'Tilta - Nucleus-M', focusMotor: '7' }, ['focusMotor'], '7:I'), /distinct motor IDs/);
 });
 
+test('a Tilta iris is reversed by holding Open above Closed, and an ARRI iris keeps its own direction', () => {
+  assert.deepEqual(decodeLensParameters('Tilta - Nucleus-M', '7:I:22:2.8,8:Z'), { irisMotor: '7', irisMin: '22', irisMax: '2.8', zoomMotor: '8', lensParamsEditable: true });
+  const tilta = { lens: 'Tilta - Nucleus-M', irisMotor: '7', irisMin: '22', irisMax: '2.8' };
+  assert.equal(lensParameters(tilta, ['irisMin', 'irisMax'], '7:I:2.8:22,8:Z'), '7:I:22:2.8,8:Z');
+  assert.equal(lensParameters({ ...tilta, irisMin: '2.8', irisMax: '22' }, ['irisMin', 'irisMax'], '7:I:22:2.8'), '7:I:2.8:22');
+  // Equal or empty limits are still no range at all.
+  assert.throws(() => lensParameters({ ...tilta, irisMax: '22' }, ['irisMin', 'irisMax'], '7:I:2.8:22'), /iris limits/);
+  assert.throws(() => lensParameters({ ...tilta, irisMax: '0' }, ['irisMin', 'irisMax'], '7:I:2.8:22'), /iris limits/);
+  assert.deepEqual(decodeLensParameters('Tilta - Nucleus-M', '7:I:22:22'), { lensParamsEditable: false });
+  // A cforce motor has a direction setting, so its limits stay the right way round.
+  assert.deepEqual(decodeLensParameters('ARRI - cforce', '22:2:iris:4:right'), { lensParamsEditable: false });
+  assert.throws(() => lensParameters({ lens: 'ARRI - cforce', irisMin: '22', irisMax: '2', irisTorque: '4', irisDirection: 'right' }, ['irisMin', 'irisMax'], '2:22:iris:4:right'), /iris limits/);
+});
+
 test('Cyanview announcements accept the observed gateway and RCP formats, including the auxiliary address', () => {
   assert.deepEqual(parseAnnouncement(Buffer.from('gateway cy-gateway-1-40 10.192.1.40. - 0 -'),'10.192.1.40'), {role:'gateway',serialHint:'CY-GATEWAY-1-40',addresses:['10.192.1.40']});
   assert.deepEqual(parseAnnouncement(Buffer.from('rcp RCP-1-50 10.192.2.50 cy-rcp-1-50 8 -'),'10.192.2.50'), {role:'rcp',serialHint:'CY-RCP-1-50',addresses:['10.192.1.50','10.192.2.50']});
@@ -472,6 +490,119 @@ test('removing a managed device forgets what was read and leaves hardware untouc
     assert.deepEqual(fake.config,hardware);assert.equal(fake.actions.length,0);
     // Removing and re-adding a zero-camera device must not exhaust import tokens.
     for(let count=0;count<18;count++)await f.call('import-device',{id:snapshot.device.id,address:'10.192.1.10'});
+  }finally{await f.instance.dispose();await fake.close();}
+});
+
+test('a controller\'s edited cameras go together over one socket, are confirmed from its own push, and save nothing',async()=>{
+  const fake=new FakeController();await fake.start();
+  for(const n of [1,2,3,4,5,6])fake.config.Camera['c'+n]={Number:String(n),Name:'Cam '+n,Model:'Sony - Venice-IP',IP:'10.20.20.'+n,Port:'80'};
+  fake.addressable(...Object.keys(fake.config.Camera));
+  const f=fixture({}, {client:fake.client});await f.instance.start();
+  try{
+    const snapshot=fake.snapshot(),plan={...planFor(fake),cameras:snapshot.cameras};
+    await f.call('save-plan',{revision:null,plan});
+    const revision=(await f.repository.read(f.signal)).revision,opened=fake.opened;
+    fake.pushDelayMs=150;
+    const started=Date.now();
+    const reply=await f.call('send',{items:snapshot.cameras.map((item:any,index:number)=>({kind:'camera',item:{...item,ip:'10.20.21.'+(index+1)},fields:['ip']}))});
+    const elapsed=Date.now()-started;
+    assert.ok(reply.results.every((row:any)=>row.verified),JSON.stringify(reply.results));
+    assert.deepEqual(Object.values(fake.config.Camera).map((row:any)=>row.IP),[1,2,3,4,5,6].map(n=>'10.20.21.'+n));
+    assert.equal(fake.opened-opened,1,'One socket for the whole send');
+    // In turn, six pushes of 150 ms each are 900 ms.
+    assert.ok(elapsed<600,'Six cameras took '+elapsed+' ms');
+    assert.equal((await f.repository.read(f.signal)).revision,revision,'Nothing on a saved row changed, so nothing is saved');
+    assert.equal(reply.controllers,1);
+    assert.ok(reply.elapsedMs>=150&&reply.results.every((row:any)=>typeof row.ms==='number'));
+    // The controller's own time is told apart from the send's: opening it, and how long it took to report the change back.
+    assert.ok(typeof reply.openMs==='number'&&reply.results.every((row:any)=>row.confirmMs>=100&&row.confirmMs<=row.ms),JSON.stringify(reply));
+    assert.deepEqual(fake.options.filter(field=>field!=='IP'),[],'Only the changed setting is looked up');
+  }finally{await f.instance.dispose();await fake.close();}
+});
+
+test('cameras whose numbers change are sent in the order given, so one can take the number another just left',async()=>{
+  const fake=new FakeController();await fake.start();
+  fake.config.Camera={a:{Number:'1',Name:'A',Model:'Sony - Venice-IP',IP:'10.20.20.1',Port:'80'},b:{Number:'2',Name:'B',Model:'Sony - Venice-IP',IP:'10.20.20.2',Port:'80'}};
+  const f=fixture({}, {client:fake.client});await f.instance.start();
+  try{
+    const snapshot=fake.snapshot(),plan={...planFor(fake),cameras:snapshot.cameras};
+    await f.call('save-plan',{revision:null,plan});
+    fake.pushDelayMs=60;
+    const [a,b]=snapshot.cameras as any[];
+    const reply=await f.call('send',{items:[{kind:'camera',item:{...b,number:'3'},fields:['number']},{kind:'camera',item:{...a,number:'2'},fields:['number']}]});
+    assert.ok(reply.results.every((row:any)=>row.verified),JSON.stringify(reply.results));
+    assert.deepEqual([fake.config.Camera.a.Number,fake.config.Camera.b.Number],['2','3']);
+  }finally{await f.instance.dispose();await fake.close();}
+});
+
+test('a controller that can\'t be reached fails all its cameras after one attempt',async()=>{
+  const fake=new FakeController();await fake.start();
+  for(const n of [1,2,3,4])fake.config.Camera['c'+n]={Number:String(n),Name:'Cam '+n,Model:'Sony - Venice-IP',IP:'10.20.20.'+n,Port:'80'};
+  let attempts=0,offline=false;
+  const f=fixture({}, {client:address=>{if(offline){attempts++;throw new Error('Simulated controller is offline');}return fake.client(address);}});await f.instance.start();
+  try{
+    const snapshot=fake.snapshot(),plan={...planFor(fake),cameras:snapshot.cameras};
+    await f.call('save-plan',{revision:null,plan});
+    offline=true;
+    const reply=await f.call('send',{items:snapshot.cameras.map((item:any)=>({kind:'camera',item:{...item,ip:'10.20.22.1'},fields:['ip']}))});
+    assert.ok(reply.results.every((row:any)=>row.error),JSON.stringify(reply.results));
+    assert.equal(attempts,1);
+  }finally{await f.instance.dispose();await fake.close();}
+});
+
+test('a Cyanview serial gives its base address',()=>{
+  assert.equal(baseFromSerial('CY-RCP-1-20'),'10.192.1.20');
+  assert.equal(baseFromSerial('cy-gateway-12-200'),'10.192.12.200');
+  for(const serial of ['CY-RCP-1','CY-RCP-300-1','RCP-1-20','CY-RCP-a-b',''])assert.equal(baseFromSerial(serial),'',serial);
+});
+
+test('a send of many deletes uses one socket per controller and one plan save',async()=>{
+  const fake=new FakeController();await fake.start();
+  for(const n of [1,2,3,4,5,6])fake.config.Camera['c'+n]={Number:String(n),Name:'Cam '+n,Model:'Sony - Venice-IP'};
+  const f=fixture({}, {client:fake.client});await f.instance.start();
+  try{
+    const snapshot=fake.snapshot(),plan={...planFor(fake),cameras:snapshot.cameras};
+    await f.call('save-plan',{revision:null,plan});
+    const opened=fake.opened;
+    const reply=await f.call('send',{items:snapshot.cameras.map((item:any)=>({kind:'camera',deleting:true,item,fields:[]}))});
+    assert.ok(reply.results.every((row:any)=>row.deleted),JSON.stringify(reply.results));
+    assert.equal(fake.opened-opened,1,'One socket for the whole send');
+    assert.deepEqual(Object.keys(fake.config.Camera),[]);
+    assert.deepEqual((await f.repository.read(f.signal)).plan.cameras,[]);
+  }finally{await f.instance.dispose();await fake.close();}
+});
+
+test('Refresh all moves a controller reached on a LAN address over to its base address',async()=>{
+  const fake=new FakeController();await fake.start();const hosts:string[]=[];
+  const socket:typeof fake.socket=(url,options)=>{hosts.push(new URL(url).hostname);return fake.socket(url,options);};
+  const f=fixture({}, {client:address=>new CyanviewClient(address,{socket,timeout:250})});await f.instance.start();
+  try{
+    const plan=planFor(fake),base=plan.devices[0]!.base;
+    plan.devices[0]!.address='10.20.101.250';
+    await f.call('save-plan',{revision:null,plan});
+    hosts.length=0;
+    const reply=await f.call('refresh');
+    assert.deepEqual(reply.failed,[]);
+    assert.equal(reply.snapshots[0].device.address,base);
+    assert.ok(hosts.includes(base));
+    assert.ok(!hosts.includes('10.20.101.250'),'The shared LAN address is not touched once the base answers');
+  }finally{await f.instance.dispose();await fake.close();}
+});
+
+test('a slow full read over the base address still moves the controller off a shared LAN address',async()=>{
+  const fake=new FakeController();await fake.start();const hosts:string[]=[];
+  fake.config.Camera.a={Number:'1',Name:'Cam',Model:'Sony - Venice-IP'};
+  const socket:typeof fake.socket=(url,options)=>{hosts.push(new URL(url).hostname);return fake.socket(url,options);};
+  const f=fixture({}, {client:address=>{const client=new CyanviewClient(address,{socket,timeout:250});client.option=async()=>{await delay(3300);throw new Error('Slow controller');};return client;}});await f.instance.start();
+  try{
+    const plan=planFor(fake),base=plan.devices[0]!.base;
+    plan.devices[0]!.address='10.20.101.250';
+    await f.call('save-plan',{revision:null,plan});
+    hosts.length=0;
+    const reply=await f.call('refresh');
+    assert.deepEqual(reply.failed,[]);
+    assert.equal(reply.snapshots[0].device.address,base);
+    assert.ok(!hosts.includes('10.20.101.250'),'The shared LAN address is left alone');
   }finally{await f.instance.dispose();await fake.close();}
 });
 

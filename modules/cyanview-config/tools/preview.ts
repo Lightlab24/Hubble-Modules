@@ -16,7 +16,7 @@ let releasePlanWrites: (() => void) | undefined;
 let planSaves = 0, planSavePending = 0;
 let sampleSetting = true, sessionOptions: Parameters<typeof fixture>[1], statePaused = false;
 const rendererState = () => session.states.at(-1) as Parameters<typeof session.context.publishState>[0];
-async function reset(sample: boolean, remi = false, gateway = false) {
+async function reset(sample: boolean, remi = false, gateway = false, direct = false, extra = false) {
   statePaused = false;
   pingDelayMs = 0;
   releaseControlWrites?.(); releaseControlWrites = undefined;
@@ -34,13 +34,15 @@ async function reset(sample: boolean, remi = false, gateway = false) {
   }
   if (remi) {
     controller.config.Camera.wide = { Number:'1',Name:'Wide',Model:'Sony - Venice-IP',IP:'10.20.20.1',Port:'80' };
-    for (const suffix of [20,30]) {
+    for (const suffix of extra ? [20,30,40,50] : [20,30]) {
       const rcp = new FakeController();
       rcp.config.Product = { Serial:'CY-RCP-1-'+suffix,Name:'RCP',MaxCam:'unlimited' };
       rcp.config.IP.protected.IP = '10.192.1.'+suffix;
       rcp.config.IP.old.IP = '10.20.101.'+(199+suffix/10);
       controllers.push(rcp);
     }
+    // A camera set up directly on an RCP, with no RIO in front of it.
+    if (direct) controllers[1]!.config.Camera.direct = { Number:'7',Name:'Jib',Model:'Sony - Venice-IP',IP:'10.20.20.7',Port:'80' };
   }
   const fleet = remi ? new FakeRemiFleet(controllers) : null;
   await Promise.all(controllers.map(device => device.start()));
@@ -53,7 +55,7 @@ async function reset(sample: boolean, remi = false, gateway = false) {
   sampleSetting = sample;
   sessionOptions = {
     client: address => new CyanviewClient(address, { socket, timeout: 2000 }),
-    control: { session: (definition, changed) => new RcpSession(definition, changed, true, () => createConnection({ host: '127.0.0.1', port: mqtt.port })) },
+    control: { cameraSettleMs: 400, session: (definition, changed) => new RcpSession(definition, changed, true, () => createConnection({ host: '127.0.0.1', port: mqtt.port })) },
     reachable: async address => ['10.192.1.10', '10.20.101.200'].includes(address),
     discovery: { durationMs: 100,
       ping: async (range, receive, progress, signal) => {
@@ -67,7 +69,7 @@ async function reset(sample: boolean, remi = false, gateway = false) {
   await session.instance.start();
   if (remi) {
     const snapshots = controllers.map(device=>device.snapshot(device.config.IP.protected.IP));
-    const names = ['Stage RIO','Master RCP','Downstream RCP'];
+    const names = ['Stage RIO','Master RCP','Downstream RCP','Truck RCP','Cart RCP'];
     await session.call('save-plan',{revision:null,plan:{
       formatVersion:1,devices:snapshots.map((snapshot,index)=>({...snapshot.device,name:names[index]})),
       cameras:snapshots.flatMap(snapshot=>snapshot.cameras),lans:[],uiState:null,
@@ -102,7 +104,7 @@ const server = createServer(async (request, response) => {
     if (request.method === 'POST') {
       const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk));
       const input = JSON.parse(Buffer.concat(chunks).toString() || '{}');
-      if (url.pathname === '/__reset') { await reset(input.sample !== false, input.remi === true, input.gateway === true); send({ reset: true }); return; }
+      if (url.pathname === '/__reset') { await reset(input.sample !== false, input.remi === true, input.gateway === true, input.direct === true, input.extra === true); send({ reset: true }); return; }
       if (url.pathname === '/__restart') {
         // The equipment and saved documents stay, as they do when Hubble restarts a module's worker.
         const { records } = session;
@@ -123,6 +125,8 @@ const server = createServer(async (request, response) => {
         if (input.releasePlanWrites) { releasePlanWrites?.(); releasePlanWrites = undefined; }
         if (input.closeController) await controller.close();
         if (input.cameraName) controller.config.Camera.wide.Name = input.cameraName;
+        if (input.addCamera) { const target = controllers[Number(input.addCamera.device) || 0]!; target.config.Camera[String(input.addCamera.key)] = input.addCamera.row; target.broadcast(); }
+        if (input.rekeyCamera) { const { wide, ...others } = controller.config.Camera; controller.config.Camera = { ...others, [input.rekeyCamera]: wide }; controller.broadcast(); }
         if (input.mqtt) mqtt.send(input.mqtt.topic, input.mqtt.value);
         if (input.mqttControls) Object.assign(mqtt.controls, input.mqttControls);
         if (typeof input.pauseState === 'boolean') statePaused = input.pauseState;

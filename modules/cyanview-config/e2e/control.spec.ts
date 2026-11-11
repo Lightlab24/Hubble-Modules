@@ -6,7 +6,7 @@ async function openFleet(page: Page, request: APIRequestContext) {
   const ui=page.frameLocator('iframe'),rio=ui.locator('[data-controller="CY-RIO-1-10"]'),row=rio.locator('tr[data-id]').first();
   const show=async()=>{
     await expect(ui.locator('[data-role="saved-label"]')).toContainText('Workspace saved');
-    await ui.locator('[data-tab="cameras"]').click();
+    await ui.locator('[data-tab="assignment"]').click().then(() => ui.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
     if(!await row.isVisible())await rio.locator('[data-action="toggle-controller"]').click();
     await expect(row).toBeVisible();
   };
@@ -25,7 +25,7 @@ test('Camera Control Enabled is immediate through held saves and retains configu
   await page.goto('/');
   const ui=page.frameLocator('iframe');
   await expect(ui.locator('[data-role="saved-label"]')).toContainText('Sample data');
-  await ui.locator('[data-tab="cameras"]').click();
+  await ui.locator('[data-tab="assignment"]').click().then(() => ui.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   const rows=ui.locator('[data-controller="rcp1"] tr[data-id]');
   const flags=rows.locator('[data-field="controlEnabled"] [role="checkbox"]');
   await expect(flags).toHaveCount(4);
@@ -45,7 +45,7 @@ test('Camera Control Enabled is immediate through held saves and retains configu
     const inspected=await(await request.get('/__inspect')).json();
     return inspected.records.find(([id]:[string])=>id==='sample-camera-control')?.[1].value.enabled.cam1;
   }).toBe(true);
-  await page.reload(); await ui.locator('[data-tab="cameras"]').click();
+  await page.reload(); await ui.locator('[data-tab="assignment"]').click().then(() => ui.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   await expect(flags.nth(0)).toBeChecked();
   expect((await(await request.get('/__inspect')).json()).actions).toHaveLength(0);
   expect(errors).toEqual([]);
@@ -54,7 +54,7 @@ test('Camera Control Enabled is immediate through held saves and retains configu
 test('control checkmarks use shared clipboard and fill without staging camera writes', async ({page,request})=>{
   await request.post('/__reset',{data:{sample:true}});await page.goto('/');
   const ui=page.frameLocator('iframe');await expect(ui.locator('[data-role="saved-label"]')).toContainText('Sample data');
-  await ui.locator('[data-tab="cameras"]').click();
+  await ui.locator('[data-tab="assignment"]').click().then(() => ui.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   const group=ui.locator('[data-controller="rcp1"]'),rows=group.locator('tr[data-id]'),table=group.getByRole('grid');
   const cells=rows.locator('[data-column="controlEnabled"]'),flags=cells.locator('[role="checkbox"]');
   await expect(table).toHaveAttribute('tabindex','0');await cells.first().click({position:{x:10,y:15}});
@@ -77,7 +77,7 @@ test('Enable all and Single switch show at once through held saves, take further
   const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
   await request.post('/__reset',{data:{sample:true}});await page.goto('/');
   const ui=page.frameLocator('iframe');await expect(ui.locator('[data-role="saved-label"]')).toContainText('Sample data');
-  await ui.locator('[data-tab="cameras"]').click();
+  await ui.locator('[data-tab="assignment"]').click().then(() => ui.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   const group=ui.locator('[data-controller="rcp1"]'),rows=group.locator('tr[data-id]'),flags=rows.locator('[data-field="controlEnabled"] [role="checkbox"]');
   const single=group.locator('input[data-control-single]'),all=group.locator('button[data-action="control-enable-all"]'),count=group.locator('[data-control-count]');
   const ticks=async()=>flags.evaluateAll(inputs=>inputs.map(input=>input.getAttribute('aria-checked')==='true'));
@@ -105,7 +105,7 @@ test('Enable all and Single switch show at once through held saves, take further
   await all.click();expect(await ticks()).toEqual([true,true,true,true]);
   await single.check();expect(await ticks()).toEqual([true,false,false,false]);
   await expect.poll(async()=>{const value=(await(await request.get('/__inspect')).json()).records.find(([id]:[string])=>id==='sample-camera-control')?.[1].value;return value?.singleSwitch?.rcp1;}).toBe(true);
-  await page.reload();await ui.locator('[data-tab="cameras"]').click();
+  await page.reload();await ui.locator('[data-tab="assignment"]').click().then(() => ui.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   await expect.poll(ticks).toEqual([true,false,false,false]);await expect(single).toBeChecked();await expect(count).toHaveText('1 enabled');
   // Enable all turns Single switch off, and turning it off leaves the tick alone. Sample data sends nothing.
   await all.click();expect(await ticks()).toEqual([true,true,true,true]);await expect(single).not.toBeChecked();
@@ -118,7 +118,7 @@ test('Recording and Status follow the camera live and stay read-only', async ({p
   const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
   await request.post('/__reset',{data:{sample:false,remi:true}});await page.goto('/');
   const ui=page.frameLocator('iframe');await expect(ui.locator('[data-role="saved-label"]')).toContainText('Workspace saved');
-  await ui.locator('[data-tab="cameras"]').click();
+  await ui.locator('[data-tab="assignment"]').click().then(() => ui.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   const group=ui.locator('[data-controller="CY-RIO-1-10"]');
   if(!await group.locator('tr[data-id]').first().isVisible())await group.locator('[data-action="toggle-controller"]').click();
   const row=group.locator('tr[data-id]').first();
@@ -160,7 +160,7 @@ test('Recording and Status follow the camera live and stay read-only', async ({p
 test('Recording and Status can be hidden, and stay hidden after a reload', async ({page,request})=>{
   await request.post('/__reset',{data:{sample:true}});await page.goto('/');
   const ui=page.frameLocator('iframe');await expect(ui.locator('[data-role="saved-label"]')).toContainText('Sample data');
-  await ui.locator('[data-tab="cameras"]').click();
+  await ui.locator('[data-tab="assignment"]').click().then(() => ui.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   const group=ui.locator('[data-controller="rcp1"]');
   await expect(group.locator('td[data-column="recording"]')).toHaveCount(4);await expect(group.locator('td[data-column="cameraStatus"]')).toHaveCount(4);
   await group.getByRole('button',{name:'Choose visible columns',exact:true}).click();
@@ -170,14 +170,14 @@ test('Recording and Status can be hidden, and stay hidden after a reload', async
   await expect(group.locator('td[data-column="cameraStatus"]')).toHaveCount(0);await expect(group.locator('td[data-column="recording"]')).toHaveCount(4);
   const hidden=async()=>(await(await request.post('/__rpc',{data:{commandId:'read-plan'}})).json()).result.plan?.uiState?.privateContent?.hiddenCameraColumnsByDevice?.rcp1;
   await expect.poll(hidden).toContain('cameraStatus');
-  await page.reload();await ui.locator('[data-tab="cameras"]').click();
+  await page.reload();await ui.locator('[data-tab="assignment"]').click().then(() => ui.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   await expect(group.locator('td[data-column="recording"]')).toHaveCount(4);await expect(group.locator('td[data-column="cameraStatus"]')).toHaveCount(0);
 });
 
 test('an open page follows a restarted worker instead of ignoring its lower sequence', async ({page,request})=>{
   await request.post('/__reset',{data:{sample:true}});await page.goto('/');
   const ui=page.frameLocator('iframe');await expect(ui.locator('[data-role="saved-label"]')).toContainText('Sample data');
-  await ui.locator('[data-tab="cameras"]').click();
+  await ui.locator('[data-tab="assignment"]').click().then(() => ui.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   const group=ui.locator('[data-controller="rcp1"]'),all=group.locator('button[data-action="control-enable-all"]'),count=group.locator('[data-control-count]');
   // Several real changes, so the page has counted well past where a new worker starts.
   await all.click();await expect(count).toHaveText('4 enabled');
@@ -202,7 +202,7 @@ test('after a worker restart every RCP and RIO answers by itself, and nothing re
   await page.screenshot({path:'artifacts/cyanview-0.1.30-control-status.png'});
   // Have the page save what it shows, so old status is there to come back.
   await ui.getByRole('button',{name:'Refresh all',exact:true}).click();
-  await expect(ui.locator('[data-role="toast"]')).toHaveText('Settings refreshed · edits retained');
+  await expect(ui.locator('[data-role="toast"]')).toHaveText('Settings refreshed');
   await expect.poll(async()=>(await stored(request,'plan'))?.devices?.map((device:{online:unknown})=>device.online)).toEqual([true,true,true]);
   // A real host reloads the page when it restarts a worker. These brokers accept the connection and don't answer yet.
   await request.post('/__simulate',{data:{mqttControls:{silent:true}}});
@@ -222,6 +222,30 @@ test('after a worker restart every RCP and RIO answers by itself, and nothing re
   expect(errors).toEqual([]);
 });
 
+test('a camera deleted and added back on the controller appears with no Refresh all, keeps its tick and leaves pending edits alone', async ({page,request})=>{
+  const {ui,rio,tick,rcp}=await openFleet(page,request);
+  const simulate=(data:object)=>request.post('/__simulate',{data});
+  await tick.click();await expect(tick).toBeChecked();
+  await expect(ui.locator('[data-role="saved-label"]')).toContainText('Workspace saved');
+  await expect(rio.locator('[data-column="control"]').first()).toHaveText('Online');
+  await page.waitForTimeout(700);
+  const before=(await inspect(request)).opened;
+  await simulate({rekeyCamera:'readded'});
+  await simulate({mqtt:{topic:'unit/readded/camhead/status/persist/number',value:'9'}});
+  const row=rio.locator('tr[data-id$=":camera:readded"]');
+  await expect(row).toHaveCount(1);
+  await expect(rio.locator('tr[data-id]')).toHaveCount(1);
+  await expect(row.locator('[data-field="controlEnabled"] [role="checkbox"]')).toBeChecked();
+  expect((await inspect(request)).opened[0]).toBe(before[0]+1);
+  // Noticing a change isn't Refresh all, so nothing waiting to send is thrown away.
+  const name=row.locator('[data-field="name"]');
+  await name.fill('Staged');await name.press('Enter');
+  await simulate({mqtt:{topic:'unit/more/camhead/status/persist/number',value:'11'}});
+  await expect.poll(async()=>(await inspect(request)).opened[0]).toBe(before[0]+2);
+  await expect(rio.locator('tr[data-id] [data-field="name"]').first()).toHaveValue('Staged');
+  await expect(rcp).toBeVisible();
+});
+
 test('Refresh all picks up outside changes in a one-off read, and leaves RCP and RIO status to MQTT', async ({page,request})=>{
   const {ui,rio,row,control,status}=await openFleet(page,request);
   const toast=ui.locator('[data-role="toast"]'),refresh=ui.getByRole('button',{name:'Refresh all',exact:true});
@@ -229,7 +253,7 @@ test('Refresh all picks up outside changes in a one-off read, and leaves RCP and
   await expect(control).toHaveText('Online');
   await simulate({cameraName:'Changed outside'});
   await refresh.click();await expect(refresh).toBeEnabled();
-  await expect(toast).toHaveText('Settings refreshed · edits retained');
+  await expect(toast).toHaveText('Settings refreshed');
   await expect(row.locator('[data-field="name"]')).toHaveValue('Changed outside');
   await expect.poll(async()=>(await inspect(request)).openSockets,'Nothing stays open').toEqual([0,0,0]);
   // With the broker gone, a successful read can't make the controller look ready for commands.
@@ -244,7 +268,7 @@ test('Refresh all names a controller it could not read, without changing its MQT
   await expect(control).toHaveText('Online');
   await request.post('/__simulate',{data:{closeController:true}});
   await ui.getByRole('button',{name:'Refresh all',exact:true}).click();
-  await expect(ui.locator('[data-role="toast"]')).toHaveText('Could not read Stage RIO · edits retained');
+  await expect(ui.locator('[data-role="toast"]')).toHaveText('Could not read Stage RIO');
   await expect(mark(rio)).toHaveText('Online');await expect(control).toHaveText('Online');
 });
 
@@ -280,10 +304,12 @@ test('a Gateway is watched over MQTT like an RCP, and its cameras can be ticked'
   const tick=row.locator('[data-field="controlEnabled"] [role="checkbox"]');
   const show=async()=>{
     await expect(ui.locator('[data-role="saved-label"]')).toContainText('Workspace saved');
-    await ui.locator('[data-tab="cameras"]').click();
+    await ui.locator('[data-tab="assignment"]').click().then(() => ui.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
     if(!await row.isVisible())await group.locator('[data-action="toggle-controller"]').click();
   };
   await expect(ui.locator('[data-role="saved-label"]')).toContainText('Workspace saved');
+  // The finder's IP field lives in the Details view; the sheet adds by IP in its last row.
+  await ui.locator('[data-device-view="details"]').click();
   await ui.getByRole('textbox',{name:'Device IP address',exact:true}).fill('10.192.1.10');
   await ui.getByRole('button',{name:'Find',exact:true}).click();
   await expect(ui.locator('[data-action="add-discovered"]')).toBeEnabled();
@@ -311,7 +337,7 @@ test('sample data keeps its own status', async ({page,request})=>{
   await request.post('/__reset',{data:{sample:true}});await page.goto('/');
   const ui=page.frameLocator('iframe');
   await expect(ui.locator('[data-role="saved-label"]')).toContainText('Sample data');
-  await ui.locator('[data-tab="cameras"]').click();
+  await ui.locator('[data-tab="assignment"]').click().then(() => ui.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   await expect(mark(ui.locator('[data-controller="rcp1"]'))).toHaveText('Online');
   await expect(mark(ui.locator('[data-controller="rio3"]'))).toHaveText('Offline');
   await expect(ui.locator('[data-role="live-summary"]')).toContainText('4 online / 1 offline');
@@ -321,9 +347,9 @@ test('sample data keeps its own status', async ({page,request})=>{
 test('a one-off read during a REMI send says nothing about live status', async ({page,request})=>{
   const {ui,rcp}=await openFleet(page,request);
   await rcp.locator('[data-action="toggle-controller"]').click();
-  await rcp.locator('[data-new-camera]').selectOption({label:'REMI cameras…'});
+  await rcp.locator('[data-action="open-remi-panel"]').click();
   const panel=rcp.locator('[data-remi-panel]');
-  await expect(panel.getByLabel('REMI source',{exact:true})).toHaveValue('CY-RIO-1-10');
+  await expect(panel.locator('[data-remi-source]')).toHaveValue('CY-RIO-1-10');
   await panel.getByRole('button',{name:'Add',exact:true}).click();
   await expect(panel.getByText('Pending add',{exact:true})).toBeVisible();
   await request.post('/__simulate',{data:{closeBroker:true}});

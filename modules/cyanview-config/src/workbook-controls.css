@@ -9,30 +9,7 @@
   background: var(--hc-window);
   font-size: 11px;
 }
-#cyanview-design .hc-camera-location {
-  flex-shrink: 0;
-  padding: 4px 8px;
-  border: 1px solid var(--hc-line);
-  border-radius: 5px;
-  background: var(--hc-surface);
-}
-#cyanview-design .hc-camera-value {
-  min-width: 0;
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--hc-secondary);
-}
-#cyanview-design .hc-camera-grid-shortcuts {
-  color: var(--hc-secondary);
-  white-space: nowrap;
-}
-#cyanview-design .hc-camera-grid-shortcuts kbd { font: inherit; color: var(--hc-text); }
 #cyanview-design .hc-camera-selection > button { padding: 4px 6px; }
-@media (max-width: 680px) {
-  #cyanview-design .hc-camera-grid-shortcuts { display: none; }
-}
 
 #cyanview-design .hc-grid[data-camera-device] {
   min-width: 0;
@@ -173,12 +150,157 @@
 
 #cyanview-design .hc-camera-selection > .hc-camera-view { flex: 0 0 auto; }
 #cyanview-design .hc-camera-view button { white-space: nowrap; }
-#cyanview-design .hc-sheet-tabs:has(> [data-camera-sheets]) { padding: 0 8px 0 0; gap: 12px; }
-#cyanview-design .hc-sheet-tabs > [data-camera-sheets] { flex: 1 1 auto; min-width: 0; }
-#cyanview-design .hc-sheet-tabs:has(> [data-camera-sheets]) .hc-sheet-caption { flex: 0 0 auto; margin-left: 0; }
 #cyanview-design .hc-grid[data-camera-device] th[data-camera-header] { padding: 0 8px; }
 #cyanview-design .hc-camera-heading { display: flex; align-items: baseline; gap: 6px; min-width: 0; white-space: nowrap; }
 #cyanview-design .hc-camera-heading span { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 400; color: var(--hc-secondary); }
 #cyanview-design .hc-controller .hc-grid[data-camera-device] tbody tr.hc-camera-section-row td { height: 26px; padding: 0 8px; background: var(--hc-chrome); font-size: 11px; font-weight: 600; color: var(--hc-secondary); }
 #cyanview-design .hc-controller .hc-grid[data-camera-device] tbody tr.hc-camera-section-row td.hc-camera-section-label { padding: 0 4px 0 8px; }
 #cyanview-design .hc-controller .hc-grid[data-camera-device] tbody td.hc-camera-setting-label { background: var(--hc-matrix-heading); font-weight: 500; white-space: nowrap; overflow: hidden; }
+/* The host hangs its resize handles off the body, above everything in this page, including a dialog. */
+body:has(#cyanview-design .hc-veil:not([hidden])) .hubble-column-resize-handles { visibility: hidden; }
+#cyanview-design .hc-route-none { color: var(--hc-secondary); }
+#cyanview-design .hc-route-master { display: inline-block; padding: 1px 8px; border-radius: 4px; background: light-dark(#dbe7ff, #1d2c4d); color: light-dark(#1f4fd6, #a9c3ff); font-size: 11px; font-weight: 500; line-height: 17px; }
+#cyanview-design td[data-column^="remi:"] { text-align: center; }
+#cyanview-design .hc-grid[data-camera-device] :is(td, th).hc-row-remove { padding: 0; text-align: right; white-space: nowrap; }
+#cyanview-design .hc-grid[data-camera-device] .hc-row-remove-button { display: inline-grid; place-items: center; min-height: 0; width: 26px; height: 24px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--hc-secondary); cursor: pointer; }
+#cyanview-design .hc-grid[data-camera-device] .hc-row-remove-button:hover { background: light-dark(#f3dede, #3a2222); color: var(--hc-red); }
+#cyanview-design .hc-grid[data-camera-device] tr.hc-remove-staged td:not(.hc-row-remove) { color: var(--hc-faint); text-decoration: line-through; }
+#cyanview-design .hc-grid[data-camera-device] tr.hc-remove-staged :is(input, .hc-choice-cell) { text-decoration: line-through; }
+#cyanview-design .hc-grid[data-camera-device] tr.hc-remove-staged .hc-row-remove-button { color: var(--hc-text); }
+#cyanview-design .hc-controller .hc-grid[data-camera-device] thead th[data-field-header^="remi:"] { text-align: center; }
+#cyanview-design .hc-grid[data-camera-device] td[data-column^="remi:"] [data-hubble-boolean] { display: grid; place-items: center; }
+/* A filled circle sends the camera to that RCP. Every other checkbox stays square. */
+#cyanview-design .hc-grid td[data-column^="remi:"] button.hubble-spreadsheet-checkbox { border: 1.5px solid light-dark(#8a8a90, #73737a); border-radius: 50%; background: transparent; }
+#cyanview-design .hc-grid td[data-column^="remi:"] button.hubble-spreadsheet-checkbox[aria-checked='true'] { border-color: #2f6bff; background: #2f6bff; }
+#cyanview-design .hc-grid td[data-column^="remi:"] button.hubble-spreadsheet-checkbox::before { content: none; }
+#cyanview-design .hc-pending-count { display: inline-block; min-width: 16px; margin-left: 3px; padding: 0 4px; border-radius: 8px; background: var(--hc-pending); color: var(--hc-text); font-size: 10px; line-height: 16px; text-align: center; }
+#cyanview-design .hc-pending-count[hidden] { display: none; }
+/* The toolbar button says how many changes wait, in amber, and Send beside it sends them. */
+#cyanview-design .hc-pending-toggle { gap: 6px; }
+#cyanview-design .hc-pending-toggle .hc-pending-count { min-width: 0; margin: 0; padding: 0; background: none; color: inherit; font-size: inherit; line-height: inherit; }
+#cyanview-design .hc-pending-toggle .hc-pending-dot { display: none; width: 7px; height: 7px; border-radius: 50%; background: var(--hc-amber); }
+#cyanview-design .hc-pending-toggle[data-pending="true"] { border-color: color-mix(in srgb, var(--hc-amber) 55%, var(--hc-line)); color: var(--hc-amber); }
+#cyanview-design .hc-pending-toggle[data-pending="true"] .hc-pending-dot { display: inline-block; }
+#cyanview-design .hc-pending-toggle[data-pending="false"] { color: var(--hc-secondary); }
+#cyanview-design .hc-pending-toggle .hc-icon { width: 13px; height: 13px; }
+#cyanview-design .hc-pending-quick { font-weight: 600; }
+#cyanview-design .hc-assignment-body { position: relative; display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+#cyanview-design .hc-assignment-body > .hc-controller-list { flex: 1 1 auto; min-width: 0; }
+#cyanview-design .hc-pending-sends { position: absolute; top: 0; right: 0; z-index: 1250; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; box-sizing: border-box; width: 340px; max-width: 100%; max-height: min(70vh, 520px); overflow: hidden; border: 1px solid light-dark(#c9c9c9, #555); border-radius: 8px; background: light-dark(#fff, #222); box-shadow: 0 10px 28px rgb(0 0 0 / 40%); font-size: 12px; }
+#cyanview-design .hc-pending-sends[hidden] { display: none; }
+/* Hubble's grid draws its handles at 1198 to 1202 and its pop-ups from 1300, with dialogs at 1400.
+   The list sits above the handles, and this page's own lists, toasts and dialogs keep the same order. */
+#cyanview-design .hc-toast { z-index: 1360; }
+#cyanview-design .hc-veil { z-index: 1400; }
+#cyanview-design .hc-pending-sends > header { display: contents; }
+#cyanview-design .hc-pending-sends h3 { grid-column: 1; grid-row: 1; margin: 0; padding: 9px 0 8px 12px; font-size: 12px; }
+#cyanview-design .hc-pending-actions { grid-column: 2; grid-row: 1; display: flex; gap: 4px; }
+#cyanview-design .hc-pending-sends > header button { grid-column: 3; grid-row: 1; min-height: 0; margin: 0 6px 0 2px; padding: 3px; border: 0; background: none; }
+#cyanview-design .hc-pending-sends > p { display: none; }
+#cyanview-design .hc-pending-sends button { font-size: 11px; padding: 2px 7px; }
+#cyanview-design .hc-pending-list { grid-column: 1 / -1; display: flex; flex-direction: column; max-height: calc(min(70vh, 520px) - 40px); overflow: auto; border-top: 1px solid light-dark(#dedede, #3a3a3a); }
+#cyanview-design .hc-pending-list:empty::before { content: 'Nothing is waiting to send.'; padding: 10px 12px; color: var(--hc-secondary); }
+#cyanview-design .hc-pending-camera { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 2px; padding: 5px 6px 1px 12px; border-top: 1px solid light-dark(#ececec, #2e2e2e); }
+#cyanview-design .hc-pending-camera:first-child { border-top: 0; }
+#cyanview-design .hc-pending-camera > div { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+#cyanview-design .hc-pending-camera strong { font-weight: 600; white-space: nowrap; }
+#cyanview-design .hc-pending-camera small { overflow: hidden; color: var(--hc-secondary); font-size: 11px; white-space: nowrap; text-overflow: ellipsis; }
+#cyanview-design .hc-pending-master { padding-bottom: 5px; }
+#cyanview-design .hc-pending-item { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0 6px; padding: 0 6px 1px 22px; font-size: 11.5px; }
+#cyanview-design .hc-pending-item > .hc-pending-setting { grid-column: 1; grid-row: 1; white-space: nowrap; }
+#cyanview-design .hc-pending-item > .hc-pending-change { grid-column: 2; grid-row: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#cyanview-design .hc-pending-item > :is(.hc-pending-note, .hc-pending-status) { grid-column: 1 / 3; }
+#cyanview-design .hc-pending-item > button { grid-column: 3; grid-row: 1; }
+#cyanview-design .hc-pending-change { color: var(--hc-secondary); }
+#cyanview-design .hc-pending-note { color: var(--hc-secondary); font-size: 11px; }
+#cyanview-design .hc-pending-status { color: light-dark(#8f6a12, #dfbc72); }
+#cyanview-design .hc-pending-status[data-kind="failed"] { color: light-dark(#b3402e, #e58f80); }
+#cyanview-design .hc-pending-status[data-kind="offline"] { color: var(--hc-secondary); }
+#cyanview-design .hc-remi-view { flex: 0 0 auto; }
+#cyanview-design .hc-remi-view button { white-space: nowrap; }
+/* The Devices sheet looks like the camera sheets, without being one of the shared spreadsheets. */
+#cyanview-design .hc-device-column { display: flex; flex: 1 1 auto; flex-direction: column; gap: 9px; min-width: 0; }
+#cyanview-design .hc-device-view { flex: 0 0 auto; }
+#cyanview-design .hc-grid[data-device-sheet] { min-width: 0; border-collapse: separate; border-spacing: 0; color: light-dark(#252525, #dedede); font: var(--hc-sheet-text-size, 13px) system-ui, sans-serif; --hc-matrix-heading: light-dark(#eaeaea, #222); --hc-matrix-grid: light-dark(#d9d9d9, #3b3b3b); }
+#cyanview-design .hc-grid[data-device-sheet] :is(td, th) { border-color: var(--hc-matrix-grid); font-size: var(--hc-sheet-text-size, 13px); }
+#cyanview-design .hc-controller .hc-grid[data-device-sheet] thead th { height: 30px; background: var(--hc-matrix-heading); text-align: left; font-weight: 600; }
+#cyanview-design .hc-controller .hc-grid[data-device-sheet] thead tr:first-child th.hc-device-group-head { height: 26px; padding: 0 6px; }
+#cyanview-design .hc-controller .hc-grid[data-device-sheet] tbody td { height: max(36px, calc(var(--hc-sheet-text-size, 13px) * 1.35 + 12px)); }
+#cyanview-design .hc-grid[data-device-sheet] td.hc-changed { background-color: var(--hc-pending); }
+#cyanview-design .hc-controller .hc-grid[data-device-sheet] :is(.hc-status, .hc-cell-input, .hc-mono, .hc-muted) { font-size: var(--hc-sheet-text-size, 13px); line-height: 1.35; }
+#cyanview-design .hc-grid[data-device-sheet] tr.hc-device-selected td:not(.hc-changed) { background-image: linear-gradient(rgb(206 206 206 / 10%), rgb(206 206 206 / 10%)); }
+#cyanview-design .hc-grid[data-device-sheet] .hc-cell-input { width: 100%; min-width: 0; box-sizing: border-box; text-overflow: ellipsis; }
+#cyanview-design .hc-grid[data-device-sheet] td:has(> .hc-device-waiting) .hc-cell-input { width: calc(100% - 78px); }
+#cyanview-design .hc-grid[data-device-sheet] .hc-device-name { font-weight: 500; }
+#cyanview-design .hc-grid[data-device-sheet] .hc-sort-heading { justify-content: flex-start; min-height: 26px; padding: 2px 0; overflow: hidden; text-overflow: ellipsis; }
+#cyanview-design .hc-device-group { display: inline-flex; align-items: center; gap: 8px; min-height: 0; padding: 2px 2px; border: 0; background: none; color: inherit; font: inherit; font-weight: 600; cursor: pointer; }
+#cyanview-design .hc-device-group:hover { background: none; color: var(--hc-strong); }
+#cyanview-design .hc-device-group-box { display: inline-grid; place-items: center; width: 16px; height: 16px; border: 1px solid light-dark(#9a9a9a, #6b6b6b); border-radius: 3px; font-size: 13px; line-height: 1; font-weight: 400; }
+#cyanview-design .hc-device-waiting { margin-left: 6px; color: light-dark(#8f6a12, #dfbc72); font-size: 11px; white-space: nowrap; }
+#cyanview-design .hc-grid[data-device-sheet] tr.hc-device-add td, #cyanview-design .hc-grid[data-device-sheet] tr.hc-device-found td { font-style: italic; }
+#cyanview-design .hc-grid[data-device-sheet] tr.hc-device-add input { font-style: normal; }
+#cyanview-design .hc-grid[data-device-sheet] tr.hc-device-found .hc-button { font-style: normal; font-size: 11px; padding: 3px 8px; }
+#cyanview-design .hc-grid[data-device-sheet] .hc-row-remove-button { display: inline-grid; place-items: center; min-height: 0; width: 26px; height: 24px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--hc-secondary); cursor: pointer; }
+#cyanview-design .hc-grid[data-device-sheet] .hc-row-remove-button:hover { background: light-dark(#f3dede, #3a2222); color: var(--hc-red); }
+#cyanview-design .hc-danger-solid { padding: 6px 12px; border: 1px solid currentColor; border-radius: 6px; }
+/* What Hubble didn't configure: keep it as it is, or clear it. */
+#cyanview-design .hc-controller-tools .hc-foreign-review { font-weight: 600; padding: 4px 10px; }
+#cyanview-design .hc-controller-tools .hc-foreign-note { color: var(--hc-amber); }
+#cyanview-design .hc-review-modal { width: min(720px, 92vw); max-width: none; }
+#cyanview-design .hc-review-item { display: flex; align-items: center; gap: 16px; }
+#cyanview-design .hc-review-item .hc-review-text { flex: 1; min-width: 0; }
+#cyanview-design .hc-review-item .hc-segment { flex: none; }
+#cyanview-design .hc-review-item [data-review-choice="clear"][aria-pressed="true"] { color: var(--hc-red); }
+
+/* One toolbar per sheet: its view controls sit at the end of the row. The hints that used to sit
+   above and below the sheets are gone; the counts stay in the footer. */
+#cyanview-design .hc-visually-hidden { position: absolute !important; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+#cyanview-design .hc-controller-tools > .hc-camera-selection { min-height: 0; padding: 0 0 0 9px; border: 0; border-left: 1px solid var(--hc-line); background: none; flex: 0 0 auto; }
+#cyanview-design :is(#hc-setup, #hc-assignment, #hc-cameras) .hc-mode-note { display: none; }
+#cyanview-design #hc-cameras .hc-panel-foot .hc-caption { display: none; }
+
+/* A sheet's camera count. */
+#cyanview-design .hc-count { display: inline-flex; align-items: center; gap: 8px; }
+#cyanview-design .hc-count-label { color: var(--hc-secondary); font-size: 12px; }
+#cyanview-design .hc-stepper { display: inline-flex; align-items: stretch; height: 28px; overflow: hidden; border: 1px solid var(--hc-line); border-radius: 6px; background: var(--hc-surface); }
+#cyanview-design .hc-stepper:focus-within { border-color: var(--hc-focus); box-shadow: 0 0 0 2px var(--hc-focus-fill); }
+#cyanview-design .hc-controller-tools .hc-stepper button { width: 28px; padding: 0; border: 0; border-radius: 0; }
+#cyanview-design .hc-controller-tools .hc-stepper button:first-child { border-right: 1px solid var(--hc-line); }
+#cyanview-design .hc-controller-tools .hc-stepper button:last-child { border-left: 1px solid var(--hc-line); }
+#cyanview-design .hc-stepper input { width: 44px; padding: 0; border: 0; outline: 0; background: transparent; color: var(--hc-strong); font-size: 12px; font-weight: 600; text-align: center; }
+#cyanview-design .hc-count-hint { color: var(--hc-faint); }
+
+/* Hubble's own pop-up list in place of the system menu. The real select stays, out of sight. */
+#cyanview-design select.hc-native-select { position: absolute !important; width: 1px !important; height: 1px !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; border: 0 !important; opacity: 0; pointer-events: none; }
+#cyanview-design .hc-dropdown { justify-content: space-between; gap: 10px; min-width: 120px; min-height: 28px; padding: 4px 8px 4px 10px; border: 1px solid var(--hc-line); border-radius: 6px; background: var(--hc-surface); color: var(--hc-text); font-size: 12px; text-align: left; }
+#cyanview-design .hc-dropdown[aria-expanded="true"] { border-color: var(--hc-focus); box-shadow: 0 0 0 2px var(--hc-focus-fill); }
+#cyanview-design .hc-dropdown > svg { flex: none; color: var(--hc-secondary); }
+#cyanview-design .hc-dropdown .hc-dropdown-value { overflow: hidden; text-overflow: ellipsis; }
+#cyanview-design .hc-dropdown.hc-dropdown-placeholder .hc-dropdown-value { color: var(--hc-secondary); }
+#cyanview-design .hc-dropdown.hc-dropdown-cell { width: 100%; min-width: 0; height: 100%; border-color: transparent; border-radius: 0; background: transparent; font-size: inherit; }
+#cyanview-design .hc-dropdown-menu { position: fixed; z-index: 1300; box-sizing: border-box; overflow: auto; padding: 6px; border: 1px solid light-dark(#c9c9c9, #555); border-radius: 7px; background: light-dark(#fff, #222); box-shadow: 0 8px 24px rgb(0 0 0 / 32%); color: var(--hc-strong); font-size: 13px; }
+#cyanview-design .hc-dropdown-group { padding: 6px 9px 4px; color: var(--hc-secondary); font-size: 11px; }
+#cyanview-design .hc-dropdown-option { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 30px; padding: 0 9px; border-radius: 4px; white-space: nowrap; }
+#cyanview-design .hc-dropdown-option.hc-dropdown-active { background: light-dark(#e8e8e8, #373737); }
+#cyanview-design .hc-dropdown-option[aria-disabled="true"] { opacity: .45; }
+#cyanview-design .hc-dropdown-option.hc-dropdown-placeholder { color: var(--hc-secondary); }
+
+/* Devices: finding devices is one line in the sheet's toolbar, and found devices are rows with Add. */
+#cyanview-design .hc-scan-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+#cyanview-design .hc-scan-bar .hc-scan-controls { display: flex; align-items: center; gap: 8px; padding: 0; }
+#cyanview-design .hc-scan-bar .hc-field { flex-direction: row; align-items: center; min-width: 0 !important; }
+#cyanview-design .hc-scan-bar .hc-field > span, #cyanview-design .hc-scan-bar .hc-manual { display: none; }
+#cyanview-design .hc-scan-bar [data-action="scan"] { border-color: var(--hc-line); background: var(--hc-surface); color: var(--hc-text); }
+#cyanview-design .hc-scan-bar .hc-scan-status { flex-direction: row; align-items: center; gap: 8px; min-height: 0; padding: 0; }
+#cyanview-design .hc-scan-bar .hc-scan-status > div:first-child { font-size: 11px; }
+#cyanview-design .hc-scan-bar .hc-progress { width: 90px; }
+#cyanview-design .hc-scan-bar:has([data-action="stop-scan"][hidden]) .hc-progress { display: none; }
+#cyanview-design .hc-scan-bar .hc-error { padding: 2px 8px; font-size: 11px; }
+#cyanview-design .hc-found-count { color: var(--hc-focus); font-size: 12px; }
+#cyanview-design .hc-found-tag { padding: 1px 7px; border: 1px solid color-mix(in srgb, var(--hc-focus) 50%, transparent); border-radius: 999px; color: var(--hc-focus); font-size: 11px; }
+#cyanview-design .hc-grid[data-device-sheet] tr.hc-device-found td { background: color-mix(in srgb, var(--hc-focus-fill) 60%, transparent); }
+#cyanview-design .hc-add-found { padding: 3px 10px; font-size: 11px; font-weight: 600; }
+#cyanview-design .hc-grid[data-device-sheet] td[data-device-column="cameras"] { white-space: nowrap; }
+#cyanview-design .hc-device-camera-count { display: inline-block; min-width: 22px; }
+#cyanview-design .hc-clear-cameras { margin-left: 4px; padding: 2px 6px; color: var(--hc-red); font-size: 11px; }
+#cyanview-design .hc-clear-cameras .hc-icon { width: 13px; height: 13px; }

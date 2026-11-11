@@ -9,14 +9,25 @@
 
   function activeCamera(table) {
     const cell = table?.querySelector(activeCameraCell);
-    return cell && cameras.find(camera => camera.device === table.dataset.cameraDevice && camera.id === cell.dataset.camera);
+    return cell && sheetCameras(table.dataset.cameraDevice).find(camera => camera.id === cell.dataset.camera);
+  }
+
+  function selectedCameras(table) {
+    const ids = new Set([...(table?.querySelectorAll('[data-hubble-spreadsheet-selected]') ?? [])].map(cell => cell.dataset.camera));
+    return table ? sheetCameras(table.dataset.cameraDevice).filter(camera => ids.has(camera.id) && !camera.jobs && !camera.deleting) : [];
   }
 
   function syncCameraDeleteButton(group) {
+    const clear = group.querySelector('[data-action="clear-selected"]');
+    if (clear) {
+      const count = selectedCameras(group.querySelector('table[data-camera-device]')).length, text = count > 1 ? 'Clear ' + count + ' from view' : 'Clear from view', label = clear.querySelector('[data-camera-clear-label]');
+      if (label.textContent !== text) label.textContent = text;
+      clear.disabled = !count;
+    }
     const button = group.querySelector('[data-action="delete-controller"]');
     const camera = activeCamera(group.querySelector('table[data-camera-device]'));
     const label = button.querySelector('[data-camera-delete-label]');
-    const text = camera?.number ? 'Delete camera ' + camera.number : 'Delete camera';
+    const text = !camera?.number ? 'Delete camera' : (removalStaged(camera) ? 'Keep camera ' : 'Delete camera ') + camera.number;
     if (label.textContent !== text) label.textContent = text;
     button.disabled = !camera || !!camera.deleting;
     button.title = camera ? camera.name : 'Select a camera cell to delete';
@@ -53,7 +64,7 @@
   function cameraSheetFocus() {
     const element = document.activeElement;
     // Tabs and view buttons survive a redraw, but moving them drops their focus.
-    if (element?.closest('[data-camera-selection],[data-camera-sheets]')) return { chrome: element };
+    if (element?.closest('[data-camera-selection]')) return { chrome: element };
     const table = element?.closest('table[data-camera-device]');
     if (!table) return null;
     const cell = element.closest(cameraCellSelector);
@@ -75,8 +86,9 @@
         // Keep the mounted grid and viewport so the host retains the range.
         const viewport = replacement.closest('.hc-scroll');
         const scrollLeft = viewport.scrollLeft;
-        replacement.closest('.hc-sheet').querySelector('[data-camera-selection]').replaceWith(sheet.strip);
-        replacement.closest('.hc-sheet').querySelector('[data-camera-sheets]').replaceWith(sheet.tabs);
+        // The view controls live in the sheet's toolbar, which a redraw may or may not have replaced.
+        const strip = replacement.closest('.hc-controller').querySelector('[data-camera-selection]');
+        if (strip && strip !== sheet.strip) strip.replaceWith(sheet.strip);
         table.setAttribute('aria-label', replacement.getAttribute('aria-label'));
         table.replaceChildren(...replacement.childNodes);
         viewport.replaceWith(sheet.viewport);
@@ -93,7 +105,7 @@
       sheet.controls?.dispose();
       cameraSheets.delete(table);
     }
-    for (const id of cameraAddresses.keys()) if (!device(id)) cameraAddresses.delete(id);
+    for (const id of cameraAddresses.keys()) if (!sheetOwner(id)) cameraAddresses.delete(id);
     if (focus?.chrome?.isConnected) focus.chrome.focus({ preventScroll: true });
     if (spreadsheetUnavailable) return;
     for (const table of tables.values()) {
@@ -106,7 +118,7 @@
     let rows, columns, cells, cameraById;
     const providers = new Map();
     const listeners = new AbortController();
-    const sheet = { listeners, controls: null, viewport: table.closest('.hc-scroll'), strip: table.closest('.hc-sheet').querySelector('[data-camera-selection]'), tabs: table.closest('.hc-sheet').querySelector('[data-camera-sheets]'), presentation: [], scale: 1 };
+    const sheet = { listeners, controls: null, viewport: table.closest('.hc-scroll'), strip: table.closest('.hc-controller').querySelector('[data-camera-selection]'), presentation: [], scale: 1 };
     cameraSheets.set(table, sheet);
 
     function indexSheet() {
@@ -126,7 +138,7 @@
         if (height) row.style.setProperty('--hc-camera-row-height', height + 'px');
       }
       cells = new Map([...table.querySelectorAll(cameraCellSelector)].map(cell => [cameraCellKey(cameraAddress(cell)), cell]));
-      cameraById = new Map(cameras.filter(camera => camera.device === deviceId).map(camera => [camera.id, camera]));
+      cameraById = new Map(sheetCameras(deviceId).map(camera => [camera.id, camera]));
       for (const cell of cells.values()) {
         const input = cell.querySelector('input[data-field]');
         if (input) input.tabIndex = -1;
@@ -137,7 +149,7 @@
     indexSheet();
 
     function showSelection(address) {
-      const strip = table.closest('.hc-sheet').querySelector('[data-camera-selection]');
+      const strip = table.closest('.hc-controller').querySelector('[data-camera-selection]');
       paintCameraSelectionSummary(strip, address && cells.get(cameraCellKey(address)));
       syncCameraDeleteButton(table.closest('[data-controller]'));
     }
@@ -163,11 +175,17 @@
       if (address && (!current || cameraCellKey(address) !== cameraCellKey(current))) sheet.controls.select(address, address, { focus: false });
     }
 
+    // A camera waiting to be deleted can't be edited until that is cancelled.
     function getCell(address) {
+      const shown = cellFor(address), camera = shown && cameraById.get(cells.get(cameraCellKey(address))?.dataset.camera);
+      return shown && camera?.removeStaged ? { ...shown, readOnly: true, choices: undefined } : shown;
+    }
+    function cellFor(address) {
       const key = cameraCellKey(address);
       const cell = cells.get(key);
       const camera = cell && cameraById.get(cell.dataset.camera);
       if (!cell || !camera || cell.classList.contains('hc-axis-inactive')) return null;
+      if (isAssignmentField(cell.dataset.column)) return assignmentSheetCell(camera, cell.dataset.column, deviceId);
       const axis = lensAxisForUseColumn(cell.dataset.column);
       if (axis) return { kind: 'boolean', value: lensAxisEnabled(camera, axis) ? 'TRUE' : 'FALSE', readOnly: !!camera.deleting };
       const control = cell.querySelector('[data-field]');
@@ -179,7 +197,7 @@
       if (control.disabled) return null;
       const field = control.dataset.field;
       if (field === 'controlEnabled') return { kind: 'boolean', value: cameraControlEnabled(camera) ? 'TRUE' : 'FALSE', readOnly: !!camera.deleting || !cameraControlDevice(device(camera.device)) };
-      const value = String(camera[field] ?? (field === 'usb' ? 'USB · Automatic' : ''));
+      const value = irisSwapCell(camera, field) ? irisSwapValue(camera) : String(camera[field] ?? (field === 'usb' ? 'USB · Automatic' : ''));
       if (camera.deleting || importedCamera(camera)) return { value, readOnly: true };
       if (!control.hasAttribute('data-camera-choice')) return { value };
       const context = choiceContext(camera, field);
@@ -248,8 +266,6 @@
     sheet.refresh();
     const presentation = await Promise.all([
       mountSpreadsheetColumnEditor({ root: sheet.strip.querySelector('[data-camera-columns]'), getItems: () => cameraColumnItems(deviceId), onVisibilityChange: (id, visible) => changeCameraVisibility(deviceId, [{ id, visible }]), onVisibilityChanges: changes => changeCameraVisibility(deviceId, changes) }),
-      mountSpreadsheetSheets({ root: sheet.tabs, getState: () => cameraSheetBarState(deviceId), onSelect: sheetId => selectCameraSheet(deviceId, sheetId), onCreate: name => createCameraSheet(deviceId, name), onRename: (sheetId, name) => renameCameraSheet(deviceId, sheetId, name), onRemove: sheetId => removeCameraSheet(deviceId, sheetId), onReorder: (sheetId, beforeId) => moveCameraSheet(deviceId, sheetId, beforeId) }),
-      mountSpreadsheetToolbar({ root: sheet.strip.querySelector('[data-camera-text-size]'), textSize: { get: () => cameraLayout(deviceId).textSize ?? 13, onChange: size => changeCameraPresentation(deviceId, () => { cameraLayout(deviceId).textSize = size; }, false) } }),
       mountSpreadsheetViewport({ root: table, viewport: sheet.viewport, getFrozen: () => [...table.querySelectorAll('.hc-camera-frozen')].map(element => ({ element, left: Number.parseFloat(element.style.left) || 0 })), onZoom(ratio) { sheet.scale = ratio; sheet.strip.querySelector('[data-camera-zoom]').textContent = Math.round(ratio * 100) + '%'; controls.refresh(); sheet.layout?.refresh(); } }),
     ]);
     if (listeners.signal.aborted) { presentation.forEach(control => control.dispose()); return; }
@@ -275,10 +291,7 @@
         if (!menu || !table.isConnected || table.closest('[hidden]')) return;
         menu.open({
           x, y, label: 'Camera ' + camera.number + ' · ' + camera.name,
-          items: [{
-            id: 'delete-camera', label: 'Delete camera', icon: 'delete', danger: true, disabled: !!camera.deleting,
-            run: () => reviewCameraDeletion(cameraById.get(camera.id)),
-          }],
+          items: cameraMenuItems(camera, cameraById),
         });
       });
     }
@@ -389,7 +402,9 @@
   function applyCameraGridEdits(edits, cameraById) {
     const controlEdits=edits.filter(edit=>edit.columnId==='controlEnabled');
     if(controlEdits.length)editCameraControl(controlEdits);
-    edits=edits.filter(edit=>edit.columnId!=='controlEnabled');
+    const routeEdits=edits.filter(edit=>isAssignmentField(edit.columnId));
+    if(routeEdits.length)editCameraRoutes(routeEdits,cameraById);
+    edits=edits.filter(edit=>edit.columnId!=='controlEnabled'&&!isAssignmentField(edit.columnId));
     const historyRows = [...new Set(edits.map(edit => cameraById.get(edit.rowId)).filter(Boolean))];
     const historyBefore = cameraDraftSnapshot(historyRows);
     const changed = new Map();
@@ -416,6 +431,18 @@
         continue;
       }
       const field = cameraField(camera, columnId);
+      if (irisSwapCell(camera, field)) {
+        // Picking the other direction swaps Open and Closed, which is all a Tilta has for it.
+        const text = value.trim().toLocaleLowerCase(), current = irisSwapValue(camera);
+        const wanted = irisSwapChoices.find(option => option.value === text || option.label.toLocaleLowerCase() === text)?.value;
+        // Left and Right belong to another lens, so a row pasted from one leaves this cell alone.
+        if (text && !wanted && !['left', 'right'].includes(text)) invalid++;
+        if (!wanted || !current || wanted === current) continue;
+        const fields = changed.get(camera) ?? new Set(), open = camera.irisMin, closed = camera.irisMax;
+        for (const edited of [...stageCell(camera, 'irisMin', closed, false), ...stageCell(camera, 'irisMax', open, false)]) fields.add(edited);
+        changed.set(camera, fields);
+        continue;
+      }
       if (isLensSetting(field) && !lensFieldUsed(camera, field)) continue;
       if (camera.model === 'Alpha-USB' && ['port', 'login', 'password'].includes(field)) continue;
       let next = value;
@@ -434,7 +461,7 @@
       const fields = changed.get(camera) ?? new Set();
       for (const edited of stageCell(camera, field, next, false)) fields.add(edited);
       changed.set(camera, fields);
-      redraw ||= field === 'model' || field === 'lens' || cameraSort(camera.device).field === field;
+      redraw ||= field === 'model' || field === 'lens' || cameraSort(virtualSheet(tab) ?? camera.device).field === field;
     }
     if (changed.size) {
       recordCameraDrafts(historyBefore, historyRows);

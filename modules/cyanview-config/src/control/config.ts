@@ -3,6 +3,8 @@ export interface CyanViewRcpConnectionDefinition {
   connectionId: string;
   name: string;
   host: string;
+  /** Tried only while `host` won't connect: the address the controller was added by, when it isn't the base. */
+  fallbackHost?: string | undefined;
   port: number;
   requestTimeoutMs: number;
   serial?: string;

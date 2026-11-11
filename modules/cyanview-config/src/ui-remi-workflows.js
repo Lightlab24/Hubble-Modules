@@ -1,5 +1,4 @@
   const remiPanels = new Map();
-  const remiMenu = '__remi__';
   let remiReview = '';
   const remiGroup = id => root.querySelector('[data-controller="'+id+'"]');
   const importedCamera = row => !!row.remi || [row.modelLabel,row.model].some(label => /^cyan\s*-\s*imported$/i.test(String(label||'').trim()));
@@ -112,7 +111,7 @@
   }
   async function remiRefreshSheets() {
     const result = await moduleBridge.refresh();
-    for (const snapshot of result.snapshots || []) mergeSnapshot(snapshot);
+    for (const snapshot of result.snapshots || []) mergeOwn(snapshot);
     applyLiveState({observations:result.observations});
     renderLans();
     renderCameras();
@@ -132,7 +131,7 @@
         const sent = items.find(item => item.id === result.id);
         if (sent && result.verified && state.drafts.get(sent.id) === sent) state.drafts.delete(sent.id);
       }
-      if (report.snapshot) mergeSnapshot(report.snapshot);
+      if (report.snapshot) mergeOwn(report.snapshot);
       if (report.refresh) await remiRefreshSheets();
       if (state.open) await remiLoad(id);
       const failed = report.results?.filter(item => item.error) || [];
@@ -210,7 +209,7 @@
     for (const item of devices) {
       const group = remiGroup(item.id);
       if (!group) continue;
-      group.querySelector('[data-new-camera]').add(new Option('REMI cameras…',remiMenu),1);
+      group.querySelector('[data-camera-count]')?.insertAdjacentHTML('afterend', '<button type="button" class="hc-button" data-action="open-remi-panel" data-id="' + esc(item.id) + '" aria-expanded="' + !!remiPanels.get(item.id)?.open + '">REMI cameras</button>');
       const state = remiPanels.get(item.id);
       if (state?.open) {
         const panel = document.createElement('section');
@@ -237,12 +236,6 @@
   };
   root.addEventListener('change',event => {
     const input = event.target;
-    if (input.dataset.newCamera && input.value===remiMenu) {
-      event.stopImmediatePropagation();
-      remiOpen(input.dataset.newCamera);
-      remiGroup(input.dataset.newCamera)?.querySelector('[data-remi-source]')?.focus();
-      return;
-    }
     const panel = input.closest('[data-remi-panel]');
     if (!panel) return;
     const id = panel.dataset.remiPanel, state = remiPanelState(id);
@@ -267,6 +260,13 @@
   root.addEventListener('click',event => {
     const button = event.target.closest('button');
     if (!button) return;
+    if (button.dataset.action === 'open-remi-panel' && device(button.dataset.id)) {
+      const id = button.dataset.id;
+      if (remiPanelState(id).open) { remiPanelState(id).open = false; renderCameras(); return; }
+      remiOpen(id);
+      remiGroup(id)?.querySelector('[data-remi-source]')?.focus();
+      return;
+    }
     if (button.hasAttribute('data-remi-apply')) {
       const id = remiReview;
       $('modal-layer').hidden = true;
@@ -288,7 +288,7 @@
     if (command==='close') {
       state.open = false;
       renderCameras();
-      remiGroup(receiver)?.querySelector('[data-new-camera]')?.focus();
+      remiGroup(receiver)?.querySelector('[data-action="open-remi-panel"]')?.focus();
     } else if (command==='refresh') void remiLoad(receiver);
     else if (command==='retry') void remiSend(receiver,[],true);
     else if (command==='source-ip') {

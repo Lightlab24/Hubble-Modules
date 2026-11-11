@@ -84,7 +84,7 @@
     if(!state||typeof state.sequence!=='number')return;
     // A restarted worker counts from zero again, so only compare within one worker.
     if(state.epoch===cameraControlState.epoch&&state.sequence<cameraControlState.sequence)return;
-    cameraControlState=state;paintCameraControl();syncConnections();
+    cameraControlState=state;paintCameraControl();syncConnections();noticeCameraChanges(state.cameraChanges);
   }
   function controlBoolean(value){
     const text=String(value).trim().toLowerCase();

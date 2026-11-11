@@ -19,7 +19,7 @@ const eventually = async (predicate: () => boolean, attempts = 200) => {
   assert.ok(predicate(), 'Expected control observation');
 };
 /** An RCP and a second controller, a RIO with no panel unless a test asks for another kind. */
-async function fleet({ second = { Serial: 'CY-RIO-1-20', Name: 'RIO' }, secondPanel = false } = {}) {
+async function fleet({ second = { Serial: 'CY-RIO-1-20', Name: 'RIO' }, secondPanel = false, cameraSettleMs = undefined as number | undefined } = {}) {
   const a = new FakeController(), b = new FakeController();
   a.config.Product = { Serial: 'CY-RCP-1-10', Name: 'RCP' };
   b.config.Product = { ...second };
@@ -34,6 +34,14 @@ async function fleet({ second = { Serial: 'CY-RIO-1-20', Name: 'RIO' }, secondPa
   const addresses = new Map([['10.192.1.10', a], ['10.192.1.20', b], ['10.20.101.200', a]]);
   // Each entry slows or fails one configuration read, so tests can finish a press's check out of order.
   const verifyDelays: (number | Error)[] = [];
+  // Holds one controller's broker as not ready yet, which is what a press waits on now.
+  const stall = (index: number, ms: number) => {
+    const serial = [a, b][index]!.config.Product.Serial, until = Date.now() + ms;
+    for (const session of sessions.filter(item => item.definition.serial === serial)) {
+      const snapshot = session.snapshot.bind(session);
+      session.snapshot = () => Date.now() < until ? { ...snapshot(), phase: 'checking' as const } : snapshot();
+    }
+  };
   const sessions: RcpSession[] = [];
   const options: Parameters<typeof fixture>[1] = {
     client: address => {
@@ -43,7 +51,7 @@ async function fleet({ second = { Serial: 'CY-RIO-1-20', Name: 'RIO' }, secondPa
       if (wait) { const connect = client.connect.bind(client); client.connect = async signal => { await delay(wait); return connect(signal); }; }
       return client;
     },
-    control: { session: (definition, changed) => {
+    control: { cameraSettleMs, session: (definition, changed) => {
       const network = networks[definition.serial === a.config.Product.Serial ? 0 : 1]!;
       const session = new RcpSession({ ...definition, requestTimeoutMs: 350 }, changed, true,
         () => createConnection({ host: '127.0.0.1', port: network.port }));
@@ -61,7 +69,7 @@ async function fleet({ second = { Serial: 'CY-RIO-1-20', Name: 'RIO' }, secondPa
     { controllerId: ids[controller]!, ...(cameraNumber === undefined ? {} : { cameraNumber }) }, { ...f.execution(), ...(signal ? { signal } : {}) });
   const state = async () => f.call('camera-control-state');
   const save = async () => { const current = await f.repository.read(f.signal); await f.call('save-plan', { revision: current.revision, plan }); };
-  return { f, a, b, networks, sessions, plan, ids, run, state, save, verifyDelays, options,
+  return { f, a, b, networks, sessions, plan, ids, run, state, save, verifyDelays, stall, options,
     async close() { await f.instance.dispose(); await Promise.all([a.close(), b.close()]); },
   };
 }
@@ -108,7 +116,11 @@ test('named choices are offline, distinguish duplicate names, filter camera numb
     assert.match((await query('control-controllers')).choices[0]!.label, /Stage left/);
     const routeResult = await s.run('select-camera', 0, 1);
     assert.equal(routeResult.status, 'success', JSON.stringify(routeResult));
-    assert.equal(s.sessions.at(-1)!.definition.host, '10.20.101.200');
+    // MQTT stays on the controller's own base address. The address it is reached by is only the way back.
+    const first = s.sessions.filter(item => item.definition.serial === 'CY-RCP-1-10');
+    assert.equal(first.length, 1, 'A changed way in doesn’t drop the MQTT connection');
+    assert.equal(first[0]!.definition.host, '10.192.1.10');
+    assert.equal(first[0]!.definition.fallbackHost, '10.20.101.200');
     assert.deepEqual(s.networks[0]!.commands.map(command => [command.topic, command.value]), [['unit/RCP/rcp/action/set/active_camera_number', '1']]);
     assert.equal(s.networks[1]!.commands.length, 0);
   } finally { await s.close(); }
@@ -131,6 +143,131 @@ test('a Gateway is in both pick lists, named by its name and serial or by its se
     assert.deepEqual(cameras.map(choice => choice.values?.['module.cameraNumber']), [1, 2]);
     assert.equal(s.b.actions.length, 0);
   } finally { await s.close(); }
+});
+
+test('a press goes over MQTT alone and opens no connection to read the controller first', async () => {
+  const s = await fleet();
+  try {
+    await s.run('toggle-camera-enabled', 0, 1);
+    const opened = [s.a.opened, s.b.opened];
+    // The controller's web side is gone entirely, and a press still goes.
+    await s.a.close();
+    const record = await s.run('roll-enabled-cameras');
+    assert.equal(record.status, 'success', JSON.stringify(record));
+    assert.equal((await s.run('record-camera', 0, 2)).status, 'success');
+    assert.deepEqual(s.networks[0]!.commands.map(command => command.topic), ['unit/a/camhead/action/set/keyboard', 'unit/b/camhead/action/set/keyboard']);
+    assert.deepEqual([s.a.opened, s.b.opened], opened, 'No WebSocket');
+  } finally { await s.f.instance.dispose(); await s.b.close(); }
+});
+
+test('MQTT uses the base address, and the address a controller was added by only while the base won’t connect', async () => {
+  const network = await broker();
+  const definition = { connectionId: 'c', name: 'RCP', serial: 'unit', host: '10.192.1.10', port: 1883, requestTimeoutMs: 350 };
+  let baseUp = false;
+  const dial = (hosts: string[]) => (host: string) => {
+    hosts.push(host);
+    return createConnection({ host: '127.0.0.1', port: host === '10.192.1.10' && !baseUp ? 9 : network.port });
+  };
+  const both: string[] = [], alone: string[] = [];
+  const session = new RcpSession({ ...definition, fallbackHost: '10.20.101.200' }, () => undefined, true, dial(both));
+  const baseOnly = new RcpSession({ ...definition }, () => undefined, true, dial(alone));
+  try {
+    assert.equal(session.host, '10.192.1.10');
+    await eventually(() => session.snapshot().phase === 'ready', 1200);
+    assert.deepEqual(both, ['10.192.1.10', '10.20.101.200']);
+    assert.equal(session.host, '10.20.101.200');
+    // With no other address there is nowhere else to go, so it keeps trying the base.
+    assert.ok(alone.length >= 2 && alone.every(host => host === '10.192.1.10'), alone.join());
+    // A connection that was up and dropped starts again at the base.
+    baseUp = true; network.disconnect();
+    await eventually(() => both.length === 3 && session.snapshot().phase === 'ready', 1200);
+    assert.equal(both[2], '10.192.1.10');
+    assert.equal(session.host, '10.192.1.10');
+  } finally { session.stop(); baseOnly.stop(); }
+});
+
+test('an address that answers as another controller is refused over MQTT', async () => {
+  const a = new FakeController(); a.config.Product = { Serial: 'CY-RCP-9-108', Name: 'RCP' };
+  a.config.Camera = { a: { Number: '1', Name: 'Wide', Model: 'Sony - Venice-IP' } };
+  await a.start();
+  const network = await broker();
+  // Two controllers were given the same LAN address, and the other one answers on it.
+  network.controls.root = 'cy-rcp-9-132';
+  const f = fixture({}, { client: a.client, control: { session: (definition, changed) => new RcpSession({ ...definition, requestTimeoutMs: 350 }, changed, true, () => createConnection({ host: '127.0.0.1', port: network.port })) } });
+  await f.instance.start();
+  try {
+    const snapshot = a.snapshot(), plan: Plan = { formatVersion: 1, devices: [snapshot.device], cameras: snapshot.cameras, lans: [], uiState: null };
+    await f.call('save-plan', { revision: null, plan });
+    const press = await f.instance.execute('record-camera', { 'module.controllerId': plan.devices[0]!.id, 'module.cameraNumber': 1 }, f.execution());
+    assert.equal(press.status, 'failure');
+    assert.match(String((press as { message?: string }).message), /another controller \(CY-RCP-9-132\)/);
+    assert.equal(network.commands.length, 0, 'Nothing is sent to the other controller');
+    // Once it answers under its own serial, the same press goes.
+    network.controls.root = 'cy-rcp-9-108';
+  } finally { await f.instance.dispose(); await a.close(); }
+});
+
+test('a press by number reaches a camera the controller has and this list doesn’t yet', async () => {
+  const s = await fleet();
+  try {
+    const control = () => object(object(object(s.f.states.at(-1)).values).cameraControl), [wide] = s.plan.cameras;
+    await eventually(() => control().controllers?.[s.ids[0]!] === true && control().cameras?.[wide!.id]?.online === true);
+    // The RCP was given a third camera, and nothing here has read it yet.
+    s.networks[0]!.send('unit/c/camhead/status/persist/number', '3');
+    s.networks[0]!.send('unit/c/camhead/status/volatile/control', 'online');
+    await delay(40);
+    assert.equal((await s.f.repository.read(s.f.signal)).plan.cameras.some(row => row.device === s.ids[0] && row.number === '3'), false);
+    const select = await s.run('select-camera', 0, 3);
+    assert.equal(select.status, 'success', JSON.stringify(select));
+    assert.deepEqual(s.networks[0]!.commands.map(command => [command.topic, command.value]), [['unit/RCP/rcp/action/set/active_camera_number', '3']]);
+    // Nor does a row that hasn't been sent, or one whose number is being edited, hold a press back.
+    s.plan.cameras[0]!.dirty = ['number']; s.plan.cameras[1]!.isNew = true; await s.save();
+    assert.equal((await s.run('select-camera', 0, 1)).status, 'success');
+    assert.equal((await s.run('select-camera', 0, 2)).status, 'success');
+    s.networks[0]!.commands.splice(1);
+    // A number the controller doesn't have is still refused, with nothing sent.
+    const missing = await s.run('select-camera', 0, 9);
+    assert.equal(missing.status, 'failure');
+    assert.match(JSON.stringify(missing), /not found on this RCP/);
+    assert.equal(s.networks[0]!.commands.length, 1);
+  } finally { await s.f.instance.dispose(); await Promise.all([s.a.close(), s.b.close()]); }
+});
+
+test('a camera deleted and added back on the controller rolls straight away', async () => {
+  const s = await fleet();
+  try {
+    const control = () => object(object(object(s.f.states.at(-1)).values).cameraControl), [wide] = s.plan.cameras;
+    await eventually(() => control().controllers?.[s.ids[0]!] === true && control().cameras?.[wide!.id]?.online === true);
+    // The controller gives it a new identity, and the saved plan still has the old one.
+    const { a: camera, ...others } = s.a.config.Camera;
+    s.a.config.Camera = { ...others, readded: camera };
+    // Its old MQTT entry can linger for a moment with the same number.
+    s.networks[0]!.send('unit/old/camhead/status/persist/number', '1');
+    s.networks[0]!.send('unit/old/camhead/status/volatile/control', 'offline');
+    await delay(30);
+    const record = await s.run('record-camera', 0, 1);
+    assert.equal(record.status, 'success', JSON.stringify(record));
+    assert.equal(s.networks[0]!.commands.at(-1)!.topic, 'unit/a/camhead/action/set/keyboard');
+  } finally { await s.f.instance.dispose(); await Promise.all([s.a.close(), s.b.close()]); }
+});
+
+test('a camera added or removed over MQTT is announced once, and connecting is not a change', async () => {
+  const s = await fleet({ cameraSettleMs: 60 });
+  try {
+    const control = () => object(object(object(s.f.states.at(-1)).values).cameraControl), [wide] = s.plan.cameras, id = s.ids[0]!;
+    await eventually(() => control().controllers?.[id] === true && control().cameras?.[wide!.id]?.online === true);
+    await delay(150);
+    assert.equal(control().cameraChanges?.[id], undefined, 'What was already there is not a change');
+    const opened = s.a.opened;
+    s.networks[0]!.send('unit/new/camhead/status/persist/number', '7');
+    s.networks[0]!.send('unit/other/camhead/status/persist/number', '8');
+    await eventually(() => control().cameraChanges?.[id] === 1);
+    await delay(150);
+    assert.equal(control().cameraChanges?.[id], 1, 'Several changes close together count once');
+    assert.equal(s.a.opened, opened, 'Noticing opens no connection');
+    s.networks[0]!.send('unit/new/camhead/status/persist/number', '');
+    await eventually(() => control().cameraChanges?.[id] === 2);
+  } finally { await s.f.instance.dispose(); await Promise.all([s.a.close(), s.b.close()]); }
 });
 
 test('a Gateway is watched over MQTT from the start and takes camera commands like an RCP', async () => {
@@ -410,7 +547,7 @@ test('the selection keeps following its document after the host refuses a watch,
   } finally { await f.instance.dispose(); }
 });
 
-test('unchecked groups send nothing; applied numbers and controller identity guard against stale or staged targets', async () => {
+test('unchecked groups send nothing, and applied numbers guard against stale or staged targets', async () => {
   const s = await fleet();
   try {
     assert.equal((await s.run('nd-up-enabled-cameras')).status, 'failure');
@@ -420,9 +557,9 @@ test('unchecked groups send nothing; applied numbers and controller identity gua
     assert.equal((await s.run('nd-up-enabled-cameras')).status, 'failure');
     assert.equal(s.networks[0]!.commands.length, 0);
     s.plan.cameras[0]!.number = '1'; s.plan.cameras[0]!.dirty = []; await s.save();
-    s.a.config.Camera.a.Number = '3';
+    // The controller says over MQTT that this camera now has another number, so the ticked row reaches nothing.
+    s.networks[0]!.send('unit/a/camhead/status/persist/number', '3'); await delay(20);
     assert.equal((await s.run('nd-up-enabled-cameras')).status, 'failure');
-    s.a.config.Camera.a.Number = '1'; s.a.config.Product.Serial = 'CY-RCP-WRONG';
     assert.equal((await s.run('record-camera', 0, 1)).status, 'failure');
     assert.equal(s.networks[0]!.commands.length, 0);
   } finally { await s.close(); }
@@ -628,7 +765,8 @@ test('a failed press does not stop the next press on that controller', async () 
   const s = await fleet();
   try {
     await s.run('toggle-camera-enabled', 0, 1);
-    s.verifyDelays.push(new Error('Simulated controller offline'));
+    // Not ready for longer than a press waits, then ready for the next one.
+    s.stall(0, 400);
     const results = await Promise.all([s.run('roll-enabled-cameras'), s.run('roll-enabled-cameras')]);
     assert.deepEqual(results.map(result => result.status), ['failure', 'success'], JSON.stringify(results));
     assert.deepEqual(s.networks[0]!.commands.map(command => command.value), ['Rec']);
@@ -639,7 +777,7 @@ test('a press cancelled while waiting its turn sends nothing', async () => {
   const s = await fleet();
   try {
     await s.run('toggle-camera-enabled', 0, 1);
-    s.verifyDelays.push(200);
+    s.stall(0, 200);
     const abort = new AbortController();
     const first = s.run('roll-enabled-cameras'), second = s.run('stop-enabled-cameras', 0, undefined, abort.signal);
     await delay(20); abort.abort();
@@ -659,8 +797,8 @@ test('a tick made just before a press counts, and one made just after it does no
     assert.equal(tick.status, 'success');
     assert.equal(press.status, 'success', JSON.stringify(press));
     assert.deepEqual(s.networks[0]!.commands.map(command => [command.topic, command.value]), [['unit/a/camhead/action/set/keyboard', 'Rec']]);
-    // The press is still checking the controller when the later tick lands.
-    s.verifyDelays.push(150);
+    // The press is still waiting on the controller when the later tick lands.
+    s.stall(0, 150);
     const [stop] = await Promise.all([s.run('stop-enabled-cameras'), s.run('toggle-camera-enabled', 0, 2)]);
     assert.equal(stop.status, 'success', JSON.stringify(stop));
     assert.deepEqual(s.networks[0]!.commands.map(command => [command.topic, command.value]), [
@@ -673,8 +811,8 @@ test('a press that counted a tick whose save fails sends nothing, even if it is 
   const s = await fleet(); let release = () => {};
   try {
     await s.run('toggle-camera-enabled', 0, 1);
-    s.verifyDelays.push(150);
-    // Holds this controller's queue, so the next press hasn't started checking when the tick fails.
+    s.stall(0, 150);
+    // Holds this controller's queue, so the next press hasn't started when the tick fails.
     const slow = s.run('nd-up-enabled-cameras');
     await delay(20);
     release = s.f.holdWrites('camera-control');
@@ -694,7 +832,7 @@ test('a tick made after a press, whose save fails, does not stop that press', as
   const s = await fleet(); let release = () => {};
   try {
     await s.run('toggle-camera-enabled', 0, 1);
-    s.verifyDelays.push(150);
+    s.stall(0, 150);
     const press = s.run('nd-up-enabled-cameras');
     await delay(20);
     release = s.f.holdWrites('camera-control');
@@ -776,10 +914,10 @@ test('a failed press shows on the cameras it targeted, and a sent command shows 
     const live = () => object(object(object(s.f.states.at(-1)).values?.cameraControl).cameras);
     await s.run('toggle-camera-enabled', 0, 1);
     await eventually(() => live()[wide!.id]?.recording === 'stopped');
-    s.a.config.Product.Serial = 'CY-RCP-WRONG';
+    s.stall(0, 400);
     assert.equal((await s.run('roll-enabled-cameras')).status, 'failure');
-    assert.match(String(live()[wide!.id]?.message), /Controller identity changed/);
-    s.a.config.Product.Serial = 'CY-RCP-1-10';
+    await delay(80);
+    assert.match(String((await s.state()).cameras[wide!.id]?.message), /broker did not become ready/);
     s.networks[0]!.controls.feedbackDelay = 200;
     const press = s.run('roll-enabled-cameras');
     await eventually(() => live()[wide!.id]?.message === 'Sending…');
@@ -965,29 +1103,29 @@ test('a camera that reports slowly still confirms, because the status wait match
   } finally { await s.close(); }
 });
 
-test('presses on one controller act in press order even if their checks finish out of order', async () => {
+test('presses on one controller act in press order while its broker is slow to answer', async () => {
   const s = await fleet();
   try {
     await s.run('toggle-camera-enabled', 0, 1);
-    s.verifyDelays.push(200, 0);
+    s.stall(0, 200);
     const results = await Promise.all([s.run('roll-enabled-cameras'), s.run('stop-enabled-cameras')]);
     assert.deepEqual(results.map(result => result.status), ['success', 'success'], JSON.stringify(results));
     assert.deepEqual(s.networks[0]!.commands.map(command => command.value), ['Rec', 'Stop']);
   } finally { await s.close(); }
 });
 
-test('a slow check on one controller holds up neither ticks nor another controller', async () => {
+test('a slow controller holds up neither ticks nor another controller', async () => {
   const s = await fleet();
   try {
     await s.run('toggle-camera-enabled', 0, 1);
     await s.run('toggle-camera-enabled', 1, 1);
-    s.verifyDelays.push(400);
+    s.stall(0, 300);
     const slow = s.run('roll-enabled-cameras', 0);
     await delay(20);
     const started = Date.now();
     assert.equal((await s.run('toggle-camera-enabled', 0, 2)).status, 'success');
     assert.equal((await s.run('nd-up-enabled-cameras', 1)).status, 'success');
-    assert.ok(Date.now() - started < 300, 'Expected no wait on the slow controller');
+    assert.ok(Date.now() - started < 220, 'Expected no wait on the slow controller');
     assert.equal(s.networks[0]!.commands.length, 0);
     assert.equal((await slow).status, 'success');
   } finally { await s.close(); }
@@ -1032,8 +1170,8 @@ test('Matrix execution and feedback use the same quick group and clear device fe
     await eventually(() => s.sessions[0]?.snapshot().phase === 'ready');
     s.networks[0]!.send('unit/RCP/rcp/status/volatile/active_camera', 'a');
     await eventually(() => object(s.f.feedback.at(-1)).state === 'active');
-    s.plan.devices[0]!.address='10.20.101.200';await s.save();
-    await eventually(()=>s.sessions.at(-1)!.definition.host==='10.20.101.200'&&s.sessions.at(-1)!.snapshot().phase==='ready');
+    s.plan.devices[0]!.base='10.192.1.99';s.plan.devices[0]!.address='10.192.1.99';await s.save();
+    await eventually(()=>s.sessions.at(-1)!.definition.host==='10.192.1.99'&&s.sessions.at(-1)!.snapshot().phase==='ready');
     s.networks[0]!.send('unit/RCP/rcp/status/volatile/active_camera','a');
     await eventually(()=>object(s.f.feedback.at(-1)).state==='active');
     s.networks[0]!.disconnect();

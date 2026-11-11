@@ -11,6 +11,12 @@ import { cameraChoiceKey, isCameraChoiceField, type CameraChoice } from './choic
 import type { ControlOptions } from './control/service.js';
 
 export type ServiceOptions = { client?: ClientFactory; reachable?: (address: string, signal: AbortSignal) => Promise<boolean>; discovery?: DiscoveryOptions; neighbors?: (signal: AbortSignal) => Promise<string[]>; control?: ControlOptions };
+/** A Cyanview serial carries its own base address: CY-RCP-1-20 is 10.192.1.20. */
+export const baseFromSerial = (serial: string) => {
+  const parts = /^cy-[a-z0-9]+-(\d{1,3})-(\d{1,3})$/i.exec(serial.trim());
+  const address = parts ? '10.192.' + Number(parts[1]) + '.' + Number(parts[2]) : '';
+  return validIp(address) ? address : '';
+};
 const safeDevice = (device: RecordValue) => Object.fromEntries(['id', 'serial', 'name', 'kind', 'base', 'alias', 'address', 'online', 'lastSeen', 'addresses', 'capacity'].filter(key => device[key] !== undefined).map(key => [key, device[key]]));
 export class CyanviewService {
   private client: ClientFactory;
@@ -21,6 +27,8 @@ export class CyanviewService {
   /** When each controller was last read. Every controller reports its status live over MQTT, so nothing here decides Online or Offline. */
   private observations: RecordValue = {};
   private candidates = new Map<string, RecordValue>();
+  /** Every controller a read one lists as a neighbour, by lower-case serial, with the addresses it was seen at. */
+  private neighbours = new Map<string, Set<string>>();
   private lookups = new Map<string, RecordValue>();
   private discovery: Discovery;
   private stopped = false;
@@ -59,12 +67,56 @@ export class CyanviewService {
     const client = this.client(address);
     try {
       await client.connect(signal); const snapshot = normalizeSnapshot(client.config, address);
+      this.noteNeighbours(client.config);
       if (catalog) await this.remi.readCameraReferences(snapshot, client, signal);
       if (catalog && snapshot.cameras[0]) {
         try { snapshot.device.modelCatalog = optionEntries(await client.option(snapshot.cameras[0].elementKey, 'Model', signal)).map(entry => ({ label: entry.label, id: object(entry.request).update?.changes?.model ?? '' })); } catch { /* The verified snapshot remains usable if option discovery is unavailable. */ }
       }
       return snapshot;
     } finally { client.close(); }
+  }
+  private noteNeighbours(config: RecordValue) {
+    for (const raw of Object.values(object(config.Remi))) {
+      const entry = object(raw), seenAt = String(entry.IP ?? '');
+      for (const peer of Object.values(object(entry.Connections))) {
+        const serial = String(object(peer).name ?? '').trim().toLowerCase();
+        if (!/^cy-[a-z0-9]+-\d{1,3}-\d{1,3}$/.test(serial)) continue;
+        const addresses = this.neighbours.get(serial) ?? new Set<string>();
+        if (validIp(seenAt)) addresses.add(seenAt);
+        this.neighbours.set(serial, addresses);
+        if (this.neighbours.size > 512) this.neighbours.delete(this.neighbours.keys().next().value!);
+      }
+    }
+  }
+  /**
+   * The rest of a rig that was set up outside this module. Each controller keeps a list of every
+   * other one it has seen, including ones from old jobs, so each listed serial is tried at its base
+   * address and only one that answers as itself is offered. Nothing is written to any controller.
+   */
+  async findRig(ignore: string[], signal: AbortSignal) {
+    const { plan } = await this.repository.read(signal);
+    const skip = new Set([...plan.devices.map(device => String(device.serial).toLowerCase()), ...ignore.map(serial => serial.toLowerCase())]);
+    const found: RecordValue[] = [], tried = new Set<string>();
+    // A controller just found may list more, so look again until a round finds nothing new.
+    for (let round = 0; round < 4 && found.length < 64; round++) {
+      const listed = [...this.neighbours].filter(([serial]) => !skip.has(serial) && !tried.has(serial)).slice(0, 64);
+      if (!listed.length) break;
+      await Promise.all(listed.map(async ([serial, seenAt]) => {
+        tried.add(serial);
+        for (const address of new Set([baseFromSerial(serial), ...seenAt].filter(Boolean))) {
+          // Only reaching it has a short limit. One that is off the network is given up on quickly.
+          let reach: CyanviewClient | undefined;
+          try {
+            reach = this.client(address);
+            await reach.connect(AbortSignal.any([signal, AbortSignal.timeout(1500)]));
+            if (reach.serial.toLowerCase() !== serial) continue;
+          } catch { signal.throwIfAborted(); continue; } finally { reach?.close(); }
+          try { found.push((await this.probe(address, signal)).device); return; }
+          catch { signal.throwIfAborted(); }
+        }
+      }));
+    }
+    return { found };
   }
   /** A read that answered says the controller was reachable then, and when. */
   private reached() {
@@ -82,7 +134,7 @@ export class CyanviewService {
   async importDevice(id: string, address: string, signal: AbortSignal) {
     const candidate = this.candidates.get(id);
     if (candidate && address !== candidate.address && !candidate.addresses?.includes(address)) throw new Error('Discovered address changed');
-    const snapshot = await this.snapshot(address, signal);
+    const reached = await this.snapshot(address, signal), snapshot = await this.baseSnapshot(reached.device, signal) ?? reached;
     if (snapshot.device.id !== id) throw new Error('Controller identity changed before adding it');
     if (snapshot.cameras.some(row => row.remi)) {
       const { plan } = await this.repository.read(signal);
@@ -93,14 +145,32 @@ export class CyanviewService {
     this.emit();
     return snapshot;
   }
+  /**
+   * A controller's base address is its own, while a LAN address can be set on two by mistake. So when
+   * a controller is reached some other way and its base answers as the same controller, use the base.
+   */
+  private async baseSnapshot(device: RecordValue, signal: AbortSignal) {
+    const base = String(device.base ?? '');
+    if (!base || base === String(device.address || base)) return undefined;
+    // Only reaching it has a short limit. A controller with a lot on it can take longer to read in full.
+    const probe = this.client(base);
+    try {
+      await probe.connect(AbortSignal.any([signal, AbortSignal.timeout(3000)]));
+      if (probe.serial !== device.serial) return undefined;
+    } catch { signal.throwIfAborted(); return undefined; } finally { probe.close(); }
+    try {
+      const snapshot = await this.snapshot(base, signal);
+      return snapshot.device.serial === device.serial ? snapshot : undefined;
+    } catch { signal.throwIfAborted(); return undefined; }
+  }
   /** Reads every controller once for changes made outside this module. Status stays with MQTT. */
-  async refresh(signal: AbortSignal) {
+  async refresh(signal: AbortSignal, only?: string[]) {
     const { plan } = await this.repository.read(signal);
     const snapshots: ReturnType<typeof normalizeSnapshot>[] = [], failed: string[] = [];
-    await Promise.all(plan.devices.map(async device => {
+    await Promise.all(plan.devices.filter(device => !only || only.includes(device.id)).map(async device => {
       const generation = this.generations.get(device.id) || 0, current = () => generation === (this.generations.get(device.id) || 0);
       try {
-        const address = device.address || device.base, snapshot = await this.snapshot(address, signal);
+        const snapshot = await this.baseSnapshot(device, signal) ?? await this.snapshot(device.address || device.base, signal);
         if (!current()) return;
         if (snapshot.device.serial !== device.serial) throw new Error('Controller identity changed');
         snapshots.push(snapshot);

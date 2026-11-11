@@ -11,10 +11,9 @@ import { recordingCheckpoint } from './recording-checkpoint.js';
 import { actionResult, type RecordingTargetResult } from './recording-result.js';
 
 export type FeedbackWait = { baseMs: number; perCameraMs: number; maxMs: number };
-export type ControlOptions = { session?: (definition: CyanViewRcpConnectionDefinition, changed: () => void) => RcpSession; feedbackWait?: FeedbackWait };
+export type ControlOptions = { cameraSettleMs?: number; session?: (definition: CyanViewRcpConnectionDefinition, changed: () => void) => RcpSession; feedbackWait?: FeedbackWait };
 /** What the page shows for one camera on a controller. `online` is null until the camera has reported. */
 export type CameraStatus = { recording: 'recording' | 'stopped' | 'unknown'; available: boolean; message: string; online: boolean | null };
-type Snapshot = { device: RecordValue; cameras: RecordValue[] };
 const steps: Partial<Record<Command, CyanViewCameraParameterStep>> = {
   'nd-up-enabled-cameras': { parameter: 'nd_filter', direction: 'next' },
   'nd-down-enabled-cameras': { parameter: 'nd_filter', direction: 'prev' },
@@ -32,6 +31,13 @@ export const FEEDBACK_WAIT: FeedbackWait = { baseMs: RECORDING_FEEDBACK_TIMEOUT_
 export const feedbackTimeout = (cameras: number, wait = FEEDBACK_WAIT) => Math.min(wait.maxMs, wait.baseMs + wait.perCameraMs * Math.max(0, cameras - 1));
 const SELECTION_QUEUE = 'selection';
 const controllerQueue = (id: unknown) => `controller/${String(id)}`;
+// MQTT goes to a controller's own base address (10.192…), which no other controller can share. The
+// address it was added by is only the way back while the base won't connect.
+const mqttHost = (device: RecordValue) => String(device.base || device.address || '');
+const mqttFallback = (device: RecordValue) => {
+  const saved = String(device.address || '');
+  return saved && saved !== mqttHost(device) ? saved : undefined;
+};
 
 /** Owns all new control paths; the standalone RCP/CCC modules are independent. */
 export class CameraControl {
@@ -47,6 +53,10 @@ export class CameraControl {
   private acceptance = new Map<string, Promise<unknown>>();
   private results = new Map<string, { number: unknown; message: string }>();
   private scheduled?: ReturnType<typeof setImmediate>;
+  // The cameras each controller reports over MQTT, so a camera added, deleted or renumbered outside
+  // this module is noticed without anyone pressing Refresh all.
+  private cameraWatches = new Map<string, { text: string; settled: boolean; timer?: ReturnType<typeof setTimeout> }>();
+  private cameraChanges: Record<string, number> = {};
   private feedbackSent = new Map<ModuleFeedbackSubscription, string>();
   // A restarted worker counts from zero again, so an open page must be able to tell.
   private readonly epoch = randomUUID();
@@ -54,7 +64,7 @@ export class CameraControl {
   private stateSequence = 0;
   private publishedSequence = -1;
   constructor(private repository: PlanRepository, private context: ModuleContext, private sample: boolean,
-    private verify: (address: string, signal: AbortSignal) => Promise<Snapshot>, private changed: () => void, private options: ControlOptions = {}) {
+    private changed: () => void, private options: ControlOptions = {}) {
     this.selection = new ControlSelection(context.services!, sample, this.plan, () => this.emit(), error => {
       context.log({ level: 'error', stage: 'control-selection', message: message(error).slice(0, 1000) });
     });
@@ -77,9 +87,9 @@ export class CameraControl {
     this.plan = plan;
     for (const [id, session] of this.sessions) {
       const device = plan.devices.find(row => row.id === id && controlDevice(row));
-      if (!device || (device.address || device.base) !== session.definition.host || device.serial !== session.definition.serial) {
-        this.sessions.delete(id); session.stop();
-      } else session.definition.name = device.name;
+      if (!device || mqttHost(device) !== session.definition.host || device.serial !== session.definition.serial) {
+        this.sessions.delete(id); session.stop(); this.forgetCameraWatch(id);
+      } else { session.definition.name = device.name; session.definition.fallbackHost = mqttFallback(device); }
     }
     const cameras = new Set(plan.cameras.map(row => row.id));
     for (const id of this.results.keys()) if (!cameras.has(id)) this.results.delete(id);
@@ -88,7 +98,7 @@ export class CameraControl {
   async refreshPlan(signal: AbortSignal) { this.setPlan((await this.repository.read(signal)).plan); }
   state() {
     const { enabled, singleSwitch } = this.selection.value();
-    const value = { enabled, singleSwitch, controllers: this.controllerStatuses(), cameras: this.cameraStatuses() };
+    const value = { enabled, singleSwitch, controllers: this.controllerStatuses(), cameras: this.cameraStatuses(), cameraChanges: { ...this.cameraChanges } };
     const text = JSON.stringify(value);
     if (text !== this.stateText) { this.stateText = text; this.stateSequence += 1; }
     return { ...value, epoch: this.epoch, sequence: this.stateSequence };
@@ -110,7 +120,7 @@ export class CameraControl {
     const connection = session.snapshot();
     if (connection.phase !== 'ready') return unavailable(connection.lastError ?? 'Connecting to the controller');
     let target: CyanViewCameraTarget;
-    try { target = session.captureCamera(Number(row.number)); } catch (error) { return unavailable(message(error)); }
+    try { target = session.captureCamera(Number(row.number), String(row.elementKey ?? '')); } catch (error) { return unavailable(message(error)); }
     const { observation } = target;
     if (observation.online === null) return unavailable('Waiting for camera status');
     if (!observation.online) return unavailable('Camera offline', false);
@@ -131,10 +141,12 @@ export class CameraControl {
     let session = this.sessions.get(device.id);
     if (!session) {
       const definition = { connectionId: device.id, name: device.name, serial: device.serial,
-        host: device.address || device.base, port: 1883, requestTimeoutMs: 3000 };
-      const changed = () => { this.recording.notify(); this.schedule(); };
+        host: mqttHost(device), fallbackHost: mqttFallback(device), port: 1883, requestTimeoutMs: 3000 };
+      const id = device.id;
+      const changed = () => { this.recording.notify(); this.watchCameraSet(id); this.schedule(); };
       session = this.options.session?.(definition, changed) ?? new RcpSession(definition, changed);
       this.sessions.set(device.id, session);
+      this.settleCameraWatch(id);
     }
     return session;
   }
@@ -211,9 +223,14 @@ export class CameraControl {
         const { enabled } = await this.selection.current(execution.signal);
         const rows = this.plan.cameras.filter(row => row.device === device.id);
         const specific = command === 'select-camera' || command === 'record-camera';
-        const targets = specific ? rows.filter(row => Number(row.number) === cameraNumber) : rows.filter(row => enabled[row.id]);
-        if (!targets.length) throw new Error(specific ? 'Camera is not configured on this controller' : 'No cameras are enabled for Cyanview controls on this controller');
-        if (specific && targets.length !== 1) throw new Error('Camera number is ambiguous on this controller');
+        // A press that names a camera number goes by what the controller reports over MQTT and nothing
+        // else. The saved list is only kept current by reading the controller's web side, so it never
+        // decides whether such a press goes. A row there only lends its identity, to settle a tie.
+        const listed = rows.filter(row => Number(row.number) === cameraNumber);
+        const targets: RecordValue[] = specific
+          ? [{ id: listed.length === 1 ? listed[0]!.id : `${device.id}:camera:#${cameraNumber}`, device: device.id, number: String(cameraNumber), elementKey: listed.length === 1 ? String(listed[0]!.elementKey ?? '') : '', unlisted: true }]
+          : rows.filter(row => enabled[row.id]);
+        if (!targets.length) throw new Error('No cameras are enabled for Cyanview controls on this controller');
         // A tick that fails to save rolls back, so a press that counted it must not act on it. Later ticks don't matter here.
         const saved = this.selection.flush(device.id);
         void saved.catch(() => undefined);
@@ -225,22 +242,22 @@ export class CameraControl {
         this.note(targets, 'Sending…');
         const assertCurrent = (row?: RecordValue) => {
           const current = this.plan.devices.find(item => item.id === device.id);
-          if (!current || current.serial !== device.serial || (current.address || current.base) !== (device.address || device.base))
+          if (!current || current.serial !== device.serial || mqttHost(current) !== mqttHost(device))
             throw new Error('Controller changed after the command was accepted');
-          if (row && !this.plan.cameras.some(item => item.id === row.id && item.elementKey === row.elementKey && item.number === row.number && this.appliedRow(item)))
+          if (row && !row.unlisted && !this.plan.cameras.some(item => item.id === row.id && item.elementKey === row.elementKey && item.number === row.number && this.appliedRow(item)))
             throw new Error('Camera changed after the command was accepted');
         };
         let session: RcpSession, captured: { row: RecordValue; target?: CyanViewCameraTarget; error?: string }[];
         try {
           await saved;
-          const snapshot = await this.verify(device.address || device.base, execution.signal);
-          if (snapshot.device.serial !== device.serial) throw new Error('Controller identity changed; refresh before using Cyanview controls');
           assertCurrent();
+          // A press goes over MQTT alone. Its topics already say which controller and which cameras
+          // answered, so nothing else is read first.
           session = this.session(device);
           await this.ready(session, execution.signal);
           const ready = session;
           captured = targets.map(row => {
-            try { return { row, target: this.capture(row, snapshot, ready) }; }
+            try { return { row, target: this.capture(row, ready) }; }
             catch (error) { return { row, error: message(error) }; }
           });
         } catch (error) { this.note(targets, message(error)); throw error; }
@@ -290,11 +307,35 @@ export class CameraControl {
   private appliedRow(row: RecordValue) {
     return !!row.elementKey && !row.isNew && number(Number(row.number)) && !(Array.isArray(row.dirty) && row.dirty.includes('number'));
   }
-  private capture(row: RecordValue, snapshot: Snapshot, session: RcpSession): CyanViewCameraTarget {
-    if (!this.appliedRow(row)) throw new Error('Send or refresh this camera’s number before using Cyanview controls');
-    const actual = snapshot.cameras.find(camera => camera.elementKey === row.elementKey);
-    if (!actual || Number(actual.number) !== Number(row.number)) throw new Error('Camera configuration changed; refresh before using Cyanview controls');
-    return session.captureCamera(Number(actual.number));
+  private capture(row: RecordValue, session: RcpSession): CyanViewCameraTarget {
+    if (!row.unlisted && !this.appliedRow(row)) throw new Error('Send or refresh this camera’s number before using Cyanview controls');
+    // A press names a camera by number, so one deleted and added back under a new identity still answers.
+    return session.captureCamera(Number(row.number), String(row.elementKey ?? ''));
+  }
+  private settleCameraWatch(id: string) {
+    const watch = this.cameraWatches.get(id) ?? { text: '', settled: false };
+    this.cameraWatches.set(id, watch);
+    clearTimeout(watch.timer);
+    watch.timer = setTimeout(() => {
+      watch.timer = undefined;
+      // What a session reads when it first connects is what was already there, not a change.
+      if (!watch.settled) { watch.settled = true; return; }
+      this.cameraChanges[id] = (this.cameraChanges[id] ?? 0) + 1;
+      this.schedule();
+    }, this.options.cameraSettleMs ?? (watch.settled ? 500 : 1500));
+    watch.timer.unref?.();
+  }
+  private watchCameraSet(id: string) {
+    const watch = this.cameraWatches.get(id), session = this.sessions.get(id);
+    if (!watch || !session) return;
+    const text = session.cameraObservations().filter(camera => camera.number !== null).map(camera => camera.address + '=' + camera.number).sort().join('|');
+    if (text === watch.text) return;
+    watch.text = text;
+    this.settleCameraWatch(id);
+  }
+  private forgetCameraWatch(id: string) {
+    clearTimeout(this.cameraWatches.get(id)?.timer);
+    this.cameraWatches.delete(id);
   }
   private async ready(session: RcpSession, signal: AbortSignal) {
     const deadline = Date.now() + session.definition.requestTimeoutMs;
@@ -379,7 +420,7 @@ export class CameraControl {
   }
   async dispose() {
     if (this.stopped) return;
-    this.stopped = true; this.selection.dispose();
+    this.stopped = true; for (const id of [...this.cameraWatches.keys()]) this.forgetCameraWatch(id); this.selection.dispose();
     if (this.scheduled) clearImmediate(this.scheduled);
     await this.recording.dispose();
     for (const session of this.sessions.values()) session.stop();

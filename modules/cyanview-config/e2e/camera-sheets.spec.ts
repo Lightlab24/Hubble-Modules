@@ -11,18 +11,11 @@ async function open(page: Page, request: APIRequestContext) {
   await page.goto('/');
   const f = frame(page);
   await expect(f.locator('#cyanview-design')).toBeVisible();
-  await f.locator('[data-tab="cameras"]').click();
+  await f.locator('[data-tab="assignment"]').click().then(() => f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   const group = f.locator('[data-controller="rcp1"]');
-  await expect(group.getByRole('button', { name: 'Add sheet' })).toBeVisible();
+  await expect(group.getByRole('button', { name: 'Choose visible columns' })).toBeVisible();
   await expect.poll(async () => (await inspect(request)).planSavePending).toBe(0);
   return { f, group, sheet: group.getByRole('grid'), tab: (name: string) => group.getByRole('tab', { name, exact: false }) };
-}
-async function addTab(page: Page, group: Locator, name: string) {
-  await group.getByRole('button', { name: 'Add sheet' }).click();
-  const dialog = frame(page).getByRole('dialog', { name: 'New sheet' });
-  await dialog.getByRole('textbox', { name: 'Sheet name' }).fill(name);
-  await dialog.getByRole('button', { name: 'Create sheet' }).click();
-  await expect(dialog).toHaveCount(0);
 }
 async function hide(page: Page, group: Locator, query: string, label: string) {
   await group.getByRole('button', { name: 'Choose visible columns' }).click();
@@ -49,91 +42,32 @@ async function dragFillTo(page: Page, f: ReturnType<typeof frame>, destination: 
   await page.mouse.up();
 }
 
-test('each tab keeps its own settings and layout, and they survive a reload', async ({ page, request }) => {
+test('there is no tab strip; a plan saved with tabs opens on the one it showed and keeps the others', async ({ page, request }) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
-  const { group, tab } = await open(page, request);
-  await expect(group.getByRole('tab')).toHaveCount(1);
-  await expect(tab('Settings')).toHaveAttribute('aria-selected', 'true');
-
-  await addTab(page, group, 'Network');
-  await expect(tab('Network')).toHaveAttribute('aria-selected', 'true');
-  await expect(group.locator('[data-column="password"]').first()).toBeVisible();
-  await hide(page, group, 'Password', 'Password');
-  await expect(group.locator('[data-column="password"]')).toHaveCount(0);
-
-  await tab('Settings').click();
-  await expect(tab('Settings')).toBeFocused();
-  await expect(group.locator('[data-column="password"]').first()).toBeVisible();
-  await tab('Network').click();
-  await expect(group.locator('[data-column="password"]')).toHaveCount(0);
-
-  await flip(group);
-  await expect(group.locator('tr[data-setting="password"]')).toHaveCount(0);
-  await expect(group.locator('tr[data-setting="login"]')).toHaveCount(1);
-  await tab('Settings').click();
-  await expect(group.locator('tr[data-id]')).toHaveCount(4);
-  await expect(group.getByRole('button', { name: 'Cameras in rows' })).toHaveAttribute('aria-pressed', 'true');
-  await tab('Network').click();
-  await expect.poll(async () => (await inspect(request)).planSavePending).toBe(0);
-  await expect.poll(async () => (await sheetsSaved(request))?.activeSheetId).toBe((await sheetsSaved(request)).sheets[1].id);
-  const data = (await saved(request)).uiState.privateContent;
-  // The tab on screen stays in the older fields, so older module versions still open it.
-  expect(data.hiddenCameraColumnsByDevice.rcp1).toContain('password');
-  expect(data.cameraSheetsByDevice.rcp1.sheets.map((sheet: any) => [sheet.name, sheet.view])).toEqual([['Settings', 'rows'], ['Network', 'columns']]);
-  expect(data.cameraSheetsByDevice.rcp1.sheets[0].hidden).not.toContain('password');
-  expect(data.cameraSheetsByDevice.rcp1.sheets[1].hidden).toBeUndefined();
-
+  const { group } = await open(page, request);
+  await expect(group.getByRole('tab')).toHaveCount(0);
+  await expect(group.getByRole('button', { name: 'Add sheet' })).toHaveCount(0);
+  await expect(group.locator('.hc-sheet-tabs, [data-camera-sheets]')).toHaveCount(0);
+  // A plan saved by an earlier version, showing its second tab with Password hidden and cameras in columns.
+  const previous = await read(request), plan = previous.plan, data = plan.uiState.privateContent;
+  data.cameraSheetsByDevice.rcp1 = { activeSheetId: 'network', sheets: [{ id: 'settings', name: 'Settings', view: 'rows', hidden: [], expanded: { iris: false, zoom: false, focus: false } }, { id: 'network', name: 'Network', view: 'columns' }] };
+  data.hiddenCameraColumnsByDevice.rcp1 = ['password'];
+  await request.post('/__rpc', { data: { commandId: 'save-plan', value: { revision: previous.revision, plan } } });
   await page.reload();
   const again = frame(page).locator('[data-controller="rcp1"]');
-  await expect(again.getByRole('tab', { name: 'Network' })).toHaveAttribute('aria-selected', 'true');
   await expect(again.locator('tr[data-setting="login"]')).toHaveCount(1);
   await expect(again.locator('tr[data-setting="password"]')).toHaveCount(0);
-  await again.getByRole('tab', { name: 'Settings' }).click();
-  await expect(again.locator('[data-column="password"]').first()).toBeVisible();
-  // Another controller has its own tabs.
-  await expect(frame(page).locator('[data-controller="rcp2"]')).toHaveCount(1);
+  await expect(again.getByRole('tab')).toHaveCount(0);
+  // Changing the view changes the sheet it showed, and the other saved tab stays as it was.
+  await unflip(again);
+  await expect(again.locator('tr[data-id]')).toHaveCount(4);
+  await expect.poll(async () => (await inspect(request)).planSavePending).toBe(0);
+  const sheets = (await sheetsSaved(request)).sheets;
+  expect(sheets.map((sheet: any) => [sheet.name, sheet.view])).toEqual([['Settings', 'rows'], ['Network', 'rows']]);
+  expect((await sheetsSaved(request)).activeSheetId).toBe('network');
   expect((await inspect(request)).actions).toEqual([]);
   expect(errors).toEqual([]);
 });
-
-test('tabs rename, reorder and remove like the Button Matrix, with undo', async ({ page, request }) => {
-  const { f, group, sheet, tab } = await open(page, request);
-  await addTab(page, group, 'Lens');
-  await addTab(page, group, 'Network');
-  await expect(group.getByRole('tab')).toHaveCount(3);
-
-  await tab('Lens').dblclick();
-  const dialog = f.getByRole('dialog', { name: 'Rename sheet' });
-  await dialog.getByRole('textbox', { name: 'Sheet name' }).fill('Glass');
-  await dialog.getByRole('button', { name: 'Rename sheet' }).click();
-  await expect(tab('Glass')).toBeVisible();
-
-  await group.getByRole('button', { name: 'Glass options' }).click();
-  await f.getByRole('menuitem', { name: 'Move sheet to end' }).click();
-  await expect(group.getByRole('tab').nth(2)).toContainText('Glass');
-
-  await tab('Glass').click();
-  await group.getByRole('button', { name: 'Glass options' }).click();
-  await f.getByRole('menuitem', { name: 'Remove sheet' }).click();
-  await expect(group.getByRole('tab')).toHaveCount(2);
-  await expect(tab('Network')).toHaveAttribute('aria-selected', 'true');
-
-  await sheet.focus();
-  await sheet.press('Meta+z');
-  await expect(group.getByRole('tab')).toHaveCount(3);
-  await expect(tab('Glass')).toHaveAttribute('aria-selected', 'true');
-  await sheet.press('Meta+Shift+z');
-  await expect(group.getByRole('tab')).toHaveCount(2);
-
-  // The last tab can't be removed.
-  await group.getByRole('button', { name: 'Network options' }).click();
-  await f.getByRole('menuitem', { name: 'Remove sheet' }).click();
-  await group.getByRole('button', { name: 'Settings options' }).click();
-  await expect(f.getByRole('menuitem', { name: 'Remove sheet' })).toHaveAttribute('aria-disabled', 'true');
-  await page.keyboard.press('Escape');
-  expect((await inspect(request)).actions).toEqual([]);
-});
-
 test('cameras in columns edit, fill, paste and report the same settings as cameras in rows', async ({ page, request }) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   const { f, group, sheet } = await open(page, request);
@@ -226,8 +160,13 @@ test('cameras in columns keep lens setup, sorting, sizes and camera deletion', a
 
   await again.locator('th[data-camera-header="cam3"]').click({ button: 'right' });
   await frame(page).getByRole('menuitem', { name: 'Delete camera' }).click();
-  await expect(frame(page).getByRole('dialog').getByText('Camera 3')).toBeVisible();
-  await frame(page).getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
+  // Pending sends doesn't open by itself any more; its button counts the delete.
+  await expect(frame(page).locator('.hc-panel:not([hidden]) .hc-toolbar [data-action="toggle-pending-sends"]')).toHaveText(/\d+\s*pending/);
+  await frame(page).locator('.hc-panel:not([hidden]) .hc-toolbar [data-action="toggle-pending-sends"]').click();
+  const staged = frame(page).locator('[data-pending-line="delete"]');
+  await expect(staged).toContainText('Deleted from');
+  await staged.getByRole('button').click();
+  await expect(staged).toHaveCount(0);
   expect((await inspect(request)).actions).toEqual([]);
 });
 
@@ -239,48 +178,7 @@ test('recording and status updates reach cameras in columns', async ({ page, req
   expect(await flipped(group, 'sync', 'cam2').textContent()).toBe('Pending');
 });
 
-test('a new tab shows at once while its save is held, and a second edit lands too', async ({ page, request }) => {
-  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
-  const { group, tab } = await open(page, request);
-  await simulate(request, { holdPlanWrites: true });
-  await addTab(page, group, 'Held');
-  await expect(tab('Held')).toHaveAttribute('aria-selected', 'true');
-  await expect.poll(async () => (await inspect(request)).planSavePending).toBe(1);
-  await flip(group);
-  await expect(group.locator('th[data-camera-header]')).toHaveCount(4);
-  await typeInto(flipped(group, 'name', 'cam1'), 'Typed during the save');
-  await expect(group.locator('th[data-camera-header="cam1"]')).toContainText('Typed during the save');
-  await simulate(request, { releasePlanWrites: true });
-  await expect.poll(async () => (await sheetsSaved(request))?.sheets?.map((sheet: any) => [sheet.name, sheet.view])).toEqual([['Settings', 'rows'], ['Held', 'columns']]);
-  await expect.poll(async () => (await saved(request))?.cameras?.find((row: any) => row.id === 'cam1')?.name).toBe('Typed during the save');
-  await expect(group.locator('th[data-camera-header]')).toHaveCount(4);
-  expect(errors).toEqual([]);
-});
-
-test('a rejected new tab is removed, returns to the previous tab and keeps a later camera edit', async ({ page, request }) => {
-  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
-  const { f, group, tab } = await open(page, request);
-  await addTab(page, group, 'Kept');
-  await expect.poll(async () => (await sheetsSaved(request))?.sheets?.length).toBe(2);
-  await expect.poll(async () => (await inspect(request)).planSavePending).toBe(0);
-
-  await simulate(request, { holdPlanWrites: true });
-  await addTab(page, group, 'Rejected');
-  await expect(tab('Rejected')).toHaveAttribute('aria-selected', 'true');
-  await expect.poll(async () => (await inspect(request)).planSavePending).toBe(1);
-  await typeInto(group.locator('[data-hubble-row="cam1"][data-hubble-column="name"]'), 'Survives the rollback');
-  await simulate(request, { failPlanWrite: true, releasePlanWrites: true });
-
-  await expect(group.getByRole('tab')).toHaveCount(2);
-  await expect(tab('Kept')).toHaveAttribute('aria-selected', 'true');
-  await expect(f.locator('[data-role="toast"]')).toContainText('Simulated storage failure');
-  await expect(group.locator('[data-hubble-row="cam1"][data-hubble-column="name"] input')).toHaveValue('Survives the rollback');
-  await expect.poll(async () => (await saved(request))?.cameras?.find((row: any) => row.id === 'cam1')?.name).toBe('Survives the rollback');
-  await expect.poll(async () => (await sheetsSaved(request))?.sheets?.map((sheet: any) => sheet.name)).toEqual(['Settings', 'Kept']);
-  expect(errors).toEqual([]);
-});
-
-test('a plan from before tabs opens as one tab with its layout, and saving nothing changes nothing', async ({ page, request }) => {
+test('a plan from before tabs opens with its layout and no tab strip, and saving nothing changes nothing', async ({ page, request }) => {
   const { group } = await open(page, request);
   const previous = await read(request), plan = previous.plan;
   delete plan.uiState.privateContent.cameraSheetsByDevice;
@@ -289,8 +187,7 @@ test('a plan from before tabs opens as one tab with its layout, and saving nothi
   const saves = (await inspect(request)).planSaves;
   await page.reload();
   const again = frame(page).locator('[data-controller="rcp1"]');
-  await expect(again.getByRole('tab')).toHaveCount(1);
-  await expect(again.getByRole('tab', { name: 'Settings' })).toBeVisible();
+  await expect(again.getByRole('tab')).toHaveCount(0);
   await expect(again.locator('tr[data-id]')).toHaveCount(4);
   await expect(again.locator('[data-column="password"]')).toHaveCount(0);
   expect((await inspect(request)).planSaves).toBe(saves);

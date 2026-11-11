@@ -13,11 +13,34 @@ async function chooseCameraCell(frame: ReturnType<typeof ui>, cell: Locator, lab
   await sheet.press('Enter');
   await frame.getByRole('dialog').getByRole('option', { name: label, exact: true }).click();
 }
+// The count box adds a row at the end; the Add camera menu it replaced also chose the model.
+async function addCamera(frame: ReturnType<typeof ui>, group: Locator, model: string) {
+  const rows = group.locator('tbody tr[data-id]'), before = await rows.count();
+  await group.locator('[data-count-step="1"]').click();
+  await expect(rows).toHaveCount(before + 1);
+  const choice = rows.last().locator('[data-field="model"]');
+  if (!(await choice.innerText()).includes(model)) await chooseCameraCell(frame, choice, model);
+  await expect(choice).toContainText(model);
+}
 async function open(page: Page, request: APIRequestContext, sample = true) {
   await request.post('/__reset', { data: { sample } });
   await page.goto('/'); await expect(ui(page).locator('#cyanview-design')).toBeVisible();
   await expect(ui(page).locator('[data-role="saved-label"]')).toContainText(sample ? 'Sample data' : 'Workspace saved');
-  if (sample) await ui(page).locator('[data-tab="cameras"]').click();
+  // These cover each device's own network card, which is now the Details view of the Devices tab.
+  await ui(page).locator('[data-device-view="details"]').click();
+  if (sample) await ui(page).locator('[data-tab="assignment"]').click().then(() => ui(page).locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
+}
+// Lists open Hubble's own pop-up; the system menu underneath can't be reached by hand.
+async function pick(frame: ReturnType<typeof ui>, label: string, option: string) {
+  await frame.getByRole('button', { name: label, exact: true }).click();
+  await frame.getByRole('listbox', { name: label }).getByRole('option', { name: option, exact: true }).click();
+}
+// Pending sends doesn't open by itself; this opens it if it's shut.
+async function openPending(frame: ReturnType<typeof ui>) {
+  const list = frame.locator('[data-role="pending-sends"]');
+  if (await list.isHidden()) await frame.locator('.hc-panel:not([hidden]) .hc-toolbar [data-action="toggle-pending-sends"]').click();
+  await expect(list).toBeVisible();
+  return list;
 }
 async function inspect(request: APIRequestContext) { return (await request.get('/__inspect')).json(); }
 async function saved(request: APIRequestContext) {
@@ -39,19 +62,20 @@ test('camera deletion targets the active cell or the right-clicked row after con
   await expect(f.locator('[data-action="add-discovered"]')).toBeEnabled();
   await f.locator('[data-action="add-discovered"]').click();
   await expect(f.locator('[data-role="device-count"]')).toHaveText('1');
-  await f.locator('[data-tab="cameras"]').click();
+  await f.locator('[data-tab="assignment"]').click().then(() => f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   await f.getByRole('button', { name: 'Expand all device spreadsheets', exact: true }).click();
   const group = f.locator('[data-controller]'), rows = group.locator('tr[data-id]');
   const deleteButton = group.locator('[data-action="delete-controller"]');
   await expect(deleteButton).toBeDisabled();
-  for (let number = 1; number <= 3; number++) await group.locator('[data-new-camera]').selectOption('Alpha-USB');
+  for (let number = 1; number <= 3; number++) await addCamera(f, group, 'Alpha-USB');
   await expect(rows).toHaveCount(3);
   await expect(group.getByRole('grid').getByRole('checkbox', { name: /Camera Control Enabled/ })).toHaveCount(3);
   await request.post('/__simulate', { data: { holdAction: 'new' } });
   await group.locator('[data-action="send-controller"]').click();
-  await expect.poll(async () => (await inspect(request)).heldReplies).toBe(3);
+  // One socket, one row at a time: the first holds up the rest of that controller's rows.
+  await expect.poll(async () => (await inspect(request)).heldReplies).toBe(1);
   expect(sends).toHaveLength(1); expect(sends[0].items).toHaveLength(3);
-  expect((await inspect(request)).actions.filter((action: any) => action.new)).toHaveLength(3);
+  expect((await inspect(request)).actions.filter((action: any) => action.new)).toHaveLength(1);
   await expect(group.locator('tr[data-id] [data-column="sync"]')).toHaveText(['Sending', 'Sending', 'Sending']);
   await request.post('/__simulate', { data: { releaseReplies: true } });
   await expect(group.locator('tr[data-id] [data-column="sync"]')).toHaveText(['Verified', 'Verified', 'Verified']);
@@ -61,11 +85,13 @@ test('camera deletion targets the active cell or the right-clicked row after con
   await expect(rows.locator('[data-hubble-spreadsheet-selected]')).toHaveCount(2);
   await expect(deleteButton).toHaveText('Delete camera 2');
   await deleteButton.click();
-  const dialog = f.getByRole('dialog', { name: 'Delete camera from device' });
-  await expect(dialog).toContainText('Camera 2');
+  const pending = await openPending(f);
+  await expect(rows.nth(1)).toHaveClass(/hc-remove-staged/);
+  await expect(pending.locator('.hc-pending-camera')).toContainText('2 ·');
+  await expect(pending.locator('[data-pending-line="delete"]')).toContainText('Deleted from');
   expect(sends).toHaveLength(1);
   await request.post('/__simulate', { data: { holdAction: 'delete' } });
-  await dialog.getByRole('button', { name: 'Delete camera', exact: true }).click();
+  await pending.locator('[data-action="send-all-pending"]').click();
   await expect.poll(async () => (await inspect(request)).heldReplies).toBe(1);
   expect(sends).toHaveLength(2);
   expect(sends[1].items).toMatchObject([{ deleting: true, item: { number: '2' } }]);
@@ -79,13 +105,15 @@ test('camera deletion targets the active cell or the right-clicked row after con
   const menuItem = f.getByRole('menuitem', { name: 'Delete camera', exact: true });
   await rightClick.click({ button: 'right' });
   await menuItem.click();
-  await expect(dialog).toContainText('Camera 3');
-  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(rows.last()).toHaveClass(/hc-remove-staged/);
+  await rightClick.click({ button: 'right' });
+  await f.getByRole('menuitem', { name: 'Keep camera', exact: true }).click();
+  await expect(rows.last()).not.toHaveClass(/hc-remove-staged/);
   expect(sends).toHaveLength(2);
   await rightClick.click({ button: 'right' });
   await menuItem.click();
   await request.post('/__simulate', { data: { holdAction: '' } });
-  await dialog.getByRole('button', { name: 'Delete camera', exact: true }).click();
+  await pending.locator('[data-action="send-all-pending"]').click();
   await expect(rows).toHaveCount(1);
   expect(sends[2].items).toMatchObject([{ deleting: true, item: { number: '3' } }]);
   await expect.poll(async () => (await saved(request))?.cameras?.map((row: any) => row.number)).toEqual(['1']);
@@ -100,10 +128,10 @@ test('auto sends and deletions on different cameras proceed while earlier replie
   await expect(f.locator('[data-action="add-discovered"]')).toBeEnabled();
   await f.locator('[data-action="add-discovered"]').click();
   await expect(f.locator('[data-role="device-count"]')).toHaveText('1');
-  await f.locator('[data-tab="cameras"]').click();
+  await f.locator('[data-tab="assignment"]').click().then(() => f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   await f.getByRole('button', { name: 'Expand all device spreadsheets', exact: true }).click();
   const group = f.locator('[data-controller]'), rows = group.locator('tr[data-id]');
-  for (let number = 1; number <= 3; number++) await group.locator('[data-new-camera]').selectOption('Alpha-USB');
+  for (let number = 1; number <= 3; number++) await addCamera(f, group, 'Alpha-USB');
   await group.locator('[data-action="send-controller"]').click();
   await expect(rows.locator('[data-column="sync"]')).toHaveText(['Verified', 'Verified', 'Verified']);
   await f.locator('[data-action="send-mode"][data-mode="Auto send"]').click();
@@ -116,7 +144,7 @@ test('auto sends and deletions on different cameras proceed while earlier replie
   await expect.poll(async () => (await inspect(request)).heldReplies).toBe(2);
   await selectCameraCell(rows.nth(2).locator('[data-field="name"]'));
   await group.locator('[data-action="delete-controller"]').click();
-  await f.locator('[data-action="confirm-send"]').click();
+  await (await openPending(f)).locator('[data-action="send-all-pending"]').click();
   await expect(rows).toHaveCount(2);
   expect((await inspect(request)).heldReplies).toBe(2);
   await request.post('/__simulate', { data: { releaseReplies: true } });
@@ -124,7 +152,7 @@ test('auto sends and deletions on different cameras proceed while earlier replie
   await request.post('/__simulate', { data: { holdAction: 'delete' } });
   await selectCameraCell(rows.nth(0).locator('[data-field="name"]'));
   await group.locator('[data-action="delete-controller"]').click();
-  await f.locator('[data-action="confirm-send"]').click();
+  await (await openPending(f)).locator('[data-action="send-all-pending"]').click();
   await expect.poll(async () => (await inspect(request)).heldReplies).toBe(1);
   await expect(rows.nth(0).locator('[data-field="name"]')).toBeDisabled();
   await rows.nth(1).locator('[data-field="name"]').fill('Edited during another deletion');
@@ -257,7 +285,7 @@ test('each camera opts into lens axes and only sends the selected settings', asy
   await expect(f.locator('[data-action="add-discovered"]')).toBeEnabled();
   await f.locator('[data-action="add-discovered"]').click();
   await expect(f.locator('[data-role="device-count"]')).toHaveText('1');
-  await f.locator('[data-tab="cameras"]').click();
+  await f.locator('[data-tab="assignment"]').click().then(() => f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   await f.getByRole('button', { name: 'Expand all device spreadsheets', exact: true }).click();
   const group = f.locator('[data-controller]'), rows = group.locator('tr[data-id]');
   const first = rows.first(), second = rows.nth(1);
@@ -267,7 +295,7 @@ test('each camera opts into lens axes and only sends the selected settings', asy
   for (const axis of ['Iris', 'Zoom', 'Focus']) await f.getByRole('menuitemcheckbox', { name: 'Use ' + axis, exact: true }).click();
   await f.getByRole('searchbox', { name: 'Search columns' }).press('Escape');
   for (const row of [first, second]) {
-    await group.locator('[data-new-camera]').selectOption('Alpha-USB');
+    await addCamera(f, group, 'Alpha-USB');
     await chooseCameraCell(f, row.locator('[data-field="lens"]'), 'Tilta - Nucleus-M');
     for (const axis of ['iris', 'zoom', 'focus']) await expect(row.locator('[data-lens-axis="' + axis + '"] [role="checkbox"]')).not.toBeChecked();
   }
@@ -338,7 +366,7 @@ test('mixed device order, expand all and LAN columns retain the approved interac
   await expect.poll(async () => (await saved(request))?.uiState?.privateContent?.hiddenNetworkColumnsByDevice?.rcp1).toContain('current');
   await page.reload(); await expect(network.getByRole('table')).toBeVisible();
   await expect(network.locator('td[data-column="current"]')).toHaveCount(0);
-  await f.locator('[data-tab="cameras"]').click();
+  await f.locator('[data-tab="assignment"]').click().then(() => f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   await expect(f.locator('[data-action="toggle-controller"][aria-expanded="true"]')).toHaveCount(0);
   expect(await f.locator('[data-controller]').evaluateAll(elements => elements.map(element => (element as HTMLElement).dataset.controller))).toEqual(['rcp1', 'rio1', 'rcp2', 'rio2', 'rio3']);
   expect(errors).toEqual([]); expect((await inspect(request)).actions).toHaveLength(0);
@@ -350,11 +378,12 @@ test('live bridge discovers, explicitly adds, saves and sends to the simulated c
   await expect(f.locator('[data-controller]')).toHaveCount(0);
   await expect(f.locator('[data-role="device-discovery"]')).toHaveAttribute('open','');
   await expect(f.locator('[data-action="scan"]')).toBeDisabled();
-  await f.getByRole('combobox', { name: 'Network range', exact: true }).selectOption('custom');
+  await pick(f, 'Network range', 'Custom range…');
   await f.getByRole('textbox', { name: 'Custom CIDR range', exact: true }).fill('10.20.101.200/32');
   await f.getByRole('button', { name: 'Discover', exact: true }).click();
   await expect(f.getByRole('table', { name: 'Discovered devices' }).locator('tbody tr')).toHaveCount(1);
-  await expect(f.locator('[data-action="add-discovered"]')).toBeDisabled();
+  await expect(f.locator('[data-action="add-discovered"]')).toHaveText('Add all 1');
+  await expect(f.locator('[data-role="device-count"]')).toHaveText('0');
   await f.getByRole('textbox', { name: 'Device IP address', exact: true }).fill('10.192.1.10');
   await f.getByRole('button', { name: 'Find', exact: true }).click();
   await expect(f.getByRole('table', { name: 'Discovered devices' }).locator('tbody tr')).toHaveCount(1);
@@ -362,10 +391,10 @@ test('live bridge discovers, explicitly adds, saves and sends to the simulated c
   await f.locator('[data-action="add-discovered"]').click();
   await expect(f.locator('[data-role="device-count"]')).toHaveText('1');
   expect((await inspect(request)).actions).toHaveLength(0);
-  await f.locator('[data-tab="cameras"]').click();
+  await f.locator('[data-tab="assignment"]').click().then(() => f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   await f.getByRole('button', { name: 'Expand all device spreadsheets', exact: true }).click();
   const group = f.locator('[data-controller]');
-  await group.locator('[data-new-camera]').selectOption('Venice-IP');
+  await addCamera(f, group, 'Venice-IP');
   const row = group.locator('tr[data-id]').first();
   await row.locator('[data-field="name"]').fill('Studio Camera'); await row.locator('[data-field="name"]').press('Enter');
   await row.locator('[data-field="ip"]').fill('10.20.100.101'); await row.locator('[data-field="ip"]').press('Tab');
@@ -407,7 +436,8 @@ test('live bridge discovers, explicitly adds, saves and sends to the simulated c
   await expect(f.locator('tr[data-id] [data-field="name"]').first()).toHaveValue('Staged name');
   const restarted = (await inspect(request)).actions.length;
   await f.getByRole('button', { name: 'Refresh all', exact: true }).click();
-  await expect(f.locator('[data-role="toast"]')).toHaveText('Settings refreshed · edits retained');
+  await expect(f.locator('[data-role="toast"]')).toHaveText('Settings refreshed · 1 pending change cleared');
+  await expect(f.locator('tr[data-id] [data-field="name"]').first()).toHaveValue('Studio Camera');
   expect((await inspect(request)).actions).toHaveLength(restarted);
   expect(errors).toEqual([]);
 });
@@ -415,7 +445,7 @@ test('live bridge discovers, explicitly adds, saves and sends to the simulated c
 test('Find by IP stays visible through completed scans and repeated host state updates',async({page,request})=>{
   await open(page,request,false);const f=ui(page);
   await expect(f.locator('[data-tab="devices"]')).toHaveAttribute('aria-selected','true');
-  await f.getByRole('combobox',{name:'Network range',exact:true}).selectOption('custom');
+  await pick(f, 'Network range', 'Custom range…');
   await f.getByRole('textbox',{name:'Custom CIDR range',exact:true}).fill('10.20.101.250/32');
   await f.getByRole('button',{name:'Discover',exact:true}).click();
   await expect(f.locator('[data-role="scan-label"]')).toContainText('Discovery complete');
@@ -423,11 +453,11 @@ test('Find by IP stays visible through completed scans and repeated host state u
   await f.getByRole('button',{name:'Find',exact:true}).click();
   const rows=f.getByRole('table',{name:'Discovered devices'}).locator('tbody tr');
   await expect(rows).toHaveCount(1);
-  await f.getByRole('combobox',{name:'Discovery method',exact:true}).selectOption('ip');
+  await pick(f, 'Discovery method', 'Full IP scan');
   await f.getByRole('button',{name:'Discover',exact:true}).click();
   await expect(f.locator('[data-role="scan-label"]')).toContainText('IP scan complete');
   await f.getByRole('button',{name:'Refresh all',exact:true}).click();
-  await expect(f.locator('[data-role="toast"]')).toHaveText('Settings refreshed · edits retained');
+  await expect(f.locator('[data-role="toast"]')).toHaveText('Settings refreshed');
   await expect(rows).toHaveCount(1);
   await expect(f.locator('[data-action="add-discovered"]')).toBeEnabled();
   expect((await inspect(request)).actions).toHaveLength(0);
@@ -445,10 +475,10 @@ async function addController(page: Page) {
 test('offline status allows fresh camera and LAN sends, with plain headers on both sheets',async({page,request})=>{
   const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
   await open(page,request,false);await addController(page);const f=ui(page);
-  await f.locator('[data-tab="cameras"]').click();
+  await f.locator('[data-tab="assignment"]').click().then(() => f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   await f.getByRole('button',{name:'Expand all device spreadsheets',exact:true}).click();
   const cameraGroup=f.locator('[data-controller]');
-  await cameraGroup.locator('[data-new-camera]').selectOption('Alpha-USB');
+  await addCamera(f, cameraGroup, 'Alpha-USB');
   const camera=cameraGroup.locator('tr[data-id]').first();
   await request.post('/__simulate',{data:{closeBroker:true}});
   await expect(cameraGroup.locator('.hc-controller-header > .hc-status')).toHaveText('Offline');
@@ -463,7 +493,8 @@ test('offline status allows fresh camera and LAN sends, with plain headers on bo
   const network=f.locator('[data-network-controller]');
   const lanId=await network.locator('tr[data-id]').filter({hasText:'10.20.101.200/16'}).getAttribute('data-id');
   const current=network.locator('tr[data-id="'+lanId+'"]');
-  await current.locator('[data-field="operation"]').selectOption('Add');
+  await current.locator('[data-field="operation"] + .hc-dropdown').click();
+  await f.getByRole('listbox').getByRole('option', { name: 'Add', exact: true }).click();
   await current.locator('[data-field="planned"]').fill('10.20.101.201/16');
   await current.locator('[data-field="planned"]').press('Enter');
   await expect(network.locator('.hc-controller-header > .hc-status')).toHaveText('Offline');
@@ -483,9 +514,9 @@ test('offline status allows fresh camera and LAN sends, with plain headers on bo
 test('device removal persists, and Undo retains camera drafts and concurrent changes after a rejected save',async({page,request})=>{
   const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
   await open(page,request,false);await addController(page);const f=ui(page);
-  await f.locator('[data-tab="cameras"]').click();
+  await f.locator('[data-tab="assignment"]').click().then(() => f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   await f.getByRole('button',{name:'Expand all device spreadsheets',exact:true}).click();
-  await f.locator('[data-new-camera]').selectOption('Venice-IP');
+  await addCamera(f, f.locator('[data-controller]'), 'Venice-IP');
   const draft=f.locator('[data-controller] tr[data-id]').first();
   await draft.locator('[data-field="name"]').fill('Keep this draft');await draft.locator('[data-field="name"]').press('Enter');
   await f.locator('[data-tab="devices"]').click();
@@ -508,7 +539,7 @@ test('device removal persists, and Undo retains camera drafts and concurrent cha
   await expect.poll(async()=>{const plan=await saved(request);return {count:plan?.devices?.length,name:plan?.cameras?.[0]?.name,mode:plan?.uiState?.privateContent?.ui?.sendMode};}).toEqual({count:1,name:'Keep this draft',mode:'Auto send'});
   await expect(f.locator('[data-role="saved-label"]')).toContainText('Workspace saved');
   await page.reload();
-  await f.locator('[data-tab="cameras"]').click();
+  await f.locator('[data-tab="assignment"]').click().then(() => f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   await expect(f.locator('[data-controller] [data-field="name"]').first()).toHaveValue('Keep this draft');
   await f.locator('[data-controller] [data-action="remove-device"]').click();
   await expect.poll(async()=>(await saved(request))?.devices?.length).toBe(0);
@@ -532,25 +563,25 @@ test('full-page sizing keeps chrome visible while long sheets scroll across resi
   }
   expect(await f.locator('#hc-cameras').evaluate(element=>element.scrollHeight>element.clientHeight)).toBe(true);
   await f.locator('[data-tab="devices"]').click();await expect(f.locator('[data-role="network-devices"]')).toBeVisible();
-  await f.locator('[data-tab="cameras"]').click();await expect(f.locator('[data-action="toggle-controller"][aria-expanded="true"]')).toHaveCount(5);
+  await f.locator('[data-tab="assignment"]').click().then(() => f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());await expect(f.locator('[data-action="toggle-controller"][aria-expanded="true"]')).toHaveCount(5);
   await expect.poll(async()=>(await saved(request))?.uiState?.privateContent?.tab).toBe('cameras');await page.reload();
-  await expect(f.locator('[data-tab="cameras"]')).toHaveAttribute('aria-selected','true');await expect(f.locator('.hc-global-foot')).toBeInViewport();
+  await expect(f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]')).toHaveAttribute('aria-pressed','true');await expect(f.locator('.hc-global-foot')).toBeInViewport();
   expect((await inspect(request)).actions).toHaveLength(0);expect(await page.locator('iframe').getAttribute('sandbox')).toBe('allow-scripts');
   await page.locator('iframe').screenshot({path:'artifacts/cyanview-full-page-ui.png'});
 });
 
 test('fast ping discovery streams verified devices, stops cleanly and retains manual results',async({page,request})=>{
   await open(page,request,false);const f=ui(page);
-  await expect(f.getByRole('combobox',{name:'Discovery method',exact:true})).toHaveValue('ping');
+  await expect(f.getByRole('button',{name:'Discovery method',exact:true})).toHaveText('Fast IP discovery');
   await request.post('/__simulate',{data:{pingDelayMs:3000}});
-  await f.getByRole('combobox',{name:'Network range',exact:true}).selectOption('10.192.0.0/16');
+  await pick(f, 'Network range', '10.192.0.0/16');
   await f.getByRole('button',{name:'Discover',exact:true}).click();
   await expect(f.getByRole('table',{name:'Discovered devices'}).locator('tbody tr')).toHaveCount(1);
   await expect(f.locator('[data-role="scan-label"]')).toContainText('Pinging IP addresses');
   await f.getByRole('button',{name:'Stop',exact:true}).click();await expect(f.locator('[data-role="scan-label"]')).toContainText('Discovery stopped');
   await f.getByRole('textbox',{name:'Device IP address',exact:true}).fill('10.192.1.10');await f.getByRole('button',{name:'Find',exact:true}).click();
   await request.post('/__simulate',{data:{pingDelayMs:0}});
-  await f.getByRole('combobox',{name:'Network range',exact:true}).selectOption('custom');await f.getByRole('textbox',{name:'Custom CIDR range',exact:true}).fill('10.20.101.250/32');
+  await pick(f, 'Network range', 'Custom range…');await f.getByRole('textbox',{name:'Custom CIDR range',exact:true}).fill('10.20.101.250/32');
   await f.getByRole('button',{name:'Discover',exact:true}).click();await expect(f.locator('[data-role="scan-label"]')).toContainText('Discovery complete');
   await expect(f.getByRole('table',{name:'Discovered devices'}).locator('tbody tr')).toHaveCount(1);expect((await inspect(request)).actions).toHaveLength(0);
 });
@@ -686,10 +717,10 @@ test('a multi-row camera paste sends one Auto send batch without replaying stage
   await expect(f.locator('[data-action="add-discovered"]')).toBeEnabled();
   await f.locator('[data-action="add-discovered"]').click();
   await expect(f.locator('[data-role="device-count"]')).toHaveText('1');
-  await f.locator('[data-tab="cameras"]').click();
+  await f.locator('[data-tab="assignment"]').click().then(() => f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   await f.getByRole('button', { name: 'Expand all device spreadsheets', exact: true }).click();
   const group = f.locator('[data-controller]'), rows = group.locator('tbody tr[data-id]');
-  for (let i = 0; i < 2; i++) await group.locator('[data-new-camera]').selectOption('Alpha-USB');
+  for (let i = 0; i < 2; i++) await addCamera(f, group, 'Alpha-USB');
   await group.locator('[data-action="send-controller"]').click();
   await expect(rows.locator('[data-column="sync"]')).toHaveText(['Verified', 'Verified']);
 
@@ -735,10 +766,10 @@ test('live lens connection choices can be selected and saved offline after reloa
   await expect(f.locator('[data-action="add-discovered"]')).toBeEnabled();
   await f.locator('[data-action="add-discovered"]').click();
   await expect(f.locator('[data-role="device-count"]')).toHaveText('1');
-  await f.locator('[data-tab="cameras"]').click();
+  await f.locator('[data-tab="assignment"]').click().then(() => f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   await f.getByRole('button', { name: 'Expand all device spreadsheets', exact: true }).click();
   const group = f.locator('[data-controller]'), row = group.locator('tbody tr[data-id]').first();
-  await group.locator('[data-new-camera]').selectOption('Alpha-USB');
+  await addCamera(f, group, 'Alpha-USB');
   await chooseCameraCell(f, row.locator('[data-field="lens"]'), 'B4 Generic');
   await group.locator('[data-action="send-controller"]').click();
   await expect(row.locator('[data-column="sync"]')).toHaveText('Verified');

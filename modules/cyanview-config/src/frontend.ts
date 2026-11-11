@@ -102,6 +102,7 @@ if (window.parent !== window) {
     scan(range: string, method = 'ping') { return client.call('scan', { range, method }); },
     stopScan() { return client.call('stop-scan'); },
     probe(address: string) { return client.call('probe', { address }); },
+    async findRig(value: unknown) { return readBounded(await client.call('find-rig', payload(value)) as Record<string, any>); },
     async importDevice(device: Record<string, unknown>) {
       const result = await client.call('import-device', payload({ id: device.id, address: device.address || device.base })) as Record<string, any>;
       const cameras: unknown[] = [];
@@ -119,8 +120,12 @@ if (window.parent !== window) {
       await tail.catch(() => undefined);
       return readBounded(await client.call('remi-send', payload(value)) as Record<string, any>);
     },
-    async refresh() {
-      return readBounded(await client.call('refresh') as Record<string, any>);
+    async remiRoute(value: unknown) {
+      await tail.catch(() => undefined);
+      return readBounded(await client.call('remi-route', payload(value)) as Record<string, any>);
+    },
+    async refresh(devices?: string[]) {
+      return readBounded(await client.call('refresh', devices ? payload({ devices }) : undefined) as Record<string, any>);
     },
     async controlState() { return client.call('camera-control-state'); },
     async controlMutate(value: unknown) {

@@ -4,6 +4,29 @@
   function lensAxisForUseColumn(column){
     return /^(iris|zoom|focus)Summary$/.exec(column)?.[1];
   }
+  // A Tilta motor has no direction setting, so its iris is reversed by swapping Open and Closed. Its
+  // Direction cell says which way round they are, and picking the other one swaps the two numbers.
+  const irisSwapChoices=[{value:'normal',label:'Normal'},{value:'swapped',label:'Swapped'}];
+  function irisSwapCell(camera,field){
+    return field==='irisDirection'&&lensCapabilities(camera).motor&&lensAxisEnabled(camera,'iris');
+  }
+  function irisSwapValue(camera){
+    const open=Number(camera.irisMin),closed=Number(camera.irisMax);
+    return open>0&&closed>0&&open!==closed?(open>closed?'swapped':'normal'):'';
+  }
+  // Open below Closed, except on a Tilta, where either order is a range.
+  function irisRangeValid(camera){
+    const open=Number(camera.irisMin),closed=Number(camera.irisMax);
+    return open>0&&(lensCapabilities(camera).motor?closed>0&&closed!==open:closed>open);
+  }
+  // Open and Closed can change from a typed value, a paste, undo or a read, so the cell follows the row.
+  function paintIrisSwap(camera){
+    root.querySelectorAll('table[data-camera-device] [data-row="'+CSS.escape(camera.id)+'"][data-field="irisDirection"]').forEach(control=>{
+      const cell=control.closest('td'),swap=irisSwapCell(camera,'irisDirection');
+      const markup=cameraChoiceCell(camera,'irisDirection',!swap&&!lensFieldUsed(camera,'irisDirection'));
+      if(cell.innerHTML!==markup)cell.innerHTML=markup;
+    });
+  }
   function lensAxisAvailable(camera){
     return lensCapabilities(camera).iris&&camera.lens!=='cmotion cGate'&&!importedCamera(camera);
   }

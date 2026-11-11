@@ -89,6 +89,8 @@ export class FakeController {
   wrongIdentity = false;
   replyDelayProperty = '';
   replyDelayMs = 0;
+  /** A controller answers a write at once and pushes its changed configuration a little later. */
+  pushDelayMs = 0;
   holdAction = '';
   heldActionReplies: (() => void)[] = [];
   replyTextHeartbeat = true;
@@ -131,7 +133,9 @@ export class FakeController {
           const echo = message.request.update ? { update: { changes: message.request.update.changes, key: message.request.update.key } } : message.request;
           const reply = () => {
             if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'action_reply', request: echo, payload: result }));
-            if (this.remiFleet) this.remiFleet.publish(); else this.broadcast();
+            if (this.remiFleet) this.remiFleet.publish();
+            else if (this.pushDelayMs) { const config = structuredClone(this.config); setTimeout(() => { for (const socket of this.sockets) if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'config_data', payload: config })); }, this.pushDelayMs); }
+            else this.broadcast();
           };
           if (this.holdAction && message.request[this.holdAction]) this.heldActionReplies.push(reply);
           else if (this.replyDelayProperty && message.request.update?.changes?.[this.replyDelayProperty] !== undefined) setTimeout(reply, this.replyDelayMs);
@@ -140,6 +144,8 @@ export class FakeController {
       });
     });
   }
+  /** Gives a camera already on the controller the address fields its model would have. */
+  addressable(...keys: string[]) { for (const key of keys) this.endpoints.set('endpoint-' + key, key); }
   releaseActionReplies() { this.holdAction = ''; for (const reply of this.heldActionReplies.splice(0)) reply(); }
   broadcast() { for (const socket of this.sockets) if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'config_data', payload: this.config })); }
   async start() { await new Promise<void>(resolve => this.server.listen(0, '127.0.0.1', resolve)); this.port = (this.server.address() as { port: number }).port; }
@@ -198,6 +204,10 @@ export class FakeController {
 export class FakeRemiFleet {
   readonly writes: { device: string; enable: string; sourceKey: string }[] = [];
   failEnable = '';
+  /** Serials a controller still lists from an earlier job, which nothing on this network answers to. */
+  remembered: string[] = [];
+  /** Which controllers list which. Every one lists every other unless a test says otherwise. */
+  sees: (from: FakeController, to: FakeController) => boolean = () => true;
   private sequence = 0;
   private sources = new Map<FakeController, { key: string; peer: string; address: string }[]>();
   private assignments = new Map<FakeController, Map<string, string>>();
@@ -208,6 +218,17 @@ export class FakeRemiFleet {
       device.config.Remi = { relay: { Type: 'Relay', Tags: ['fixture-access-tag'] } };
       this.sources.set(device, []);
       this.assignments.set(device, new Map());
+    }
+    this.sync();
+  }
+  /** Adds controllers to a running fleet. */
+  adopt(devices: FakeController[]) {
+    for (const device of devices) {
+      device.remiFleet = this;
+      device.config.Remi = { relay: { Type: 'Relay', Tags: ['fixture-access-tag'] } };
+      this.sources.set(device, []);
+      this.assignments.set(device, new Map());
+      (this.devices as FakeController[]).push(device);
     }
     this.sync();
   }
@@ -238,6 +259,13 @@ export class FakeRemiFleet {
         });
         importer.Connections[route.peer] = { name: source.config.Product.Serial.toLowerCase(), connected: '1', cameras };
       }
+      // Like a real controller, each one lists every other it has seen, whether or not it takes cameras from it.
+      for (const key of Object.keys(receiver.config.Remi)) if (key.startsWith('seen-')) delete receiver.config.Remi[key];
+      for (const other of this.devices) if (other !== receiver && this.sees(receiver, other)) {
+        const serial = String(other.config.Product.Serial).toLowerCase();
+        receiver.config.Remi['seen-' + serial] = { Type: 'LAN_auto', IP: other.config.IP.protected.IP, Connections: { ['seen-' + serial]: { name: serial, connected: '1', cameras: [] } } };
+      }
+      for (const serial of this.remembered) receiver.config.Remi['seen-' + serial] = { Type: 'LAN_auto', IP: '', Connections: { ['seen-' + serial]: { name: serial, connected: '0', cameras: [] } } };
     }
   }
   publish() { this.sync(); for (const device of this.devices) device.broadcast(); }

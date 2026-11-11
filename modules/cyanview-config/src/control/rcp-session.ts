@@ -103,6 +103,7 @@ export class RcpSession {
   #socket: Socket | undefined;
   #buffer: Buffer = Buffer.alloc(0);
   #connected = false;
+  #fallback = false;
   #subscribed = false;
   #stopped = false;
   #awaitingPing = false;
@@ -156,13 +157,17 @@ export class RcpSession {
     return [...this.#feedback.values()];
   }
 
-  captureCamera(cameraNumber: number): CyanViewCameraTarget {
+  captureCamera(cameraNumber: number, entity = ""): CyanViewCameraTarget {
     const root = this.requireRoot();
     const matches = this.cameraObservations().filter(
       (camera) => camera.number === cameraNumber && camera.address.startsWith(root + '/'),
     );
-    const observation = matches[0];
-    if (matches.length !== 1 || !observation)
+    // The same number twice means a deleted camera's entry is still around. The saved identity
+    // settles it if it is one of them, and otherwise whichever one is online.
+    const exact = matches.filter((camera) => camera.address === root + "/" + entity);
+    const online = matches.filter((camera) => camera.online === true);
+    const observation = matches.length === 1 ? matches[0] : exact.length === 1 ? exact[0] : online.length === 1 ? online[0] : undefined;
+    if (!observation)
       throw unavailable(
         matches.length
           ? "Camera number is ambiguous on this RCP"
@@ -275,7 +280,14 @@ export class RcpSession {
   private cameraRoot(): string | null {
     const roots = [...new Set([...this.#cameras.keys()].map(key => key.split('/')[0]!))];
     const matching = roots.find(root => root.toLowerCase() === this.definition.serial?.toLowerCase());
-    return matching ?? (roots.length === 1 ? roots[0]! : null);
+    return matching ?? (roots.length === 1 && !this.otherController(roots[0]!) ? roots[0]! : null);
+  }
+
+  // A controller's topics start with its own serial. A lone root that is some other serial means
+  // this address reached a different controller, which two devices sharing an address can do.
+  private otherController(root: string): boolean {
+    const serial = this.definition.serial?.toLowerCase();
+    return !!serial && /^cy-[a-z]+-\d+-\d+$/iu.test(root) && root.toLowerCase() !== serial;
   }
 
   private requireRoot(): string {
@@ -378,6 +390,7 @@ export class RcpSession {
   refresh(): void {
     this.disconnect(unavailable("Refreshing CyanView RCP connection"));
     clearTimeout(this.#reconnect);
+    this.#fallback = false;
     this.#phase = "checking";
     this.#lastError = null;
     this.#reachable = null;
@@ -393,7 +406,7 @@ export class RcpSession {
 
   private connect(): void {
     if (this.#stopped) return;
-    const host = this.definition.host.replace(/^\[|\]$/gu, "");
+    const host = this.host.replace(/^\[|\]$/gu, "");
     const socket = this.connectSocket(host, this.definition.port);
     this.#socket = socket;
     socket.setNoDelay(true);
@@ -441,7 +454,16 @@ export class RcpSession {
     });
   }
 
+  /** The address the open connection, or the next attempt, uses. */
+  get host(): string {
+    return this.#fallback && this.definition.fallbackHost ? this.definition.fallbackHost : this.definition.host;
+  }
+
   private disconnect(error: CyanViewRcpConnectionError): void {
+    // The base address comes first. An attempt that never connected hands the next one to the other
+    // address, and a connection that was up and dropped starts again at the base.
+    const other = this.definition.fallbackHost;
+    this.#fallback = !this.#connected && !this.#fallback && Boolean(other) && other !== this.definition.host;
     const socket = this.#socket;
     this.#socket = undefined;
     socket?.destroy();
@@ -702,8 +724,11 @@ export class RcpSession {
     if (this.#discovery !== undefined) return;
     this.#discovery = setTimeout(() => {
       this.#discovery = undefined;
+      const roots = [...new Set([...this.#cameras.keys()].map(key => key.split('/')[0]!))];
       this.#lastError =
-        this.cameraRoot() === null ? 'No unique Cyanview camera root was found on this broker' : null;
+        this.cameraRoot() !== null ? null
+          : roots.length === 1 && this.otherController(roots[0]!) ? 'This address answered as another controller (' + roots[0]!.toUpperCase() + '). Press Refresh all to reconnect.'
+          : 'No unique Cyanview camera root was found on this broker';
       this.#phase = this.#lastError === null ? "ready" : "unavailable";
       this.changed();
     }, 100);

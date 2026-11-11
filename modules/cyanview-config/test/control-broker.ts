@@ -41,6 +41,7 @@ export async function broker(port = 0, options: { onlyHubble?: boolean } = {}) {
     variableNd: false,
     capabilities: true,
     silent: false,
+    root: "unit",
   };
   let connections = 0;
   let inFlight = 0;
@@ -95,7 +96,7 @@ export async function broker(port = 0, options: { onlyHubble?: boolean } = {}) {
           );
           if (controls.panel) socket.write(
             publish(
-              "unit/RCP/rcp_helper/status/volatile/control",
+              `${controls.root}/RCP/rcp_helper/status/volatile/control`,
               "online",
               true,
             ),
@@ -105,18 +106,18 @@ export async function broker(port = 0, options: { onlyHubble?: boolean } = {}) {
             ["b", "2"],
           ] as const) {
             socket.write(
-              publish(`unit/${id}/camhead/status/persist/number`, number, true),
+              publish(`${controls.root}/${id}/camhead/status/persist/number`, number, true),
             );
             socket.write(
               publish(
-                `unit/${id}/camhead/status/persist/name`,
+                `${controls.root}/${id}/camhead/status/persist/name`,
                 `Camera ${id}`,
                 true,
               ),
             );
             socket.write(
               publish(
-                `unit/${id}/camhead/status/volatile/control`,
+                `${controls.root}/${id}/camhead/status/volatile/control`,
                 "online",
                 true,
               ),
@@ -124,7 +125,7 @@ export async function broker(port = 0, options: { onlyHubble?: boolean } = {}) {
             if (controls.capabilities)
               socket.write(
                 publish(
-                  `unit/${id}/camhead/status/volatile/capabilities`,
+                  `${controls.root}/${id}/camhead/status/volatile/capabilities`,
                   "00 ".repeat(13) + (id === "a" ? "80" : "00"),
                   true,
                 ),
@@ -132,13 +133,13 @@ export async function broker(port = 0, options: { onlyHubble?: boolean } = {}) {
             if (controls.variableNd)
               socket.write(
                 publish(
-                  `unit/${id}/camhead/status/persist/nd_filter_clear`,
+                  `${controls.root}/${id}/camhead/status/persist/nd_filter_clear`,
                   "0",
                   true,
                 ),
               );
             if (controls.initialRecording !== null) {
-              const recordingTopic = `unit/${id}/camhead/status/volatile/recording`;
+              const recordingTopic = `${controls.root}/${id}/camhead/status/volatile/recording`;
               recordings.set(recordingTopic, controls.initialRecording);
               socket.write(
                 publish(recordingTopic, controls.initialRecording, true),

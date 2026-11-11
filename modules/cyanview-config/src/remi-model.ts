@@ -89,6 +89,8 @@ export function describeRemiOrigins(rows: RecordValue[], available: RecordValue[
     const verified = receipt && receipt.source === peer?.id && receipt.entry.peer === info.peer &&
       receipt.entry.selector === info.selector && receipt.entry.connection === info.connection;
     const sourceKey = verified ? receipt.sourceKey : info.sourceKey;
+    // The All Cameras view folds each copy into the camera it came from, so it needs the source's key.
+    if (verified) info.sourceKey = receipt.sourceKey;
     if (peer && sourceKey) {
       const source = byCamera.get(key(peer.id, sourceKey));
       const origin = source && originOf(source, visited);
@@ -96,6 +98,7 @@ export function describeRemiOrigins(rows: RecordValue[], available: RecordValue[
     } else if (peer && info.label) {
       const candidates = available.filter(source => source.device === peer.id && source.elementKey &&
         remiLabel({ key: source.elementKey, number: String(source.number), name: String(source.name) }) === info.label);
+      if (candidates.length === 1) info.sourceKey = candidates[0]!.elementKey;
       const origin = candidates.length === 1 && originOf(candidates[0]!, visited);
       if (origin) return origin;
     }

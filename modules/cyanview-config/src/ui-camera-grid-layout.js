@@ -1,4 +1,19 @@
   const cameraLayouts = new Map();
+  // The All Cameras tab is one more sheet with its own layout, sort and tabs, but no controller of its own.
+  const allCamerasSheet = '__all-cameras__';
+  const cameraSetupSheet = '__camera-setup__';
+  function virtualSheet(name) { return name === 'assignment' ? allCamerasSheet : name === 'setup' ? cameraSetupSheet : null; }
+  const canBeMaster = d => d?.kind === 'RCP' || d?.kind === 'Gateway';
+  const remiControllers = () => orderedDevices().filter(canBeMaster);
+  const routeReceivers = remiControllers;
+  const isAssignmentField = field => field === 'source' || field === 'remiMaster' || String(field).startsWith('remi:');
+  const assignmentLabel = field => field === 'source' ? 'Source device' : field === 'remiMaster' ? 'Master RCP' : 'REMI to ' + (device(field.slice(5))?.name ?? field.slice(5));
+  // The matrix shows where each camera goes, Camera Configuration its settings and Source, and a
+  // controller's own sheet its settings and master.
+  const sheetSections = id => cameraSheetSections().filter(section => id === allCamerasSheet ? ['source', 'remi', 'route'].includes(section.id) : id === cameraSetupSheet ? !['remi', 'route'].includes(section.id) : !['source', 'route'].includes(section.id));
+  const cameraFieldName = field => isAssignmentField(field) ? assignmentLabel(field) : cameraSortLabels[field] ?? 'Use ' + axisName(field.replace(/Summary$/, ''));
+  const sheetOwner = id => id === allCamerasSheet || id === cameraSetupSheet || !!device(id);
+  const sheetOwners = () => [...devices, { id: allCamerasSheet }, { id: cameraSetupSheet }];
   const cameraAxes = ['iris', 'zoom', 'focus'];
   function cameraLayout(id) {
     if (!cameraLayouts.has(id)) cameraLayouts.set(id, {
@@ -8,6 +23,9 @@
   }
   function cameraSheetSections() {
     return [
+      { id: 'source', label: 'Source', fields: [{ id: 'source', label: 'Source device' }] },
+      { id: 'route', label: 'REMI to', fields: routeReceivers().map(d => ({ id: 'remi:' + d.id, label: d.name })) },
+      { id: 'remi', label: 'REMI', fields: [{ id: 'remiMaster', label: 'Master RCP' }] },
       { id: 'camera', label: 'Camera', fields: [
         { id: 'number', label: 'Camera number' }, { id: 'name', label: 'Camera name' },
         { id: 'model', label: 'Camera model' }, { id: 'ip', label: 'Camera IP / interface' },
@@ -43,21 +61,21 @@
   }
   function cameraColumnWidth(id, column) { return cameraLayouts.get(id)?.columns[column.id] ?? column.width; }
   function pruneCameraLayout(id, layout) {
-    const ids = new Set(cameras.filter(camera => camera.device === id).map(camera => camera.id));
+    const ids = new Set(sheetCameras(id).map(camera => camera.id));
     const kept = sizes => Object.fromEntries(Object.entries(sizes).filter(([cameraId]) => ids.has(cameraId)));
     return { ...layout, rows: kept(layout.rows), ...(layout.cameraWidths && { cameraWidths: kept(layout.cameraWidths) }) };
   }
   function saveCameraLayouts() {
-    return Object.fromEntries([...cameraLayouts].filter(([id]) => device(id)).map(([id, layout]) => [id, pruneCameraLayout(id, layout)]));
+    return Object.fromEntries([...cameraLayouts].filter(([id]) => sheetOwner(id)).map(([id, layout]) => [id, pruneCameraLayout(id, layout)]));
   }
   function restoreCameraLayouts(data) {
     cameraLayouts.clear();
-    for (const d of devices) cameraLayouts.set(d.id, cleanCameraLayout(d.id, data.cameraLayouts?.[d.id]));
+    for (const d of sheetOwners()) cameraLayouts.set(d.id, cleanCameraLayout(d.id, data.cameraLayouts?.[d.id]));
   }
   function cleanCameraLayout(id, saved = {}) {
     const layout = { version: 2, columns: {}, rows: {}, groups: {}, hiddenGroups: [], textSize: 13 };
     const columnIds = cameraSheetSections().flatMap(section => section.fields.map(field => field.id));
-    const cameraIds = new Set(cameras.filter(camera => camera.device === id).map(camera => camera.id));
+    const cameraIds = new Set(sheetCameras(id).map(camera => camera.id));
     const within = (value, least, most) => Number.isInteger(value) && value >= least && value <= most;
     for (const [column, size] of Object.entries(saved.columns ?? {})) if (columnIds.includes(column) && within(size, 36, 640)) layout.columns[column] = size;
     for (const [rowId, size] of Object.entries(saved.rows ?? {})) if (cameraIds.has(rowId) && within(size, 30, 240)) layout.rows[rowId] = size;
@@ -78,20 +96,21 @@
     const hasGroups = columns.some(column => column.group), top = [], fields = [];
     for (const [index, column] of columns.entries()) {
       const id = column.id;
-      const attributes = column.placeholder ? ' aria-hidden="true"' : ' data-field-header="' + id + '"' + cameraSortAria(column, deviceId);
-      const heading = column.placeholder ? '' : cameraSortHeading(column, deviceId);
+      const quiet = column.placeholder || column.tool;
+      const attributes = quiet ? ' aria-hidden="true"' : ' data-field-header="' + id + '"' + cameraSortAria(column, deviceId);
+      const heading = quiet ? '' : cameraSortHeading(column, deviceId);
       if (column.group) {
         if (columns[index - 1]?.group !== column.group) top.push('<th class="hc-camera-group-header" scope="colgroup" colspan="' + columns.filter(field => field.group === column.group).length + '"><div data-axis-header="' + column.group + '"></div></th>');
         fields.push('<th scope="col"' + attributes + '>' + heading + '</th>');
       } else {
-        const frozen = column.frozen === undefined ? '' : ' class="hc-camera-frozen" style="left:' + column.frozen + 'px"';
+        const frozen = column.frozen === undefined ? '' : ' class="hc-camera-frozen' + (column.tool ? ' hc-row-remove' : '') + '" style="left:' + column.frozen + 'px"';
         top.push('<th scope="col" rowspan="' + (hasGroups ? 2 : 1) + '"' + frozen + attributes + '>' + heading + '</th>');
       }
     }
-    return '<colgroup>' + columns.map(column => '<col' + (column.placeholder ? '' : ' data-hubble-column="' + column.id + '" data-label="' + esc(column.label) + '"') + ' style="width:' + column.width + 'px">').join('') + '</colgroup><thead>' + cameraColumnBands(columns) + '<tr>' + top.join('') + '</tr>' + (fields.length ? '<tr>' + fields.join('') + '</tr>' : '') + '</thead>';
+    return '<colgroup>' + columns.map(column => '<col' + (column.placeholder || column.tool ? '' : ' data-hubble-column="' + column.id + '" data-label="' + esc(column.label) + '"') + ' style="width:' + column.width + 'px">').join('') + '</colgroup><thead>' + cameraColumnBands(columns, deviceId) + '<tr>' + top.join('') + '</tr>' + (fields.length ? '<tr>' + fields.join('') + '</tr>' : '') + '</thead>';
   }
   function cameraColumnItems(id) {
-    return cameraSheetSections().map(section => ({
+    return sheetSections(id).map(section => ({
       id: 'section:' + section.id, label: section.label, visible: !cameraLayout(id).hiddenGroups.includes(section.id),
       fields: section.fields.map(field => ({ id: field.id, label: field.label, visible: cameraFieldVisible(id, field.id, true) && (!section.axis || axisGroups(id)[section.axis] || cameraAxisGroup(id, section.axis).collapsedColumnIds.includes(field.id)) })),
     }));
@@ -145,39 +164,38 @@
     }
     void mountSpreadsheetResize({ root: table, viewport, getScale: () => sheet.scale ?? 1,
       getItems: () => cameraSheetView(id) === 'columns' ? flippedResizeItems(table) : [
-        ...[...table.querySelectorAll('th[data-field-header]:not([data-field-header="row"])')].map(header => ({ id: header.dataset.fieldHeader, header, axis: 'column', label: cameraSortLabels[header.dataset.fieldHeader] ?? 'Use ' + axisName(header.dataset.fieldHeader.replace(/Summary$/, '')), size: header.offsetWidth, min: header.dataset.fieldHeader.endsWith('Summary') ? 72 : 36, max: 640 })),
+        ...[...table.querySelectorAll('th[data-field-header]:not([data-field-header="row"])')].map(header => ({ id: header.dataset.fieldHeader, header, axis: 'column', label: cameraFieldName(header.dataset.fieldHeader), size: header.offsetWidth, min: header.dataset.fieldHeader.endsWith('Summary') ? 72 : 36, max: 640 })),
         ...[...table.tBodies[0].rows].map(row => ({ id: row.dataset.id, header: row.cells[0], axis: 'row', label: 'camera ' + (cameras.find(item => item.id === row.dataset.id)?.number ?? row.sectionRowIndex + 1) + ' row', size: row.offsetHeight, min: 30, max: 240 })),
       ], onResize({ id: item, axis }, size) { changeCameraPresentation(id, () => { if (cameraSheetView(id) === 'columns') resizeFlippedSheet(id, item, axis, size); else cameraLayout(id)[axis === 'row' ? 'rows' : 'columns'][item] = size; }); },
     }).then(controls => { if (disposed) controls.dispose(); else { resize = controls; resize.refresh(); } }).catch(error => { if (!disposed) toast(error.message); });
     refresh();
     return { refresh, dispose() { disposed = true; for (const group of groups.values()) group.controls?.dispose(); resize?.dispose(); } };
   }
-  function cameraColumnBands(columns){
+  function cameraColumnBands(columns,deviceId){
     const cameraFields=new Set(['number','name','model','ip','port','login','password','controlEnabled','control','recording','cameraStatus']);
-    const bands=[
-      {label:'',kind:'gutter',count:columns.filter(column=>column.id==='row').length},
-      {label:'Camera',kind:'camera',count:columns.filter(column=>cameraFields.has(column.id)).length},
-      {label:'Lens',kind:'lens',count:columns.filter(column=>column.id==='lens'||column.id==='connection'||column.group).length},
-      {label:'Sync',kind:'sync',count:columns.filter(column=>column.id==='sync').length},
-    ];
-    return '<tr class="hc-camera-bands">'+bands.filter(band=>band.count).map(band=>
-      '<th colspan="'+band.count+'" scope="colgroup" class="hc-camera-band hc-camera-band-'+band.kind+'">'+band.label+'</th>'
+    const all=deviceId===allCamerasSheet;
+    const labels={gutter:'',route:'REMI',camera:'Camera',lens:'Lens',sync:all?'':'Sync',remi:'REMI to'};
+    const kindOf=column=>column.id==='row'?'gutter':column.tool?'camera':String(column.id).startsWith('remi:')?'remi':isAssignmentField(column.id)?(all?'route':'camera'):column.id==='sync'?'sync':all||cameraFields.has(column.id)?'camera':'lens';
+    const bands=[];
+    for(const column of columns){
+      const kind=kindOf(column),last=bands.at(-1);
+      if(last?.kind===kind)last.count++;else bands.push({kind,count:1,left:column.frozen});
+    }
+    return '<tr class="hc-camera-bands">'+bands.map(band=>
+      '<th colspan="'+band.count+'" scope="colgroup" class="hc-camera-band hc-camera-band-'+band.kind+(all&&band.left!==undefined?' hc-camera-frozen" style="left:'+band.left+'px':'')+'">'+labels[band.kind]+'</th>'
     ).join('')+'</tr>';
   }
 
+  // The sheet's view controls sit at the end of its toolbar. The selected cell's address and value
+  // are still kept up to date for screen readers, out of sight.
   function cameraSelectionStrip(deviceId){
     return '<div class="hc-camera-selection" data-camera-selection="'+esc(deviceId)+'">'+
-      '<span class="hc-camera-location" data-camera-location>Select a cell</span>'+
-      '<span class="hc-camera-value" data-camera-value></span>'+
-      '<span class="hc-camera-grid-shortcuts"><span data-camera-search-hint hidden>Type to search <span aria-hidden="true">·</span> </span>'+cameraClipboardHint()+' <span aria-hidden="true">·</span> Drag to fill</span>'+
-      '<span data-camera-zoom aria-label="Sheet zoom">100%</span>'+
-      '<div data-camera-text-size></div>'+cameraViewControl(deviceId)+'<div data-camera-columns title="Choose which settings this tab shows"></div>'+
+      '<span class="hc-camera-location hc-visually-hidden" data-camera-location>Select a cell</span>'+
+      '<span class="hc-camera-value hc-visually-hidden" data-camera-value></span>'+
+      '<span data-camera-search-hint hidden></span>'+
+      '<span data-camera-zoom hidden>100%</span>'+
+      cameraViewControl(deviceId)+'<div data-camera-columns title="Choose which settings this sheet shows"></div>'+
       '</div>';
-  }
-
-  function cameraClipboardHint(){
-    const modifier=/Mac/.test(navigator.platform)?'⌘':'Ctrl+';
-    return '<kbd>'+modifier+'C</kbd> Copy <kbd>'+modifier+'V</kbd> Paste';
   }
 
   function paintCameraSelectionSummary(strip,cell){
@@ -191,7 +209,7 @@
     const row=cameras.find(camera=>camera.id===cell.dataset.camera);
     const choice=input?.hasAttribute('data-camera-choice');
     const axisSetup=column.endsWith('Summary');
-    const label=choice?choiceLabel(input.dataset.field):axisSetup?'Use '+axisName(column.replace(/Summary$/,'')):cameraSortLabels[column]||column;
+    const label=isAssignmentField(column)?assignmentLabel(column):choice?choiceLabel(input.dataset.field):axisSetup?'Use '+axisName(column.replace(/Summary$/,'')):cameraSortLabels[column]||column;
     location.textContent='Camera '+(row?.number||'—')+' · '+label;
     if(column==='password')value.textContent=input?.value?'••••••••':'';
     else if(axisSetup&&cell.classList.contains('hc-axis-inactive'))value.textContent='Unavailable for this camera';

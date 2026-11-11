@@ -1,6 +1,6 @@
 {
   "name": "@hubble-module/cyanview-config",
-  "version": "0.1.36",
+  "version": "0.1.50",
   "private": true,
   "type": "module",
   "hubble": {
@@ -20,7 +20,7 @@
     "generate:ui": "node -e \"import('./tools/adapt-ui.mjs').then(m=>m.buildUiAdapter())\"",
     "build": "pnpm generate:ui && hubble-module build .",
     "test": "pnpm generate:ui && hubble-module test .",
-    "package": "pnpm generate:ui && hubble-module build . && hubble-module test . && hubble-module pack . ../../artifacts/lightlab-cyanview-config-0.1.36.hubble-module",
+    "package": "pnpm generate:ui && hubble-module build . && hubble-module test . && hubble-module pack . ../../artifacts/lightlab-cyanview-config-0.1.50.hubble-module",
     "test:ui": "playwright test --config playwright.config.ts",
     "preview": "tsx tools/preview.ts"
   },

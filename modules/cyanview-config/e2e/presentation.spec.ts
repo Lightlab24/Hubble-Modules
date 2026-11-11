@@ -7,7 +7,7 @@ async function open(page: Page, request: APIRequestContext) {
   await request.post('/__reset', { data: { sample: true } });
   await page.goto('/'); const f = frame(page);
   await expect(f.locator('#cyanview-design')).toBeVisible();
-  await f.locator('[data-tab="cameras"]').click();
+  await f.locator('[data-tab="assignment"]').click().then(() => f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   const group = f.locator('[data-controller="rcp1"]');
   await expect(group.getByRole('button', { name: 'Choose visible columns' })).toBeVisible();
   await expect.poll(async () => (await inspect(request)).planSavePending).toBe(0);
@@ -31,6 +31,7 @@ async function edit(group: Locator, row: string, value: string) {
   const cell = group.locator(`[data-hubble-row="${row}"][data-hubble-column="name"]`);
   await cell.dblclick(); await cell.locator('input').fill(value); await cell.locator('input').press('Enter');
 }
+const textSize = (group: Locator) => group.getByRole('grid').evaluate(table => (table as HTMLElement).style.getPropertyValue('--hc-camera-text-size'));
 const layout = async (request: APIRequestContext) => (await saved(request))?.uiState?.privateContent?.cameraLayouts?.rcp1;
 test('shared Columns paints one save and history step, cancels, searches and keeps group preferences independent', async ({ page, request }) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
@@ -68,16 +69,17 @@ test('shared Columns paints one save and history step, cancels, searches and kee
   expect((await inspect(request)).actions).toEqual([]); expect(errors).toEqual([]);
 });
 
-test('text sizing preserves an editor and a second edit during a held save, independently of sheet zoom', async ({ page, request }) => {
+test('⌘+ and ⌘− size the text with an editor open and a save held, independently of sheet zoom', async ({ page, request }) => {
   const { group, sheet } = await open(page, request);
   const input = group.locator('[data-hubble-row="cam2"][data-hubble-column="name"] input');
   const nameWidth = await group.locator('th[data-field-header="name"]').evaluate(element => (element as HTMLElement).offsetWidth);
+  const size = () => textSize(group);
   await request.post('/__simulate', { data: { holdPlanWrites: true } });
   await edit(group, 'cam1', 'First held edit');
   await expect.poll(async () => (await inspect(request)).planSavePending).toBe(1);
   await input.locator('..').dblclick(); await input.fill('Typing during a save');
-  await group.getByRole('button', { name: 'Increase text size' }).click();
-  await expect(group.getByLabel('Workbook text size value')).toHaveText('14'); await expect(input).toBeFocused();
+  await page.keyboard.press('Meta+Equal');
+  await expect.poll(size).toBe('14px'); await expect(input).toBeFocused();
   expect(await input.evaluate(element => getComputedStyle(element).fontSize)).toBe('14px');
   expect(await group.locator('th[data-field-header="name"]').evaluate(element => (element as HTMLElement).offsetWidth)).toBe(nameWidth);
   const cellBox = (await input.locator('..').boundingBox())!, inputBox = (await input.boundingBox())!;
@@ -85,27 +87,26 @@ test('text sizing preserves an editor and a second edit during a held save, inde
   await request.post('/__simulate', { data: { releasePlanWrites: true } });
   await expect(input).toBeFocused(); await expect(input).toHaveValue('Typing during a save'); await input.press('Enter');
   await expect.poll(async () => (await saved(request))?.cameras?.find((row: any) => row.id === 'cam2')?.name).toBe('Typing during a save');
+  // Text size isn't an edit, so Undo takes back the camera edit and leaves the size.
   await sheet.focus(); await sheet.press('Meta+z'); await expect(input).toHaveValue('Venice 2 — wide');
-  await sheet.press('Meta+z'); await expect(group.getByLabel('Workbook text size value')).toHaveText('13');
-  await sheet.press('Meta+Shift+z'); await expect(group.getByLabel('Workbook text size value')).toHaveText('14');
+  await expect.poll(size).toBe('14px');
   await sheet.press('Meta+Shift+z'); await expect(input).toHaveValue('Typing during a save');
   await group.getByRole('button', { name: 'Expand Iris', exact: true }).click();
-  for (let i = 0; i < 10; i++) await group.getByRole('button', { name: 'Increase text size' }).click();
-  await expect(group.getByLabel('Workbook text size value')).toHaveText('24');
-  await expect(group.getByRole('button', { name: 'Increase text size' })).toBeDisabled();
+  await sheet.focus();
+  for (let i = 0; i < 10; i++) await page.keyboard.press('Meta+Equal');
+  await expect.poll(size).toBe('24px');
   const heading = (await group.locator('th.hc-camera-group-header').first().boundingBox())!, child = (await group.locator('th[data-field-header="irisSummary"]').boundingBox())!;
   expect(Math.abs(heading.y + heading.height - child.y)).toBeLessThanOrEqual(1);
   const checkbox = (await group.locator('[data-hubble-row="cam1"] [role="checkbox"]').first().boundingBox())!;
   expect(checkbox.width).toBe(18); expect(checkbox.height).toBe(18);
-  for (let i = 0; i < 15; i++) await group.getByRole('button', { name: 'Decrease text size' }).click();
-  await expect(group.getByLabel('Workbook text size value')).toHaveText('9');
-  await expect(group.getByRole('button', { name: 'Decrease text size' })).toBeDisabled();
-  for (let i = 0; i < 5; i++) await group.getByRole('button', { name: 'Increase text size' }).click();
-  for (let i = 0; i < 5; i++) await group.getByRole('button', { name: 'Increase text size' }).click();
-  await expect.poll(async () => (await layout(request))?.textSize).toBe(19);
+  for (let i = 0; i < 15; i++) await page.keyboard.press('Meta+Minus');
+  await expect.poll(size).toBe('10px');
+  for (let i = 0; i < 7; i++) await page.keyboard.press('Meta+Equal');
+  await expect.poll(size).toBe('18px');
+  await expect.poll(async () => (await layout(request))?.textSize).toBe(18);
   await group.locator('.hc-scroll').evaluate(element => element.dispatchEvent(new WheelEvent('wheel', { ctrlKey: true, deltaY: -10, clientX: 600, clientY: 400, cancelable: true, bubbles: true })));
-  await expect(group.getByLabel('Sheet zoom')).toHaveText('120%'); await expect(group.getByLabel('Workbook text size value')).toHaveText('19');
-  await page.reload(); await expect(group.getByLabel('Workbook text size value')).toHaveText('19'); await expect(group.getByLabel('Sheet zoom')).toHaveText('100%');
+  await expect(group.locator('[data-camera-zoom]')).toHaveText('120%'); await expect.poll(size).toBe('18px');
+  await page.reload(); await expect.poll(size).toBe('18px'); await expect(group.locator('[data-camera-zoom]')).toHaveText('100%');
   expect((await inspect(request)).actions).toEqual([]);
 });
 
@@ -116,11 +117,12 @@ test('a rejected paint rolls back dependent text sizing while an unrelated later
   const popup = await menu(page, group, 'Iris'); await paint(page, popup);
   await expect.poll(async () => (await inspect(request)).planSavePending).toBe(1);
   await popup.getByRole('searchbox').press('Escape');
-  await group.getByRole('button', { name: 'Increase text size' }).click();
+  await group.getByRole('grid').focus(); await page.keyboard.press('Meta+Equal');
+  await expect.poll(() => textSize(group)).toBe('14px');
   await edit(group, 'cam1', 'Independent retained draft');
   await request.post('/__simulate', { data: { failPlanWrite: true, releasePlanWrites: true } });
   await expect(group.locator('[data-column="irisMotor"]')).toHaveCount(0);
-  await expect(group.getByLabel('Workbook text size value')).toHaveText('13');
+  await expect.poll(() => textSize(group)).toBe('13px');
   await expect.poll(async () => (await saved(request))?.cameras?.find((row: any) => row.id === 'cam1')?.name).toBe('Independent retained draft');
   expect((await layout(request)).groups.iris?.collapsed ?? []).toEqual([]);
   expect((await layout(request)).textSize).toBe(13);
@@ -144,7 +146,7 @@ test('opening a legacy plan preserves explicit collapsed fields, staged settings
   await expect(group.locator('[data-column="irisTorque"]').first()).toBeVisible();
   await expect(group.locator('[data-column="irisSummary"]')).toHaveCount(0);
   await expect(group.locator('[data-column="password"]')).toHaveCount(0);
-  await expect(group.getByLabel('Workbook text size value')).toHaveText('13');
+  await expect.poll(() => textSize(group)).toBe('13px');
   expect(await group.locator('th[data-field-header="name"]').evaluate(element => (element as HTMLElement).offsetWidth)).toBe(231);
   expect((await inspect(request)).planSaves).toBe(count);
   expect(await saved(request)).toEqual(plan);

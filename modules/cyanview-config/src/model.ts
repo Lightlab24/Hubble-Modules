@@ -47,7 +47,13 @@ const lensAxes = ['iris', 'zoom', 'focus'] as const;
 type LensAxis = typeof lensAxes[number];
 const tiltaCodes = { iris: 'I', zoom: 'Z', focus: 'F' };
 const positiveMotorId = (value: unknown) => /^\d+$/.test(String(value)) && Number.isSafeInteger(Number(value)) && Number(value) > 0;
-const validIrisRange = (values: RecordValue) => Number(values.irisMin) > 0 && Number(values.irisMax) > Number(values.irisMin) && Number.isFinite(Number(values.irisMax));
+// Open is below Closed. A Tilta motor has no direction setting, so its iris is reversed by entering
+// them the other way round, and for it either order is a range.
+const validIrisRange = (values: RecordValue, eitherWay = false) => {
+  const open = Number(values.irisMin), closed = Number(values.irisMax);
+  if (!(open > 0) || !Number.isFinite(open) || !Number.isFinite(closed)) return false;
+  return eitherWay ? closed > 0 && closed !== open : closed > open;
+};
 const validMotorSettings = (axis: LensAxis, values: RecordValue) =>
   ['1', '2', '3', '4'].includes(String(values[axis + 'Torque'])) && ['left', 'right'].includes(values[axis + 'Direction']);
 export const supportsLensParameters = (lens: string) => lens === 'Tilta - Nucleus-M' || lens === 'ARRI - cforce';
@@ -70,7 +76,7 @@ function parseLensParameters(lens: string, parameters: string) {
       if (!validMotorSettings(axis, values)) return null;
       if (iris) [values.irisMin, values.irisMax] = parts;
     }
-    if (iris && !validIrisRange(values)) return null;
+    if (iris && !validIrisRange(values, tilta)) return null;
     blocks.set(axis, { text, values });
   }
   return blocks;
@@ -103,7 +109,7 @@ export function lensParameters(camera: RecordValue, fields: readonly string[], c
     }
     const observed = blocks.get(axis)?.values;
     const values = Object.fromEntries(settings.map(field => [field, !observed || fields.includes(field) ? camera[field] : observed[field]]));
-    if (axis === 'iris' && !validIrisRange(values)) throw new Error('Enter valid iris limits');
+    if (axis === 'iris' && !validIrisRange(values, tilta)) throw new Error('Enter valid iris limits');
     const range = axis === 'iris' ? `${values.irisMin}:${values.irisMax}` : '';
     let text;
     if (tilta) {

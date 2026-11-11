@@ -145,11 +145,28 @@ export class RemiOperations {
     } finally { from.close(); }
   }
 
+  // An unfinished refresh is about one camera and its copies, so only that camera waits for it.
+  private refreshHolds(job: RemiRefresh, controller: string, key: string) {
+    return (job.source === controller && job.camera.key === key) ||
+      !!job.steps?.some(step => step.receiver === controller && (step.entry.localKey === key || step.next?.localKey === key));
+  }
+
   send(input: RecordValue, signal: AbortSignal) {
     return this.enqueue(async () => {
       const { plan } = await this.repository.read(signal);
-      const receiver = this.device(plan, input.receiver);
       const store = await this.repository.readRemi(signal);
+      if (input.operation === 'jobs') {
+        return { jobs: store.data.refreshes.map(job => ({ source: job.source, key: job.camera.key, number: job.camera.number, name: job.camera.name,
+          receivers: [...new Set((job.steps ?? []).map(step => step.receiver))] })) };
+      }
+      // A refresh that can't finish, because a controller is gone or its copies were rebuilt by hand, is let go here.
+      if (input.operation === 'dismiss') {
+        const before = store.data.refreshes.length;
+        store.data.refreshes = store.data.refreshes.filter(job => !(job.source === input.source && job.camera.key === input.key));
+        if (store.data.refreshes.length !== before) await this.repository.writeRemi(store, signal);
+        return { dismissed: before - store.data.refreshes.length };
+      }
+      const receiver = this.device(plan, input.receiver);
       if (input.operation === 'retry') {
         const jobs = store.data.refreshes.filter(job => job.source === receiver.id ||
           job.steps?.some(step => step.receiver === receiver.id));
@@ -164,10 +181,9 @@ export class RemiOperations {
       const items = input.items.map(object);
       if (items.some((item: RecordValue) => typeof item.id !== 'string' || !item.id || !['camera', 'tag', 'remove'].includes(item.kind)) ||
         new Set(items.map((item: RecordValue) => item.id)).size !== items.length) throw new Error('Invalid REMI changes');
-      if (items.some((item: RecordValue) => item.kind !== 'tag') && store.data.refreshes.some(job =>
-        job.source === receiver.id || job.steps?.some(step => step.receiver === receiver.id) ||
-        items.some((item: RecordValue) => item.source === job.source || job.steps?.some(step => step.receiver === item.source)))) {
-        throw new Error('Finish the pending REMI refresh before changing these camera assignments');
+      if (items.some((item: RecordValue) => item.kind !== 'tag' && store.data.refreshes.some(job =>
+        this.refreshHolds(job, item.kind === 'remove' ? receiver.id : String(item.source), String(item.key))))) {
+        throw new Error('Finish or dismiss the pending REMI refresh for this camera before changing where it goes');
       }
       const target = await this.connect(receiver, signal);
       const sources = new Map<string, CyanviewClient>();
@@ -175,11 +191,6 @@ export class RemiOperations {
         const results = [];
         const additions = items.filter((item: RecordValue) => item.kind === 'camera' && item.enable === true);
         if (additions.length) {
-          const current = cameraKeys(target.config).length;
-          const limit = String(target.config.Product?.MaxCam ?? '');
-          const capacity = /^\d+$/.test(limit) ? Number(limit) : Infinity;
-          // Existing assignments and copied camera rows count once.
-          const managed = plan.cameras.filter(row => row.device !== receiver.id).length;
           const selectors = remiEntries(target.config).some(entry => entry.enabled) ? await this.selectors(target, signal) : new Map();
           let newCount = 0;
           for (const item of additions) {
@@ -190,9 +201,7 @@ export class RemiOperations {
               if (!this.assigned(target, receiver, source, from.config, camera, store, selectors)) newCount++;
             } catch { /* Invalid rows report their own errors below. */ }
           }
-          if (newCount && (current + newCount > capacity || managed + current + newCount > 512)) {
-            throw new Error('This import would exceed camera capacity');
-          }
+          if (newCount) this.assertCapacity(plan, receiver, target, newCount);
         }
         for (const item of items) {
           signal.throwIfAborted();
@@ -225,6 +234,155 @@ export class RemiOperations {
         for (const client of sources.values()) client.close();
       }
     });
+  }
+
+  /**
+   * Makes one camera's copies match `tree`, which maps each controller holding a copy to the
+   * controller it gets it from. Only what differs is touched, downstream copies go first, and
+   * `expected` is what the person was looking at, so a stale view can't remove a copy it never showed.
+   */
+  route(input: RecordValue, signal: AbortSignal) {
+    return this.enqueue(async () => {
+      if (!Array.isArray(input.items) || !input.items.length || input.items.length > 512) throw new Error('Choose between 1 and 512 camera assignments');
+      const items = input.items.map(object);
+      const tree = (value: unknown) => !!value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length <= 128 &&
+        Object.entries(value).every(([receiver, parent]) => receiver && typeof parent === 'string' && parent);
+      if (items.some((item: RecordValue) => typeof item.id !== 'string' || !item.id || typeof item.camera !== 'string' || typeof item.key !== 'string' || !item.key || !tree(item.tree) || !tree(item.expected) ||
+        (item.copies !== undefined && !tree(item.copies))) ||
+        new Set(items.map((item: RecordValue) => item.id)).size !== items.length) throw new Error('Invalid camera assignments');
+      const { plan } = await this.repository.read(signal);
+      const store = await this.repository.readRemi(signal);
+      // Only the controllers a change involves are opened, each once for the whole request. One that
+      // nothing here touches is never asked, so it can be off without stopping the others.
+      const clients = new Map<string, CyanviewClient>(), opening = new Map<string, Promise<CyanviewClient>>();
+      const reach = async (id: string) => {
+        const device = this.device(plan, id);
+        let pending = opening.get(id);
+        if (!pending) {
+          pending = this.connect(device, signal).then(client => { clients.set(id, client); return client; });
+          pending.catch(() => undefined);
+          opening.set(id, pending);
+        }
+        let client: CyanviewClient;
+        try { client = await pending; }
+        catch { signal.throwIfAborted(); throw new Error('Cannot reach ' + device.name); }
+        if (!client.connected) throw new Error('Cannot reach ' + device.name);
+        return client;
+      };
+      try {
+        const touched = new Set<string>(), results = [];
+        for (const item of items) {
+          signal.throwIfAborted();
+          try {
+            await this.applyRoute(plan, item, reach, store, touched, signal);
+            results.push({ id: item.id, verified: true });
+          } catch (error) { results.push({ id: item.id, error: message(error) }); }
+        }
+        const live = [...clients.values()].filter(client => client.connected);
+        const observed = live.map(client => normalizeSnapshot(client.config, client.address));
+        if (observed.some(snapshot => snapshot.cameras.some(row => row.remi))) {
+          for (const [index, snapshot] of observed.entries()) await this.readCameraReferences(snapshot, live[index]!, signal, store.data.links);
+          await this.describeCameras(plan, observed, signal, store.data.links);
+        }
+        // A closed socket may have missed a readback. The page reads that controller again.
+        return { results, snapshots: observed.filter(snapshot => touched.has(snapshot.device.id)), refresh: [...touched].some(id => !clients.get(id)?.connected), controllers: opening.size };
+      } finally {
+        for (const client of clients.values()) client.close();
+      }
+    });
+  }
+
+  private assertRouteTree(plan: Plan, origin: RecordValue, wanted: Record<string, string>) {
+    if (Object.hasOwn(wanted, origin.id)) throw new Error('A camera can\'t be REMI\'d to the controller it is set up on');
+    for (const receiver of Object.keys(wanted)) {
+      this.device(plan, receiver);
+      let hops = 1;
+      for (let parent = wanted[receiver]!; parent !== origin.id; parent = wanted[parent]!, hops++) {
+        if (!Object.hasOwn(wanted, parent) || hops > 3) throw new Error('A REMI copy has to trace back to the camera within three hops');
+      }
+      if (hops > 3) throw new Error('A REMI copy has to trace back to the camera within three hops');
+    }
+  }
+
+  private async applyRoute(plan: Plan, item: RecordValue, reach: (id: string) => Promise<CyanviewClient>,
+    store: Receipt, touched: Set<string>, signal: AbortSignal) {
+    const origin = this.device(plan, item.camera), wanted: Record<string, string> = item.tree, expected: Record<string, string> = item.expected;
+    const stale = () => new Error('This camera\'s REMI copies have changed. Refresh before sending.');
+    this.assertRouteTree(plan, origin, wanted);
+    if (store.data.refreshes.some(job => this.refreshHolds(job, origin.id, String(item.key)))) {
+      throw new Error('Finish or dismiss the pending REMI refresh for this camera before changing where it goes');
+    }
+    const saved = plan.cameras.find(row => row.device === origin.id && row.elementKey === item.key);
+    if (saved?.remi || isRemiModel(saved?.model) || isRemiModel(saved?.modelLabel)) throw new Error('Change this assignment on the camera it came from');
+    // How far each copy the page showed is from the camera. One that doesn't trace back is a view to refresh.
+    const depth = (receiver: string) => {
+      let hops = 1;
+      for (let parent = expected[receiver]!; parent !== origin.id; parent = expected[parent]!, hops++) {
+        if (!Object.hasOwn(expected, parent) || hops > 8) throw stale();
+      }
+      return hops;
+    };
+    const shown = Object.keys(expected).sort((a, b) => depth(a) - depth(b));
+    // Where each copy sits on its controller: what the page showed, or what was recorded when it was made or last read.
+    const given: Record<string, string> = object(item.copies), local = new Map<string, string>([[origin.id, String(item.key)]]);
+    for (const receiver of shown) {
+      const parent = expected[receiver]!, parentKey = local.get(parent);
+      const key = given[receiver] ?? (parentKey ? store.data.links.find(link => link.receiver === receiver && link.source === parent && link.sourceKey === parentKey)?.entry.localKey ??
+        plan.cameras.find(row => row.device === receiver && row.elementKey && row.remi && samePeer(String(row.remi.peer ?? ''), this.device(plan, parent)) && row.remi.sourceKey === parentKey)?.elementKey : undefined);
+      if (key) local.set(receiver, String(key));
+    }
+    // A copy stays only if it comes from the same place and that place stays too. Parents come first in `shown`.
+    const keys = new Map<string, string>([[origin.id, String(item.key)]]), kept = new Set<string>([origin.id]);
+    for (const receiver of shown) if (wanted[receiver] === expected[receiver] && kept.has(expected[receiver]!)) {
+      kept.add(receiver);
+      if (local.has(receiver)) keys.set(receiver, local.get(receiver)!);
+    }
+    // Only a controller losing or gaining a copy is opened, and for a new copy the one it comes from.
+    for (const receiver of [...shown].reverse()) {
+      if (kept.has(receiver)) continue;
+      const key = local.get(receiver), parent = this.device(plan, expected[receiver]);
+      if (!key) throw stale();
+      const target = await reach(receiver);
+      touched.add(receiver);
+      const entry = remiEntries(target.config).find(candidate => candidate.localKey === key && isImported(candidate, target.config));
+      if (!entry) {
+        // Already taken off by hand. Anything else under that key is not this copy.
+        if (target.config.Camera?.[key]) throw stale();
+        if (store.data.links.some(link => link.receiver === receiver && link.entry.localKey === key)) {
+          store.data.links = store.data.links.filter(link => link.receiver !== receiver || link.entry.localKey !== key);
+          await this.repository.writeRemi(store, signal);
+        }
+        continue;
+      }
+      if (!samePeer(entry.peer, parent)) throw stale();
+      await this.remove(target, receiver, entry, store, signal);
+    }
+    const waiting = Object.keys(wanted).filter(id => !kept.has(id));
+    while (waiting.length) {
+      const next = waiting.findIndex(candidate => keys.has(wanted[candidate]!));
+      // The copy this one would come from was never found on its controller.
+      if (next < 0) throw stale();
+      const id = waiting.splice(next, 1)[0]!;
+      const receiver = this.device(plan, id), source = this.device(plan, wanted[id]), key = keys.get(source.id)!;
+      const target = await reach(id), from = await reach(source.id);
+      if (!from.config.Camera?.[key]) throw stale();
+      if (source.id === origin.id && isRemiModel(from.config.Camera[key].Model)) throw new Error('Change this assignment on the camera it came from');
+      this.assertCapacity(plan, receiver, target, 1);
+      touched.add(id);
+      await this.assign(target, receiver, source, from, { key, enable: true }, store, signal);
+      const link = store.data.links.find(row => row.source === source.id && row.sourceKey === key && row.receiver === id);
+      if (!link?.entry.localKey) throw new Error('The REMI copy on ' + receiver.name + ' could not be confirmed');
+      keys.set(id, link.entry.localKey);
+    }
+  }
+
+  private assertCapacity(plan: Plan, receiver: RecordValue, target: CyanviewClient, adding: number) {
+    const current = cameraKeys(target.config).length;
+    const limit = String(target.config.Product?.MaxCam ?? '');
+    const capacity = /^\d+$/.test(limit) ? Number(limit) : Infinity;
+    // Existing assignments and copied camera rows count once.
+    const managed = plan.cameras.filter(row => row.device !== receiver.id).length;
+    if (current + adding > capacity || managed + current + adding > 512) throw new Error('This import would exceed camera capacity');
   }
 
   private async sourceClient(sources: Map<string, CyanviewClient>, source: RecordValue, signal: AbortSignal) {
@@ -413,6 +571,8 @@ export class RemiOperations {
       const { plan } = await this.repository.read(signal);
       if (plan.devices.length < 2) return {};
       const store = await this.repository.readRemi(signal);
+      // With no copy on record there is nothing to rebuild and no controller to ask.
+      if (!this.holders(plan, store.data.links, source.id, before.key).size) return {};
       const job: RemiRefresh = { source: source.id, camera, before, steps: null };
       // Persist the verified source change before looking up downstream devices.
       store.data.refreshes.push(job);
@@ -426,11 +586,41 @@ export class RemiOperations {
     });
   }
 
+  /**
+   * The controllers recorded as holding a copy of a camera, however many hops away. A copy made by
+   * hand on a controller since it was last read isn't on record, and waits for a Refresh all.
+   */
+  private holders(plan: Plan, links: RemiLink[], source: string, key: string) {
+    const found = new Set<string>(), seen = new Set<string>(), queue: [string, string][] = [[source, key]];
+    while (queue.length) {
+      const [device, camera] = queue.shift()!, id = device + '\n' + camera;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      for (const link of links) if (link.source === device && link.sourceKey === camera) {
+        found.add(link.receiver);
+        if (link.entry.localKey) queue.push([link.receiver, link.entry.localKey]);
+      }
+      const from = plan.devices.find(row => row.id === device);
+      if (from) for (const row of plan.cameras) {
+        const info = row.remi;
+        if (!info || row.device === device || !samePeer(String(info.peer ?? ''), from)) continue;
+        // A copy whose source camera was never worked out could be this one, so its controller is read too.
+        if (info.sourceKey && info.sourceKey !== camera) continue;
+        found.add(String(row.device));
+        if (info.sourceKey && row.elementKey) queue.push([String(row.device), String(row.elementKey)]);
+      }
+    }
+    found.delete(source);
+    return found;
+  }
+
   private async captureChain(plan: Plan, job: RemiRefresh, store: Receipt, signal: AbortSignal) {
     const inventory = new Map<string, Observed>();
+    const involved = new Set([job.source, ...this.holders(plan, store.data.links, job.source, job.before.key)]);
+    const devices = plan.devices.filter(device => involved.has(device.id));
     // Bound simultaneous sockets when a workspace contains a large fleet.
-    for (let start = 0; start < plan.devices.length; start += 8) {
-      await Promise.all(plan.devices.slice(start, start + 8).map(async device => {
+    for (let start = 0; start < devices.length; start += 8) {
+      await Promise.all(devices.slice(start, start + 8).map(async device => {
         try { inventory.set(device.id, await this.observe(device, signal)); }
         catch { signal.throwIfAborted(); }
       }));
