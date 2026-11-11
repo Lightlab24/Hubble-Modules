@@ -12,7 +12,7 @@ export default defineModuleManifest({
   formatVersion: 1, apiVersion: 1, configVersion: 1,
   instanceScope: 'workspace',
   host: { minimumVersion: '2.0.18', requiredFeatures: [
-    'module-workspace-instances-v1', 'module-pages-v1', 'module-custom-pages-v1', 'module-documents-v1',
+    'module-workspace-instances-v1', 'module-pages-v1', 'module-page-icons-v1', 'module-custom-pages-v1', 'module-documents-v1',
     'host-service-registry-v1', 'module-custom-pages-full-page-v1', 'module-helpers-v1',
     MODULE_SPREADSHEET_CONTROLS_FEATURE, MODULE_SPREADSHEET_COLUMN_GROUPS_FEATURE, MODULE_SPREADSHEET_EXTENDED_EDITING_FEATURE,
     MODULE_SPREADSHEET_LAYOUT_FEATURE,
@@ -35,7 +35,7 @@ export default defineModuleManifest({
     methods: [{ id: 'batch', readOnly: true, timeoutMs: 10000 }],
     readinessTimeoutMs: 5000, maxConcurrent: 4, memoryMb: 64,
   }],
-  pages: [{ id: 'studio', label: 'Cyanview', layout: 'full-page', sections: [ModuleFrontendSectionSchema.parse({
+  pages: [{ id: 'studio', label: 'Cyanview', icon: 'ui/logo.svg', layout: 'full-page', sections: [ModuleFrontendSectionSchema.parse({
     type: 'custom', id: 'frontend', label: 'Cyanview configuration', entry: 'ui/index.html',
     commands: ['read-plan', 'read-part', 'save-plan', 'save-begin', 'save-part', 'save-commit', 'send', 'send-begin', 'send-part', 'send-commit', 'scan', 'stop-scan', 'probe', 'find-rig', 'import-device', 'import-part', 'refresh', 'choice-catalogs', 'options', 'remi-state', 'remi-send', 'remi-route', 'camera-control-state', 'camera-control-mutate'].map(id => ({ id, label: id })),
   })] }],
