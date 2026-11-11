@@ -249,6 +249,18 @@ or disabled observations. The module decides protocol truth and appearance; the
 host paints cells without replacing grid data and animates the fastest active
 button glow. A presentation receipt must not repaint newer edited values.
 
+Hubble draws a key with up to three coloured parts: the background, an outline and
+a bar along the bottom. `backgroundColor` stays the row's feedback colour; Hubble
+puts it on the part the operator chose with Light up in the Tally Color popup, which
+is the background unless they chose Outline or Bar. With `module-feedback-key-parts-v1`
+the appearance can also contain `outlineColor`, which always lights the outline, and
+`barColor`, which always lights the bar. A lit part shows even when the button has no
+colour of its own for it. Emit null for a part that should stop being lit. When
+several feedbacks light the same part, the usual feedback order decides, part by
+part. Companion's own buttons show one colour: the lit background, else the newest
+lit colour. Require the feature before emitting either field, because older hosts
+reject an appearance that contains them.
+
 Use `runtimeDirectory` for local runtime state that must survive module versions.
 Document any data excluded from workspace export. Tally's follow-state file is
 local runtime state; row colour/glow choices and column defaults are portable.
