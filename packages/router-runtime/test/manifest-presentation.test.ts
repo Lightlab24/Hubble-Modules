@@ -19,7 +19,13 @@ it.each([
       name: type,
       version: "1.1.3",
       entry: "module.mjs",
-      files: ["module.mjs", "ui/index.html", "ui/settings.html", "ui/app.js"],
+      files: [
+        "module.mjs",
+        "ui/index.html",
+        "ui/settings.html",
+        "ui/app.js",
+        "ui/logo.svg",
+      ],
     });
     const features =
       "minimumVersion" in manifest.host
@@ -77,5 +83,41 @@ it.each([
       connectionType: type,
       normalize: true,
     });
+  },
+);
+
+it.each([
+  ["aja-kumo", aja, undefined],
+  ["blackmagic-videohub", blackmagic, undefined],
+  ["evertz-quartz", evertz, undefined],
+  ["ross-ultrix-ogp", ross, "ui/logo.svg"],
+] as const)(
+  "%s declares only its own Router sidebar icon",
+  (type, source, icon) => {
+    const files = ["module.mjs", "ui/index.html", "ui/settings.html"];
+    const manifest = ModuleManifestSchema.parse({
+      ...source,
+      id: `hubble-${type}`,
+      name: type,
+      version: "1.1.3",
+      entry: "module.mjs",
+      files: icon ? [...files, icon] : files,
+    });
+    const features =
+      "minimumVersion" in manifest.host
+        ? (manifest.host.requiredFeatures ?? [])
+        : [];
+    const routing = manifest.pages?.find((page) => page.id === "routing");
+    expect(routing?.icon).toBe(icon);
+    expect(features.includes("module-page-icons-v1")).toBe(!!icon);
+    if (icon)
+      // Hubble 2.1.0 and older lack the feature, so they keep the previous release.
+      expect(
+        moduleCompatibility(manifest, {
+          version: "2.1.0",
+          apiVersions: [1],
+          features: features.filter((item) => item !== "module-page-icons-v1"),
+        }),
+      ).toContain("module-page-icons-v1");
   },
 );

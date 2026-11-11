@@ -116,4 +116,5 @@ export default withRouterInterface(
     ],
     feedback: [],
   }),
+  { icon: "ui/logo.svg" },
 );

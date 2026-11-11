@@ -1,6 +1,6 @@
 {
   "name": "@hubble-module/ross-ultrix-ogp",
-  "version": "1.2.17",
+  "version": "1.2.18",
   "private": true,
   "type": "module",
   "hubble": {
@@ -8,7 +8,8 @@
     "name": "Ross Ultrix OGP",
     "assets": [
       "ui/index.html",
-      "ui/settings.html"
+      "ui/settings.html",
+      "ui/logo.svg"
     ],
     "frontend": {
       "ui/app.js": "src/frontend.ts"
@@ -17,7 +18,7 @@
   "scripts": {
     "build": "hubble-module build .",
     "test": "hubble-module test .",
-    "package": "hubble-module build . && hubble-module test . && hubble-module pack . ../../artifacts/hubble-ross-ultrix-ogp-1.2.17.hubble-module"
+    "package": "hubble-module build . && hubble-module test . && hubble-module pack . ../../artifacts/hubble-ross-ultrix-ogp-1.2.18.hubble-module"
   },
   "dependencies": {
     "@hubble/module-sdk": "workspace:1.8.0",

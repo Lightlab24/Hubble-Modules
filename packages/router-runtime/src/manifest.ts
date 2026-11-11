@@ -140,11 +140,18 @@ export function routerSettings(type: RouterType): ModuleField[] {
   ];
 }
 
+export interface RouterInterfaceOptions {
+  /** The Router sidebar page's own icon, a package file under ui/. Needs Hubble 2.1.1. */
+  icon?: string;
+}
+
 /** The four packages share implementation source, not a private host dependency. */
 export function withRouterInterface(
   type: RouterType,
   base: ModuleManifestSource,
+  options: RouterInterfaceOptions = {},
 ): ModuleManifestSource {
+  const { icon } = options;
   return {
     ...base,
     lifecycle: { runWhenDisabled: true },
@@ -172,6 +179,7 @@ export function withRouterInterface(
           "module-matrix-collections-v1",
           "module-choice-bindings-v1",
           "module-pages-v1",
+          ...(icon ? ["module-page-icons-v1"] : []),
           "module-custom-pages-v1",
           "module-spreadsheet-controls-v1",
           "module-spreadsheet-extended-editing-v1",
@@ -218,6 +226,7 @@ export function withRouterInterface(
       {
         id: "routing",
         label: "Router",
+        ...(icon ? { icon } : {}),
         navigation: { replaces: "router" },
         sections: [
           {

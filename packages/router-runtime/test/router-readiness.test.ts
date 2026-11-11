@@ -65,7 +65,14 @@ function parsedManifest(type: Router[0], source: Router[1]) {
     name: type,
     version: "1.1.3",
     entry: "module.mjs",
-    files: ["module.mjs", "ui/index.html", "ui/settings.html", "ui/app.js"],
+    files: [
+      "module.mjs",
+      "ui/index.html",
+      "ui/settings.html",
+      "ui/app.js",
+      // Ross declares its Router page icon, so the package carries it.
+      ...(type === "ross-ultrix-ogp" ? ["ui/logo.svg"] : []),
+    ],
   });
 }
 
