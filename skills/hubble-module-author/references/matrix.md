@@ -257,9 +257,17 @@ the appearance can also contain `outlineColor`, which always lights the outline,
 `barColor`, which always lights the bar. A lit part shows even when the button has no
 colour of its own for it. Emit null for a part that should stop being lit. When
 several feedbacks light the same part, the usual feedback order decides, part by
-part. Companion's own buttons show one colour: the lit background, else the newest
-lit colour. Require the feature before emitting either field, because older hosts
-reject an appearance that contains them.
+part. Companion keys show the outline and bar through the image layer Hubble sends
+under Companion's text. Require the feature before emitting either field, because
+older hosts reject an appearance that contains them.
+
+With `module-feedback-key-effects-v1`, `outlineEffect` and `barEffect` make a lit
+outline or bar move: `{ kind: 'blink' | 'fade', cycleMs }`, where `cycleMs` is one
+full cycle from 200 to 10,000 ms. A blink is on for the first half of the cycle; a
+fade starts bright, dims and comes back. All keys follow one clock, so parts with the
+same timing move together, on Stream Deck and Companion keys alike. An effect applies
+only while its part is lit, and emitting null makes it steady again. Operators set
+the same effects for their own rows in the Tally Color popup.
 
 Use `runtimeDirectory` for local runtime state that must survive module versions.
 Document any data excluded from workspace export. Tally's follow-state file is
