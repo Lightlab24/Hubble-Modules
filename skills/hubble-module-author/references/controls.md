@@ -134,7 +134,12 @@ Every mount takes `root`, `label`, `getState`, an optional `className` and an op
   as a spreadsheet choice cell. Typing on the button opens it with that text. Keep the
   provider's identity stable during unrelated feedback.
 - `mountColorPicker` saves favourites through `favorites: { get, set }` in module-owned
-  preferences, or for the page's lifetime without it.
+  preferences, or for the page's lifetime without it. The picker shows them under
+  Saved, beside recent colours, a palette and custom values. With
+  `module-color-picker-v2` it also takes `allowNone` (shows None and reports `''`, which
+  the state may then hold), `namedColors: [{ label, color }]` (at most 24 named chips,
+  labels up to 32 characters) and `suggestions` (at most 32 colours under Suggested,
+  most useful first). Invalid lists reject the mount.
 - `showToast({ kind?, title, message? })` shows Hubble's fading toast inside the page;
   hover or focus pauses it, and the newest four stay. `confirm({ title, message?,
 confirmLabel?, cancelLabel?, danger? })` resolves `true` only from the confirm
