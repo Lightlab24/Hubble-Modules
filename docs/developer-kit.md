@@ -1,5 +1,14 @@
 # Hubble module developer kit
 
+Developer kit **1.8.1-dev.6** adds `module-page-icons-v1`: a sidebar page can name its
+own icon with `pages[].icon`, an SVG, PNG, JPEG or WebP file under `ui/` that is listed
+in `files` and is at most 256 KB. Hubble shows it in full colour in the sidebar and in
+Module Connections; the operator can still pick another icon and a colour on their own
+Mac. Hubble builds without the feature refuse a package that requires it, so check the
+actual host's `describe` response and keep the icon out of releases meant for older
+hosts. Prefer an SVG, or a PNG of at least 128 pixels, so it stays sharp when HubDash
+is zoomed.
+
 The next developer kit also adds `module-controls-v1`: Hubble's shared switch,
 segmented choice, stepper, timecode field, buttons, lamps, meters, XY pad, standalone
 choice and colour pickers, toasts and confirmations. Declare the field and status
