@@ -21,6 +21,11 @@ For a package-owned screen that fills the app area, opt in with `pages[].layout:
 exactly one custom section, Hubble 2.0.18+ and `module-custom-pages-full-page-v1`.
 The package owns its header, tabs, footer and scrolling; keep mixed/native pages in section mode.
 See the kit 1.8.0 `full-page` example. Do not compensate with a fixed iframe height or host-specific screen.
+To give a sidebar page its own icon, set `pages[].icon` to an SVG, PNG, JPEG or WebP file
+under `ui/` that is listed in `files` (at most 256 KB) and require `module-page-icons-v1`.
+Hubble fits it into the 16-pixel icon slot in full colour, so prefer an SVG or a PNG of at
+least 128 pixels so it stays sharp when HubDash is zoomed. The operator can still pick their
+own icon for the tab.
 For Button Matrix controls inside a custom layout, read
 [the spreadsheet controls API](references/spreadsheet-controls.md) and build
 the `custom-spreadsheet` example from the kit. For module-owned controls,

@@ -259,6 +259,17 @@ export const ModulePageSchema = z.strictObject({
   id: ModuleIdentifierSchema,
   label: LabelSchema,
   description: DescriptionSchema.optional(),
+  /**
+   * Sidebar icon: an SVG, PNG, JPEG or WebP file under ui/ listed in `files`, at most 256 KB.
+   * Hubble fits it into the icon slot and keeps its colours. Requires module-page-icons-v1.
+   */
+  icon: z
+    .string()
+    .max(240)
+    .regex(
+      /^ui\/(?:[A-Za-z0-9_][A-Za-z0-9_.-]*\/)*[A-Za-z0-9_][A-Za-z0-9_.-]*\.(?:svg|png|jpe?g|webp)$/u,
+    )
+    .optional(),
   sections: z
     .array(
       z.discriminatedUnion("type", [
@@ -986,6 +997,26 @@ export const ModuleManifestSchema = z
             path: ["pages", pageIndex, "navigation"],
             message: "Page composition requires module-page-navigation-v1",
           });
+        if (page.icon !== undefined) {
+          if (!features.includes("module-page-icons-v1"))
+            ctx.addIssue({
+              code: "custom",
+              path: ["pages", pageIndex, "icon"],
+              message: "A page icon requires module-page-icons-v1",
+            });
+          if (!manifest.files.includes(page.icon))
+            ctx.addIssue({
+              code: "custom",
+              path: ["pages", pageIndex, "icon"],
+              message: "A page icon must be one of the package files",
+            });
+          if (page.placement === "module-settings")
+            ctx.addIssue({
+              code: "custom",
+              path: ["pages", pageIndex, "icon"],
+              message: "Only sidebar pages show an icon",
+            });
+        }
         if (page.placement !== undefined) {
           if (!features.includes("module-settings-pages-v1"))
             ctx.addIssue({
