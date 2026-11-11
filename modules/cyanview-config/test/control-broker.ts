@@ -53,6 +53,9 @@ export async function broker(port = 0, options: { onlyHubble?: boolean } = {}) {
   };
   const server = createServer((socket) => {
     connections += 1;
+    // Nagle's algorithm can hold a small report back behind an unacknowledged packet. On Linux that
+    // outlasts the 20 ms a test waits after a report, so the report looks as if it never arrived.
+    socket.setNoDelay(true);
     sockets.add(socket);
     socket.on("error", () => undefined);
     socket.on("close", () => sockets.delete(socket));
