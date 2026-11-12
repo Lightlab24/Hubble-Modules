@@ -249,6 +249,15 @@ or disabled observations. The module decides protocol truth and appearance; the
 host paints cells without replacing grid data and animates the fastest active
 button glow. A presentation receipt must not repaint newer edited values.
 
+Operators can turn a column's live cell colours off, or back on, with **Show
+Feedback Colors** in the column's right-click menu. It changes only the Button
+Matrix: keys light the same either way, and labels and `inputSource` still show.
+With `module-matrix-feedback-colors-v1` a matrix can start its columns with them
+off by declaring `"showFeedbackColors": false`; leave it out to show them. A
+column the operator hasn't changed follows the declaration, so a later version
+that changes it reaches that column. The column's own choice is saved with it
+and travels with copies and workspace exports.
+
 Hubble draws a key with up to three coloured parts: the background, an outline and
 a bar along the bottom. `backgroundColor` stays the row's feedback colour; Hubble
 puts it on the part the operator chose with Light up in the Tally Color popup, which

@@ -400,6 +400,12 @@ const MatrixDefinitionSchema = z
     triggers: z.array(ModuleFeedbackTriggerSchema).max(16).optional(),
     /** The colour field whose cell edits the triggers' looks; the first colour field if absent. */
     triggerField: Id.optional(),
+    /**
+     * Whether the column's cells show live feedback colours in the Button Matrix; on when absent.
+     * Operators can turn them on or off for one column from its right-click menu, which keys
+     * never follow. Requires module-matrix-feedback-colors-v1.
+     */
+    showFeedbackColors: z.boolean().optional(),
     mapping: z
       .strictObject({
         label: Label,
