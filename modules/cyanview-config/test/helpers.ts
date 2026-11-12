@@ -25,8 +25,9 @@ export function fixture(settings: RecordValue = {}, options: ServiceOptions = {}
   const watchers = new Map<string, Set<() => void>>();
   const definitions = documentDefinitions();
   const scope = { kind: 'host' as const, workspaceId: randomUUID(), capabilityId: 'lightlab-cyanview-config' };
-  // Every managed RCP and RIO opens its connection as soon as the worker starts, so no test may default to a real one.
-  const module: HubbleModule = { createInstance: context => createInstance(context, { neighbors:async()=>[],control:noEquipment,...options }) };
+  // Every managed RCP and RIO opens its connections as soon as the worker starts, so no test may default to a real one.
+  // Held settings sockets are off unless a test asks for them, since many tests count sockets.
+  const module: HubbleModule = { createInstance: context => createInstance(context, { neighbors:async()=>[],control:noEquipment,liveConfig:false,...options }) };
   const harness = createModuleHarness(module, { sampleData: false, ...settings }, { scope,
     requestHost: async (method, raw, signal) => {
       if (method !== 'service') throw new Error('Unexpected host operation');

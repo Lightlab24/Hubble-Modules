@@ -1080,16 +1080,34 @@
     }
     if (autoReads.size) scheduleAutoRead(200);
   }
+  // Each managed controller also keeps a settings socket open and reports every change to its
+  // configuration, whoever made it, so any setting catches up the same way, not just the camera list.
+  let configChangesEpoch = null;
+  const seenConfigChanges = new Map();
+  function noticeConfigChanges(changes) {
+    if (!moduleBridge || moduleBridge.preview || !changes?.counts) return;
+    // A restarted worker counts from zero again.
+    if (changes.epoch !== configChangesEpoch) { configChangesEpoch = changes.epoch; seenConfigChanges.clear(); }
+    for (const [id, count] of Object.entries(changes.counts)) {
+      if (seenConfigChanges.get(id) !== count && device(id)) autoReads.add(id);
+      seenConfigChanges.set(id, count);
+    }
+    // The worker has already waited for a burst of changes to finish.
+    if (autoReads.size) scheduleAutoRead(30);
+  }
   function scheduleAutoRead(wait) { autoReadTimer ??= setTimeout(runAutoRead, wait); }
+  // A send reports its own results, and a read partway through one would show half a change.
+  const autoReadWaits = () => sendsRunning || cameras.some(camera => camera.jobs > 0 || camera.deleting) || [...remiPanels.values()].some(state => state.busy);
   async function runAutoRead() {
     autoReadTimer = null;
     if (!autoReads.size) return;
-    // A send reports its own results, and a read partway through one would show half a change.
-    if (sendsRunning || cameras.some(camera => camera.jobs > 0 || camera.deleting) || [...remiPanels.values()].some(state => state.busy)) { scheduleAutoRead(500); return; }
+    if (autoReadWaits()) { scheduleAutoRead(500); return; }
     const ids = [...autoReads];
     autoReads.clear();
     try {
-      const reply = await moduleBridge.refresh(ids);
+      const reply = await moduleBridge.refresh(ids, true);
+      // A send that began during the read may already have changed what it read. The send's own change reads again after it.
+      if (autoReadWaits()) { for (const id of ids) autoReads.add(id); scheduleAutoRead(500); return; }
       for (const snapshot of reply.snapshots || []) mergeSnapshot(snapshot);
       renderLans();
       renderCameras();

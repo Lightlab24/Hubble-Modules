@@ -42,6 +42,8 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
       ' in ' + Math.round(elapsed) + ' ms' + (parts.length ? ' (' + parts.join(', ') + ')' : '') +
       (failed.length ? ', ' + failed.length + ' not confirmed: ' + reason(failed[0]!.error) : '') + (copies ? ', copies not rebuilt: ' + reason(copies.remiError) : '') });
   };
+  // The page and the controller sockets follow the saved plan. Sample data opens nothing.
+  const followPlan = (plan: Plan) => { control!.setPlan(plan); if (!sample) service.watch(plan); };
   const reason = (error: unknown) => String(error instanceof Error ? error.message : error || 'no reason given').slice(0, 200);
   // A request that gives up has no result to time, and a timeout is the longest wait a page has. So it's logged here, as is one that was slow.
   const watched = async <T>(stage: string, what: string, signal: AbortSignal, work: () => Promise<T>, slowMs = Infinity): Promise<T> => {
@@ -59,18 +61,22 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
     if (sample) throw new Error('Sample data does not send commands to equipment');
     const began = performance.now(), result = await watched('send-timing', 'A send', signal, () => service.send(input, signal));
     if (Array.isArray(result.results)) timing('send-timing', result.results, result.controllers, performance.now() - began, result.openMs);
-    await control!.refreshPlan(signal);
+    followPlan((await repository.read(signal)).plan);
     return bounded(result);
   };
   const save = async (revision: unknown, value: unknown, signal: AbortSignal) => {
     if (revision !== null && typeof revision !== 'string') throw new Error('Invalid configuration revision');
     const saved = await repository.write(revision, validatePlan(value), signal);
     service.forgetManagedDevices(saved.removedDeviceIds);
-    control!.setPlan(saved.plan);
+    followPlan(saved.plan);
     publish(service.state()); return { revision: saved.revision };
   };
   return {
-    async start() { await control!.start(lifetime.signal); publish(); },
+    async start() {
+      await control!.start(lifetime.signal);
+      if (!sample) service.watch((await repository.read(lifetime.signal)).plan);
+      publish(service.state());
+    },
     async call(method, raw, execution) {
       execution.signal.throwIfAborted();
       if (stopped || method !== 'page.studio') throw new Error('Cyanview module is unavailable');
@@ -81,7 +87,7 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
       for (const [id, transfer] of imports) if (transfer.expires < Date.now()) imports.delete(id);
       for (const [id, transfer] of reads) if (transfer.expires < Date.now()) reads.delete(id);
       switch (request.commandId) {
-        case 'camera-control-state': await control!.refreshPlan(signal); return control!.state();
+        case 'camera-control-state': followPlan((await repository.read(signal)).plan); return control!.state();
         case 'camera-control-mutate': return control!.mutate(input, signal);
         case 'read-plan': {
           const saved = await repository.read(signal);
@@ -153,7 +159,7 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
         case 'stop-scan': service.stopScan(); return { stopped: true };
         case 'refresh': {
           const began = performance.now();
-          const value = await watched('read-timing', 'Reading the controllers', signal, () => service.refresh(signal, Array.isArray(input.devices) ? input.devices.map(String) : undefined));
+          const value = await watched('read-timing', 'Reading the controllers', signal, () => service.refresh(signal, Array.isArray(input.devices) ? input.devices.map(String) : undefined, input.live === true));
           // A controller that doesn't answer is waited on until its read times out, so a slow or failed read says which.
           const elapsed = Math.round(performance.now() - began), read = value.snapshots.length + value.failed.length;
           if (elapsed >= 1000 || value.failed.length) context.log({ level: 'info', stage: 'read-timing', message: 'Read ' + read + (read === 1 ? ' controller' : ' controllers') + ' in ' + elapsed + ' ms' +

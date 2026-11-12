@@ -3,14 +3,17 @@ import { ConfigurationOperations, type ClientFactory } from './operations.js';
 import { PlanRepository } from './repository.js';
 import { Discovery, type DiscoveryMethod, type DiscoveryOptions } from './discovery.js';
 import { normalizeSnapshot, optionEntries } from './normalize.js';
-import { object, validIp, type RecordValue } from './model.js';
+import { object, validIp, type Plan, type RecordValue } from './model.js';
 import { readNeighbors } from './neighbors.js';
 import { RemiOperations } from './remi.js';
 import type { ChoiceCatalogs } from './choice-catalogs.js';
 import { cameraChoiceKey, isCameraChoiceField, type CameraChoice } from './choice-context.js';
 import type { ControlOptions } from './control/service.js';
+import { LiveConfig, type LiveConfigOptions } from './live-config.js';
 
-export type ServiceOptions = { client?: ClientFactory; reachable?: (address: string, signal: AbortSignal) => Promise<boolean>; discovery?: DiscoveryOptions; neighbors?: (signal: AbortSignal) => Promise<string[]>; control?: ControlOptions };
+export type ServiceOptions = { client?: ClientFactory; reachable?: (address: string, signal: AbortSignal) => Promise<boolean>; discovery?: DiscoveryOptions; neighbors?: (signal: AbortSignal) => Promise<string[]>; control?: ControlOptions;
+  /** Each managed controller's held settings socket. False holds none, for tests that count sockets. */
+  liveConfig?: LiveConfigOptions | false };
 /** A Cyanview serial carries its own base address: CY-RCP-1-20 is 10.192.1.20. */
 export const baseFromSerial = (serial: string) => {
   const parts = /^cy-[a-z0-9]+-(\d{1,3})-(\d{1,3})$/i.exec(serial.trim());
@@ -31,11 +34,13 @@ export class CyanviewService {
   private neighbours = new Map<string, Set<string>>();
   private lookups = new Map<string, RecordValue>();
   private discovery: Discovery;
+  private live?: LiveConfig;
   private stopped = false;
   constructor(private repository: PlanRepository, private choiceCatalogs: ChoiceCatalogs, private publish: (values: RecordValue) => void, private lifetime: AbortSignal, private options: ServiceOptions = {}) {
     this.client = options.client ?? (address => new CyanviewClient(address));
     this.remi = new RemiOperations(repository, this.client);
     this.operations = new ConfigurationOperations(repository, this.client, this.remi);
+    if (options.liveConfig !== false) this.live = new LiveConfig(this.client, () => this.emit(), options.liveConfig);
     this.discovery = new Discovery(async (address, signal) => {
       const snapshot = await this.snapshot(address, signal, false);
       if (!/^CY-(RCP|RIO|GATEWAY|GWY)-/i.test(snapshot.device.serial)) throw new Error('Not a configurable Cyanview controller');
@@ -52,7 +57,9 @@ export class CyanviewService {
       }),
     });
   }
-  state() { return { observations: this.observations, discovery: this.discovery.progress, lookupResults: [...this.lookups.values()] }; }
+  state() { return { observations: this.observations, discovery: this.discovery.progress, lookupResults: [...this.lookups.values()], configChanges: this.live?.state() ?? null }; }
+  /** Keeps a settings socket open on each managed controller, so a change made anywhere shows up without Refresh all. */
+  watch(plan: Plan) { if (!this.stopped) this.live?.setPlan(plan); }
   forgetManagedDevices(ids: string[]) {
     for (const id of ids) { this.generations.set(id, (this.generations.get(id) || 0) + 1); delete this.observations[id]; }
   }
@@ -65,15 +72,17 @@ export class CyanviewService {
   async snapshot(address: string, signal: AbortSignal, catalog = true) {
     if (!validIp(address)) throw new Error('Enter a valid controller IPv4 address');
     const client = this.client(address);
-    try {
-      await client.connect(signal); const snapshot = normalizeSnapshot(client.config, address);
-      this.noteNeighbours(client.config);
-      if (catalog) await this.remi.readCameraReferences(snapshot, client, signal);
-      if (catalog && snapshot.cameras[0]) {
-        try { snapshot.device.modelCatalog = optionEntries(await client.option(snapshot.cameras[0].elementKey, 'Model', signal)).map(entry => ({ label: entry.label, id: object(entry.request).update?.changes?.model ?? '' })); } catch { /* The verified snapshot remains usable if option discovery is unavailable. */ }
-      }
-      return snapshot;
-    } finally { client.close(); }
+    try { await client.connect(signal); return await this.read(client, signal, catalog); } finally { client.close(); }
+  }
+  /** What an open socket says the controller has now. */
+  private async read(client: CyanviewClient, signal: AbortSignal, catalog = true) {
+    const snapshot = normalizeSnapshot(client.config, client.address);
+    this.noteNeighbours(client.config);
+    if (catalog) await this.remi.readCameraReferences(snapshot, client, signal);
+    if (catalog && snapshot.cameras[0]) {
+      try { snapshot.device.modelCatalog = optionEntries(await client.option(snapshot.cameras[0].elementKey, 'Model', signal)).map(entry => ({ label: entry.label, id: object(entry.request).update?.changes?.model ?? '' })); } catch { /* The verified snapshot remains usable if option discovery is unavailable. */ }
+    }
+    return snapshot;
   }
   private noteNeighbours(config: RecordValue) {
     for (const raw of Object.values(object(config.Remi))) {
@@ -163,14 +172,18 @@ export class CyanviewService {
       return snapshot.device.serial === device.serial ? snapshot : undefined;
     } catch { signal.throwIfAborted(); return undefined; }
   }
-  /** Reads every controller once for changes made outside this module. Status stays with MQTT. */
-  async refresh(signal: AbortSignal, only?: string[]) {
+  /**
+   * Reads every controller once for changes made outside this module. Status stays with MQTT. A live read
+   * follows a change the controller just reported, so it reads the socket that reported it.
+   */
+  async refresh(signal: AbortSignal, only?: string[], live = false) {
     const { plan } = await this.repository.read(signal);
     const snapshots: ReturnType<typeof normalizeSnapshot>[] = [], failed: string[] = [];
     await Promise.all(plan.devices.filter(device => !only || only.includes(device.id)).map(async device => {
       const generation = this.generations.get(device.id) || 0, current = () => generation === (this.generations.get(device.id) || 0);
       try {
-        const snapshot = await this.baseSnapshot(device, signal) ?? await this.snapshot(device.address || device.base, signal);
+        const held = live ? this.live?.connection(device.id) : undefined;
+        const snapshot = held ? await this.read(held, signal) : await this.baseSnapshot(device, signal) ?? await this.snapshot(device.address || device.base, signal);
         if (!current()) return;
         if (snapshot.device.serial !== device.serial) throw new Error('Controller identity changed');
         snapshots.push(snapshot);
@@ -205,5 +218,5 @@ export class CyanviewService {
     return { ...catalog, saved };
   }
   send(input: RecordValue, signal: AbortSignal) { return this.operations.run(input, signal); }
-  dispose() { this.stopped = true; this.discovery.dispose(); }
+  dispose() { this.stopped = true; this.discovery.dispose(); this.live?.dispose(); }
 }

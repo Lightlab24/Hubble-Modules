@@ -16,7 +16,7 @@ let releasePlanWrites: (() => void) | undefined;
 let planSaves = 0, planSavePending = 0;
 let sampleSetting = true, sessionOptions: Parameters<typeof fixture>[1], statePaused = false;
 const rendererState = () => session.states.at(-1) as Parameters<typeof session.context.publishState>[0];
-async function reset(sample: boolean, remi = false, gateway = false, direct = false, extra = false) {
+async function reset(sample: boolean, remi = false, gateway = false, direct = false, extra = false, live = false) {
   statePaused = false;
   pingDelayMs = 0;
   releaseControlWrites?.(); releaseControlWrites = undefined;
@@ -55,6 +55,8 @@ async function reset(sample: boolean, remi = false, gateway = false, direct = fa
   sampleSetting = sample;
   sessionOptions = {
     client: address => new CyanviewClient(address, { socket, timeout: 2000 }),
+    // Held settings sockets, as in Hubble. Off unless a spec asks, since several count sockets.
+    liveConfig: live ? { retryMs: [200, 1000], settleMs: 50 } : false,
     control: { cameraSettleMs: 400, session: (definition, changed) => new RcpSession(definition, changed, true, () => createConnection({ host: '127.0.0.1', port: mqtt.port })) },
     reachable: async address => ['10.192.1.10', '10.20.101.200'].includes(address),
     discovery: { durationMs: 100,
@@ -104,7 +106,7 @@ const server = createServer(async (request, response) => {
     if (request.method === 'POST') {
       const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk));
       const input = JSON.parse(Buffer.concat(chunks).toString() || '{}');
-      if (url.pathname === '/__reset') { await reset(input.sample !== false, input.remi === true, input.gateway === true, input.direct === true, input.extra === true); send({ reset: true }); return; }
+      if (url.pathname === '/__reset') { await reset(input.sample !== false, input.remi === true, input.gateway === true, input.direct === true, input.extra === true, input.live === true); send({ reset: true }); return; }
       if (url.pathname === '/__restart') {
         // The equipment and saved documents stay, as they do when Hubble restarts a module's worker.
         const { records } = session;
@@ -126,6 +128,8 @@ const server = createServer(async (request, response) => {
         if (input.closeController) await controller.close();
         if (input.cameraName) controller.config.Camera.wide.Name = input.cameraName;
         if (input.addCamera) { const target = controllers[Number(input.addCamera.device) || 0]!; target.config.Camera[String(input.addCamera.key)] = input.addCamera.row; target.broadcast(); }
+        // A change made outside Hubble, such as in Cyanview's own page. The controller pushes it to every open socket.
+        if (input.editCamera) { const target = controllers[Number(input.editCamera.device) || 0]!; Object.assign(target.config.Camera[String(input.editCamera.key)], input.editCamera.fields); target.broadcast(); }
         if (input.rekeyCamera) { const { wide, ...others } = controller.config.Camera; controller.config.Camera = { ...others, [input.rekeyCamera]: wide }; controller.broadcast(); }
         if (input.mqtt) mqtt.send(input.mqtt.topic, input.mqtt.value);
         if (input.mqttControls) Object.assign(mqtt.controls, input.mqttControls);

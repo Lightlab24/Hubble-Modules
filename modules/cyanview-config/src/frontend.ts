@@ -124,8 +124,9 @@ if (window.parent !== window) {
       await tail.catch(() => undefined);
       return readBounded(await client.call('remi-route', payload(value)) as Record<string, any>);
     },
-    async refresh(devices?: string[]) {
-      return readBounded(await client.call('refresh', devices ? payload({ devices }) : undefined) as Record<string, any>);
+    /** A live read follows a change a controller just reported, and reads the socket that reported it. */
+    async refresh(devices?: string[], live = false) {
+      return readBounded(await client.call('refresh', devices ? payload(live ? { devices, live } : { devices }) : undefined) as Record<string, any>);
     },
     async controlState() { return client.call('camera-control-state'); },
     async controlMutate(value: unknown) {
