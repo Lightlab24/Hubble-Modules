@@ -82,6 +82,7 @@ async function reset(sample: boolean, remi = false, gateway = false, direct = fa
 }
 await reset(true);
 const manifest = JSON.parse(await readFile(path.resolve('dist/hubble-module.json'), 'utf8'));
+const declaredCommands = new Set<string>(manifest.pages[0].sections[0].commands.map((command: { id: string }) => command.id));
 const frameHeight = manifest.pages[0].layout === 'full-page' ? '100dvh' : (manifest.pages[0].sections[0].height || 560)+'px';
 const pagePath = '/api/module-pages/' + 'a'.repeat(43);
 const runtimePath = '/api/module-controls/spreadsheet-v1.js';
@@ -141,6 +142,8 @@ const server = createServer(async (request, response) => {
         send({ updated: true }); return;
       }
       if (url.pathname !== '/__rpc') { send({ error: 'Unknown fixture route' }, 404); return; }
+      // Hubble passes a page only the commands its manifest declares, and so does the preview.
+      if (input.operation !== 'state' && !declaredCommands.has(input.commandId)) { send({ error: 'Module page command is not declared: ' + input.commandId }); return; }
       const planSave = ['save-plan', 'save-commit'].includes(input.commandId);
       if (planSave) { planSaves++; planSavePending++; }
       try { send({ result: input.operation === 'state' ? rendererState() : await session.call(input.commandId, input.value) }); }
