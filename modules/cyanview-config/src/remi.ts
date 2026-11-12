@@ -530,15 +530,34 @@ export class RemiOperations {
     return current()!;
   }
 
-  private async disable(target: CyanviewClient, entry: RemiEntry, signal: AbortSignal, allowAlreadyRemoved = false) {
+  /**
+   * Takes a copy off a controller: its import is switched off and the camera it made is deleted. A controller
+   * can keep that camera after the import is off, and can make the copy again under a new key, so whatever the
+   * import feeds now goes too, along with the key on record. `rebuilding` is a refresh, which takes off what
+   * is there however it has moved, and goes on when it is already gone.
+   */
+  private async disable(target: CyanviewClient, entry: RemiEntry, signal: AbortSignal, rebuilding = false) {
     const current = remiEntries(target.config).find(candidate => sameEntry(candidate, entry));
-    if (current?.enabled && current.localKey === entry.localKey && isImported(current, target.config)) {
-      await target.update(current.selector, { auto_camera: '0' }, signal);
-    } else if (!allowAlreadyRemoved || current?.enabled || !!target.config.Camera?.[entry.localKey!]) {
+    const keys = [...new Set([entry.localKey, current?.localKey].filter((key): key is string => !!key))];
+    // A copy no other import feeds. A camera of the controller's own is never one.
+    const leftover = (config: RecordValue) => keys.filter(key => isRemiModel(config.Camera?.[key]?.Model) &&
+      !remiEntries(config).some(candidate => candidate.enabled && candidate.localKey === key && !sameEntry(candidate, entry)));
+    if (!rebuilding && !(current?.enabled && current.localKey === entry.localKey && isImported(current, target.config))) {
       throw new Error('The REMI assignment changed. Refresh before removing it.');
     }
-    await target.waitFor(config => !remiEntries(config).some(candidate => sameEntry(candidate, entry) && candidate.enabled) &&
-      !config.Camera?.[entry.localKey!], signal);
+    if (current?.enabled) await target.update(current.selector, { auto_camera: '0' }, signal);
+    await target.waitFor(config => !remiEntries(config).some(candidate => sameEntry(candidate, entry) && candidate.enabled), signal);
+    let refused: unknown;
+    for (const key of leftover(target.config)) {
+      try { await target.action({ delete: [key] }, signal); }
+      // The controller may have deleted it itself in the meantime, which the readback below shows.
+      catch (error) { signal.throwIfAborted(); refused = error; }
+    }
+    try {
+      await target.waitFor(config => !leftover(config).length &&
+        !remiEntries(config).some(candidate => sameEntry(candidate, entry) && candidate.enabled), signal);
+    } catch (error) { throw refused ?? error; }
+    return keys;
   }
 
   private async removeRow(target: CyanviewClient, receiver: RecordValue, item: RecordValue, store: Receipt, signal: AbortSignal) {
@@ -675,21 +694,25 @@ export class RemiOperations {
       for (const id of new Set([job.source, ...steps.map(step => step.receiver)])) {
         await this.sourceClient(clients, this.device(plan, id), signal);
       }
+      // A copy that moved to a new key or was taken off by hand is still rebuilt, as long as the controller
+      // can still get the camera, so nothing is taken off that can't be put back.
       for (const step of steps) {
-        if (step.phase !== 'attached') continue;
+        if (step.phase !== 'attached' && step.phase !== 'removing') continue;
         const config = clients.get(step.receiver)!.config;
         const current = remiEntries(config).find(entry => sameEntry(entry, step.entry));
-        if (!current?.connected || current.localKey !== step.entry.localKey || !isImported(current, config)) {
-          throw new Error('A REMI assignment changed on ' + this.device(plan, step.receiver).name + '. Check the connection before retrying.');
+        const reachable = current ? current.connected :
+          remiEntries(config).some(entry => entry.importer === step.entry.importer && entry.peer === step.entry.peer && entry.connected);
+        if (!reachable) {
+          throw new Error('REMI source is disconnected on ' + this.device(plan, step.receiver).name + '. Check the connection before retrying.');
         }
       }
       for (const step of [...steps].reverse()) {
         if (step.phase !== 'attached' && step.phase !== 'removing') continue;
         const target = clients.get(step.receiver)!;
-        const alreadyStarted = step.phase === 'removing';
         step.phase = 'removing';
         await this.repository.writeRemi(store, signal);
-        await this.disable(target, step.entry, signal, alreadyStarted);
+        const removed = await this.disable(target, step.entry, signal, true);
+        store.data.links = store.data.links.filter(link => link.receiver !== step.receiver || !removed.includes(link.entry.localKey!));
         step.phase = 'removed';
         await this.repository.writeRemi(store, signal);
       }

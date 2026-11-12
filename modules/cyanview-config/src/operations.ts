@@ -45,8 +45,6 @@ const controllersAtOnce = 8;
 // A controller's socket takes one request at a time whatever this is. It bounds how many cameras
 // are waiting on the controller's confirmation together.
 const camerasAtOnce = 6;
-// What a REMI copy shows of the camera it was made from. Nothing else on the camera reaches a copy.
-const copiedFields = ['Number', 'Name', 'Model'];
 export class ConfigurationOperations {
   private queues = new Map<string, Promise<unknown>>();
   // Sends still working through a controller, which a network change has to wait for.
@@ -285,13 +283,13 @@ export class ConfigurationOperations {
     const waited = performance.now();
     if (session) await client.waitFor(config => Object.entries(expected).every(([field, value]) => matches(object(config.Camera?.[key]), field, value)), signal).catch(() => signal.throwIfAborted());
     const fresh = session ? client : await this.connect(device, signal);
-    let copiesStale = false;
+    let changed = false;
     let verifiedCamera: ReturnType<typeof remiCamera>;
     try {
       const observed = object(fresh.config.Camera?.[key]);
       for (const [field, value] of Object.entries(expected)) {
         if (!matches(observed, field, value)) throw new Error('Camera configuration could not be verified through a fresh connection');
-        if (before && copiedFields.includes(field) && !matches(before, field, value)) copiesStale = true;
+        if (before && !matches(before, field, value)) changed = true;
       }
       verifiedCamera = remiCamera(key, fresh.config);
     } finally { if (!session) fresh.close(); }
@@ -301,8 +299,10 @@ export class ConfigurationOperations {
     if (session) result.confirmMs = Math.round(performance.now() - waited);
     if (session) session.receipts.push({ item, patch });
     else result.revision = (await this.receipt('camera', item, patch, signal)).revision;
-    // An address, login or lens change never reaches a copy, so the copies and their controllers are left alone.
-    if (before && copiesStale && this.remi) {
+    // Any change to a camera that is REMI'd elsewhere takes its copies off and imports them again, because a
+    // controller doesn't update a copy it already holds (camera 11 renumbered 6 stayed 11 on the RCP, Nov 12).
+    // Sending a value the controller already had changes nothing and leaves the copies alone.
+    if (before && changed && this.remi) {
       const previous = { key, name: String(before.Name ?? ''), number: String(before.Number ?? '') }, rebuilding = performance.now();
       try { Object.assign(result, await this.remi.cameraChanged(device, previous, verifiedCamera, signal)); }
       catch (error) {

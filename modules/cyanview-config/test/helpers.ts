@@ -204,6 +204,8 @@ export class FakeController {
 export class FakeRemiFleet {
   readonly writes: { device: string; enable: string; sourceKey: string }[] = [];
   failEnable = '';
+  /** Switching an import off leaves the camera it made on the controller, as a left-behind copy. */
+  keepCopies = false;
   /** Serials a controller still lists from an earlier job, which nothing on this network answers to. */
   remembered: string[] = [];
   /** Which controllers list which. Every one lists every other unless a test says otherwise. */
@@ -302,7 +304,7 @@ export class FakeRemiFleet {
       receiver.config.Camera[key] = { Number: row.Number, Name: row.Name, Model: 'Cyan - Imported' };
       assignments.set(update.key, key);
     } else if (enable === '0' && previous) {
-      delete receiver.config.Camera[previous];
+      if (!this.keepCopies) delete receiver.config.Camera[previous];
       assignments.delete(update.key);
     }
     return ['ok', update.key];

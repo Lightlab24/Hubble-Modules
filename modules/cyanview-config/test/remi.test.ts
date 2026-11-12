@@ -281,20 +281,81 @@ test('a route refuses a stale view, an impossible tree and an unreachable contro
 const sourceCamera = async (s: Awaited<ReturnType<typeof routeSetup>>) =>
   (await s.session.repository.read(s.session.signal)).plan.cameras.find(row => row.device === s.source && row.elementKey === 'original')!;
 
-test('an edit a copy never shows leaves the copies and every other controller alone', async () => {
+test('any change to a camera takes its copies off and puts them back, and resending what it has changes nothing', async () => {
   const s = await routeSetup();
   try {
     assert.equal((await s.route({ [s.receiver]: s.source, [s.downstream]: s.receiver }, {})).results[0].verified, true);
     s.rio.addressable('original');
-    const camera = await sourceCamera(s), opened = () => [s.rio, s.master, s.leaf].map(device => device.opened), before = opened();
+    const camera = await sourceCamera(s), copies = () => [s.master, s.leaf].map(device => Object.keys(device.config.Camera)), before = copies();
     s.fleet.writes.length = 0;
+    // An address never shows on a copy, and the copies are still made again (the user's rule, Nov 12).
     const sent = await s.session.call('send', { items: [{ kind: 'camera', item: { ...camera, ip: '10.20.20.9' }, fields: ['ip'] }] });
     assert.equal(sent.results[0].verified, true, sent.results[0].error);
-    assert.equal(sent.results[0].remiRefresh, undefined);
+    assert.equal(sent.results[0].remiError, undefined);
+    assert.equal(sent.results[0].remiRefresh, true);
     assert.equal(s.rio.config.Camera.original.IP, '10.20.20.9');
-    assert.deepEqual(s.fleet.writes, [], 'No copy is taken off or put back');
-    assert.deepEqual(opened(), [before[0]! + 1, before[1], before[2]], 'One socket, to the camera’s own controller');
+    assert.deepEqual(s.fleet.writes.map(row => [row.device, row.enable]), [[s.downstream, '0'], [s.receiver, '0'], [s.receiver, '1'], [s.downstream, '1']]);
+    for (const [index, keys] of copies().entries()) {
+      assert.equal(keys.length, 1);
+      assert.notEqual(keys[0], before[index]![0], 'Each copy is a new camera on its controller');
+    }
     for (const device of [s.master, s.leaf]) assert.deepEqual(names(device), ['Wide']);
+
+    s.fleet.writes.length = 0;
+    const same = await s.session.call('send', { items: [{ kind: 'camera', item: { ...camera, ip: '10.20.20.9' }, fields: ['ip'] }] });
+    assert.equal(same.results[0].verified, true, same.results[0].error);
+    assert.equal(same.results[0].remiRefresh, undefined);
+    assert.deepEqual(s.fleet.writes, [], 'Nothing changed, so no copy is taken off');
+  } finally { await s.close(); }
+});
+
+test('a controller that keeps a copy after its import is off has it deleted, and the renumbered camera comes back', async () => {
+  const s = await routeSetup();
+  try {
+    assert.equal((await s.route({ [s.receiver]: s.source }, {})).results[0].verified, true);
+    const [old] = Object.keys(s.master.config.Camera) as [string];
+    assert.equal(s.master.config.Camera[old].Number, '1');
+    s.fleet.keepCopies = true;
+    const camera = await sourceCamera(s);
+    const sent = await s.session.call('send', { items: [{ kind: 'camera', item: { ...camera, number: '6' }, fields: ['number'] }] });
+    assert.equal(sent.results[0].verified, true, sent.results[0].error);
+    assert.equal(sent.results[0].remiError, undefined);
+    assert.deepEqual(s.master.actions.filter(row => row.delete).map(row => row.delete), [[old]]);
+    assert.deepEqual(Object.values(object(s.master.config.Camera)).map(row => [row.Number, row.Name, row.Model]), [['6', 'Wide', 'Cyan - Imported']]);
+    const store = await s.session.repository.readRemi(s.session.signal);
+    assert.deepEqual(store.data.refreshes, []);
+    assert.deepEqual(store.data.links.filter(link => link.receiver === s.receiver).map(link => link.entry.localKey), Object.keys(s.master.config.Camera));
+  } finally { await s.close(); }
+});
+
+test('Retry finishes a refresh stuck taking a copy off, after the controller made the copy again under a new key', async () => {
+  const s = await routeSetup();
+  try {
+    assert.equal((await s.route({ [s.receiver]: s.source }, {})).results[0].verified, true);
+    const store = await s.session.repository.readRemi(s.session.signal);
+    const link = store.data.links.find(row => row.receiver === s.receiver)!;
+    // Like the live RCP on Nov 12: the refresh stopped while taking the copy off, the record still names the old key,
+    // and the controller now holds the copy under a new one. Here the old camera is also left behind.
+    s.fleet.keepCopies = true;
+    s.fleet.apply(s.master, { update: { key: link.entry.selector, changes: { auto_camera: '0' } } });
+    s.fleet.apply(s.master, { update: { key: link.entry.selector, changes: { auto_camera: '1' } } });
+    s.rio.config.Camera.original.Number = '6';
+    s.fleet.publish();
+    const remade = Object.keys(s.master.config.Camera).find(key => key !== link.entry.localKey)!;
+    assert.deepEqual(Object.keys(s.master.config.Camera).sort(), [link.entry.localKey, remade].sort());
+    store.data.refreshes.push({ source: s.source, camera: { key: 'original', number: '6', name: 'Wide' }, before: { key: 'original', number: '1', name: 'Wide' },
+      steps: [{ source: s.source, sourceKey: 'original', receiver: s.receiver, entry: { ...link.entry, label: '6 Wide' }, parent: -1, phase: 'removing' }] });
+    await s.session.repository.writeRemi(store, s.session.signal);
+    assert.match((await s.session.call('send', { items: [{ kind: 'camera', item: await sourceCamera(s), fields: ['name'] }] })).results[0].error, /Retry this camera/);
+
+    const retry = await s.session.call('remi-send', { receiver: s.source, operation: 'retry' });
+    assert.equal(retry.results[0].verified, true, retry.results[0].error);
+    assert.deepEqual(s.master.actions.filter(row => row.delete).map(row => row.delete[0]).sort(), [link.entry.localKey, remade].sort(), 'The left-behind camera and the copy made by hand both go');
+    const after = Object.entries(object(s.master.config.Camera));
+    assert.deepEqual(after.map(([, row]) => [row.Number, row.Name]), [['6', 'Wide']]);
+    const saved = await s.session.repository.readRemi(s.session.signal);
+    assert.deepEqual(saved.data.refreshes, []);
+    assert.deepEqual(saved.data.links.filter(row => row.receiver === s.receiver).map(row => row.entry.localKey), [after[0]![0]]);
   } finally { await s.close(); }
 });
 

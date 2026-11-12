@@ -3074,7 +3074,7 @@ import { PresentationLedger } from './presentation-ledger.js';
         (index === 0 && device(id)?.online === false ? '<div class="hc-pending-status" data-kind="offline">Won’t send while ' + name + ' is offline</div>' : '') +
         pendingButton('Cancel', 'data-pending-remi-item="' + esc(item.id) + '" data-pending-remi-device="' + esc(id) + '" aria-label="Cancel ' + esc(remiDraftLabel(item)) + ' on ' + name + '"', state.busy) + '</div>').join('');
   }
-  // A rename or renumber on a camera with copies is finished on each controller that has one. If one
+  // Any change to a camera with copies is finished on each controller that has one. If one
   // of them can't be reached it stays unfinished, and that camera's copies can't change until it is
   // retried or dismissed.
   let remiJobs = [];
