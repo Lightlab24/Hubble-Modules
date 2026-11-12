@@ -606,6 +606,40 @@ export class RemiOperations {
   }
 
   /**
+   * Every REMI copy of a camera, however many hops away, each listed after the copy it was made from.
+   * Every managed controller is read afresh, so a copy made by hand is found too. A controller that
+   * can't be read is named in `unread`, since a copy on it can't be reached either.
+   */
+  async copiesOf(sourceId: string, key: string, signal: AbortSignal) {
+    const { plan } = await this.repository.read(signal);
+    this.device(plan, sourceId);
+    const inventory = new Map<string, Observed>();
+    for (let start = 0; start < plan.devices.length; start += 8) {
+      await Promise.all(plan.devices.slice(start, start + 8).map(async device => {
+        try { inventory.set(device.id, await this.observe(device, signal)); }
+        catch { signal.throwIfAborted(); }
+      }));
+    }
+    const origin = inventory.get(sourceId);
+    if (!origin) throw new Error('Cannot read ' + this.device(plan, sourceId).name);
+    const steps: { receiver: string; key: string; parent: number }[] = [];
+    const walk = (fromId: string, camera: RemiCamera, parent: number, ancestors: Set<string>) => {
+      const from = inventory.get(fromId)!;
+      for (const target of inventory.values()) {
+        if (ancestors.has(target.device.id)) continue;
+        const active = target.entries.filter(entry => isImported(entry, target.config));
+        for (const entry of this.match(active, target.selectors, from.device, from.config, camera)) {
+          if (steps.length >= 512) throw new Error('The REMI chain exceeds camera capacity');
+          const index = steps.push({ receiver: target.device.id, key: entry.localKey!, parent }) - 1;
+          walk(target.device.id, remiCamera(entry.localKey!, target.config), index, new Set([...ancestors, target.device.id]));
+        }
+      }
+    };
+    walk(sourceId, remiCamera(key, origin.config), -1, new Set([sourceId]));
+    return { steps, unread: plan.devices.filter(device => !inventory.has(device.id)).map(device => String(device.id)) };
+  }
+
+  /**
    * The controllers recorded as holding a copy of a camera, however many hops away. A copy made by
    * hand on a controller since it was last read isn't on record, and waits for a Refresh all.
    */

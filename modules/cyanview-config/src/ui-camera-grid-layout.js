@@ -30,7 +30,7 @@
         { id: 'number', label: 'Camera number' }, { id: 'name', label: 'Camera name' },
         { id: 'model', label: 'Camera model' }, { id: 'ip', label: 'Camera IP / interface' },
         { id: 'port', label: 'Port' }, { id: 'login', label: 'Username' }, { id: 'password', label: 'Password' },
-        { id: 'controlEnabled', label: 'Camera Control Enabled' }, { id: 'control', label: 'Control status' },
+        { id: 'controlEnabled', label: 'Camera Control Enabled' }, { id: 'control', label: 'Control status' }, { id: 'cameraEnabled', label: 'Camera Enabled' },
         { id: 'recording', label: 'Recording' }, { id: 'cameraStatus', label: 'Recording status' }, { id: 'sync', label: 'Sync status' },
       ] },
       { id: 'lens', label: 'Lens', fields: [{ id: 'lens', label: 'Lens model' }, { id: 'connection', label: 'Lens connection' }] },
@@ -172,7 +172,7 @@
     return { refresh, dispose() { disposed = true; for (const group of groups.values()) group.controls?.dispose(); resize?.dispose(); } };
   }
   function cameraColumnBands(columns,deviceId){
-    const cameraFields=new Set(['number','name','model','ip','port','login','password','controlEnabled','control','recording','cameraStatus']);
+    const cameraFields=new Set(['number','name','model','ip','port','login','password','controlEnabled','control','cameraEnabled','recording','cameraStatus']);
     const all=deviceId===allCamerasSheet;
     const labels={gutter:'',route:'REMI',camera:'Camera',lens:'Lens',sync:all?'':'Sync',remi:'REMI to'};
     const kindOf=column=>column.id==='row'?'gutter':column.tool?'camera':String(column.id).startsWith('remi:')?'remi':isAssignmentField(column.id)?(all?'route':'camera'):column.id==='sync'?'sync':all||cameraFields.has(column.id)?'camera':'lens';

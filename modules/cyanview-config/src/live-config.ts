@@ -11,7 +11,9 @@ export type LiveConfigOptions = {
   /** How long reaching one address may take before the next is tried. */
   connectMs?: number;
 };
-type Watch = { id: string; serial: string; hosts: string[]; stop: AbortController; client?: CyanviewClient; text: string; timer?: ReturnType<typeof setTimeout> };
+type Watch = { id: string; serial: string; hosts: string[]; stop: AbortController; client?: CyanviewClient; text: string; config?: RecordValue; timer?: ReturnType<typeof setTimeout> };
+/** Each configuration a controller reports that differs from the last, with the one before it. None before the first. */
+export type ConfigObserver = (id: string, before: RecordValue | undefined, after: RecordValue) => void;
 
 // The base address first, as for MQTT, since no other controller can share it. The address it was added by is the way back.
 const hostsOf = (device: RecordValue) => [...new Set([device.base, device.address].map(value => String(value ?? '')).filter(validIp))];
@@ -28,7 +30,9 @@ export class LiveConfig {
   // A restarted worker counts from zero again, so an open page must be able to tell.
   private readonly epoch = randomUUID();
   private stopped = false;
+  private observers = new Set<ConfigObserver>();
   constructor(private client: (address: string) => CyanviewClient, private changed: () => void, private options: LiveConfigOptions = {}) {}
+  observe(observer: ConfigObserver) { this.observers.add(observer); return () => this.observers.delete(observer); }
   state() { return { epoch: this.epoch, counts: { ...this.counts } }; }
   setPlan(plan: Plan) {
     if (this.stopped) return;
@@ -97,7 +101,9 @@ export class LiveConfig {
   private seen(watch: Watch, config: RecordValue) {
     const text = JSON.stringify(config);
     if (text === watch.text) return;
-    watch.text = text;
+    const before = watch.config;
+    watch.text = text; watch.config = config;
+    for (const observer of this.observers) { try { observer(watch.id, before, config); } catch { /* One observer's failure doesn't stop the watch. */ } }
     clearTimeout(watch.timer);
     watch.timer = setTimeout(() => {
       watch.timer = undefined;

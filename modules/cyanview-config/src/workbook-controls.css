@@ -304,3 +304,16 @@ body:has(#cyanview-design .hc-veil:not([hidden])) .hubble-column-resize-handles 
 #cyanview-design .hc-device-camera-count { display: inline-block; min-width: 22px; }
 #cyanview-design .hc-clear-cameras { margin-left: 4px; padding: 2px 6px; color: var(--hc-red); font-size: 11px; }
 #cyanview-design .hc-clear-cameras .hc-icon { width: 13px; height: 13px; }
+/* Camera Enabled: Cyanview's own Enabled as an On/Off switch, a refresh beside it, and what is happening. */
+#cyanview-design .hc-grid[data-camera-device] .hc-camera-enabled { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; vertical-align: middle; }
+#cyanview-design .hc-grid[data-camera-device] .hc-camera-enabled .hc-segment { padding: 1px; }
+#cyanview-design .hc-grid[data-camera-device] .hc-camera-enabled .hc-segment button { padding: 2px 8px; min-height: 0; }
+#cyanview-design .hc-grid[data-camera-device] .hc-camera-enabled .hc-segment button:disabled { cursor: default; }
+#cyanview-design .hc-grid[data-camera-device] .hc-camera-enabled .hc-segment.hc-locked { opacity: .45; }
+#cyanview-design .hc-grid[data-camera-device] .hc-camera-enabled .hc-caption { margin: 0 0 0 2px; }
+#cyanview-design .hc-grid[data-camera-device] .hc-row-refresh-button { display: inline-grid; place-items: center; min-height: 0; width: 26px; height: 24px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--hc-secondary); cursor: pointer; }
+#cyanview-design .hc-grid[data-camera-device] .hc-row-refresh-button:hover:not(:disabled) { background: var(--hc-selected); color: var(--hc-strong); }
+#cyanview-design .hc-grid[data-camera-device] .hc-row-refresh-button:disabled { cursor: default; opacity: .55; }
+#cyanview-design .hc-grid[data-camera-device] .hc-row-refresh-button.hc-busy svg { animation: hc-camera-refresh 1s linear infinite; }
+@keyframes hc-camera-refresh { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { #cyanview-design .hc-grid[data-camera-device] .hc-row-refresh-button.hc-busy svg { animation: none; } }

@@ -237,7 +237,7 @@ import { PresentationLedger } from './presentation-ledger.js';
     columns.push({id:'model',label:'Camera model',width:120},{id:'ip',label:'Camera IP / interface',width:142});
     columns.push({id:'port',label:'Port',width:55},{id:'login',label:'Username',width:88},{id:'password',label:'Password',width:96});
     columns.push({id:'controlEnabled',label:'Camera Control Enabled',width:175});
-    columns.push({id:'control',label:'Control',width:104},{id:'recording',label:'Recording',width:96},{id:'cameraStatus',label:'Status',width:200});
+    columns.push({id:'control',label:'Control',width:104},{id:'cameraEnabled',label:'Camera Enabled',width:236},{id:'recording',label:'Recording',width:96},{id:'cameraStatus',label:'Status',width:200});
     columns.push({id:'lens',label:'Lens model',width:126},{id:'connection',label:'Lens connection',width:116});
     for (const axis of ['iris', 'zoom', 'focus']) {
       columns.push(...cameraAxisColumns(deviceId, axis));
@@ -274,6 +274,7 @@ import { PresentationLedger } from './presentation-ledger.js';
       else if(field==='model')content=cameraChoiceCell(camera,field);
       else if(field==='ip')content=camera.model==='Alpha-USB'?cameraChoiceCell(camera,'usb'):inputCell(camera,'ip',camera.ip,'hc-mono');
       else if(field==='control')content=status(camera.online);
+      else if(field==='cameraEnabled')content=cameraEnabledCell(camera);
       else if(field==='recording')content=cameraRecordingCell(camera.id);
       else if(field==='cameraStatus')content=cameraStatusCell(camera.id);
       else if(field==='lens')content=cameraChoiceCell(camera,field);
@@ -778,7 +779,7 @@ import { PresentationLedger } from './presentation-ledger.js';
         { id: 'number', label: 'Camera number' }, { id: 'name', label: 'Camera name' },
         { id: 'model', label: 'Camera model' }, { id: 'ip', label: 'Camera IP / interface' },
         { id: 'port', label: 'Port' }, { id: 'login', label: 'Username' }, { id: 'password', label: 'Password' },
-        { id: 'controlEnabled', label: 'Camera Control Enabled' }, { id: 'control', label: 'Control status' },
+        { id: 'controlEnabled', label: 'Camera Control Enabled' }, { id: 'control', label: 'Control status' }, { id: 'cameraEnabled', label: 'Camera Enabled' },
         { id: 'recording', label: 'Recording' }, { id: 'cameraStatus', label: 'Recording status' }, { id: 'sync', label: 'Sync status' },
       ] },
       { id: 'lens', label: 'Lens', fields: [{ id: 'lens', label: 'Lens model' }, { id: 'connection', label: 'Lens connection' }] },
@@ -920,7 +921,7 @@ import { PresentationLedger } from './presentation-ledger.js';
     return { refresh, dispose() { disposed = true; for (const group of groups.values()) group.controls?.dispose(); resize?.dispose(); } };
   }
   function cameraColumnBands(columns,deviceId){
-    const cameraFields=new Set(['number','name','model','ip','port','login','password','controlEnabled','control','recording','cameraStatus']);
+    const cameraFields=new Set(['number','name','model','ip','port','login','password','controlEnabled','control','cameraEnabled','recording','cameraStatus']);
     const all=deviceId===allCamerasSheet;
     const labels={gutter:'',route:'REMI',camera:'Camera',lens:'Lens',sync:all?'':'Sync',remi:'REMI to'};
     const kindOf=column=>column.id==='row'?'gutter':column.tool?'camera':String(column.id).startsWith('remi:')?'remi':isAssignmentField(column.id)?(all?'route':'camera'):column.id==='sync'?'sync':all||cameraFields.has(column.id)?'camera':'lens';
@@ -1250,6 +1251,7 @@ import { PresentationLedger } from './presentation-ledger.js';
     if(values.cameraControl)applyCameraControlState(values.cameraControl);
     if(moduleBridge.preview)return;
     noticeConfigChanges(values.configChanges);
+    applyCameraEnabledJobs(values.cameraEnabledJobs);
     syncConnections();
     syncSummary();
     for(const candidate of values.lookupResults||[])manualDiscoveries.set(candidate.serial,candidate);
@@ -2104,7 +2106,7 @@ import { PresentationLedger } from './presentation-ledger.js';
       if (axis) return { kind: 'boolean', value: lensAxisEnabled(camera, axis) ? 'TRUE' : 'FALSE', readOnly: !!camera.deleting };
       const control = cell.querySelector('[data-field]');
       if (!control) {
-        return ['control', 'recording', 'cameraStatus', 'sync'].includes(cell.dataset.column)
+        return ['control', 'cameraEnabled', 'recording', 'cameraStatus', 'sync'].includes(cell.dataset.column)
           ? { value: cell.textContent.trim(), readOnly: true }
           : null;
       }
@@ -2797,7 +2799,7 @@ import { PresentationLedger } from './presentation-ledger.js';
   }
   function cameraMenuItems(camera, cameraById) {
     const staged = removalStaged(camera);
-    return [{ id: 'clear-camera', label: 'Clear from view', disabled: !!camera.deleting || !!camera.jobs, run: () => clearFromView([cameraById.get(camera.id) ?? camera]) }, { id: 'delete-camera', label: staged ? 'Keep camera' : importedCamera(camera) ? 'Remove REMI copy' : 'Delete camera', icon: staged ? undefined : 'delete', danger: !staged, disabled: !!camera.deleting || !!camera.jobs, run: () => reviewCameraDeletion(cameraById.get(camera.id) ?? camera) }];
+    return [{ id: 'refresh-camera', label: 'Refresh camera', disabled: !camera.elementKey || !!camera.deleting || !!camera.jobs || cameraEnabledSent.has(camera.id) || !!cameraEnabledJob(camera), run: () => runCameraEnabled(cameraById.get(camera.id) ?? camera, 'refresh') }, { id: 'clear-camera', label: 'Clear from view', disabled: !!camera.deleting || !!camera.jobs, run: () => clearFromView([cameraById.get(camera.id) ?? camera]) }, { id: 'delete-camera', label: staged ? 'Keep camera' : importedCamera(camera) ? 'Remove REMI copy' : 'Delete camera', icon: staged ? undefined : 'delete', danger: !staged, disabled: !!camera.deleting || !!camera.jobs, run: () => reviewCameraDeletion(cameraById.get(camera.id) ?? camera) }];
   }
   function removeCell(camera, column) {
     const staged = removalStaged(camera), label = (staged ? 'Keep camera ' : importedCamera(camera) ? 'Remove the REMI copy of camera ' : 'Delete camera ') + camera.number;
@@ -3580,6 +3582,73 @@ import { PresentationLedger } from './presentation-ledger.js';
     else if (data.pendingSend && row(data.pendingSend)) void sendPending([row(data.pendingSend)]);
     else if (data.pendingCancel && row(data.pendingCancel)) cancelCamera(row(data.pendingCancel));
     else if (data.pendingCancelLine && row(data.pendingCameraId)) cancelPending([{ camera: row(data.pendingCameraId), line: data.pendingCancelLine }]);
+  });
+
+  // Camera Enabled is Cyanview's own Enabled setting on each camera, not Hubble's Camera Control Enabled
+  // checkmark. A REMI copy follows the camera it comes from, so its switch is locked. Refresh switches a
+  // camera off and on again, then each copy made from it, which brings back a copy its RCP stopped selecting.
+  let cameraEnabledJobs = [];
+  const cameraEnabledSent = new Set();
+  const cameraEnabledJob = camera => cameraEnabledJobs.find(job => job.device === camera.device && job.key === camera.elementKey);
+  function cameraEnabledCell(camera) {
+    if (!camera.elementKey || !camera.device) return '<span class="hc-caption">—</span>';
+    const copy = importedCamera(camera), job = cameraEnabledJob(camera);
+    const busy = !!job || cameraEnabledSent.has(camera.id) || !!camera.deleting || !!camera.jobs;
+    const where = 'camera ' + camera.number + ' on ' + (device(camera.device)?.name || camera.device);
+    const source = copy ? remiDeviceName(camera.remi?.peer || camera.remiPeer) : '';
+    const choice = on => '<button type="button" data-action="camera-enabled" data-camera-enabled="' + (on ? 'on' : 'off') + '" data-enabled-row="' + esc(camera.id) +
+      '" aria-pressed="' + String(camera.cameraEnabled === on) + '"' + (copy || busy ? ' disabled' : '') + '>' + (on ? 'On' : 'Off') + '</button>';
+    const segment = '<span class="hc-segment hc-camera-enabled-switch' + (copy ? ' hc-locked' : '') + '" role="group" aria-label="Camera Enabled for ' + esc(where) + '"' +
+      (copy ? ' title="Follows ' + esc(source) + '"' : '') + '>' + choice(true) + choice(false) + '</span>';
+    const refresh = '<button type="button" class="hc-row-refresh-button' + (job ? ' hc-busy' : '') + '" data-action="refresh-camera" data-refresh-row="' + esc(camera.id) +
+      '" aria-label="Refresh ' + esc(where) + '" title="' + esc(copy ? 'Off and on again on this RCP, then any copies made from it' : 'Off and on again, then its REMI copies') + '"' + (busy ? ' disabled' : '') + '>' + icon('refresh-cw') + '</button>';
+    const note = job ? job.text : copy ? 'follows ' + source : '';
+    return '<span class="hc-camera-enabled">' + segment + refresh + (note ? '<span class="hc-caption" data-camera-enabled-note>' + esc(note) + '</span>' : '') + '</span>';
+  }
+  function paintCameraEnabled(rows = cameras) {
+    let painted = false;
+    for (const camera of rows) for (const cell of root.querySelectorAll('td[data-column="cameraEnabled"][data-camera="' + CSS.escape(camera.id) + '"]')) {
+      const markup = cameraEnabledCell(camera);
+      if (cell.innerHTML !== markup) { cell.innerHTML = markup; painted = true; }
+    }
+    if (painted) icons();
+  }
+  function applyCameraEnabledJobs(jobs) {
+    if (!Array.isArray(jobs)) return;
+    const text = JSON.stringify(jobs);
+    if (text === JSON.stringify(cameraEnabledJobs)) return;
+    cameraEnabledJobs = jobs;
+    paintCameraEnabled();
+  }
+  async function runCameraEnabled(camera, mode) {
+    if (!moduleBridge || moduleBridge.preview) { toast('Sample data does not send commands to equipment'); return; }
+    if (!camera?.elementKey || cameraEnabledSent.has(camera.id)) return;
+    const before = camera.cameraEnabled, where = 'Camera ' + camera.number + ' on ' + (device(camera.device)?.name || camera.device);
+    cameraEnabledSent.add(camera.id);
+    // The switch moves at once. The controller's own report then confirms it, and a failure puts it back.
+    if (mode !== 'refresh') camera.cameraEnabled = mode;
+    paintCameraEnabled([camera]);
+    try {
+      const reply = mode === 'refresh' ? await moduleBridge.cameraRefresh(camera.device, camera.elementKey) : await moduleBridge.cameraEnabled(camera.device, camera.elementKey, mode);
+      const copies = Number(reply?.copies) || 0, unread = (reply?.unread || []).map(id => device(id)?.name || id);
+      const done = mode === 'refresh' ? where + ' refreshed' : where + ' switched ' + (mode ? 'on' : 'off');
+      toast(done + (copies ? ' with ' + copies + (copies === 1 ? ' copy' : ' copies') : '') + (unread.length ? ' · could not reach ' + unread.join(', ') : ''));
+    } catch (error) {
+      if (mode !== 'refresh') camera.cameraEnabled = before;
+      toast(error.message || 'Camera Enabled could not be changed');
+    } finally {
+      cameraEnabledSent.delete(camera.id);
+      paintCameraEnabled([camera]);
+    }
+  }
+  root.addEventListener('click', event => {
+    const button = event.target.closest('button[data-action="camera-enabled"],button[data-action="refresh-camera"]');
+    if (!button || button.disabled) return;
+    const camera = cameras.find(row => row.id === (button.dataset.enabledRow || button.dataset.refreshRow));
+    if (!camera) return;
+    if (button.dataset.action === 'refresh-camera') { void runCameraEnabled(camera, 'refresh'); return; }
+    const on = button.dataset.cameraEnabled === 'on';
+    if (camera.cameraEnabled !== on) void runCameraEnabled(camera, on);
   });
 
   // ── A rig that was set up outside Hubble ───────────────────────────────────

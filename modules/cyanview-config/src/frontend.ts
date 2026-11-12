@@ -128,6 +128,10 @@ if (window.parent !== window) {
     async refresh(devices?: string[], live = false) {
       return readBounded(await client.call('refresh', devices ? payload(live ? { devices, live } : { devices }) : undefined) as Record<string, any>);
     },
+    /** Cyanview's own Enabled on a camera. Its REMI copies follow it. */
+    async cameraEnabled(device: string, key: string, enabled: boolean) { return client.call('camera-enabled', payload({ device, key, enabled })); },
+    /** Switches a camera off and on again, then each REMI copy made from it. */
+    async cameraRefresh(device: string, key: string) { return client.call('camera-refresh', payload({ device, key })); },
     async controlState() { return client.call('camera-control-state'); },
     async controlMutate(value: unknown) {
       await tail.catch(() => undefined);

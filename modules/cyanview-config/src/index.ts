@@ -7,6 +7,8 @@ import { createHostPing } from './ping.js';
 import { networkRange } from './discovery.js';
 import { ChoiceCatalogs } from './choice-catalogs.js';
 import { CameraControl } from './control/service.js';
+import { CameraEnabledOperations } from './camera-enabled.js';
+import { CyanviewClient } from './transport.js';
 
 export function createInstance(context: ModuleContext, options: ServiceOptions = {}): ModuleInstance {
   if (!context.services) throw new Error('Module storage is unavailable');
@@ -20,6 +22,11 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
   const choices = new ChoiceCatalogs(context.services);
   const service = new CyanviewService(repository, choices, publish, lifetime.signal, { ...options, discovery: { ...options.discovery, ping: options.discovery?.ping ?? hostPing!.sweep } });
   control = new CameraControl(repository, context, sample, () => publish(), options.control);
+  // Cyanview's own Enabled on each camera, with every REMI copy following the camera it comes from.
+  const cameraEnabled = new CameraEnabledOperations(repository, options.client ?? (address => new CyanviewClient(address)), service.remi,
+    (device, number, key) => control!.cameraOnline(device, number, key), () => publish({ cameraEnabledJobs: cameraEnabled.state() }),
+    message => context.log({ level: 'info', stage: 'camera-enabled', message: message.slice(0, 500) }), lifetime.signal, options.cameraEnabled);
+  if (!sample) service.observeConfig((device, before, after) => cameraEnabled.observe(device, before, after));
   const transfers = new Map<string, { kind: 'save' | 'send'; revision: string | null; parts: string[]; size: number; expires: number }>();
   const imports = new Map<string, { cameras: RecordValue[]; expires: number }>();
   const reads = new Map<string, { text: string; expires: number }>();
@@ -185,6 +192,18 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
           const began = performance.now(), result = await watched('route-timing', 'A REMI route', signal, () => service.remi.route(input, signal));
           timing('route-timing', result.results, result.controllers, performance.now() - began);
           return bounded(result);
+        }
+        case 'camera-enabled':
+        case 'camera-refresh': {
+          if (sample) throw new Error('Sample data does not send commands to equipment');
+          const device = String(input.device ?? ''), key = String(input.key ?? '');
+          if (!device || !key) throw new Error('Choose a camera that is on its controller');
+          const refresh = request.commandId === 'camera-refresh', began = performance.now();
+          const result = await watched('camera-enabled', refresh ? 'A camera refresh' : 'A Camera Enabled change', signal,
+            () => refresh ? cameraEnabled.refresh(device, key, signal) : cameraEnabled.set(device, key, input.enabled === true, signal));
+          context.log({ level: 'info', stage: 'camera-enabled', message: (refresh ? 'Refreshed' : input.enabled === true ? 'Switched on' : 'Switched off') + ' camera ' + key + ' on ' + device +
+            ' and ' + result.copies + (result.copies === 1 ? ' copy' : ' copies') + ' in ' + Math.round(performance.now() - began) + ' ms' + (result.unread.length ? ', could not read ' + result.unread.join(', ') : '') });
+          return result;
         }
         case 'send': return send(input, signal);
         default: throw new Error('Unknown Cyanview command');

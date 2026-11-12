@@ -9,11 +9,13 @@ import { RemiOperations } from './remi.js';
 import type { ChoiceCatalogs } from './choice-catalogs.js';
 import { cameraChoiceKey, isCameraChoiceField, type CameraChoice } from './choice-context.js';
 import type { ControlOptions } from './control/service.js';
-import { LiveConfig, type LiveConfigOptions } from './live-config.js';
+import type { CameraEnabledOptions } from './camera-enabled.js';
+import { LiveConfig, type ConfigObserver, type LiveConfigOptions } from './live-config.js';
 
 export type ServiceOptions = { client?: ClientFactory; reachable?: (address: string, signal: AbortSignal) => Promise<boolean>; discovery?: DiscoveryOptions; neighbors?: (signal: AbortSignal) => Promise<string[]>; control?: ControlOptions;
   /** Each managed controller's held settings socket. False holds none, for tests that count sockets. */
-  liveConfig?: LiveConfigOptions | false };
+  liveConfig?: LiveConfigOptions | false;
+  cameraEnabled?: CameraEnabledOptions };
 /** A Cyanview serial carries its own base address: CY-RCP-1-20 is 10.192.1.20. */
 export const baseFromSerial = (serial: string) => {
   const parts = /^cy-[a-z0-9]+-(\d{1,3})-(\d{1,3})$/i.exec(serial.trim());
@@ -60,6 +62,8 @@ export class CyanviewService {
   state() { return { observations: this.observations, discovery: this.discovery.progress, lookupResults: [...this.lookups.values()], configChanges: this.live?.state() ?? null }; }
   /** Keeps a settings socket open on each managed controller, so a change made anywhere shows up without Refresh all. */
   watch(plan: Plan) { if (!this.stopped) this.live?.setPlan(plan); }
+  /** Each configuration a held socket reports, with the one before it. Nothing is reported without held sockets. */
+  observeConfig(observer: ConfigObserver) { return this.live?.observe(observer); }
   forgetManagedDevices(ids: string[]) {
     for (const id of ids) { this.generations.set(id, (this.generations.get(id) || 0) + 1); delete this.observations[id]; }
   }

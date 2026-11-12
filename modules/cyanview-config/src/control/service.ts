@@ -105,6 +105,12 @@ export class CameraControl {
     for (const id of this.results.keys()) if (!cameras.has(id)) this.results.delete(id);
     this.selection.setPlan(plan);
   }
+  /** Whether a controller's camera reports itself online over MQTT, or null while nothing has said. */
+  cameraOnline(deviceId: string, number: number, key: string): boolean | null {
+    const session = this.sessions.get(deviceId);
+    if (!session || session.snapshot().phase !== 'ready') return null;
+    try { return session.captureCamera(number, key).observation.online; } catch { return null; }
+  }
   async refreshPlan(signal: AbortSignal) { this.setPlan((await this.repository.read(signal)).plan); }
   state() {
     const { enabled, singleSwitch } = this.selection.value();

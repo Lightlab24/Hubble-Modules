@@ -20,7 +20,9 @@ export function normalizeSnapshot(config: RecordValue, address: string) {
       peer: assignment.peer, selector: assignment.selector, connection: assignment.connection, label: assignment.label,
     };
     const remiPeer = isRemiModel(model) ? /^\(D\)(cy-[a-z0-9-]+)$/i.exec(String(object(row.Interface).device ?? ''))?.[1] : undefined;
-    return { id: `${id}:camera:${key}`, device: id, elementKey: key, number: String(row.Number ?? ''), name: String(row.Name ?? ''), model: name, modelLabel: model, ip: String(row.IP ?? ''), port: String(row.Port ?? ''), login: String(row.Login ?? ''), password: String(row.Password ?? ''), usb: object(row.Interface).port && object(row.Interface).port !== '*' ? String(object(row.Interface).port) : 'USB · Automatic', lens: lens || 'None', lensPort: connection, lensParams: String(row.LensParams ?? ''), ...decodeLensParameters(lens, String(row.LensParams ?? '')), online: null, pending: false, dirty: [], result: 'In sync', revision: 0, isNew: false,
+    return { id: `${id}:camera:${key}`, device: id, elementKey: key, number: String(row.Number ?? ''), name: String(row.Name ?? ''), model: name, modelLabel: model, ip: String(row.IP ?? ''), port: String(row.Port ?? ''), login: String(row.Login ?? ''), password: String(row.Password ?? ''), usb: object(row.Interface).port && object(row.Interface).port !== '*' ? String(object(row.Interface).port) : 'USB · Automatic', lens: lens || 'None', lensPort: connection, lensParams: String(row.LensParams ?? ''),
+      // Cyanview's own Enabled, separate from Hubble's Camera Control Enabled checkmark. Null when the controller doesn't say.
+      cameraEnabled: row.Enabled === undefined || row.Enabled === '' ? null : flag(row.Enabled), ...decodeLensParameters(lens, String(row.LensParams ?? '')), online: null, pending: false, dirty: [], result: 'In sync', revision: 0, isNew: false,
       ...(remi ? { remi } : {}), ...(remiPeer ? { remiPeer } : {}) };
   });
   const lans = ips.map(row => {

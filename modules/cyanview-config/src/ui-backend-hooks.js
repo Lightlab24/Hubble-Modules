@@ -105,6 +105,7 @@
     if(values.cameraControl)applyCameraControlState(values.cameraControl);
     if(moduleBridge.preview)return;
     noticeConfigChanges(values.configChanges);
+    applyCameraEnabledJobs(values.cameraEnabledJobs);
     syncConnections();
     syncSummary();
     for(const candidate of values.lookupResults||[])manualDiscoveries.set(candidate.serial,candidate);

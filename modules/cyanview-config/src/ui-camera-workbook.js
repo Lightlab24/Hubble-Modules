@@ -190,7 +190,7 @@
       if (axis) return { kind: 'boolean', value: lensAxisEnabled(camera, axis) ? 'TRUE' : 'FALSE', readOnly: !!camera.deleting };
       const control = cell.querySelector('[data-field]');
       if (!control) {
-        return ['control', 'recording', 'cameraStatus', 'sync'].includes(cell.dataset.column)
+        return ['control', 'cameraEnabled', 'recording', 'cameraStatus', 'sync'].includes(cell.dataset.column)
           ? { value: cell.textContent.trim(), readOnly: true }
           : null;
       }

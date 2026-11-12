@@ -30,10 +30,10 @@ async function reset(sample: boolean, remi = false, gateway = false, direct = fa
   controllers = [controller];
   if (gateway) {
     controller.config.Product = { Serial:'CY-GWY-1-10',Name:'GATEWAY',MaxCam:'unlimited' };
-    controller.config.Camera.wide = { Number:'1',Name:'Wide',Model:'Sony - Venice-IP',IP:'10.20.20.1',Port:'80' };
+    controller.config.Camera.wide = { Number:'1',Name:'Wide',Model:'Sony - Venice-IP',IP:'10.20.20.1',Port:'80',Enabled:'1' };
   }
   if (remi) {
-    controller.config.Camera.wide = { Number:'1',Name:'Wide',Model:'Sony - Venice-IP',IP:'10.20.20.1',Port:'80' };
+    controller.config.Camera.wide = { Number:'1',Name:'Wide',Model:'Sony - Venice-IP',IP:'10.20.20.1',Port:'80',Enabled:'1' };
     for (const suffix of extra ? [20,30,40,50] : [20,30]) {
       const rcp = new FakeController();
       rcp.config.Product = { Serial:'CY-RCP-1-'+suffix,Name:'RCP',MaxCam:'unlimited' };
@@ -42,7 +42,7 @@ async function reset(sample: boolean, remi = false, gateway = false, direct = fa
       controllers.push(rcp);
     }
     // A camera set up directly on an RCP, with no RIO in front of it.
-    if (direct) controllers[1]!.config.Camera.direct = { Number:'7',Name:'Jib',Model:'Sony - Venice-IP',IP:'10.20.20.7',Port:'80' };
+    if (direct) controllers[1]!.config.Camera.direct = { Number:'7',Name:'Jib',Model:'Sony - Venice-IP',IP:'10.20.20.7',Port:'80',Enabled:'1' };
   }
   const fleet = remi ? new FakeRemiFleet(controllers) : null;
   await Promise.all(controllers.map(device => device.start()));
@@ -57,6 +57,8 @@ async function reset(sample: boolean, remi = false, gateway = false, direct = fa
     client: address => new CyanviewClient(address, { socket, timeout: 2000 }),
     // Held settings sockets, as in Hubble. Off unless a spec asks, since several count sockets.
     liveConfig: live ? { retryMs: [200, 1000], settleMs: 50 } : false,
+    // Short enough for specs. Hubble itself holds a camera off for a second and waits up to six for it to come back online.
+    cameraEnabled: { holdMs: 300, onlineWaitMs: 400 },
     control: { cameraSettleMs: 400, session: (definition, changed) => new RcpSession(definition, changed, true, () => createConnection({ host: '127.0.0.1', port: mqtt.port })) },
     reachable: async address => ['10.192.1.10', '10.20.101.200'].includes(address),
     discovery: { durationMs: 100,

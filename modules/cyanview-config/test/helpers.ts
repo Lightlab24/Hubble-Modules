@@ -95,6 +95,8 @@ export class FakeController {
   holdAction = '';
   heldActionReplies: (() => void)[] = [];
   replyTextHeartbeat = true;
+  /** Sees every action as it arrives, so a test can check the order across controllers. */
+  onAction?: (request: RecordValue) => void;
   modelChoices = [['Sony - Venice-IP', 'VeniceCBM'], ['Sony - Alpha-USB', 'SonyDslr'], ['Sony - Alpha-IP', 'SonyDslrIP']];
   lensChoices = [['None', ''], ['B4 Generic', 'sony'], ['Tilta - Nucleus-M', 'tilta'], ['ARRI - cforce', 'arri_motor'], ['cmotion cGate', 'cgate']];
   config: RecordValue = { Product: { Serial: 'CY-RIO-1-10', Name: 'RIO', MaxCam: 'unlimited' }, Camera: {}, IP: {
@@ -126,7 +128,7 @@ export class FakeController {
             ws.send(JSON.stringify({ type: 'option_reply', request: message.request, payload: this.option(message.request) })); return;
           }
           if (message.type !== 'action_request') return;
-          this.actions.push(structuredClone(message.request));
+          this.actions.push(structuredClone(message.request)); this.onAction?.(structuredClone(message.request));
           const result = this.apply(message.request);
           if (this.dropCreateReply && message.request.new) { this.dropCreateReply = false; this.broadcast(); return; }
           if (this.dropDeleteReply && message.request.delete) { this.dropDeleteReply = false; ws.terminate(); return; }
@@ -155,6 +157,7 @@ export class FakeController {
   snapshot(address = '10.192.1.10') { return normalizeSnapshot(this.config, address); }
   private option([key, field]: string[]) {
     if (this.remiFleet && key === 'relay' && field === 'Tags') return { key, property: 'tags' };
+    if (field === 'Enabled') return this.config.Camera[key!] ? { key, property: 'enabled' } : [];
     if (field === 'Model') return this.modelChoices.map(([label, model]) => [label, { update: { key, changes: { model } } }]);
     if (['IP', 'Port', 'Login', 'Password'].includes(field!)) return { key: [...this.endpoints].find(([, camera]) => camera === key)?.[0], property: field!.toLowerCase() };
     if (field === 'LensModel') return this.lensChoices.map(([label, model]) => [label, { update: { key: [...this.lenses].find(([, camera]) => camera === key)?.[0], changes: { model } } }]);
@@ -189,7 +192,7 @@ export class FakeController {
       const camera = this.config.Camera[key];
       if (camera) for (const [field, value] of Object.entries(changes)) {
         if (field === 'model') { camera.Model = this.modelChoices.find(([, id]) => id === value)?.[0] ?? ''; for (const [endpoint, owner] of this.endpoints) if (owner === key) this.endpoints.delete(endpoint); this.endpoints.set('endpoint-' + randomUUID().slice(0, 8), key); if (value !== 'SonyDslr') Object.assign(camera, { IP: '', Port: '80', Login: '', Password: '' }); }
-        else camera[field === 'number' ? 'Number' : field === 'name' ? 'Name' : field] = value;
+        else camera[field === 'number' ? 'Number' : field === 'name' ? 'Name' : field === 'enabled' ? 'Enabled' : field] = value;
       }
       else if (this.endpoints.has(key)) { const target = this.config.Camera[this.endpoints.get(key)!]; for (const [field, value] of Object.entries(changes)) { if (field === 'content') target.Interface = { device: 'SN', port: value }; else target[({ ip: 'IP', port: 'Port', login: 'Login', password: 'Password' } as RecordValue)[field] ?? field] = value; } }
       else if (this.lenses.has(key)) { const target = this.config.Camera[this.lenses.get(key)!]; if (changes.model !== undefined) target.LensModel = changes.model === '' ? '' : this.lensChoices.find(([, id]) => id === changes.model)?.[0] ?? ''; if (changes.params !== undefined) target.LensParams = changes.params; }
@@ -302,7 +305,7 @@ export class FakeRemiFleet {
     if (enable === '1' && !previous) {
       const key = this.key('copy');
       const row = entry.source.config.Camera[entry.sourceKey];
-      receiver.config.Camera[key] = { Number: row.Number, Name: row.Name, Model: 'Cyan - Imported' };
+      receiver.config.Camera[key] = { Number: row.Number, Name: row.Name, Model: 'Cyan - Imported', Enabled: '1' };
       assignments.set(update.key, key);
     } else if (enable === '0' && previous) {
       if (!this.keepCopies) delete receiver.config.Camera[previous];
