@@ -286,7 +286,25 @@ highest priority first, each with the part it lights by default:
 ```
 
 `part` is `background`, `outline` or `bar`; `effect` is optional and steady when
-absent. Up to 16 triggers, with unique IDs. Then report which are on in the
+absent. Up to 16 triggers, with unique IDs.
+
+When different rows mean different things, give a trigger `when`, the same conditions
+fields use for `enabledWhen`, so it belongs only to those rows. With
+`module-feedback-trigger-conditions-v1`, a row lists, edits and lights only its own
+triggers:
+
+```json
+{
+  "id": "all-enabled",
+  "label": "All enabled",
+  "part": "background",
+  "color": "#37A65B",
+  "when": [{ "field": "actionType", "values": ["enable-all-cameras"] }]
+}
+```
+
+Give each action its own IDs when the defaults differ; two triggers can share a label.
+A row's saved changes for a trigger that no longer belongs to it are ignored. Then report which are on in the
 appearance: `{ triggers: ['online', 'selected'] }`. Several triggers can be on at
 once and each lights its part, so one key can show recording on the bar, selection
 on the background and connection on the outline. When two want the same part, the

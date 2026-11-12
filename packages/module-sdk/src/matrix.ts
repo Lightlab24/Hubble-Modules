@@ -337,8 +337,29 @@ export const ModuleFeedbackTriggerSchema = z.strictObject({
   part: z.enum(["background", "outline", "bar"]),
   color: Color,
   effect: FeedbackEffect.optional(),
+  /**
+   * The rows this trigger belongs to, such as one action type; every row when absent. Rows
+   * only list, edit and light their own triggers. Requires module-feedback-trigger-conditions-v1.
+   */
+  when: z.array(ModuleMatrixConditionSchema).min(1).max(16).optional(),
 });
 export type ModuleFeedbackTrigger = z.infer<typeof ModuleFeedbackTriggerSchema>;
+
+/** The triggers that belong to a row with these field values, in priority order. */
+export function matrixTriggersFor<
+  Trigger extends {
+    readonly when?:
+      | readonly z.infer<typeof ModuleMatrixConditionSchema>[]
+      | undefined;
+  },
+>(
+  triggers: readonly Trigger[] | undefined,
+  values: Readonly<Record<string, unknown>>,
+): Trigger[] {
+  return (triggers ?? []).filter((trigger) =>
+    moduleMatrixMatches(trigger.when, values),
+  );
+}
 
 const MatrixDefinitionSchema = z
   .strictObject({
@@ -451,6 +472,16 @@ const MatrixDefinitionSchema = z
       ctx.addIssue({
         code: "custom",
         message: "Matrix triggers require unique IDs",
+      });
+    const fieldIds = new Set(matrix.fields.map(({ id }) => id));
+    if (
+      matrix.triggers?.some((trigger) =>
+        trigger.when?.some(({ field }) => !fieldIds.has(field)),
+      )
+    )
+      ctx.addIssue({
+        code: "custom",
+        message: "Trigger conditions must name declared fields",
       });
     if (
       (matrix.triggers?.length || matrix.triggerField) &&
