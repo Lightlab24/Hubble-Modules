@@ -336,6 +336,24 @@ row that kept it. The changes travel with workspace exports. Hubble keeps the
 trigger cell's own value but no longer draws it; don't rely on it for anything a
 new host shows.
 
+### Hold to confirm
+
+A matrix can ask for some press rows to answer a hold too, such as a record button
+that starts on a tap but only stops on a hold. Declare `hold` with `ms` of 1000, 2000
+or 3000 and optional `when` conditions, and require `module-matrix-hold-v1`:
+
+```json
+"hold": { "ms": 2000, "when": [{ "field": "actionType", "values": ["record-camera"] }] }
+```
+
+Hubble gives those keys a hold lane, on Companion and on Stream Deck, without the
+operator adding a Long Press row. The press then runs when the key is let go before
+the hold, and the hold runs once it is reached, never both. The same action runs
+either way; read `context.gesture` (`press` or `long-press-2s`, for example) to decide
+what each does. Rows already timed to a hold, by their own lane or their column, are
+left as they are. A key with other actions on its Press row also fires them on
+release from then on, which is the cost of telling a tap from a hold.
+
 Use `runtimeDirectory` for local runtime state that must survive module versions.
 Document any data excluded from workspace export. Tally's follow-state file is
 local runtime state; row colour/glow choices and column defaults are portable.

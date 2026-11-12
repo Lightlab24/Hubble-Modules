@@ -1,5 +1,5 @@
 import { ModuleMatrixSchema } from '@hubble/module-sdk';
-import { commands, cameraCommands, feedbackCommands, feedbackTriggers, localCommands } from './config.js';
+import { commands, cameraCommands, feedbackCommands, feedbackTriggers, holdToStop, localCommands } from './config.js';
 
 export const matrix = ModuleMatrixSchema.parse({
   id: 'camera-control', label: 'Cyanview', actionId: 'camera-control', feedbackId: 'camera-control', primaryField: 'actionType',
@@ -26,6 +26,7 @@ export const matrix = ModuleMatrixSchema.parse({
   ],
   triggers: feedbackTriggers,
   triggerField: 'module.feedbackColor',
+  hold: holdToStop,
 });
 
 const controller = { id: 'controllerId', label: 'Cyanview controller', type: 'choice' as const, default: '', required: true, choices: [], choiceProvider: 'control-controllers' };

@@ -65,11 +65,13 @@ async function fleet({ second = { Serial: 'CY-RIO-1-20', Name: 'RIO' }, secondPa
     cameras: snapshots.flatMap(snapshot => snapshot.cameras), lans: [], uiState: null };
   await f.call('save-plan', { revision: null, plan });
   const ids = plan.devices.map(device => device.id);
-  const run = (command: string, controller = 0, cameraNumber?: number, signal?: AbortSignal) => f.instance.execute(command,
-    { controllerId: ids[controller]!, ...(cameraNumber === undefined ? {} : { cameraNumber }) }, { ...f.execution(), ...(signal ? { signal } : {}) });
+  const run = (command: string, controller = 0, cameraNumber?: number, signal?: AbortSignal, gesture: 'press' | 'long-press-2s' = 'press') => f.instance.execute(command,
+    { controllerId: ids[controller]!, ...(cameraNumber === undefined ? {} : { cameraNumber }) }, { ...f.execution(), gesture, ...(signal ? { signal } : {}) });
+  /** The 2-second hold Hubble sends a Record camera key on top of its press. */
+  const hold = (command: string, controller = 0, cameraNumber?: number) => run(command, controller, cameraNumber, undefined, 'long-press-2s');
   const state = async () => f.call('camera-control-state');
   const save = async () => { const current = await f.repository.read(f.signal); await f.call('save-plan', { revision: current.revision, plan }); };
-  return { f, a, b, networks, sessions, plan, ids, run, state, save, verifyDelays, stall, options,
+  return { f, a, b, networks, sessions, plan, ids, run, hold, state, save, verifyDelays, stall, options,
     async close() { await f.instance.dispose(); await Promise.all([a.close(), b.close()]); },
   };
 }
@@ -1200,6 +1202,54 @@ test('a camera row reports its recording, state and connection as feedback trigg
     await s.f.instance.subscribeFeedback!([{ id: 'camera-control', fields: { ...fields, values: { ...fields.values, 'module.feedbackEnabled': false } } }], { signal: s.f.signal });
     await eventually(() => triggers() === null);
     assert.equal(s.networks[0]!.commands.length, 0, 'Watching sends nothing');
+  } finally { await s.close(); }
+});
+
+test('Record camera starts on a tap, stops only on a 2-second hold, and blinks Stopping until the camera has stopped', async () => {
+  const s = await fleet();
+  try {
+    assert.ok(manifest.host?.requiredFeatures?.includes('module-matrix-hold-v1'), 'Without the hold lane a key could never stop');
+    assert.deepEqual(matrix.hold, { ms: 2000, when: [{ field: 'actionType', values: ['record-camera'] }] });
+    const stopping = matrix.triggers?.find(trigger => trigger.id === 'stopping');
+    assert.deepEqual(stopping && [stopping.part, stopping.color, stopping.effect], ['background', '#37A65B', { kind: 'blink', cycleMs: 400 }]);
+    assert.ok(matrix.triggers!.findIndex(trigger => trigger.id === 'stopping') < matrix.triggers!.findIndex(trigger => trigger.id === 'rolling'),
+      'Stopping outranks Recording, which stays on until the camera reports');
+    const fields = { actionId: 'row-rec', actionColumnId: 'column-one', values: { enabled: true, actionType: 'record-camera',
+      'module.controllerId': s.ids[0]!, 'module.cameraNumber': 1, 'module.feedbackEnabled': true, 'module.feedbackColor': '#333333 | #00FF00' } };
+    const triggers = () => JSON.stringify(object(object(s.f.feedback.at(-1)).appearance).triggers);
+    const seen: string[] = [];
+    const network = s.networks[0]!, values = () => network.commands.map(command => command.value);
+    const live = () => object(cameraControl(s.f).cameras), wide = s.plan.cameras[0]!;
+    await s.f.instance.subscribeFeedback!([{ id: 'camera-control', fields }], { signal: s.f.signal });
+    await eventually(() => s.sessions[0]?.snapshot().phase === 'ready');
+    await eventually(() => triggers() === '["online"]');
+    // A tap on a stopped camera rolls it.
+    assert.equal((await s.run('record-camera', 0, 1)).status, 'success');
+    assert.deepEqual(values(), ['Rec']);
+    await eventually(() => triggers() === '["rolling","online"]');
+    // A tap on a rolling camera sends nothing and says how to stop it.
+    assert.equal((await s.run('record-camera', 0, 1)).status, 'success');
+    assert.deepEqual(values(), ['Rec']);
+    await eventually(() => live()[wide.id]?.message === 'Recording. Hold for 2 seconds to stop');
+    // The hold stops it, and the key blinks Stopping from the send until the camera reports it stopped.
+    network.controls.feedbackDelay = 300;
+    const check = setInterval(() => seen.push(triggers()), 5);
+    try {
+      const held = s.hold('record-camera', 0, 1);
+      await eventually(() => triggers() === '["stopping","rolling","online"]');
+      assert.deepEqual(values(), ['Rec', 'Stop']);
+      const result = await held;
+      assert.equal(result.status, 'success');
+      if (result.status === 'success') assert.equal(result.evidence.kind, 'state-confirmed');
+      await eventually(() => triggers() === '["online"]');
+    } finally { clearInterval(check); }
+    assert.ok(!seen.slice(seen.lastIndexOf('["stopping","rolling","online"]')).includes('["rolling","online"]'),
+      'Nothing goes back to plain Recording between the blink and the stop');
+    // A hold on a stopped camera rolls it, so holding a little too long still starts a take.
+    network.controls.feedbackDelay = 0;
+    assert.equal((await s.hold('record-camera', 0, 1)).status, 'success');
+    assert.deepEqual(values(), ['Rec', 'Stop', 'Rec']);
+    await eventually(() => triggers() === '["rolling","online"]');
   } finally { await s.close(); }
 });
 

@@ -32,6 +32,8 @@ export class RecordingCoordinator {
     { generation: number; sequence: number }
   >();
   private readonly changes = new Set<() => void>();
+  /** Cameras with a Stop on its way, until they report it took or the wait for that runs out. */
+  private readonly stopping = new Set<string>();
   private readonly stopped = new AbortController();
   private readonly slots: {
     resolve(release: () => void): void;
@@ -78,6 +80,10 @@ export class RecordingCoordinator {
   }
   isUncertain(key: string): boolean {
     return this.uncertain.has(key);
+  }
+  /** Whether a Stop was sent to this camera and it hasn't yet reported that it stopped. */
+  isStopping(key: string): boolean {
+    return this.stopping.has(key);
   }
   checkpoint(): JsonValue {
     return { uncertain: [...this.uncertain.keys()] };
@@ -216,6 +222,7 @@ export class RecordingCoordinator {
           : expected
             ? "Rec"
             : "Stop";
+      if (!expected) this.setStopping(key, true);
       await session.sendCameraCommand(target, command, signal, () => {
         transmission.sent = true;
       });
@@ -251,7 +258,15 @@ export class RecordingCoordinator {
       );
     } finally {
       release?.();
+      this.setStopping(key, false);
     }
+  }
+
+  private setStopping(key: string, on: boolean): void {
+    if (this.stopping.has(key) === on) return;
+    if (on) this.stopping.add(key);
+    else this.stopping.delete(key);
+    this.options.changed?.();
   }
 
   private markUncertain(captured: RecordingTarget, sequence: number): void {

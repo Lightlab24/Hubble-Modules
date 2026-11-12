@@ -79,7 +79,7 @@ export class CameraControl {
       context.log({ level: 'error', stage: 'control-selection', message: message(error).slice(0, 1000) });
     });
     // Runtime files are initialized in start(), when the host grants the directory.
-    this.recording = new RecordingCoordinator({ feedbackTimeoutMs: RECORDING_FEEDBACK_TIMEOUT_MS });
+    this.recording = new RecordingCoordinator({ feedbackTimeoutMs: RECORDING_FEEDBACK_TIMEOUT_MS, changed: () => this.emit() });
   }
   async start(signal: AbortSignal) {
     if (!this.sample && this.context.runtimeDirectory) {
@@ -208,7 +208,7 @@ export class CameraControl {
     if (!Number.isSafeInteger(offset) || offset < 0) throw new Error('Invalid choice cursor');
     return { revision: revision ?? 'initial', choices: choices.slice(offset, offset + limit), nextCursor: offset + limit < choices.length ? String(offset + limit) : null };
   }
-  async execute(id: string, fields: ModuleValues, execution: Pick<ModuleExecutionContext, 'signal' | 'log'>) {
+  async execute(id: string, fields: ModuleValues, execution: Pick<ModuleExecutionContext, 'signal' | 'log'> & { readonly gesture?: ModuleExecutionContext['gesture'] }) {
     try {
       execution.signal.throwIfAborted();
       if (this.stopped || this.sample) throw new Error('Sample data does not send commands to equipment');
@@ -288,7 +288,12 @@ export class CameraControl {
                 const before = connected.snapshot();
                 await connected.selectCamera(target.observation.number!, execution.signal);
                 this.holdSelection(device.id, target.observation.number!, before.activeCameraNumber, before.activeCameraReports);
-              } else if (command === 'record-camera' || command.startsWith('roll-') || command === 'stop-enabled-cameras') {
+              } else if (command === 'record-camera') {
+                // A tap only ever starts the camera. Stopping takes the 2-second hold, whose lane Hubble adds to the key.
+                const tap = (execution.gesture ?? 'press') === 'press';
+                const result = await this.recording.record({ key, session: connected, target }, tap ? 'start' : 'toggle', execution.signal, feedbackTimeout(targets.length, this.options.feedbackWait));
+                return tap && result.evidence === 'noop' ? { ...result, message: 'Recording. Hold for 2 seconds to stop' } : result;
+              } else if (command.startsWith('roll-') || command === 'stop-enabled-cameras') {
                 return await this.recording.record({ key, session: connected, target }, command === 'roll-enabled-cameras' ? 'start' : command === 'stop-enabled-cameras' ? 'stop' : 'toggle', execution.signal, feedbackTimeout(targets.length, this.options.feedbackWait));
               } else {
                 await this.recording.deliver(() => steps[command]
@@ -392,7 +397,7 @@ export class CameraControl {
       if (resolved) cells['module.cameraNumber'] = { label: `${matches[0]!.number} · ${matches[0]!.name || 'Camera'}`, color: null };
       let active: boolean | null = null;
       // Recording and connection, reported as triggers beside the row's own state. Null is not known yet.
-      let recording: boolean | null = null, online: boolean | null = null;
+      let recording: boolean | null = null, online: boolean | null = null, stopping = false;
       // Group rows: every one, or only some, of their cameras enabled or rolling.
       let all = false, some = false;
       if (command === 'toggle-camera-enabled' && resolved) active = matches.every(row => selected.enabled[row.id] === true);
@@ -430,6 +435,7 @@ export class CameraControl {
           try {
             const target = session.captureCamera(Number(values['module.cameraNumber']));
             const observation = target.observation;
+            stopping = this.recording.isStopping(`${device!.id}/${target.address}`);
             if (observation.online !== null) online = observation.online;
             if (observation.online === true && observation.recording !== null && this.recording.usableObservation(`${device!.id}/${target.address}`, target, observation)) {
               recording = observation.recording;
@@ -457,7 +463,7 @@ export class CameraControl {
       // Each action reports its own triggers, as the matrix declares them.
       const own: Record<string, readonly (string | false)[]> = {
         'select-camera': [active === true && 'selected', recording === true && 'recording'],
-        'record-camera': [recording === true && 'rolling'],
+        'record-camera': [stopping && 'stopping', recording === true && 'rolling'],
         'toggle-camera-enabled': [active === true && 'enabled', recording === true && 'recording'],
         'enable-all-cameras': [all && 'all-enabled', some && 'some-enabled'],
         'single-switch': [active === true && 'single-switch'],

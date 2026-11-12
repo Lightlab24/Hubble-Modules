@@ -21,6 +21,8 @@ export default defineModuleManifest({
     'module-workspace-actions-v1', 'module-workspace-matrix-choices-v1', 'module-matrix-v1',
     'module-matrix-row-fields-v1', 'module-feedback-observers-v1', 'module-choice-bindings-v1',
     'module-choices-v2', 'module-fields-v2', 'module-runtime-directory-v1', 'module-feedback-triggers-v1', 'module-feedback-trigger-conditions-v1',
+    // Record camera starts on a tap and stops on a 2-second hold, so it needs the hold lane.
+    'module-matrix-hold-v1',
   ] },
   capabilities: ['host.documents', 'host.helpers', 'service.page.studio', 'state-feedback'],
   settings: [{ id: 'sampleData', label: 'Use sample devices', type: 'boolean', required: true, default: false }],

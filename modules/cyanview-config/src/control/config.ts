@@ -32,7 +32,9 @@ export const commandGroup = (command: Command) => command === 'select-camera' ? 
 export const cameraCommands: readonly string[] = ['select-camera', 'record-camera', 'toggle-camera-enabled'];
 export const localCommands: readonly string[] = ['toggle-camera-enabled', 'enable-all-cameras', 'single-switch'];
 export const feedbackCommands = [...localCommands, 'select-camera', 'record-camera', 'roll-enabled-cameras', 'stop-enabled-cameras', 'roll-toggle-enabled-cameras'];
-const forActions = (...actions: string[]) => [{ field: 'actionType', values: actions }];
+export const forActions = (...actions: string[]) => [{ field: 'actionType', values: actions }];
+/** A tap starts these and only a hold this long stops them, so a stray tap can't cut a take. */
+export const holdToStop = { ms: 2000 as const, when: forActions('record-camera') };
 const cameraActions = ['select-camera', 'record-camera', 'toggle-camera-enabled'];
 const groupRecordingActions = ['roll-enabled-cameras', 'stop-enabled-cameras', 'roll-toggle-enabled-cameras'];
 /**
@@ -41,6 +43,8 @@ const groupRecordingActions = ['roll-enabled-cameras', 'stop-enabled-cameras', '
  */
 export const feedbackTriggers = [
   { id: 'selected', label: 'Selected', part: 'background', color: '#37A65B', when: forActions('select-camera') },
+  // From the moment a hold sends Stop until the camera reports it has stopped. Above Recording, which stays on until then.
+  { id: 'stopping', label: 'Stopping', part: 'background', color: '#37A65B', effect: { kind: 'blink', cycleMs: 400 }, when: forActions('record-camera') },
   { id: 'rolling', label: 'Recording', part: 'background', color: '#E3242B', when: forActions('record-camera') },
   { id: 'enabled', label: 'Enabled', part: 'background', color: '#37A65B', when: forActions('toggle-camera-enabled') },
   { id: 'recording', label: 'Recording', part: 'bar', color: '#E3242B', effect: { kind: 'blink', cycleMs: 800 }, when: forActions('select-camera', 'toggle-camera-enabled') },

@@ -406,6 +406,19 @@ const MatrixDefinitionSchema = z
      * never follow. Requires module-matrix-feedback-colors-v1.
      */
     showFeedbackColors: z.boolean().optional(),
+    /**
+     * Press rows that also answer a hold of this length, such as one action type; every press row
+     * when `when` is absent. Their keys get a hold lane, so the press runs when the key is let go
+     * before then and the hold runs once it is reached. The module reads which from the execution
+     * context's `gesture`. Rows already timed to a hold are left as they are. Requires
+     * module-matrix-hold-v1.
+     */
+    hold: z
+      .strictObject({
+        ms: z.union([z.literal(1000), z.literal(2000), z.literal(3000)]),
+        when: z.array(ModuleMatrixConditionSchema).min(1).max(16).optional(),
+      })
+      .optional(),
     mapping: z
       .strictObject({
         label: Label,
@@ -488,6 +501,11 @@ const MatrixDefinitionSchema = z
       ctx.addIssue({
         code: "custom",
         message: "Trigger conditions must name declared fields",
+      });
+    if (matrix.hold?.when?.some(({ field }) => !fieldIds.has(field)))
+      ctx.addIssue({
+        code: "custom",
+        message: "Hold conditions must name declared fields",
       });
     if (
       (matrix.triggers?.length || matrix.triggerField) &&
