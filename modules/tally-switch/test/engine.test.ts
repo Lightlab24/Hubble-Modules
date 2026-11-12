@@ -91,6 +91,53 @@ describe("independent TALLY Switch decisions", () => {
     update(tally(false, true));
     expect(route).not.toHaveBeenCalled();
   });
+  it("does not catch up to a winner that changed while the router was away", async () => {
+    const { engine, route, update } = fixture();
+    update(tally(true, false));
+    engine.routers.set("router", { ready: false, approved: true });
+    engine.evaluate(false);
+    update(tally(false, true));
+    engine.routers.set("router", { ready: true, approved: true });
+    engine.evaluate(false);
+    // A repeated packet after the router returns is not a fresh tally change.
+    update(tally(false, true));
+    await Promise.resolve();
+    expect(route).not.toHaveBeenCalled();
+    expect(engine.statuses[1]?.values.status).toBe(
+      "Holding · router ready; waiting for a tally change",
+    );
+    update(tally(true, false));
+    await vi.waitFor(() => expect(route).toHaveBeenCalledTimes(1));
+    expect(route).toHaveBeenCalledWith({
+      router: "router",
+      source: 1,
+      destination: 1,
+      level: 1,
+    });
+  });
+  it("does not catch up when the router finishes connecting after startup", async () => {
+    const { engine, route, update } = fixture();
+    engine.routers.set("router", { ready: false, approved: true });
+    update(tally(true, false), false);
+    update(tally(false, true));
+    engine.routers.set("router", { ready: true, approved: true });
+    engine.evaluate(false);
+    update(tally(false, true));
+    await Promise.resolve();
+    expect(route).not.toHaveBeenCalled();
+    update(tally(true, false));
+    await vi.waitFor(() => expect(route).toHaveBeenCalledTimes(1));
+  });
+  it("does not catch up after an action approval is restored", async () => {
+    const { engine, route, update } = fixture();
+    update(tally(true, false));
+    engine.routers.set("router", { ready: true, approved: false });
+    update(tally(false, true));
+    engine.routers.set("router", { ready: true, approved: true });
+    update(tally(false, true));
+    await Promise.resolve();
+    expect(route).not.toHaveBeenCalled();
+  });
   it("does not retry an uncertain failure until a new program transition", async () => {
     const route = vi.fn(async () => {
       throw new Error("timeout");

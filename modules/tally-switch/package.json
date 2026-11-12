@@ -1,6 +1,6 @@
 {
   "name": "@hubble-module/tally-switch",
-  "version": "1.1.5",
+  "version": "1.1.7",
   "private": true,
   "type": "module",
   "hubble": {
@@ -10,7 +10,7 @@
   "scripts": {
     "build": "hubble-module build .",
     "test": "hubble-module test .",
-    "package": "hubble-module build . && hubble-module test . && hubble-module pack . ../../artifacts/hubble-tally-switch-1.1.5.hubble-module"
+    "package": "hubble-module build . && hubble-module test . && hubble-module pack . ../../artifacts/hubble-tally-switch-1.1.7.hubble-module"
   },
   "dependencies": {
     "@hubble/module-sdk": "workspace:1.8.0",

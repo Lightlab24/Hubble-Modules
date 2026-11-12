@@ -201,6 +201,12 @@ export class TallySwitchEngine {
       }
       const router = this.routers.get(winner.values.router);
       if (!router?.ready || !router.approved) {
+        // A router that connects, reconnects or regains approval starts fresh, as at startup:
+        // the tally it returns to is the baseline, so a change it missed is never caught up.
+        this.attempts.set(key, {
+          signature,
+          status: "Holding · router ready; waiting for a tally change",
+        });
         set(winner, "Holding · router unavailable", true);
         continue;
       }
