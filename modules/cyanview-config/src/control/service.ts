@@ -398,6 +398,22 @@ export class CameraControl {
       if (devices.length && command === 'single-switch') active = devices.every(item => selected.singleSwitch[item.id] === true);
       const sessions = devices.map(item => this.sessions.get(item.id));
       if (sessions.length && sessions.every(item => item !== undefined)) online = sessions.every(item => item!.snapshot().phase === 'ready');
+      // With no controller named, a camera row follows that camera on every controller that has it:
+      // online when any of them sees it online, offline only when none can, and recording when any of them sees it roll.
+      if (!device && cameraCommands.includes(command) && matches.length) {
+        const seen = matches.flatMap(row => {
+          const own = this.plan.devices.find(item => item.id === row.device), owner = own && this.sessions.get(own.id);
+          if (!owner || owner.snapshot().phase !== 'ready') return owner ? [{ online: false, recording: null as boolean | null }] : [];
+          try {
+            const target = owner.captureCamera(Number(row.number)), observation = target.observation;
+            const usable = observation.online === true && observation.recording !== null && this.recording.usableObservation(`${own.id}/${target.address}`, target, observation);
+            return [{ online: observation.online, recording: usable ? observation.recording : null }];
+          } catch { return []; }
+        });
+        if (seen.length) online = seen.some(item => item.online === true) ? true : seen.every(item => item.online === false) ? false : null;
+        if (seen.some(item => item.recording === true)) recording = true;
+        else if (seen.length && seen.every(item => item.recording === false)) recording = false;
+      }
       if (session?.snapshot().phase === 'ready') {
         if (command === 'select-camera') {
           const current = this.selectedCamera(device!.id, session);

@@ -1203,6 +1203,28 @@ test('a camera row reports its recording, state and connection as feedback trigg
   } finally { await s.close(); }
 });
 
+test('a camera row with no controller named rolls with its camera and stays online while any controller sees it', async () => {
+  const s = await fleet();
+  try {
+    const fields = { actionId: 'row-any', actionColumnId: 'column-one', values: { enabled: true, actionType: 'toggle-camera-enabled',
+      'module.controllerId': '', 'module.cameraNumber': 1, 'module.feedbackEnabled': true, 'module.feedbackColor': '#333333 | #00FF00' } };
+    const triggers = () => object(object(s.f.feedback.at(-1)).appearance).triggers;
+    await s.f.instance.subscribeFeedback!([{ id: 'camera-control', fields }], { signal: s.f.signal });
+    for (const network of s.networks) network.send('unit/a/camhead/status/volatile/recording', '0');
+    await eventually(() => JSON.stringify(triggers()) === '["online"]');
+    // Rolling seen on one controller lights Recording, the way the named Record camera key does.
+    s.networks[0]!.send('unit/a/camhead/status/volatile/recording', '1');
+    await eventually(() => JSON.stringify(triggers()) === '["recording","online"]');
+    // One controller losing the camera leaves it online through the other.
+    s.networks[1]!.send('unit/a/camhead/status/volatile/control', 'offline');
+    await delay(60);
+    assert.deepEqual(triggers(), ['recording', 'online']);
+    s.networks[0]!.send('unit/a/camhead/status/volatile/control', 'offline');
+    await eventually(() => JSON.stringify(triggers()) === '["offline"]');
+    assert.equal(s.networks[0]!.commands.length + s.networks[1]!.commands.length, 0, 'Watching sends nothing');
+  } finally { await s.close(); }
+});
+
 test('group rows report all or some of their cameras, and only their own triggers', async () => {
   const s = await fleet();
   try {
