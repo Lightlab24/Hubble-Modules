@@ -310,6 +310,36 @@ export const ModuleMatrixFieldSchema = z.strictObject({
     .max(16)
     .optional(),
 });
+const FeedbackEffect = z.strictObject({
+  kind: z.enum(["blink", "fade"]),
+  /** One full cycle in milliseconds: on and off, or bright to dim and back. */
+  cycleMs: z.int().min(200).max(10000),
+});
+
+/** The colour field whose cell edits a matrix's trigger looks, when it declares triggers. */
+export function matrixTriggerFieldId(matrix: {
+  readonly triggers?: readonly unknown[] | undefined;
+  readonly triggerField?: string | undefined;
+  readonly fields: readonly { readonly id: string; readonly type: string }[];
+}): string | undefined {
+  if (!matrix.triggers?.length && matrix.triggerField === undefined)
+    return undefined;
+  const colours = matrix.fields.filter((field) => field.type === "color");
+  return matrix.triggerField === undefined
+    ? colours[0]?.id
+    : colours.find((field) => field.id === matrix.triggerField)?.id;
+}
+
+/** A named feedback state and the key part it lights by default. Requires module-feedback-triggers-v1. */
+export const ModuleFeedbackTriggerSchema = z.strictObject({
+  id: Id,
+  label: Label,
+  part: z.enum(["background", "outline", "bar"]),
+  color: Color,
+  effect: FeedbackEffect.optional(),
+});
+export type ModuleFeedbackTrigger = z.infer<typeof ModuleFeedbackTriggerSchema>;
+
 const MatrixDefinitionSchema = z
   .strictObject({
     id: Id,
@@ -341,6 +371,14 @@ const MatrixDefinitionSchema = z
       .optional(),
     columnSettings: ModuleFieldsSchema.default([]),
     columnDescription: z.string().max(1000).optional(),
+    /**
+     * Feedback states, highest priority first. A row's feedback reports which are on; each
+     * lights its part, and when two want the same part the higher one wins. Operators can
+     * change any trigger's look per row. Requires module-feedback-triggers-v1.
+     */
+    triggers: z.array(ModuleFeedbackTriggerSchema).max(16).optional(),
+    /** The colour field whose cell edits the triggers' looks; the first colour field if absent. */
+    triggerField: Id.optional(),
     mapping: z
       .strictObject({
         label: Label,
@@ -405,6 +443,22 @@ const MatrixDefinitionSchema = z
       ctx.addIssue({
         code: "custom",
         message: "Matrix descriptor exceeds 64 KiB",
+      });
+    if (
+      new Set(matrix.triggers?.map(({ id }) => id)).size !==
+      (matrix.triggers?.length ?? 0)
+    )
+      ctx.addIssue({
+        code: "custom",
+        message: "Matrix triggers require unique IDs",
+      });
+    if (
+      (matrix.triggers?.length || matrix.triggerField) &&
+      matrixTriggerFieldId(matrix) === undefined
+    )
+      ctx.addIssue({
+        code: "custom",
+        message: "Matrix triggers require a colour field to edit them from",
       });
     const ids = new Set(matrix.fields.map((field) => field.id));
     if (ids.size !== matrix.fields.length || !ids.has(matrix.primaryField))
@@ -607,7 +661,24 @@ export type ModuleFeedbackSubscription = z.infer<
   typeof ModuleFeedbackSubscriptionSchema
 >;
 export const ModuleFeedbackAppearanceSchema = z.strictObject({
+  /** The row's feedback colour. Hubble puts it on the key part the operator chose. */
   backgroundColor: Color.nullable().optional(),
+  /** Lights the key's outline, whatever part the operator chose. Requires module-feedback-key-parts-v1. */
+  outlineColor: Color.nullable().optional(),
+  /** Lights the key's bar, whatever part the operator chose. Requires module-feedback-key-parts-v1. */
+  barColor: Color.nullable().optional(),
+  /** Makes a lit outline blink or fade. Requires module-feedback-key-effects-v1. */
+  outlineEffect: FeedbackEffect.nullable().optional(),
+  /** Makes a lit bar blink or fade. Requires module-feedback-key-effects-v1. */
+  barEffect: FeedbackEffect.nullable().optional(),
+  /** Makes a lit background blink or fade. Requires module-feedback-triggers-v1. */
+  backgroundEffect: FeedbackEffect.nullable().optional(),
+  /**
+   * The matrix's triggers that are on for this row. When present, the host draws the key from
+   * the triggers' looks and ignores the colours and effects above. Requires
+   * module-feedback-triggers-v1.
+   */
+  triggers: z.array(Id).max(16).nullable().optional(),
   glow: z
     .strictObject({ color: Color, cycleMs: z.int().min(500).max(10000) })
     .nullable()

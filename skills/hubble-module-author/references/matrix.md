@@ -269,6 +269,46 @@ same timing move together, on Stream Deck and Companion keys alike. An effect ap
 only while its part is lit, and emitting null makes it steady again. Operators set
 the same effects for their own rows in the Tally Color popup.
 
+### Feedback triggers
+
+With `module-feedback-triggers-v1` a matrix can name the states it reports and let
+operators decide how each one looks, row by row. Declare them on the matrix,
+highest priority first, each with the part it lights by default:
+
+```json
+"triggers": [
+  { "id": "recording", "label": "Recording", "part": "bar", "color": "#E3242B",
+    "effect": { "kind": "blink", "cycleMs": 800 } },
+  { "id": "selected", "label": "Selected", "part": "background", "color": "#1FA34A" },
+  { "id": "online", "label": "Online", "part": "outline", "color": "#2563EB" },
+  { "id": "offline", "label": "Offline", "part": "outline", "color": "#8A8F98" }
+]
+```
+
+`part` is `background`, `outline` or `bar`; `effect` is optional and steady when
+absent. Up to 16 triggers, with unique IDs. Then report which are on in the
+appearance: `{ triggers: ['online', 'selected'] }`. Several triggers can be on at
+once and each lights its part, so one key can show recording on the bar, selection
+on the background and connection on the outline. When two want the same part, the
+one higher in the list wins, which is how `offline` only shows when `online` is not
+on. An empty list, or null when the observation is stale, lights nothing.
+
+When `triggers` is present Hubble draws the key from the triggers alone and ignores
+`backgroundColor`, `outlineColor`, `barColor` and their effects, so a module can
+still send those for older hosts. `backgroundEffect` (same shape as the other
+effects, same feature) makes a lit background blink or fade; it works with or
+without triggers.
+
+Operators edit the looks from the matrix's trigger colour cell: `triggerField`, or
+the first colour field when it is absent. A matrix with triggers needs one. That
+cell shows the row's triggers as coloured segments and opens a list where each
+trigger can be ignored, moved to another part, given another colour, made to blink
+or fade, or put back to the module's look. The row saves only what differs from
+your declaration, so a later version that changes a default still reaches every
+row that kept it. The changes travel with workspace exports. Hubble keeps the
+trigger cell's own value but no longer draws it; don't rely on it for anything a
+new host shows.
+
 Use `runtimeDirectory` for local runtime state that must survive module versions.
 Document any data excluded from workspace export. Tally's follow-state file is
 local runtime state; row colour/glow choices and column defaults are portable.
