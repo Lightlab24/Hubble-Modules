@@ -19,7 +19,7 @@ const eventually = async (predicate: () => boolean, attempts = 200) => {
   assert.ok(predicate(), 'Expected control observation');
 };
 /** An RCP and a second controller, a RIO with no panel unless a test asks for another kind. */
-async function fleet({ second = { Serial: 'CY-RIO-1-20', Name: 'RIO' }, secondPanel = false, cameraSettleMs = undefined as number | undefined } = {}) {
+async function fleet({ second = { Serial: 'CY-RIO-1-20', Name: 'RIO' }, secondPanel = false, cameraSettleMs = undefined as number | undefined, selectHoldMs = undefined as number | undefined } = {}) {
   const a = new FakeController(), b = new FakeController();
   a.config.Product = { Serial: 'CY-RCP-1-10', Name: 'RCP' };
   b.config.Product = { ...second };
@@ -51,7 +51,7 @@ async function fleet({ second = { Serial: 'CY-RIO-1-20', Name: 'RIO' }, secondPa
       if (wait) { const connect = client.connect.bind(client); client.connect = async signal => { await delay(wait); return connect(signal); }; }
       return client;
     },
-    control: { cameraSettleMs, session: (definition, changed) => {
+    control: { cameraSettleMs, ...(selectHoldMs === undefined ? {} : { selectHoldMs }), session: (definition, changed) => {
       const network = networks[definition.serial === a.config.Product.Serial ? 0 : 1]!;
       const session = new RcpSession({ ...definition, requestTimeoutMs: 350 }, changed, true,
         () => createConnection({ host: '127.0.0.1', port: network.port }));
@@ -1222,6 +1222,31 @@ test('group rows report all or some of their cameras, and only their own trigger
     s.networks[0]!.send('unit/b/camhead/status/volatile/recording', '1');
     await eventually(() => JSON.stringify(triggers()) === '["all-rolling"]');
     assert.equal(s.networks[0]!.commands.length, 0, 'Watching sends nothing');
+  } finally { await s.close(); }
+});
+
+test('Select camera lights as soon as the controller acknowledges, and the RCP report confirms or corrects it', async () => {
+  const s = await fleet({ selectHoldMs: 300 });
+  try {
+    const fields = { actionId: 'row-select', actionColumnId: 'column-one', values: { enabled: true, actionType: 'select-camera',
+      'module.controllerId': s.ids[0]!, 'module.cameraNumber': 1, 'module.feedbackEnabled': true, 'module.feedbackColor': '#333333 | #00FF00' } };
+    const triggers = () => object(object(s.f.feedback.at(-1)).appearance).triggers as string[] | null;
+    await s.f.instance.subscribeFeedback!([{ id: 'camera-control', fields }], { signal: s.f.signal });
+    await eventually(() => s.sessions[0]?.snapshot().phase === 'ready');
+    assert.ok(!triggers()?.includes('selected'));
+    // The RCP hasn't reported anything yet, but the press shows straight away.
+    assert.equal((await s.run('select-camera', 0, 1)).status, 'success');
+    assert.ok(triggers()?.includes('selected'), JSON.stringify(triggers()));
+    // With no report the hold runs out and the key goes back to what the RCP last said.
+    await eventually(() => !triggers()?.includes('selected'));
+    // The RCP's own report decides from then on.
+    s.networks[0]!.send('unit/RCP/rcp/status/volatile/active_camera', 'a');
+    await eventually(() => triggers()?.includes('selected') === true);
+    // A press for another camera that the RCP then reports elsewhere follows the report at once.
+    assert.equal((await s.run('select-camera', 0, 2)).status, 'success');
+    s.networks[0]!.send('unit/RCP/rcp/status/volatile/active_camera', 'a');
+    await delay(50);
+    assert.ok(triggers()?.includes('selected'), 'The report of camera 1 wins over the press for camera 2');
   } finally { await s.close(); }
 });
 

@@ -11,7 +11,12 @@ import { recordingCheckpoint } from './recording-checkpoint.js';
 import { actionResult, type RecordingTargetResult } from './recording-result.js';
 
 export type FeedbackWait = { baseMs: number; perCameraMs: number; maxMs: number };
-export type ControlOptions = { cameraSettleMs?: number; session?: (definition: CyanViewRcpConnectionDefinition, changed: () => void) => RcpSession; feedbackWait?: FeedbackWait };
+export type ControlOptions = {
+  cameraSettleMs?: number; session?: (definition: CyanViewRcpConnectionDefinition, changed: () => void) => RcpSession; feedbackWait?: FeedbackWait;
+  /** How long a Select camera press shows its camera before the RCP's own report must confirm it. */
+  selectHoldMs?: number;
+};
+const SELECT_HOLD_MS = 2000;
 /** What the page shows for one camera on a controller. `online` is null until the camera has reported. */
 export type CameraStatus = { recording: 'recording' | 'stopped' | 'unknown'; available: boolean; message: string; online: boolean | null };
 const steps: Partial<Record<Command, CyanViewCameraParameterStep>> = {
@@ -58,6 +63,11 @@ export class CameraControl {
   private cameraWatches = new Map<string, { text: string; settled: boolean; timer?: ReturnType<typeof setTimeout> }>();
   private cameraChanges: Record<string, number> = {};
   private feedbackSent = new Map<ModuleFeedbackSubscription, string>();
+  /**
+   * Select camera presses the controller acknowledged, shown at once until the RCP reports a camera change
+   * over MQTT or the hold runs out, whichever comes first. Keyed by controller.
+   */
+  private pendingSelection = new Map<string, { camera: number; reports: number; until: number }>();
   // A restarted worker counts from zero again, so an open page must be able to tell.
   private readonly epoch = randomUUID();
   private stateText = '';
@@ -269,7 +279,9 @@ export class CameraControl {
               if (!target) throw new Error(error);
               assertCurrent(row);
               if (command === 'select-camera') {
+                const before = connected.snapshot();
                 await connected.selectCamera(target.observation.number!, execution.signal);
+                this.holdSelection(device.id, target.observation.number!, before.activeCameraNumber, before.activeCameraReports);
               } else if (command === 'record-camera' || command.startsWith('roll-') || command === 'stop-enabled-cameras') {
                 return await this.recording.record({ key, session: connected, target }, command === 'roll-enabled-cameras' ? 'start' : command === 'stop-enabled-cameras' ? 'stop' : 'toggle', execution.signal, feedbackTimeout(targets.length, this.options.feedbackWait));
               } else {
@@ -387,7 +399,10 @@ export class CameraControl {
       const sessions = devices.map(item => this.sessions.get(item.id));
       if (sessions.length && sessions.every(item => item !== undefined)) online = sessions.every(item => item!.snapshot().phase === 'ready');
       if (session?.snapshot().phase === 'ready') {
-        if (command === 'select-camera' && session.snapshot().activeCameraNumber !== null) active = session.snapshot().activeCameraNumber === values['module.cameraNumber'];
+        if (command === 'select-camera') {
+          const current = this.selectedCamera(device!.id, session);
+          if (current !== null) active = current === values['module.cameraNumber'];
+        }
         // A camera row follows its camera, found by number on the named controller the same way its press finds it, as reported over MQTT.
         if (cameraCommands.includes(command)) {
           try {
@@ -436,6 +451,21 @@ export class CameraControl {
       this.feedbackSent.set(subscription, signature);
       this.context.publishFeedback({ ...subscription, state, observedAt: observing && active === null ? null : new Date().toISOString(), appearance });
     }
+  }
+  /** Shows an acknowledged Select camera press straight away, then lets the RCP's report take over. */
+  private holdSelection(deviceId: string, camera: number, before: number | null, reports: number) {
+    if (before === camera) return;
+    const holdMs = this.options.selectHoldMs ?? SELECT_HOLD_MS;
+    this.pendingSelection.set(deviceId, { camera, reports, until: Date.now() + holdMs });
+    setTimeout(() => this.emit(), holdMs + 10).unref();
+    this.emit();
+  }
+  /** The camera a controller has selected: an acknowledged press until the RCP reports a change, then its report. */
+  private selectedCamera(deviceId: string, session: RcpSession): number | null {
+    const snapshot = session.snapshot(), pending = this.pendingSelection.get(deviceId);
+    // Any report from the RCP after the press, the same camera or another, decides from then on.
+    if (pending && (Date.now() >= pending.until || snapshot.activeCameraReports !== pending.reports)) this.pendingSelection.delete(deviceId);
+    return this.pendingSelection.get(deviceId)?.camera ?? snapshot.activeCameraNumber;
   }
   private emit() {
     if (this.stopped) return;

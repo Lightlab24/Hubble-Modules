@@ -51,6 +51,8 @@ export interface ManagedCyanViewRcpConnectionSnapshot {
   readonly phase: "checking" | "ready" | "unavailable";
   readonly panelId: string | null;
   readonly activeCameraNumber: number | null;
+  /** Counts the RCP's active-camera reports, so a repeat of the same camera still shows it reported. */
+  readonly activeCameraReports: number;
   readonly lastEventAt: string | null;
   readonly lastError: string | null;
   /** Null until the first attempt settles, so "hasn't answered yet" stays apart from "didn't answer". */
@@ -120,6 +122,7 @@ export class RcpSession {
   #phase: ManagedCyanViewRcpConnectionSnapshot["phase"] = "checking";
   #lastError: string | null = null;
   #lastEventAt: string | null = null;
+  #activeCameraReports = 0;
   #reachable: boolean | null = null;
 
   constructor(
@@ -147,6 +150,7 @@ export class RcpSession {
               `${selected[0].slice(0, selected[0].indexOf("/"))}/${selected[1].activeCamera}`,
             ) ?? null)
           : null,
+      activeCameraReports: this.#activeCameraReports,
       lastEventAt: this.#lastEventAt,
       lastError: this.#lastError,
       reachable: this.#reachable,
@@ -707,8 +711,11 @@ export class RcpSession {
       if (domain === "rcp") panel.activeCamera = payload || null;
       else panel.online = payload === "online";
       this.#panels.set(key, panel);
+      if (domain === "rcp") this.#activeCameraReports += 1;
     } else return;
     this.#lastEventAt = new Date().toISOString();
+    // Once ready, a camera change shows at once rather than after discovery's settling pause.
+    if (domain === "rcp" && this.#phase === "ready") this.changed();
     this.updateState();
   }
 
