@@ -1191,7 +1191,7 @@ test('a camera row reports its recording, state and connection as feedback trigg
     s.networks[0]!.send('unit/a/camhead/status/volatile/recording', '0');
     await eventually(() => JSON.stringify(triggers()) === '["online"]');
     s.networks[0]!.send('unit/a/camhead/status/volatile/recording', '1');
-    await eventually(() => JSON.stringify(triggers()) === '["recording","active","online"]');
+    await eventually(() => JSON.stringify(triggers()) === '["rolling","online"]');
     // The colour stays for hosts without triggers.
     assert.equal(object(object(s.f.feedback.at(-1)).appearance).backgroundColor, '#00FF00');
     s.networks[0]!.send('unit/a/camhead/status/volatile/control', 'offline');
@@ -1199,6 +1199,28 @@ test('a camera row reports its recording, state and connection as feedback trigg
     // With Button Feedback off nothing is reported.
     await s.f.instance.subscribeFeedback!([{ id: 'camera-control', fields: { ...fields, values: { ...fields.values, 'module.feedbackEnabled': false } } }], { signal: s.f.signal });
     await eventually(() => triggers() === null);
+    assert.equal(s.networks[0]!.commands.length, 0, 'Watching sends nothing');
+  } finally { await s.close(); }
+});
+
+test('group rows report all or some of their cameras, and only their own triggers', async () => {
+  const s = await fleet();
+  try {
+    const row = (actionType: string) => ({ actionId: `row-${actionType}`, actionColumnId: 'column-one', values: { enabled: true, actionType,
+      'module.controllerId': s.ids[0]!, 'module.feedbackEnabled': true, 'module.feedbackColor': '#333333 | #00FF00' } });
+    const triggers = () => object(object(s.f.feedback.at(-1)).appearance).triggers;
+    await s.run('toggle-camera-enabled', 0, 1);
+    await s.f.instance.subscribeFeedback!([{ id: 'camera-control', fields: row('enable-all-cameras') }], { signal: s.f.signal });
+    await eventually(() => JSON.stringify(triggers()) === '["some-enabled"]');
+    await s.run('toggle-camera-enabled', 0, 2);
+    await eventually(() => JSON.stringify(triggers()) === '["all-enabled"]');
+    await eventually(() => s.sessions[0]?.snapshot().phase === 'ready');
+    await s.f.instance.subscribeFeedback!([{ id: 'camera-control', fields: row('roll-enabled-cameras') }], { signal: s.f.signal });
+    s.networks[0]!.send('unit/a/camhead/status/volatile/recording', '1');
+    s.networks[0]!.send('unit/b/camhead/status/volatile/recording', '0');
+    await eventually(() => JSON.stringify(triggers()) === '["some-rolling"]');
+    s.networks[0]!.send('unit/b/camhead/status/volatile/recording', '1');
+    await eventually(() => JSON.stringify(triggers()) === '["all-rolling"]');
     assert.equal(s.networks[0]!.commands.length, 0, 'Watching sends nothing');
   } finally { await s.close(); }
 });

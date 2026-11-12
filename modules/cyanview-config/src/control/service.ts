@@ -375,8 +375,14 @@ export class CameraControl {
       let active: boolean | null = null;
       // Recording and connection, reported as triggers beside the row's own state. Null is not known yet.
       let recording: boolean | null = null, online: boolean | null = null;
+      // Group rows: every one, or only some, of their cameras enabled or rolling.
+      let all = false, some = false;
       if (command === 'toggle-camera-enabled' && resolved) active = matches.every(row => selected.enabled[row.id] === true);
-      if (devices.length && command === 'enable-all-cameras') active = rows.length > 0 && rows.every(row => selected.enabled[row.id]);
+      if (devices.length && command === 'enable-all-cameras') {
+        active = rows.length > 0 && rows.every(row => selected.enabled[row.id]);
+        all = active;
+        some = !all && rows.some(row => selected.enabled[row.id]);
+      }
       if (devices.length && command === 'single-switch') active = devices.every(item => selected.singleSwitch[item.id] === true);
       const sessions = devices.map(item => this.sessions.get(item.id));
       if (sessions.length && sessions.every(item => item !== undefined)) online = sessions.every(item => item!.snapshot().phase === 'ready');
@@ -402,19 +408,26 @@ export class CameraControl {
               return this.appliedRow(row) && target.observation.online === true && this.recording.usableObservation(`${device!.id}/${target.address}`, target, target.observation) ? target.observation.recording : null;
             } catch { return null; }
           });
-          if (observations.length && observations.every(value => value !== null)) {
+          if (observations.length && observations.every(value => value !== null))
             active = observations.every(value => value === (command !== 'stop-enabled-cameras'));
-            recording = observations.every(value => value === true);
-          }
+          all = observations.length > 0 && observations.every(value => value === true);
+          some = !all && observations.some(value => value === true);
         }
       }
       const observing = values.enabled !== false && values['module.feedbackEnabled'] === true && feedbackCommands.includes(command);
       const colors = String(values['module.feedbackColor'] || '#3A3A40 | #37A65B').split('|').map(color => color.trim()).filter(color => /^#[0-9a-f]{6}$/i.test(color));
       const state = !observing ? 'inactive' as const : active === null ? 'unavailable' as const : active ? 'active' as const : 'inactive' as const;
-      const triggers = !observing ? null : [
-        ...(recording ? ['recording'] : []), ...(active ? ['active'] : []),
-        ...(online === true ? ['online'] : []), ...(online === false ? ['offline'] : []),
-      ];
+      // Each action reports its own triggers, as the matrix declares them.
+      const own: Record<string, readonly (string | false)[]> = {
+        'select-camera': [active === true && 'selected', recording === true && 'recording'],
+        'record-camera': [recording === true && 'rolling'],
+        'toggle-camera-enabled': [active === true && 'enabled', recording === true && 'recording'],
+        'enable-all-cameras': [all && 'all-enabled', some && 'some-enabled'],
+        'single-switch': [active === true && 'single-switch'],
+      };
+      for (const action of ['roll-enabled-cameras', 'stop-enabled-cameras', 'roll-toggle-enabled-cameras']) own[action] = [all && 'all-rolling', some && 'some-rolling'];
+      const connection = cameraCommands.includes(command) ? [online === true && 'online', online === false && 'offline'] : [];
+      const triggers = !observing ? null : [...(own[command] ?? []), ...connection].filter((id): id is string => typeof id === 'string');
       // Hubble with feedback triggers draws the key from `triggers`; the colour is for older hosts.
       const appearance = { cells, backgroundColor: !observing || active === null ? null : active ? colors.at(-1) ?? null : colors.length === 2 ? colors[0]! : null, triggers };
       // observedAt marks a change of state, not a heartbeat, so repeated camera traffic stays off the host.
