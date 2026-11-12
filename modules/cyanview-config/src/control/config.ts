@@ -31,4 +31,11 @@ export type Command = typeof commands[number][0];
 export const commandGroup = (command: Command) => command === 'select-camera' ? 'RCP set active camera' : 'Cyanview';
 export const cameraCommands: readonly string[] = ['select-camera', 'record-camera', 'toggle-camera-enabled'];
 export const localCommands: readonly string[] = ['toggle-camera-enabled', 'enable-all-cameras', 'single-switch'];
-export const feedbackCommands = [...localCommands, 'select-camera', 'roll-enabled-cameras', 'stop-enabled-cameras', 'roll-toggle-enabled-cameras'];
+export const feedbackCommands = [...localCommands, 'select-camera', 'record-camera', 'roll-enabled-cameras', 'stop-enabled-cameras', 'roll-toggle-enabled-cameras'];
+/** Feedback states a row reports, highest priority first. Operators change their looks row by row in Hubble. */
+export const feedbackTriggers = [
+  { id: 'recording', label: 'Recording', part: 'bar', color: '#E3242B', effect: { kind: 'blink', cycleMs: 800 } },
+  { id: 'active', label: 'Active', part: 'background', color: '#37A65B' },
+  { id: 'online', label: 'Online', part: 'outline', color: '#2563EB' },
+  { id: 'offline', label: 'Offline', part: 'outline', color: '#8A8F98', effect: { kind: 'fade', cycleMs: 2000 } },
+] as const;

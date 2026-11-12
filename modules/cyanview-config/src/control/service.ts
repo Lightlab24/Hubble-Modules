@@ -373,11 +373,27 @@ export class CameraControl {
       if (device) cells['module.controllerId'] = { label: controllerLabel(device), color: null };
       if (resolved) cells['module.cameraNumber'] = { label: `${matches[0]!.number} · ${matches[0]!.name || 'Camera'}`, color: null };
       let active: boolean | null = null;
+      // Recording and connection, reported as triggers beside the row's own state. Null is not known yet.
+      let recording: boolean | null = null, online: boolean | null = null;
       if (command === 'toggle-camera-enabled' && resolved) active = matches.every(row => selected.enabled[row.id] === true);
       if (devices.length && command === 'enable-all-cameras') active = rows.length > 0 && rows.every(row => selected.enabled[row.id]);
       if (devices.length && command === 'single-switch') active = devices.every(item => selected.singleSwitch[item.id] === true);
+      const sessions = devices.map(item => this.sessions.get(item.id));
+      if (sessions.length && sessions.every(item => item !== undefined)) online = sessions.every(item => item!.snapshot().phase === 'ready');
       if (session?.snapshot().phase === 'ready') {
         if (command === 'select-camera' && session.snapshot().activeCameraNumber !== null) active = session.snapshot().activeCameraNumber === values['module.cameraNumber'];
+        // A camera row follows its camera, found by number on the named controller the same way its press finds it, as reported over MQTT.
+        if (cameraCommands.includes(command)) {
+          try {
+            const target = session.captureCamera(Number(values['module.cameraNumber']));
+            const observation = target.observation;
+            if (observation.online !== null) online = observation.online;
+            if (observation.online === true && observation.recording !== null && this.recording.usableObservation(`${device!.id}/${target.address}`, target, observation)) {
+              recording = observation.recording;
+              if (command === 'record-camera') active = observation.recording;
+            }
+          } catch { /* Not on this controller, or the number is ambiguous. */ }
+        }
         if (['roll-enabled-cameras', 'stop-enabled-cameras', 'roll-toggle-enabled-cameras'].includes(command)) {
           const enabled = rows.filter(row => selected.enabled[row.id]);
           const observations = enabled.map(row => {
@@ -386,13 +402,21 @@ export class CameraControl {
               return this.appliedRow(row) && target.observation.online === true && this.recording.usableObservation(`${device!.id}/${target.address}`, target, target.observation) ? target.observation.recording : null;
             } catch { return null; }
           });
-          if (observations.length && observations.every(value => value !== null)) active = observations.every(value => value === (command !== 'stop-enabled-cameras'));
+          if (observations.length && observations.every(value => value !== null)) {
+            active = observations.every(value => value === (command !== 'stop-enabled-cameras'));
+            recording = observations.every(value => value === true);
+          }
         }
       }
       const observing = values.enabled !== false && values['module.feedbackEnabled'] === true && feedbackCommands.includes(command);
       const colors = String(values['module.feedbackColor'] || '#3A3A40 | #37A65B').split('|').map(color => color.trim()).filter(color => /^#[0-9a-f]{6}$/i.test(color));
       const state = !observing ? 'inactive' as const : active === null ? 'unavailable' as const : active ? 'active' as const : 'inactive' as const;
-      const appearance = { cells, backgroundColor: !observing || active === null ? null : active ? colors.at(-1) ?? null : colors.length === 2 ? colors[0]! : null };
+      const triggers = !observing ? null : [
+        ...(recording ? ['recording'] : []), ...(active ? ['active'] : []),
+        ...(online === true ? ['online'] : []), ...(online === false ? ['offline'] : []),
+      ];
+      // Hubble with feedback triggers draws the key from `triggers`; the colour is for older hosts.
+      const appearance = { cells, backgroundColor: !observing || active === null ? null : active ? colors.at(-1) ?? null : colors.length === 2 ? colors[0]! : null, triggers };
       // observedAt marks a change of state, not a heartbeat, so repeated camera traffic stays off the host.
       const signature = JSON.stringify([state, appearance]);
       if (this.feedbackSent.get(subscription) === signature) continue;

@@ -1,5 +1,5 @@
 import { ModuleMatrixSchema } from '@hubble/module-sdk';
-import { commands, cameraCommands, feedbackCommands, localCommands } from './config.js';
+import { commands, cameraCommands, feedbackCommands, feedbackTriggers, localCommands } from './config.js';
 
 export const matrix = ModuleMatrixSchema.parse({
   id: 'camera-control', label: 'Cyanview', actionId: 'camera-control', feedbackId: 'camera-control', primaryField: 'actionType',
@@ -20,9 +20,12 @@ export const matrix = ModuleMatrixSchema.parse({
       enabledWhen: [{ field: 'actionType', values: [...cameraCommands] }] },
     { id: 'module.feedbackEnabled', label: 'Button Feedback', type: 'boolean', default: true, fill: 'copy', width: 130,
       enabledWhen: [{ field: 'actionType', values: feedbackCommands }] },
+    // On Hubble with feedback triggers this cell shows and edits the row's trigger looks; older hosts use the colour pair.
     { id: 'module.feedbackColor', label: 'Feedback Color', type: 'color', colorMode: 'pair', default: '#3A3A40 | #37A65B', fill: 'copy', width: 155,
       enabledWhen: [{ field: 'actionType', values: feedbackCommands }, { field: 'module.feedbackEnabled', values: [true] }] },
   ],
+  triggers: feedbackTriggers,
+  triggerField: 'module.feedbackColor',
 });
 
 const controller = { id: 'controllerId', label: 'Cyanview controller', type: 'choice' as const, default: '', required: true, choices: [], choiceProvider: 'control-controllers' };

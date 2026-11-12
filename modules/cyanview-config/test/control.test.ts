@@ -1180,6 +1180,29 @@ test('Matrix execution and feedback use the same quick group and clear device fe
   } finally { await s.close(); }
 });
 
+test('a camera row reports its recording, state and connection as feedback triggers', async () => {
+  const s = await fleet();
+  try {
+    const fields = { actionId: 'row-rec', actionColumnId: 'column-one', values: { enabled: true, actionType: 'record-camera',
+      'module.controllerId': s.ids[0]!, 'module.cameraNumber': 1, 'module.feedbackEnabled': true, 'module.feedbackColor': '#333333 | #00FF00' } };
+    const triggers = () => object(object(s.f.feedback.at(-1)).appearance).triggers;
+    await s.f.instance.subscribeFeedback!([{ id: 'camera-control', fields }], { signal: s.f.signal });
+    await eventually(() => s.sessions[0]?.snapshot().phase === 'ready');
+    s.networks[0]!.send('unit/a/camhead/status/volatile/recording', '0');
+    await eventually(() => JSON.stringify(triggers()) === '["online"]');
+    s.networks[0]!.send('unit/a/camhead/status/volatile/recording', '1');
+    await eventually(() => JSON.stringify(triggers()) === '["recording","active","online"]');
+    // The colour stays for hosts without triggers.
+    assert.equal(object(object(s.f.feedback.at(-1)).appearance).backgroundColor, '#00FF00');
+    s.networks[0]!.send('unit/a/camhead/status/volatile/control', 'offline');
+    await eventually(() => JSON.stringify(triggers()) === '["offline"]');
+    // With Button Feedback off nothing is reported.
+    await s.f.instance.subscribeFeedback!([{ id: 'camera-control', fields: { ...fields, values: { ...fields.values, 'module.feedbackEnabled': false } } }], { signal: s.f.signal });
+    await eventually(() => triggers() === null);
+    assert.equal(s.networks[0]!.commands.length, 0, 'Watching sends nothing');
+  } finally { await s.close(); }
+});
+
 test('cancelled recording is not replayed and controller removal invalidates named targets', async () => {
   const s = await fleet();
   try {
