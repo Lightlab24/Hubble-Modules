@@ -1275,6 +1275,29 @@ test('a camera row with no controller named rolls with its camera and stays onli
   } finally { await s.close(); }
 });
 
+test('a camera row for a camera no controller has reads Offline, never Online from its controller being up', async () => {
+  const s = await fleet();
+  try {
+    // Both controllers list cameras 1 and 2 only. Camera 6 is named on the first, camera 7 on none.
+    const row = (id: string, actionType: string, controllerId: string, cameraNumber: number) => ({ id: 'camera-control', fields: { actionId: id, actionColumnId: 'column-one',
+      values: { enabled: true, actionType, 'module.controllerId': controllerId, 'module.cameraNumber': cameraNumber, 'module.feedbackEnabled': true, 'module.feedbackColor': '#333333 | #00FF00' } } });
+    const rows = [row('named-6', 'toggle-camera-enabled', s.ids[0]!, 6), row('record-6', 'record-camera', s.ids[0]!, 6), row('any-7', 'toggle-camera-enabled', '', 7), row('named-1', 'toggle-camera-enabled', s.ids[0]!, 1)];
+    const triggers = (id: string) => JSON.stringify(object(object([...s.f.feedback].reverse().find(item => object(object(item).fields).actionId === id)).appearance).triggers);
+    await s.f.instance.subscribeFeedback!(rows, { signal: s.f.signal });
+    await eventually(() => s.sessions.length === 2 && s.sessions.every(session => session.snapshot().phase === 'ready'));
+    await eventually(() => triggers('named-1') === '["online"]');
+    assert.equal(triggers('named-6'), '["offline"]');
+    assert.equal(triggers('record-6'), '["offline"]');
+    assert.equal(triggers('any-7'), '["offline"]');
+    // A camera that turns up on the controller follows its own report from then on.
+    s.networks[0]!.send('unit/f/camhead/status/persist/number', '6');
+    s.networks[0]!.send('unit/f/camhead/status/volatile/control', 'online');
+    await eventually(() => triggers('named-6') === '["online"]');
+    assert.equal(triggers('any-7'), '["offline"]');
+    assert.equal(s.networks[0]!.commands.length + s.networks[1]!.commands.length, 0, 'Watching sends nothing');
+  } finally { await s.close(); }
+});
+
 test('group rows report all or some of their cameras, and only their own triggers', async () => {
   const s = await fleet();
   try {

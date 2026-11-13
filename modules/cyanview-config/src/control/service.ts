@@ -111,6 +111,18 @@ export class CameraControl {
     if (!session || session.snapshot().phase !== 'ready') return null;
     try { return session.captureCamera(number, key).observation.online; } catch { return null; }
   }
+  /**
+   * A camera as one controller can reach it, for a key's Online and Offline: the camera's own report, offline when the
+   * controller is down or doesn't list that number, and null while that isn't known. The controller being up is not enough.
+   */
+  private cameraReach(session: RcpSession | undefined, number: number): { online: boolean | null; target: CyanViewCameraTarget | null } {
+    if (!session) return { online: null, target: null };
+    if (session.snapshot().phase !== 'ready') return { online: false, target: null };
+    try {
+      const target = session.captureCamera(number);
+      return { online: target.observation.online, target };
+    } catch { return { online: session.listsCamera(number) === false ? false : null, target: null }; }
+  }
   async refreshPlan(signal: AbortSignal) { this.setPlan((await this.repository.read(signal)).plan); }
   state() {
     const { enabled, singleSwitch } = this.selection.value();
@@ -407,41 +419,38 @@ export class CameraControl {
         some = !all && rows.some(row => selected.enabled[row.id]);
       }
       if (devices.length && command === 'single-switch') active = devices.every(item => selected.singleSwitch[item.id] === true);
-      const sessions = devices.map(item => this.sessions.get(item.id));
-      if (sessions.length && sessions.every(item => item !== undefined)) online = sessions.every(item => item!.snapshot().phase === 'ready');
+      // Online and Offline on a camera row are the camera's own. A controller being up says nothing about a camera it doesn't have.
       // With no controller named, a camera row follows that camera on every controller that has it:
       // online when any of them sees it online, offline only when none can, and recording when any of them sees it roll.
-      if (!device && cameraCommands.includes(command) && matches.length) {
+      if (!device && cameraCommands.includes(command) && devices.length) {
         const seen = matches.flatMap(row => {
           const own = this.plan.devices.find(item => item.id === row.device), owner = own && this.sessions.get(own.id);
-          if (!owner || owner.snapshot().phase !== 'ready') return owner ? [{ online: false, recording: null as boolean | null }] : [];
-          try {
-            const target = owner.captureCamera(Number(row.number)), observation = target.observation;
-            const usable = observation.online === true && observation.recording !== null && this.recording.usableObservation(`${own.id}/${target.address}`, target, observation);
-            return [{ online: observation.online, recording: usable ? observation.recording : null }];
-          } catch { return []; }
+          if (!owner) return [];
+          const { online: reached, target } = this.cameraReach(owner, Number(row.number)), observation = target?.observation;
+          const usable = !!target && observation!.online === true && observation!.recording !== null && this.recording.usableObservation(`${own.id}/${target.address}`, target, observation!);
+          return [{ online: reached, recording: usable ? observation!.recording : null }];
         });
-        if (seen.length) online = seen.some(item => item.online === true) ? true : seen.every(item => item.online === false) ? false : null;
+        // A number no controller has is a camera Hubble can't reach.
+        if (!matches.length) online = devices.every(item => this.sessions.has(item.id)) ? false : null;
+        else if (seen.length) online = seen.some(item => item.online === true) ? true : seen.every(item => item.online === false) ? false : null;
         if (seen.some(item => item.recording === true)) recording = true;
         else if (seen.length && seen.every(item => item.recording === false)) recording = false;
       }
+      // A camera row with a controller named follows its camera there, found by number the same way its press finds it, as reported over MQTT.
+      const reach = device && cameraCommands.includes(command) ? this.cameraReach(session, Number(values['module.cameraNumber'])) : null;
+      if (reach) online = reach.online;
       if (session?.snapshot().phase === 'ready') {
         if (command === 'select-camera') {
           const current = this.selectedCamera(device!.id, session);
           if (current !== null) active = current === values['module.cameraNumber'];
         }
-        // A camera row follows its camera, found by number on the named controller the same way its press finds it, as reported over MQTT.
-        if (cameraCommands.includes(command)) {
-          try {
-            const target = session.captureCamera(Number(values['module.cameraNumber']));
-            const observation = target.observation;
-            stopping = this.recording.isStopping(`${device!.id}/${target.address}`);
-            if (observation.online !== null) online = observation.online;
-            if (observation.online === true && observation.recording !== null && this.recording.usableObservation(`${device!.id}/${target.address}`, target, observation)) {
-              recording = observation.recording;
-              if (command === 'record-camera') active = observation.recording;
-            }
-          } catch { /* Not on this controller, or the number is ambiguous. */ }
+        if (reach?.target) {
+          const target = reach.target, observation = target.observation;
+          stopping = this.recording.isStopping(`${device!.id}/${target.address}`);
+          if (observation.online === true && observation.recording !== null && this.recording.usableObservation(`${device!.id}/${target.address}`, target, observation)) {
+            recording = observation.recording;
+            if (command === 'record-camera') active = observation.recording;
+          }
         }
         if (['roll-enabled-cameras', 'stop-enabled-cameras', 'roll-toggle-enabled-cameras'].includes(command)) {
           const enabled = rows.filter(row => selected.enabled[row.id]);

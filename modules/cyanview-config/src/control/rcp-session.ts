@@ -161,6 +161,15 @@ export class RcpSession {
     return [...this.#feedback.values()];
   }
 
+  /** Whether this controller lists a camera under the number, or null until its camera list has settled. */
+  listsCamera(cameraNumber: number): boolean | null {
+    const root = this.cameraRoot();
+    if (this.#phase !== "ready" || !this.#subscribed || !root) return null;
+    return this.cameraObservations().some(
+      (camera) => camera.number === cameraNumber && camera.address.startsWith(root + "/"),
+    );
+  }
+
   captureCamera(cameraNumber: number, entity = ""): CyanViewCameraTarget {
     const root = this.requireRoot();
     const matches = this.cameraObservations().filter(
