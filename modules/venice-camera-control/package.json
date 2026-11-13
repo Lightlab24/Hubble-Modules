@@ -1,0 +1,34 @@
+{
+  "name": "@hubble-module/venice-camera-control",
+  "version": "0.1.27",
+  "private": true,
+  "type": "module",
+  "description": "Sony VENICE 2 camera control using Hubble spreadsheet controls",
+  "hubble": {
+    "id": "venice-camera-control",
+    "name": "VENICE Camera Control",
+    "assets": [
+      "ui/index.html"
+    ],
+    "frontend": {
+      "ui/app.js": "src/frontend.ts"
+    }
+  },
+  "scripts": {
+    "build": "hubble-module build .",
+    "test": "hubble-module test .",
+    "typecheck": "tsc --noEmit",
+    "package": "hubble-module build . && hubble-module test . && hubble-module pack . ../../artifacts/venice-camera-control-0.1.27.hubble-module"
+  },
+  "dependencies": {
+    "@hubble/module-sdk": "workspace:1.8.0",
+    "@msgpack/msgpack": "3.1.3",
+    "ws": "8.22.1"
+  },
+  "devDependencies": {
+    "@hubble/module-tools": "workspace:1.5.0",
+    "@types/node": "22.19.17",
+    "@types/ws": "8.18.1",
+    "typescript": "6.0.3"
+  }
+}

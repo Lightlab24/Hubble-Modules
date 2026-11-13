@@ -36,10 +36,16 @@ const series: Record<string, readonly string[]> = {
 describe("module-owned fill declarations", () => {
   it("accounts for every production project, including page-only and observation-only modules", () => {
     expect(names).toEqual(
-      [...Object.keys(series), "mqtt-capture", "tally-switch"].sort(),
+      [
+        ...Object.keys(series),
+        "mqtt-capture",
+        "tally-switch",
+        "venice-camera-control",
+      ].sort(),
     );
     expect(manifests.get("mqtt-capture")?.matrix).toBeUndefined();
     expect(manifests.get("tally-switch")?.matrix).toBeUndefined();
+    expect(manifests.get("venice-camera-control")?.matrix).toBeUndefined();
   });
 
   it.each(Object.keys(series))(

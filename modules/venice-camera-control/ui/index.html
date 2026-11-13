@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>VENICE Camera Control</title><link rel="stylesheet" href="./app.css"></head>
+<body>
+<div class="camera-app" id="app">
+  <header class="app-header">
+    <div class="app-title"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="14" height="12" rx="2"/><path d="m17 10 4-3v10l-4-3M7 6V4h6v2"/></svg><div><h1>Camera Control</h1><p>Sony VENICE 2</p></div></div>
+    <div class="header-status"><span class="status-dot"></span><span id="fleet-status">Loading workspace…</span><div class="segment send-mode" role="group" aria-label="Send mode"><button id="send-manual" aria-pressed="true" title="Edits wait in Pending sends until you press Send all">Manual</button><button id="send-auto" aria-pressed="false" title="Enter, Tab or leaving a cell sends that edit to the camera">Auto send</button></div></div>
+  </header>
+  <div class="toolbar" role="toolbar" aria-label="Camera controls">
+    <button id="add-camera" class="primary"><span aria-hidden="true">+</span> Add camera</button>
+    <label class="camera-count">Cameras<input id="camera-count" type="number" min="0" max="24" step="1" autocomplete="off" aria-label="Number of cameras"></label>
+    <span class="toolbar-divider"></span>
+    <button id="refresh-camera" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M5 8a8 8 0 0 1 13-3l2 3M4 16l2 3a8 8 0 0 0 13-3"/></svg><span id="refresh-label">Refresh all</span></button>
+    <label class="live-switch" title="Holds one connection open to each camera, so changes appear as the camera reports them. Stays on when you leave this page, until you switch it off."><input id="live-updates" type="checkbox" role="switch">Live</label>
+    <button id="send-all-bar" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h13M12 6l6 6-6 6"/></svg>Send all <span class="count" id="send-all-bar-count" hidden>0</span></button>
+    <button id="pending-toggle" aria-expanded="false" aria-controls="pending-sends">Pending sends <span class="count" id="pending-count" hidden>0</span></button>
+    <button id="alerts-toggle" aria-expanded="false" aria-controls="alerts-panel" title="Tell this Mac when a camera stops answering"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0"/></svg>Alerts <span class="alerts-tag" id="alerts-tag">Off</span></button>
+    <span class="toolbar-spacer"></span>
+    <div class="segment" role="group" aria-label="Sheet layout for this tab"><button id="view-rows" aria-pressed="true">Cameras in rows</button><button id="view-columns" aria-pressed="false">Cameras in columns</button></div>
+    <div id="text-size" aria-label="Patch text size"></div>
+    <button id="expand-all">Expand all</button><button id="collapse-all">Collapse all</button>
+    <div id="column-editor" title="Choose which settings this tab shows"></div>
+    <button id="details-toggle" class="icon-button" aria-label="Setting details" aria-expanded="false">ⓘ</button>
+  </div>
+  <div id="error" class="notice error" role="alert" hidden></div>
+  <main class="work-area">
+    <div class="sheet-scroll" id="viewport"><table id="camera-grid" role="grid" aria-label="VENICE camera settings" tabindex="0"><colgroup></colgroup></table></div>
+    <aside id="setting-details" hidden aria-label="Setting details"><h2>Setting details</h2><div id="detail-content">Select a setting.</div></aside>
+    <aside id="alerts-panel" hidden aria-label="Alerts"><header><h2>Alerts</h2><button id="alerts-close" class="icon-button" aria-label="Close alerts">×</button></header><p>Camera Control can tell you on this Mac when a camera stops answering. Everything here starts off.</p><div class="alert-group" role="group" aria-labelledby="alerts-offline-title"><h3 id="alerts-offline-title">A camera stops answering</h3><label class="alert-row"><span>Show a notification<small>“Camera offline: Camera 3”</small></span><span class="live-switch"><input id="alert-offline-notification" type="checkbox" role="switch"></span></label><label class="alert-row"><span>Bounce the HubDash Dock icon<small>Keeps bouncing until you click HubDash</small></span><span class="live-switch"><input id="alert-offline-bounce" type="checkbox" role="switch"></span></label></div><div class="alert-group" role="group" aria-labelledby="alerts-online-title"><h3 id="alerts-online-title">A camera answers again</h3><label class="alert-row"><span>Show a notification<small>“Camera back online: Camera 3”</small></span><span class="live-switch"><input id="alert-online-notification" type="checkbox" role="switch"></span></label></div><p class="alerts-note">Only cameras that have answered since Hubble started can alert, so cameras that are off at the start of the day stay quiet. No banner? Set up this Mac in Hubble → Service Settings → Alerts.</p></aside>
+    <aside id="pending-sends" hidden aria-label="Pending sends"><header><h2>Pending sends</h2><button id="pending-close" class="icon-button" aria-label="Close pending sends">×</button></header><p id="pending-summary"></p><div class="pending-actions"><button id="send-all" class="primary">Send all</button><button id="cancel-all">Cancel all</button></div><div id="pending-list"></div></aside>
+    <div id="loading" class="loading" role="status">Connecting to workspace…</div>
+    <div id="empty" class="empty" hidden><h2>Add a camera</h2><p>Set how many cameras you want in the toolbar, then drag to fill their IPs. Or add one by name and address.</p><button id="empty-add" class="primary">Add camera</button></div>
+  </main>
+  <div id="sheet-tabs" class="sheet-tabs"></div>
+  <footer class="app-footer"><output id="save-status" aria-live="polite">Loading…</output><span title="Pinch or Ctrl+scroll to zoom the whole sheet"><output id="zoom-status" aria-label="Patch zoom">100%</output> · Pinch to zoom</span><span id="pending-status">Draft settings stay local until you send.</span></footer>
+</div>
+<dialog id="camera-dialog"><form id="camera-form"><header><h2 id="dialog-title">Add camera</h2><button type="button" id="close-dialog" aria-label="Close">×</button></header><div class="dialog-body"><p id="dialog-context">Add a camera row to this workspace.</p><label id="name-label">Camera name<input id="camera-name" autocomplete="off" maxlength="96"></label><label id="host-label">Host / IP<input id="camera-host" autocomplete="off" spellcheck="false" placeholder="192.0.2.109"></label><p id="dialog-error" role="alert" hidden></p></div><footer><button type="button" id="cancel-dialog">Cancel</button><button id="dialog-submit" type="submit" class="primary">Add camera</button></footer></form></dialog>
+<dialog id="remove-dialog" aria-labelledby="remove-title"><header><h2 id="remove-title">Remove cameras?</h2></header><div class="dialog-body"><p id="remove-context">This takes the last cameras out of the plan, with their addresses, logins and staged settings. Undo brings them back.</p><p>Filled in: <span id="remove-names"></span></p></div><footer><button type="button" id="remove-cancel">Cancel</button><button type="button" id="remove-confirm" class="primary">Remove cameras</button></footer></dialog>
+<script type="module" src="./app.js"></script>
+</body></html>
