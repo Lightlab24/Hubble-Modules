@@ -327,7 +327,7 @@ it("subscribes to a peer that becomes available on the next poll", async () => {
   await test.instance.dispose();
 });
 
-it("follows a revoked and restored router approval on the next poll", async () => {
+it("follows a revoked and restored router approval on the next poll, holding the change it missed", async () => {
   const test = await harness();
   await test.instance.start();
   await test.data("router", { ready: true });
@@ -342,9 +342,14 @@ it("follows a revoked and restored router approval on the next poll", async () =
   await tick();
   expect(test.route).not.toHaveBeenCalled();
 
+  // Regaining approval starts fresh, as a reconnect does: camera 2 went on air while
+  // the router couldn't act, so it is the baseline and only the next change routes.
   test.setBindings([tslBinding, routerBinding]);
   await tick();
   await test.data("tally", onAir(2));
+  await tick();
+  expect(test.route).not.toHaveBeenCalled();
+  await test.data("tally", onAir(1));
   await vi.waitFor(() => expect(test.route).toHaveBeenCalledTimes(1));
   await test.instance.dispose();
 });
