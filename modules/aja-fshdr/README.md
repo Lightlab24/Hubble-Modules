@@ -1,6 +1,6 @@
 # AJA FS-HDR
 
-Module ID `aja-fshdr`, version 2.0.1. Controls AJA FS-HDR frame synchronizers and HDR converters over their REST interface, from one page built on Hubble's shared spreadsheet controls. It needs Hubble 2.2.0 or later.
+Module ID `aja-fshdr`, version 2.0.2. Controls AJA FS-HDR frame synchronizers and HDR converters over their REST interface, from one page built on Hubble's shared spreadsheet controls. It needs Hubble 2.2.0 or later.
 
 ## The page
 
@@ -21,6 +21,8 @@ An edit is staged: the cell turns amber and nothing reaches a unit. **Send all**
 Every write is checked against the unit's own limits, sent, and confirmed by reading the value back. A setting the unit refuses or does not confirm stays staged with the reason. Writes to one unit go one at a time; different units are written side by side. A unit whose Allow sends tick is off, or whose Remote Control setting is Local Only, is never written to.
 
 The worker keeps one event connection to each unit whether or not the page is open, so cells follow changes made at the unit or by another controller. **Refresh all** drops those connections and reads every unit again from scratch. A unit that is not answering shows Offline with one blank, locked row.
+
+Framing settings the unit gives in percent (Custom Size, Custom H and V Pos, the four Custom crops and the four ROI edges) show as a slider with the number beside it. The range and step are the unit's own. Releasing the slider stages one value, the same as typing it, so with Auto send on it goes to the unit on release, not while dragging. Double-click the number, or select the cell and type, to enter an exact value. A Master cell that reads Mixed stays text until a value is typed.
 
 A setting can be locked on a unit, with the reason as its tooltip: the unit reports it but does not let it be set, it belongs to the other operating mode, or its prerequisite is off (Custom Size needs Custom Size/Pos on). Settings that are stored once per frame-rate family or per transform are followed to the copy in use.
 

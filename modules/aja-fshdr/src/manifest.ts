@@ -9,7 +9,7 @@ export default defineModuleManifest({
   host: { minimumVersion: '2.2.0', requiredFeatures: [
     'module-pages-v1', 'module-custom-pages-v1', 'module-custom-pages-full-page-v1', 'module-matrix-v1', 'module-feedback-observers-v1', 'module-choices-v2',
     'module-spreadsheet-controls-v1', 'module-spreadsheet-column-groups-v1', 'module-spreadsheet-column-editor-v1', 'module-spreadsheet-column-visibility-v1', 'module-spreadsheet-column-paint-v1', 'module-spreadsheet-text-size-v1',
-    'module-spreadsheet-layout-v1', 'module-spreadsheet-extended-editing-v1', 'module-spreadsheet-workbook-tools-v1', 'module-documents-v1', 'host-service-registry-v1', 'module-disabled-state-v1',
+    'module-spreadsheet-layout-v1', 'module-spreadsheet-extended-editing-v1', 'module-spreadsheet-workbook-tools-v1', 'module-documents-v1', 'host-service-registry-v1', 'module-disabled-state-v1', 'module-sliders-v1',
   ] },
   configVersion: 2,
   lifecycle: { runWhenDisabled: true },

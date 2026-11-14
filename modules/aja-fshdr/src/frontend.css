@@ -130,3 +130,7 @@ dialog::backdrop{background:#0009}dialog header{display:flex;align-items:center;
 :is(#grid-setup,#grid-master,#grid-channels) td[data-connection=duplicate]{color:#e0a458}
 :is(#grid-setup,#grid-master,#grid-channels) td>[data-hubble-boolean]{display:flex;justify-content:center;align-items:center}
 :is(#grid-setup,#grid-master,#grid-channels) td:has(>[data-hubble-boolean]){padding-right:8px}
+/* A Framing setting in % is Hubble's slider with its number beside it. The number follows the sheet's text size and colour. */
+:is(#grid-setup,#grid-master,#grid-channels) td.slider-cell{padding:0 10px 0 8px;white-space:nowrap}
+.cell-slider{width:100%;min-width:0}
+.cell-slider .hubble-slider{font:inherit;--slider-value-color:currentColor;--slider-thumb-size:14px;--slider-hit-size:26px}

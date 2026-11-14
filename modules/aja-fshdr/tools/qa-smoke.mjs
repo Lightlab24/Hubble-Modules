@@ -18,10 +18,21 @@ const f = page.frameLocator('iframe');
 const cell = (row, column) => f.locator(`.sheet-scroll:not([hidden]) td[data-hubble-row="${row}"][data-hubble-column="${column}"]`);
 const tab = name => f.getByRole('tab', { name });
 const staged = async (row, column) => { const { document } = await state(), [unitId, channel] = row.split('#'), found = document.units.find(item => item.id === unitId); return (channel === undefined ? found.values : found.channels?.[channel] ?? {})[column] ?? ''; };
-async function type(row, column, value) { await cell(row, column).scrollIntoViewIfNeeded(); await cell(row, column).dblclick(); const input = cell(row, column).locator('input.cell-input'); await expect(input).toBeVisible(); await input.fill(value); await input.press('Enter'); }
+// On a slider cell the number is what opens for typing; a double press on the track only moves the slider.
+async function type(row, column, value) { await cell(row, column).scrollIntoViewIfNeeded(); const number = cell(row, column).locator('.hubble-slider-value'); await ((await number.count()) ? number : cell(row, column)).dblclick(); const input = cell(row, column).locator('input.cell-input'); await expect(input).toBeVisible(); await input.fill(value); await input.press('Enter'); }
 async function choose(row, column, label) { await cell(row, column).scrollIntoViewIfNeeded(); await cell(row, column).click(); await page.keyboard.press('Enter'); await f.getByRole('option', { name: label, exact: true }).click(); }
 async function show(label) { await f.locator('.toolbar [data-for]:not([hidden]) button[aria-label="Choose visible columns"]').click(); const search = f.getByRole('searchbox', { name: 'Search columns' }); await search.fill(label); await f.getByRole('menuitemcheckbox', { name: label, exact: true }).click(); await search.press('Escape'); }
 const sendAll = async () => { await expect(f.locator('#send-all-bar')).toBeEnabled(); await f.locator('#send-all-bar').click(); await expect(f.locator('#pending-status')).toHaveText('No changes pending', { timeout: 15000 }); };
+const number = (row, column) => cell(row, column).locator('.hubble-slider-value');
+const reading = async (row, column) => Number((await number(row, column).textContent()).replace(/\s*%$/, ''));
+/** A real pointer drag along a slider's track, from one fraction of its length to another. */
+async function drag(row, column, from, to) {
+  await cell(row, column).scrollIntoViewIfNeeded();
+  const box = await cell(row, column).locator('.hubble-slider-root').boundingBox(), y = box.y + box.height / 2;
+  await page.mouse.move(box.x + box.width * from, y); await page.mouse.down();
+  for (let step = 1; step <= 8; step++) await page.mouse.move(box.x + box.width * (from + (to - from) * step / 8), y);
+  await page.mouse.up();
+}
 const shot = async name => { if (shots) await page.screenshot({ path: shots + '/' + name + '.png' }); };
 try {
   await expect(f.locator('#fleet-status')).toHaveText('3 units / 3 live', { timeout: 15000 });
@@ -126,10 +137,71 @@ try {
   await expect(cell(unit(0) + '#1', 'Vid#CustomSize')).toHaveAttribute('aria-invalid', 'true');
   await cell(unit(0) + '#1', 'Vid#CustomSize').click(); await page.keyboard.press('ControlOrMeta+z');
   await type(unit(0) + '#1', 'Vid#CustomSize', '120');
-  await expect(cell(unit(0) + '#1', 'Vid#CustomSize')).toHaveText('120.0 %');
+  await expect(number(unit(0) + '#1', 'Vid#CustomSize')).toHaveText('120.0 %');
   await sendAll();
   assert.equal(String(await sim(0, 'eParamID_Vid1CustomSize')), '1200');
   check('a locked setting unlocks once its prerequisite is sent, an out-of-range number is refused, and 120 is sent as 120.0 %');
+
+  // Framing settings in % are sliders with their number. A drag stages one value on release, and nothing reaches the unit until it is sent.
+  await show('Custom H Pos');
+  const ch1 = unit(0) + '#1';
+  await expect(cell(ch1, 'Vid#CustomHPosition').getByRole('slider')).toHaveAttribute('aria-valuemin', '-100');
+  await expect(number(ch1, 'Vid#CustomHPosition')).toHaveText('0.0 %');
+  await expect(cell(unit(1) + '#1', 'Vid#CustomSize').getByRole('slider')).toHaveAttribute('data-disabled', '');
+  await drag(ch1, 'Vid#CustomHPosition', 0.5, 0.8);
+  const moved = await reading(ch1, 'Vid#CustomHPosition');
+  assert.ok(moved > 0, 'the drag moved H Pos right: ' + moved);
+  await expect(cell(ch1, 'Vid#CustomHPosition')).toHaveAttribute('data-pending', 'true');
+  assert.equal(await staged(ch1, 'Vid#CustomHPosition'), moved.toFixed(1));
+  assert.equal(String(await sim(0, 'eParamID_Vid1CustomHPosition')), '0');
+  await expect(f.locator('.sheet-scroll:not([hidden]) [data-hubble-spreadsheet-active="true"]')).toHaveAttribute('data-hubble-column', 'Vid#CustomHPosition');
+  await expect(f.locator('#grid-channels')).toBeFocused();
+  await page.keyboard.press('ArrowLeft');
+  await expect(f.locator('.sheet-scroll:not([hidden]) [data-hubble-spreadsheet-active="true"]')).toHaveAttribute('data-hubble-column', 'Vid#CustomSize');
+  await shot('slider-staged');
+  check('a slider drag stages one value in amber, the number follows it, the unit is untouched, and the arrow keys still move around the sheet');
+  // A locked slider doesn't move.
+  await drag(unit(1) + '#1', 'Vid#CustomSize', 0.5, 0.9);
+  await expect(number(unit(1) + '#1', 'Vid#CustomSize')).toHaveText('100.0 %');
+  assert.equal(await staged(unit(1) + '#1', 'Vid#CustomSize'), '');
+  check('a slider locked by its prerequisite does not move');
+  await sendAll();
+  assert.equal(String(await sim(0, 'eParamID_Vid1CustomHPosition')), String(Math.round(moved * 10)));
+  await expect(number(ch1, 'Vid#CustomHPosition')).toHaveText(moved.toFixed(1) + ' %');
+  check('Send all writes the slider value and the unit confirms it');
+  // The page shows a drag before the workspace has answered, and a second drag does not wait for it.
+  await post('/fixture/hold');
+  await drag(ch1, 'Vid#CustomHPosition', 0.5, 0.2);
+  const left = await reading(ch1, 'Vid#CustomHPosition');
+  assert.ok(left < 0, 'the drag moved H Pos left: ' + left);
+  await expect.poll(async () => (await state()).held).toBe(true);
+  await drag(ch1, 'Vid#CustomSize', 0.3, 0.1);
+  const smaller = await reading(ch1, 'Vid#CustomSize');
+  assert.ok(smaller < 120, 'the drag made Custom Size smaller: ' + smaller);
+  await post('/fixture/release', {});
+  await expect.poll(() => staged(ch1, 'Vid#CustomSize')).toBe(smaller.toFixed(1));
+  assert.equal(await staged(ch1, 'Vid#CustomHPosition'), left.toFixed(1));
+  check('two drags show at once while the first save is still held, and both land when it is released');
+  // Typing still gives an exact value.
+  await type(ch1, 'Vid#CustomHPosition', '-12.5');
+  await expect(number(ch1, 'Vid#CustomHPosition')).toHaveText('-12.5 %');
+  assert.equal(await staged(ch1, 'Vid#CustomHPosition'), '-12.5');
+  await sendAll();
+  assert.equal(String(await sim(0, 'eParamID_Vid1CustomHPosition')), '-125');
+  check('double-clicking the number types an exact value, and it is sent');
+  // With Auto send on, the value goes when the slider is let go.
+  await f.locator('#send-auto').click();
+  await drag(ch1, 'Vid#CustomSize', 0.4, 0.6);
+  const sent = await reading(ch1, 'Vid#CustomSize');
+  await expect.poll(async () => String(await sim(0, 'eParamID_Vid1CustomSize')), { timeout: 10000 }).toBe(String(Math.round(sent * 10)));
+  await expect(cell(ch1, 'Vid#CustomSize')).toHaveAttribute('data-pending', 'false');
+  await f.locator('#send-manual').click();
+  check('with Auto send on, letting go of the slider sends its value');
+  // A change at the unit moves the slider.
+  await simSet(0, 'eParamID_Vid1CustomHPosition', '250');
+  await expect(number(ch1, 'Vid#CustomHPosition')).toHaveText('25.0 %', { timeout: 5000 });
+  check('a change made at the unit moves the slider and its number');
+  await type(ch1, 'Vid#CustomSize', '120'); await sendAll();
 
   // Master: tick channels, change one cell, send to all of them together.
   await tab(/Master/).click();
@@ -165,15 +237,43 @@ try {
   await f.locator('#view-columns').click();
   await expect(f.locator('#grid-channels')).toHaveAttribute('data-orientation', 'columns');
   await expect(cell('Vid#ColorHDRTransform', unit(0) + '#1')).toHaveText('BBC HLG LUT');
+  // With channels in columns, the slider is in the same cell, turned with it. Channel 1 is first, so the sheet goes back to its left edge, clear of the frozen setting names.
+  await f.locator('#viewport-channels').evaluate(viewport => { viewport.scrollLeft = 0; });
+  await drag('Vid#CustomHPosition', unit(0) + '#1', 0.5, 0.75);
+  const across = await reading('Vid#CustomHPosition', unit(0) + '#1');
+  assert.ok(across > 0, 'the drag moved H Pos right: ' + across);
+  assert.equal(await staged(unit(0) + '#1', 'Vid#CustomHPosition'), across.toFixed(1));
   await shot('sheet-columns');
+  await f.locator('#pending-toggle').click(); await f.locator('.pending-item button', { hasText: 'Cancel' }).click(); await f.locator('#pending-close').click();
+  await expect(number('Vid#CustomHPosition', unit(0) + '#1')).toHaveText('25.0 %');
+  check('with channels in columns the slider drags and stages the same way');
   await f.locator('#view-rows').click();
   await f.getByRole('button', { name: 'Add sheet' }).click();
   const dialog = f.getByRole('dialog', { name: 'New sheet' });
   await dialog.getByRole('textbox', { name: 'Sheet name' }).fill('Framing');
   await dialog.getByRole('button', { name: 'Create sheet' }).click();
   await expect(tab(/Framing/)).toHaveAttribute('aria-selected', 'true');
-  await expect(cell(unit(0) + '#1', 'Vid#CustomSize')).toHaveText('120.0 %');
+  await expect(number(unit(0) + '#1', 'Vid#CustomSize')).toHaveText('120.0 %');
   check('channels can be turned into columns, and a new sheet starts as a copy of the open one');
+  // Master: a Mixed slider cell stays text until a value is typed, then one drag stages on every ticked channel.
+  await simSet(1, 'eParamID_Vid1CustomSizePos', '1');
+  await tab(/Master/).click();
+  await show('Custom H Pos');
+  for (const row of [unit(0) + '#1', unit(1) + '#1']) await cell(row, 'master-tick').locator('[role=checkbox]').click();
+  await expect(cell('master', 'Vid#CustomHPosition')).toHaveText('Mixed');
+  await expect(cell('master', 'Vid#CustomHPosition').getByRole('slider')).toHaveCount(0);
+  await type('master', 'Vid#CustomHPosition', '10');
+  await expect(number('master', 'Vid#CustomHPosition')).toHaveText('10.0 %');
+  await drag('master', 'Vid#CustomHPosition', 0.55, 0.3);
+  const together = await reading('master', 'Vid#CustomHPosition');
+  assert.ok(together < 10, 'the Master drag moved H Pos left: ' + together);
+  for (const row of [unit(0) + '#1', unit(1) + '#1']) { assert.equal(await staged(row, 'Vid#CustomHPosition'), together.toFixed(1)); await expect(cell(row, 'Vid#CustomHPosition')).toHaveAttribute('data-pending', 'true'); }
+  assert.equal(String(await sim(1, 'eParamID_Vid1CustomHPosition')), '0');
+  await shot('master-slider');
+  await sendAll();
+  assert.deepEqual([String(await sim(0, 'eParamID_Vid1CustomHPosition')), String(await sim(1, 'eParamID_Vid1CustomHPosition'))], [String(Math.round(together * 10)), String(Math.round(together * 10))]);
+  await f.locator('#master-none').click();
+  check('a Mixed Master cell stays text until typed, then one Master drag stages on both ticked channels and Send all writes both units');
   await tab(/Setup/).click();
   await f.locator('#unit-count').fill('4'); await f.locator('#unit-count').press('Enter');
   await expect.poll(async () => (await state()).document.units.length).toBe(4);

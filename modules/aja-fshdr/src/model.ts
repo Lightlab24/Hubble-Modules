@@ -1,7 +1,8 @@
 import raw from './fields.json' with { type: 'json' };
 
 export type Scope = 'unit' | 'channel';
-export interface Field { id: string; label: string; group: string; kind: 'text' | 'number' | 'choice'; scope: Scope; width: number }
+/** `slider`: a setting the unit gives in %, shown as Hubble's slider with its number. */
+export interface Field { id: string; label: string; group: string; kind: 'text' | 'number' | 'choice'; scope: Scope; width: number; slider?: boolean }
 export interface Group { id: string; label: string; scope: Scope; fields: Field[]; collapsed: string[] }
 /** The four input labels are the unit's own Channel Name settings, so they are sent like any other setting. */
 export const labelFieldIds = ['ChannelName1', 'ChannelName2', 'ChannelName3', 'ChannelName4'] as const;

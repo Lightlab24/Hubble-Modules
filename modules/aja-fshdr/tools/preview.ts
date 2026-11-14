@@ -66,6 +66,7 @@ const server = http.createServer(async (request, response) => {
     if (url.pathname.startsWith(prefix)) file = path.join(root, 'dist/ui', path.basename(url.pathname));
     if (url.pathname === '/api/module-controls/spreadsheet-v1.js') file = path.join(assets, 'module-spreadsheet-v1.js');
     if (url.pathname === '/api/module-controls/workbook-tools-v1.js') file = path.join(assets, 'module-workbook-tools-v1.js');
+    if (url.pathname === '/api/module-controls/slider-v1.js') file = path.join(assets, 'module-slider-v1.js');
     if (!file) { response.writeHead(404); response.end('Not found'); return; }
     const bytes = await readFile(file);
     response.writeHead(200, { 'Content-Type': file.endsWith('.css') ? 'text/css' : file.endsWith('.html') ? 'text/html' : 'text/javascript', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' }); response.end(bytes);

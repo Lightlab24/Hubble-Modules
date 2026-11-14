@@ -4,10 +4,12 @@ import {
   type SpreadsheetAddress, type SpreadsheetCell, type SpreadsheetControls, type SpreadsheetColumn, type SpreadsheetColumnGroup,
   type SpreadsheetEdit, type SpreadsheetReorderItem, type SpreadsheetColumnGroupControls,
 } from '@hubble/module-sdk/spreadsheet-controls';
+import { mountSlider, type SliderControls, type SliderState } from '@hubble/module-sdk/slider-controls';
 import { activeKind, activeSheetId, clone, fieldById, groupById, groupsOf, isFlipped, masterRowId, masterSelection, nameField, scopeOf, valueOf, viewChange, visibleFields, withColumnVisibility, withNoColumns, type CellEdit, type Field, type SheetKind, type View } from './model.js';
 import { choicesOf, displayValue, isLive, labelFieldOf, masterRows, normalize, rowObservation, rowsFor, shownLabel, shownName, unitObservation, type Row } from './rows.js';
 import { DraftStore } from './draft-store.js';
 import type { Observed } from './backend.js';
+import type { Limits } from './device.js';
 
 export interface GridOptions {
   kind: SheetKind; table: HTMLTableElement; viewport: HTMLElement; columnEditor: HTMLElement; store: DraftStore;
@@ -17,6 +19,9 @@ export interface GridOptions {
   onEdited?: (edits: CellEdit[]) => void;
 }
 interface Meta { id: string; label: string; width: number; fill: 'series' | 'copy'; resizable: boolean }
+/** Hubble's slider in one cell. `drag` is where the thumb is while the pointer is down; `last` is kept for while the cell is being taken down. */
+interface SliderCell { address: SpreadsheetAddress; slot: HTMLElement; controls?: SliderControls; drag?: number; last: SliderState; gone?: boolean }
+type SliderRange = Limits & { min: number; max: number; step: number };
 const channelMeta: Meta[] = [
   { id: 'row-unit', label: 'FS-HDR', width: 130, fill: 'copy', resizable: true }, { id: 'row-label', label: 'Input label', width: 110, fill: 'copy', resizable: true }, { id: 'row-signal', label: 'Input signal', width: 124, fill: 'copy', resizable: true },
 ];
@@ -47,6 +52,7 @@ export async function createGrid(options: GridOptions) {
   const identityRows = new Map<string, HTMLTableRowElement>(), settingRows = new Map<string, HTMLTableRowElement>();
   const sectionRows = new Map<string, { row: HTMLTableRowElement; filler: HTMLTableCellElement }>();
   const controlsToDispose: { dispose(): void; refresh?(): void }[] = [];
+  const sliders = new Map<string, SliderCell>();
   let active: SpreadsheetAddress | undefined, controls: SpreadsheetControls, editor: { address: SpreadsheetAddress; cell: HTMLTableCellElement; input: HTMLInputElement; expected: string } | undefined, disposed = false, shownLayout = '', wasShowing = false;
   let resize: Awaited<ReturnType<typeof mountSpreadsheetResize>> | undefined;
   let reorder: Awaited<ReturnType<typeof mountSpreadsheetReorder>> | undefined;
@@ -112,6 +118,63 @@ export async function createGrid(options: GridOptions) {
     if (id === 'row-label') return { value: row.channel === null ? '' : shownLabel(observed(), unit, row.channel), readOnly: true };
     if (id === 'row-signal') return { value: live(row) ? seen(row)?.signal ?? '' : connectionLabels[about?.state ?? 'connecting'] ?? '', readOnly: true };
     return field && field.scope === scope ? fieldCell(row, field) : null;
+  }
+  /** The unit's range for a setting. The Master row takes it from the first ticked channel that can take the setting, as its value does. */
+  function limitsOf(row: Row, field: Field): Limits | undefined {
+    const from = row.kind === 'master' ? editedRows().find(target => !fieldCell(target, field).readOnly) : row;
+    return from && seen(from)?.limits[field.id];
+  }
+  /** A slider needs a number to show and a range from the unit. A blank, Mixed or offline cell stays text. */
+  function sliderRange(address: SpreadsheetAddress): SliderRange | undefined {
+    const row = rowById.get(address.rowId), field = fieldById.get(address.columnId);
+    if (!row || !field?.slider || field.scope !== scope) return undefined;
+    const cell = cellValue(address), limits = limitsOf(row, field);
+    if (!cell || cell.mixed || !cell.value || !Number.isFinite(Number(cell.value)) || !limits) return undefined;
+    const { min, max, step } = limits;
+    return min !== undefined && max !== undefined && step !== undefined && min < max && step > 0 ? { ...limits, min, max, step } : undefined;
+  }
+  function sliderState(slider: SliderCell): SliderState {
+    const { address } = slider, row = rowById.get(address.rowId), field = fieldById.get(address.columnId), range = sliderRange(address);
+    if (!row || !field || !range) return slider.last;
+    const cell = cellValue(address)!, current = row.kind === 'master' ? undefined : seen(row), reported = current?.values[field.id] ?? '';
+    const waiting = (target: Row) => { const value = staged(target, field.id); return !!value && value !== seen(target)?.values[field.id]; };
+    const pending = row.kind === 'master' ? editedRows().some(waiting) : waiting(row);
+    // While a value waits to be sent, the number's tooltip says what the unit still has.
+    return slider.last = {
+      value: slider.drag ?? Number(cell.value), min: range.min, max: range.max, step: range.step, unit: range.units ? ' ' + range.units : undefined,
+      disabled: !!cell.readOnly, pending: current?.sending.includes(field.id) ?? false,
+      confirmedValue: pending && reported && Number.isFinite(Number(reported)) ? Number(reported) : undefined,
+      error: pending ? current?.errors[field.id] ?? null : null,
+    };
+  }
+  function dropSlider(key: string) {
+    const slider = sliders.get(key); if (!slider) return;
+    sliders.delete(key); slider.gone = true; slider.controls?.dispose(); slider.slot.remove();
+  }
+  function showSlider(cell: HTMLTableCellElement, address: SpreadsheetAddress) {
+    const key = addressKey(address), existing = sliders.get(key);
+    if (existing?.slot.parentElement === cell) { existing.controls?.refresh(); return; }
+    if (existing) dropSlider(key);
+    const slot = document.createElement('div'), slider: SliderCell = { address, slot, last: { value: 0, min: 0, max: 1, step: 1 } };
+    slot.className = 'cell-slider'; slider.last = sliderState(slider); sliders.set(key, slider); cell.replaceChildren(slot);
+    // The sheet takes the pointer for a range selection on any press in a cell, so a press on the track is kept for the slider. It still selects the cell.
+    slot.addEventListener('pointerdown', event => {
+      if (!(event.target as Element).closest('.hubble-slider-root')) return;
+      event.stopPropagation();
+      if (event.button === 0) controls.select(position(address), undefined, { focus: false });
+    });
+    // The slider takes keyboard focus on a press. Afterwards the arrow keys move around the sheet again, and typing edits the number.
+    const giveBack = () => { if (!slider.gone && slot.contains(document.activeElement)) controls.select(position(address)); };
+    slot.addEventListener('pointerup', giveBack); slot.addEventListener('lostpointercapture', giveBack);
+    const row = rowById.get(address.rowId);
+    void mountSlider({
+      root: slot, layout: 'cell', label: (settingLabel(address.columnId) ?? 'Setting') + (row ? ' for ' + rowName(row) : ''),
+      getState: () => sliderState(slider),
+      onValueChange(value) { slider.drag = value; },
+      // One release stages one value, the same as typing it. With Auto send on, it goes to the unit.
+      onValueCommit(value) { slider.drag = undefined; submit([{ ...address, value: String(value) }]); },
+      onError: error => options.onError(error.message),
+    }).then(mounted => { if (slider.gone) mounted.dispose(); else slider.controls = mounted; }, (error: unknown) => { if (!slider.gone) options.onError(error instanceof Error ? error.message : 'The slider could not be shown.'); });
   }
   function layout(next: View) { store.submit(viewChange(store.document, next)); }
   function groupDescriptor(id: string): SpreadsheetColumnGroup {
@@ -308,14 +371,15 @@ export async function createGrid(options: GridOptions) {
       if (['Escape', 'Tab', 'Enter'].includes(event.key)) { event.preventDefault(); event.stopPropagation(); finish(event.key !== 'Escape', true); if (event.key === 'Tab') controls.move?.(event.shiftKey ? -1 : 1, 0); else if (event.key === 'Enter') controls.move?.(0, 1); }
     });
     input.addEventListener('blur', () => finish(true, false), { once: true });
-    delete cell.dataset.empty; cell.replaceChildren(input); input.focus(); input.setSelectionRange(input.value.length, input.value.length); return true;
+    dropSlider(addressKey(address)); delete cell.dataset.empty; cell.replaceChildren(input); input.focus(); input.setSelectionRange(input.value.length, input.value.length); return true;
   }
   table.addEventListener('keydown', event => {
     if (event.target !== table || event.isComposing || event.metaKey || event.ctrlKey || event.altKey) return;
     const cell = table.querySelector<HTMLTableCellElement>('[data-hubble-spreadsheet-active="true"]');
     if (cell && (event.key === 'F2' || event.key === 'Enter' || event.key.length === 1) && startEdit(cell, event.key.length === 1 ? event.key : undefined)) { event.preventDefault(); event.stopImmediatePropagation(); }
   }, { capture: true });
-  table.addEventListener('dblclick', event => { const cell = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLTableCellElement>('td'); if (cell && table.contains(cell) && !editor) startEdit(cell); });
+  // Two quick presses on a slider move it twice. A double-click on its number opens the number for typing.
+  table.addEventListener('dblclick', event => { const target = document.elementFromPoint(event.clientX, event.clientY); if (target?.closest('.hubble-slider-root')) return; const cell = target?.closest<HTMLTableCellElement>('td'); if (cell && table.contains(cell) && !editor) startEdit(cell); });
   function ensureRow(row: Row) {
     if (rowNodes.has(row.id)) return;
     const tr = document.createElement('tr'); tr.dataset.rowId = row.id; if (row.kind === 'master') tr.className = 'master-row'; rowNodes.set(row.id, tr);
@@ -402,7 +466,7 @@ export async function createGrid(options: GridOptions) {
     rows = rowsFor(store.document, observed(), kind); rowById = new Map(rows.map(row => [row.id, row]));
     for (const [id, element] of rowNodes) if (!rowById.has(id)) {
       element.remove(); rowNodes.delete(id);
-      for (const [key, cell] of cells) if (cell.dataset.rowId === id) { cell.remove(); cells.delete(key); }
+      for (const [key, cell] of cells) if (cell.dataset.rowId === id) { dropSlider(key); cell.remove(); cells.delete(key); }
       for (const placeholder of placeholders.values()) placeholder.cells.delete(id);
       channelTracks.get(id)?.remove(); channelTracks.delete(id); numberHeads.get(id)?.remove(); numberHeads.delete(id);
     }
@@ -428,6 +492,10 @@ export async function createGrid(options: GridOptions) {
         cell.dataset.pending = String(pending); cell.dataset.sending = String(sending); cell.dataset.failed = String(pending && !!failure);
         cell.classList.toggle('mixed', !!field?.mixed && !invalid);
         if (field?.kind === 'boolean' && !invalid) { delete cell.dataset.empty; if (!cell.firstElementChild?.hasAttribute('data-hubble-boolean')) { const slot = document.createElement('span'); slot.setAttribute('data-hubble-boolean', ''); cell.replaceChildren(slot); } continue; }
+        const slider = !invalid && !!sliderRange(address);
+        cell.classList.toggle('slider-cell', slider);
+        if (slider) { delete cell.dataset.empty; showSlider(cell, address); continue; }
+        dropSlider(addressKey(address));
         const from = row.kind === 'master' && definition ? seen(editedRows().find(target => !fieldCell(target, definition).readOnly) ?? row) : current;
         cell.textContent = invalid?.edit.value ?? (field?.mixed ? 'Mixed' : definition && id !== 'unit-name' ? displayValue(observed(), from, definition, field?.value ?? '') : field?.value ?? '');
         if (!cell.textContent && !field?.readOnly) cell.dataset.empty = 'true'; else delete cell.dataset.empty;
@@ -440,5 +508,5 @@ export async function createGrid(options: GridOptions) {
   }
   const unsubscribe = store.subscribe(render);
   render();
-  return { kind, refresh: render, select: (address: SpreadsheetAddress) => controls.select(position(address)), get active() { return active; }, get editing() { return editor?.address; }, getValue: (address: SpreadsheetAddress) => cellValue(address), dispose() { disposed = true; unsubscribe(); for (const control of controlsToDispose.reverse()) control.dispose(); } };
+  return { kind, refresh: render, select: (address: SpreadsheetAddress) => controls.select(position(address)), get active() { return active; }, get editing() { return editor?.address; }, getValue: (address: SpreadsheetAddress) => cellValue(address), dispose() { disposed = true; unsubscribe(); for (const key of [...sliders.keys()]) dropSlider(key); for (const control of controlsToDispose.reverse()) control.dispose(); } };
 }

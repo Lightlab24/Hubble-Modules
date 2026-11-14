@@ -45,7 +45,9 @@ for (const [id, m] of Object.entries(metadata)) {
   if (surface === 'HDR / color / LUT / legalizer') group = template.startsWith('Film_') ? 'film' : template.startsWith('TV_') ? 'tv' : /Vid#(YUV|RGB)ProcAmp/.test(template) ? 'procamp' : 'hdr';
   if (!group) continue;
   const d = descriptors.get(id);
-  if (!seen.has(template)) { const field = { id: template, label: d.param_name || short, group, kind: kinds[d.param_type], scope: 'channel', width: width(d.param_name || short, d) }; seen.set(template, field); fields.push(field); }
+  // A Framing setting the unit gives in % is a slider with its number, so it needs room for both.
+  const slider = group === 'framing' && kinds[d.param_type] === 'number' && d.units === '%' && d.min_value != null && d.max_value != null;
+  if (!seen.has(template)) { const field = { id: template, label: d.param_name || short, group, kind: kinds[d.param_type], scope: 'channel', width: Math.max(slider ? 200 : 0, width(d.param_name || short, d)), ...(slider ? { slider: true } : {}) }; seen.set(template, field); fields.push(field); }
 }
 for (const group of unitGroups) for (const [id, m] of Object.entries(metadata)) {
   if (m.channel != null || m.surface !== group.surface || !usable(id)) continue;
