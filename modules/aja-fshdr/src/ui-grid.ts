@@ -5,8 +5,8 @@ import {
   type SpreadsheetEdit, type SpreadsheetReorderItem, type SpreadsheetColumnGroupControls,
 } from '@hubble/module-sdk/spreadsheet-controls';
 import { mountSlider, type SliderControls, type SliderState } from '@hubble/module-sdk/slider-controls';
-import { activeKind, activeSheetId, clone, fieldById, groupById, groupsOf, isFlipped, masterRowId, masterSelection, nameField, scopeOf, valueOf, viewChange, visibleFields, withColumnVisibility, withNoColumns, type CellEdit, type Field, type SheetKind, type View } from './model.js';
-import { choicesOf, displayValue, isLive, labelFieldOf, masterRows, normalize, rowObservation, rowsFor, shownLabel, shownName, unitObservation, type Row } from './rows.js';
+import { activeKind, activeSheetId, clone, fieldById, groupById, groupsOf, isFlipped, isSimulated, masterRowId, masterSelection, modeLabel, modes, nameField, plannedMode, scopeOf, valueOf, viewChange, visibleFields, withColumnVisibility, withNoColumns, type CellEdit, type Field, type SheetKind, type View } from './model.js';
+import { choicesOf, displayValue, isLive, labelFieldOf, masterRows, normalize, rowObservation, rowsFor, shownLabel, shownName, unitObservation, waitingLabel, type Row } from './rows.js';
 import { DraftStore } from './draft-store.js';
 import type { Observed } from './backend.js';
 import type { Limits } from './device.js';
@@ -28,12 +28,15 @@ const channelMeta: Meta[] = [
 const metaByKind: Record<SheetKind, Meta[]> = {
   setup: [
     { id: 'unit-name', label: 'FS-HDR name', width: 160, fill: 'series', resizable: true }, { id: 'unit-host', label: 'Host / IP', width: 140, fill: 'series', resizable: true },
-    { id: 'connection-status', label: 'Connection', width: 110, fill: 'copy', resizable: false }, { id: 'unit-mode', label: 'Mode', width: 126, fill: 'copy', resizable: false }, { id: 'unit-allow', label: 'Allow sends', width: 112, fill: 'copy', resizable: false },
+    { id: 'unit-simulated', label: 'Simulated', width: 104, fill: 'copy', resizable: false }, { id: 'connection-status', label: 'Connection', width: 110, fill: 'copy', resizable: false }, { id: 'unit-mode', label: 'Mode', width: 126, fill: 'copy', resizable: false }, { id: 'unit-allow', label: 'Allow sends', width: 112, fill: 'copy', resizable: false },
   ],
   master: [{ id: 'master-tick', label: 'Edit', width: 60, fill: 'copy', resizable: false }, ...channelMeta],
   channels: channelMeta,
 };
 const connectionLabels: Record<string, string> = { live: 'Live', connecting: 'Connecting', offline: 'Offline', duplicate: 'Duplicate address', disabled: 'Switched off', unset: '' };
+// The operating mode a unit that isn't live is planned in. A live unit's own mode can't be changed from here.
+const modeChoices = async (query: string, signal: AbortSignal) => { signal.throwIfAborted(); const words = query.toLowerCase().split(/\s+/); return modes.filter(mode => words.every(word => mode.label.toLowerCase().includes(word))).map(mode => ({ value: mode.value, label: mode.label, group: 'Mode' })); };
+const modeValue = (typed: string) => modes.find(mode => mode.value === typed || mode.label.toLowerCase() === typed.trim().toLowerCase())?.value;
 const addressKey = (a: SpreadsheetAddress) => a.rowId + '/' + a.columnId;
 const clearAllId = 'clear-all-columns', settingLabelsId = 'setting-labels', defaultLabelWidth = 240, defaultChannelWidth = 170, defaultSettingHeight = 36;
 
@@ -78,11 +81,11 @@ export async function createGrid(options: GridOptions) {
   const tickable = () => rows.filter(row => row.kind === 'channel');
 
   function fieldCell(row: Row, field: Field): SpreadsheetCell {
-    // A unit that isn't live shows nothing, and an edit there would be invisible, so its settings are locked.
-    // Anything already staged stays in the Pending sends list.
-    if (!live(row)) return { value: '', readOnly: true };
+    // A unit that isn't live takes presets: the cell shows what is staged, with the choices and ranges the unit will offer.
+    // They wait in Pending sends until the unit connects and Send is pressed.
     const current = seen(row);
-    if (current?.locked[field.id]) return { value: current.values[field.id] ?? '', readOnly: true };
+    if (!current || (!live(row) && !current.planned)) return { value: '', readOnly: true };
+    if (current.locked[field.id]) return { value: live(row) ? current.values[field.id] ?? '' : staged(row, field.id), readOnly: true };
     const base = { value: shown(row, field.id) }, choices = choicesOf(observed(), current, field.id);
     if (field.kind !== 'choice' || !choices.length) return base;
     const key = row.id + '/' + field.id, signature = String(current?.choices[field.id]);
@@ -111,12 +114,13 @@ export async function createGrid(options: GridOptions) {
     const unit = row.unit!, about = unitObservation(observed(), unit);
     if (id === 'unit-name') return { value: shownName(observed(), unit) };
     if (id === 'unit-host' || id === 'unit-allow') return id === 'unit-allow' ? { value: unit.values[id] === 'TRUE' ? 'TRUE' : 'FALSE', kind: 'boolean' } : { value: unit.values[id] ?? '' };
-    if (id === 'connection-status') return { value: connectionLabels[about?.state ?? 'connecting'] ?? '', readOnly: true };
-    if (id === 'unit-mode') return { value: about?.mode ?? '', readOnly: true };
+    if (id === 'unit-simulated') return { value: isSimulated(unit) ? 'TRUE' : 'FALSE', kind: 'boolean' };
+    if (id === 'connection-status') return { value: about?.simulated && about.state === 'live' ? 'Simulated' : connectionLabels[about?.state ?? 'connecting'] ?? '', readOnly: true };
+    if (id === 'unit-mode') return isLive(observed(), unit) && !isSimulated(unit) ? { value: about?.mode ?? '', readOnly: true } : { value: plannedMode(unit), choices: modeChoices };
     if (id === 'master-tick') return row.kind === 'channel' ? { value: String(ticked().has(row.id)).toUpperCase(), kind: 'boolean' } : { value: 'FALSE', kind: 'boolean', readOnly: true };
     if (id === 'row-unit') return { value: shownName(observed(), unit), readOnly: true };
     if (id === 'row-label') return { value: row.channel === null ? '' : shownLabel(observed(), unit, row.channel), readOnly: true };
-    if (id === 'row-signal') return { value: live(row) ? seen(row)?.signal ?? '' : connectionLabels[about?.state ?? 'connecting'] ?? '', readOnly: true };
+    if (id === 'row-signal') return { value: live(row) ? about?.simulated ? 'Simulated' : seen(row)?.signal ?? '' : waitingLabel(observed(), unit), readOnly: true };
     return field && field.scope === scope ? fieldCell(row, field) : null;
   }
   /** The unit's range for a setting. The Master row takes it from the first ticked channel that can take the setting, as its value does. */
@@ -244,6 +248,15 @@ export async function createGrid(options: GridOptions) {
         for (const target of row.kind === 'master' ? tickable() : [row]) if (on) selection.add(target.id); else selection.delete(target.id);
       } else if (row.kind === 'master') {
         if (field) for (const target of editedRows()) if (!fieldCell(target, field).readOnly) stage(target, field, edit.value);
+      } else if (edit.columnId === 'unit-simulated' && row.unit) {
+        const on = edit.value === 'TRUE', unit = row.unit;
+        add(row.id, 'unit-simulated', on ? 'TRUE' : 'FALSE');
+        // Turning a simulated unit back into a real one keeps what was set on it, as presets for the real unit.
+        if (!on && isSimulated(unit)) for (const [rowId, values] of Object.entries(unitObservation(observed(), unit)?.changes ?? {})) for (const [fieldId, value] of Object.entries(values)) if (!valueOf(store.document, rowId, fieldId)) add(rowId, fieldId, value);
+      } else if (edit.columnId === 'unit-mode' && row.unit) {
+        const mode = modeValue(edit.value);
+        if (!mode) { refused = true; store.refuse({ rowId: row.id, columnId: 'unit-mode', value: edit.value, expected: row.unit.values['unit-mode'] ?? '' }, 'Choose HD/SD 4 Ch or 4K/UHD 1 Ch.'); continue; }
+        add(row.id, 'unit-mode', mode);
       } else if (edit.columnId === 'unit-name') {
         const checked = normalize(seen(row), nameField, edit.value);
         if ('error' in checked) { refused = true; store.refuse({ rowId: row.id, columnId: 'unit-name', value: edit.value, expected: row.unit!.values['unit-name'] ?? '' }, checked.error); continue; }
@@ -484,11 +497,12 @@ export async function createGrid(options: GridOptions) {
         cell.setAttribute('aria-readonly', String(!field || !!field.readOnly));
         cell.toggleAttribute('aria-invalid', !!invalid); if (invalid) cell.setAttribute('aria-invalid', 'true');
         const failure = definition ? current?.errors[definition.id] : undefined;
-        cell.title = invalid?.message ?? failure ?? (definition && online ? current?.locked[definition.id] ?? '' : '');
+        cell.title = invalid?.message ?? failure ?? (definition && (online || current?.planned) ? current?.locked[definition.id] ?? '' : '');
         cell.setAttribute('aria-label', (settingLabel(id) ?? id) + (flip ? ' for ' + rowName(row) : '') + (invalid ? ': ' + invalid.message : ''));
         let pending = false, sending = false;
+        const known = online || !!current?.planned;
         if (row.kind === 'master') pending = !!definition && id !== 'unit-name' && editedRows().some(target => { const value = staged(target, definition.id); return !!value && value !== seen(target)?.values[definition.id]; });
-        else if (definition) { const value = staged(row, definition.id); pending = online && !!value && value !== current?.values[definition.id]; sending = current?.sending.includes(definition.id) ?? false; }
+        else if (definition) { const value = staged(row, definition.id); pending = known && !!value && value !== current?.values[definition.id]; sending = current?.sending.includes(definition.id) ?? false; }
         cell.dataset.pending = String(pending); cell.dataset.sending = String(sending); cell.dataset.failed = String(pending && !!failure);
         cell.classList.toggle('mixed', !!field?.mixed && !invalid);
         if (field?.kind === 'boolean' && !invalid) { delete cell.dataset.empty; if (!cell.firstElementChild?.hasAttribute('data-hubble-boolean')) { const slot = document.createElement('span'); slot.setAttribute('data-hubble-boolean', ''); cell.replaceChildren(slot); } continue; }
@@ -497,9 +511,9 @@ export async function createGrid(options: GridOptions) {
         if (slider) { delete cell.dataset.empty; showSlider(cell, address); continue; }
         dropSlider(addressKey(address));
         const from = row.kind === 'master' && definition ? seen(editedRows().find(target => !fieldCell(target, definition).readOnly) ?? row) : current;
-        cell.textContent = invalid?.edit.value ?? (field?.mixed ? 'Mixed' : definition && id !== 'unit-name' ? displayValue(observed(), from, definition, field?.value ?? '') : field?.value ?? '');
+        cell.textContent = invalid?.edit.value ?? (field?.mixed ? 'Mixed' : id === 'unit-mode' && field && !field.readOnly ? modeLabel(field.value) : definition && id !== 'unit-name' ? displayValue(observed(), from, definition, field?.value ?? '') : field?.value ?? '');
         if (!cell.textContent && !field?.readOnly) cell.dataset.empty = 'true'; else delete cell.dataset.empty;
-        if (id === 'connection-status' || id === 'row-signal') cell.dataset.connection = about?.state === 'live' ? (id === 'connection-status' ? 'live' : '') : about?.state ?? 'connecting';
+        if (id === 'connection-status' || id === 'row-signal') cell.dataset.connection = about?.state === 'live' ? about.simulated ? 'simulated' : id === 'connection-status' ? 'live' : '' : about?.state ?? (row.unit && (row.unit.values['unit-host'] || isSimulated(row.unit)) ? 'connecting' : 'unset');
       }
     }
     controls.refresh(); resize?.refresh(); reorder?.refresh(); columnEditor.refresh();

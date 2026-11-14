@@ -128,6 +128,10 @@ dialog::backdrop{background:#0009}dialog header{display:flex;align-items:center;
 :is(#grid-setup,#grid-master,#grid-channels) td.mixed{color:#8b8b93;font-style:italic}
 :is(#grid-setup,#grid-master,#grid-channels) td[data-connection=offline],:is(#grid-setup,#grid-master,#grid-channels) td[data-connection=connecting],:is(#grid-setup,#grid-master,#grid-channels) td[data-connection=disabled]{color:#8b8b93}
 :is(#grid-setup,#grid-master,#grid-channels) td[data-connection=duplicate]{color:#e0a458}
+:is(#grid-setup,#grid-master,#grid-channels) td[data-connection=unset]{color:#8b8b93}
+/* A simulated unit is built into Hubble. Its blue keeps it apart from a real one at a glance. */
+:is(#grid-setup,#grid-master,#grid-channels) td[data-connection=simulated]{color:#8fb3ff}
+:is(#grid-setup,#grid-master,#grid-channels) td[data-connection=simulated][data-setting-id=connection-status]{font-weight:600}
 :is(#grid-setup,#grid-master,#grid-channels) td>[data-hubble-boolean]{display:flex;justify-content:center;align-items:center}
 :is(#grid-setup,#grid-master,#grid-channels) td:has(>[data-hubble-boolean]){padding-right:8px}
 /* A Framing setting in % is Hubble's slider with its number beside it. The number follows the sheet's text size and colour. */

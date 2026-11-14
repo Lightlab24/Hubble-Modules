@@ -62,3 +62,55 @@ const groups = [
 ].filter(g => g.fields.length);
 await writeFile(new URL('../src/fields.json', import.meta.url), JSON.stringify({ firmware: fixture.firmware, groups }) + '\n');
 console.log(groups.map(g => g.scope + ' ' + g.id + ' ' + g.fields.length).join('\n'));
+
+// src/catalog.json: what the worker needs to offer a unit's choices and ranges before it is reached, and to run a simulated
+// unit. Every setting a sheet can show, the settings they map onto or depend on, and the bench values from the capture.
+// A channel setting that is the same on every channel is stored once, with `Vid#` for the channel.
+const forwardMaps = fixture.maps.forward_maps ?? {};
+const snapshot = fixture.values ?? {};
+const wanted = new Set(['eParamID_FS4Mode', 'eParamID_RemoteControl', 'eParamID_SystemName', ...[0, 1, 2, 3, 4].flatMap(n => ['eParamID_Vid' + n + '_ChannelName', 'eParamID_Vid' + n + 'DetectedInputFormat'])]);
+for (const field of fields) if (field.scope === 'channel') for (const n of [0, 1, 2, 3, 4]) wanted.add('eParamID_' + field.id.replace('Vid#', 'Vid' + n)); else wanted.add('eParamID_' + field.id);
+for (let size = -1; size !== wanted.size;) {
+  size = wanted.size;
+  for (const id of [...wanted]) {
+    const map = forwardMaps[id];
+    if (map) for (const other of [...(map.depends_on ?? []), ...(map.param_maps ?? [])]) if (typeof other === 'string') wanted.add(other);
+    for (const list of Object.values(descriptors.get(id)?.relations ?? {})) for (const condition of list ?? []) wanted.add(condition.paramid);
+  }
+}
+const kept = ['param_id', 'param_name', 'param_type', 'enum_values', 'class_names', 'min_value', 'max_value', 'adjust_by', 'scale_by', 'display_precision', 'units', 'min_length', 'max_length', 'relations'];
+function trim(d) {
+  const out = {};
+  for (const key of kept) if (d[key] !== undefined) out[key] = d[key];
+  if (out.enum_values) out.enum_values = out.enum_values.map(option => ({ value: option.value, text: option.text }));
+  if (out.class_names) { out.class_names = out.class_names.filter(name => name === 'readonly'); if (!out.class_names.length) delete out.class_names; }
+  if (out.relations) out.relations = Object.fromEntries(Object.entries(out.relations).filter(([key]) => key === 'enabled_by' || key === 'disabled_by').map(([key, list]) => [key, list.map(({ paramid, value }) => ({ paramid, value }))]));
+  return out;
+}
+const channelOf = id => { const match = /^eParamID_Vid([0-4])(?!\d)/.exec(id); return match ? Number(match[1]) : null; };
+const template = (value, n) => JSON.parse(JSON.stringify(value).replaceAll('eParamID_Vid' + n, 'eParamID_Vid#'));
+const present = [...wanted].filter(id => descriptors.has(id)).sort();
+const catalog = { firmware: fixture.firmware, descriptors: [], maps: {}, values: {} };
+const byTemplate = new Map();
+for (const id of present) {
+  const n = channelOf(id);
+  if (n === null) { catalog.descriptors.push(trim(descriptors.get(id))); continue; }
+  const key = id.replace('eParamID_Vid' + n, 'eParamID_Vid#');
+  if (!byTemplate.has(key)) byTemplate.set(key, []);
+  byTemplate.get(key).push(n);
+}
+const rawValue = id => String(snapshot[id] ?? descriptors.get(id).default_value ?? '');
+for (const id of present) if (channelOf(id) === null) { catalog.values[id] = rawValue(id); if (forwardMaps[id]) catalog.maps[id] = forwardMaps[id]; }
+for (const [key, channels] of byTemplate) {
+  const ids = channels.map(n => key.replace('eParamID_Vid#', 'eParamID_Vid' + n));
+  const shapes = channels.map((n, i) => JSON.stringify(template(trim(descriptors.get(ids[i])), n)));
+  const mapShapes = channels.map((n, i) => JSON.stringify(forwardMaps[ids[i]] ? template(forwardMaps[ids[i]], n) : null));
+  if (new Set(shapes).size === 1 && new Set(mapShapes).size === 1) {
+    catalog.descriptors.push({ ...JSON.parse(shapes[0]), channels });
+    if (mapShapes[0] !== 'null') catalog.maps[key] = JSON.parse(mapShapes[0]);
+  } else ids.forEach((id, i) => { catalog.descriptors.push(trim(descriptors.get(id))); if (forwardMaps[id]) catalog.maps[id] = forwardMaps[id]; });
+  const values = ids.map(rawValue);
+  catalog.values[key] = new Set(values).size === 1 ? values[0] : Object.fromEntries(channels.map((n, i) => [n, values[i]]));
+}
+await writeFile(new URL('../src/catalog.json', import.meta.url), JSON.stringify(catalog) + '\n');
+console.log('catalog ' + present.length + ' settings in ' + catalog.descriptors.length + ' entries');

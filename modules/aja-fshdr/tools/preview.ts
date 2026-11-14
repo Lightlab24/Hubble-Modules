@@ -1,6 +1,7 @@
 // Runs the real page and the real worker code in a browser, against FS-HDR simulators on this computer.
 //   node --import tsx tools/preview.ts
 // FSHDR_SIMULATOR_DIR=<folder holding server.mjs> starts simulators too, one per entry in FSHDR_SIMULATORS (default "four,four,single").
+// The browser checks in tools/qa-smoke.mjs want FSHDR_SIMULATORS=four,four,single,four and PREVIEW_UNITS=3: the fourth stands in for a unit that arrives later.
 // Nothing here reaches a real unit unless you type its address into Setup.
 import http from 'node:http';
 import path from 'node:path';
@@ -21,8 +22,9 @@ if (process.env.FSHDR_SIMULATOR_DIR) for (const [index, mode] of (process.env.FS
 // Stands in for Hubble's document store: each document has a revision, and a write against an old one is refused.
 const stored = new Map<string, { revision: number; value: unknown }>();
 const seeded = defaultDocument();
-if (process.env.PREVIEW_EMPTY !== '1') seeded.units = simulatorHosts.map((host, index) => newUnit('unit-' + (index + 1), 'FS-HDR ' + (index + 1), host));
-stored.set('fshdr-plan', { revision: 1, value: seeded }); stored.set('setup', { revision: 1, value: {} });
+// PREVIEW_UNITS puts only the first few simulators in Setup, so a check can bring in another one later.
+if (process.env.PREVIEW_EMPTY !== '1') seeded.units = simulatorHosts.slice(0, Number(process.env.PREVIEW_UNITS ?? simulatorHosts.length)).map((host, index) => newUnit('unit-' + (index + 1), 'FS-HDR ' + (index + 1), host));
+stored.set('fshdr-plan', { revision: 1, value: seeded }); stored.set('setup', { revision: 1, value: {} }); stored.set('fshdr-sim', { revision: 1, value: { version: 1, units: {} } });
 let hold = false, held: { resolve(rejected: boolean): void } | undefined, published: unknown, feedback: unknown[] = [];
 const record = (id: string) => ({ id, version: 1, revision: String(stored.get(id)!.revision), value: stored.get(id)!.value });
 const services = { async request(_service: string, _version: number, input: any, signal?: AbortSignal) {
@@ -48,7 +50,7 @@ const server = http.createServer(async (request, response) => {
     const url = new URL(request.url!, 'http://127.0.0.1');
     if (url.pathname === '/favicon.ico') { response.writeHead(204); response.end(); return; }
     if (url.pathname === '/fixture/live') { json(response, 200, published ?? {}); return; }
-    if (url.pathname === '/fixture/state') { json(response, 200, { document: stored.get('fshdr-plan')!.value, revision: String(stored.get('fshdr-plan')!.revision), published, held: !!held, simulatorHosts, logs, feedback }); return; }
+    if (url.pathname === '/fixture/state') { json(response, 200, { document: stored.get('fshdr-plan')!.value, simulated: stored.get('fshdr-sim')!.value, revision: String(stored.get('fshdr-plan')!.revision), published, held: !!held, simulatorHosts, logs, feedback }); return; }
     // The next save waits here until it is released, so a check can see what the page does before the workspace answers.
     if (url.pathname === '/fixture/hold') { hold = true; json(response, 200, { ok: true }); return; }
     if (url.pathname === '/fixture/release') { const input = await body(request); if (held) { held.resolve(input.reject === true); held = undefined; } hold = false; json(response, 200, { ok: true }); return; }

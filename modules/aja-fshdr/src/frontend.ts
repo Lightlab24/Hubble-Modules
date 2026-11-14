@@ -1,7 +1,7 @@
 import { connectModuleFrontend, ModuleFrontendValueSchema } from '@hubble/module-sdk/frontend';
 import { mountSpreadsheetSheets, mountSpreadsheetToolbar, type SpreadsheetAddress } from '@hubble/module-sdk/spreadsheet-controls';
-import { activeKind, activeSheet, activeSheetId, addSheet, autoSendOn, clone, fieldById, groupsOf, isFlipped, masterSelection, moveSheet, nameField, newUnit, parseRowId, removeSheet, renameSheet, scopeOf, setOrientation, setUnitCount, sheetList, unitHasData, validHost, valueOf, viewChange, type CellEdit, type Field, type Mutation, type Orientation, type SheetKind, type Unit } from './model.js';
-import { displayValue, hostOf, isLive, masterRows, pendingFields, rowObservation, rowTitle, rowsFor, shownName, stagedRowIds, unitObservation } from './rows.js';
+import { activeKind, activeSheet, activeSheetId, addSheet, autoSendOn, clone, fieldById, groupsOf, isFlipped, isSimulated, masterSelection, moveSheet, nameField, newUnit, parseRowId, removeSheet, renameSheet, scopeOf, setOrientation, setUnitCount, sheetList, unitHasData, validHost, valueOf, viewChange, type CellEdit, type Field, type Mutation, type Orientation, type SheetKind, type Unit } from './model.js';
+import { displayValue, hostOf, isLive, isSimulatedLive, masterRows, pendingFields, rowObservation, rowReady, rowTitle, rowsFor, sendsAfter, shownName, stagedRowIds, unitObservation, waitingLabel } from './rows.js';
 import { DraftStore, type SaveReceipt } from './draft-store.js';
 import { createGrid } from './ui-grid.js';
 import type { Observed } from './backend.js';
@@ -51,7 +51,8 @@ try {
   });
   const orientationButtons = [['view-rows', 'rows'], ['view-columns', 'columns']] as [string, Orientation][];
   const unitOf = (rowId: string) => doc().units.find(unit => unit.id === parseRowId(rowId).unitId);
-  const rowLive = (rowId: string) => { const unit = unitOf(rowId); return !!unit && isLive(observed, unit); };
+  // A row Send can reach now: its unit is live, real or simulated, and has that channel. Presets for other rows wait.
+  const rowLive = (rowId: string) => rowReady(observed, doc(), rowId);
   const seenRow = (rowId: string) => rowObservation(observed, unitOf(rowId), rowId);
   const pending = (rowId: string) => pendingFields(doc(), observed, rowId);
   // What Send all would write now: staged settings on units that are live. Offline ones wait.
@@ -83,11 +84,12 @@ try {
     const sendable = readyToSend(), sendBar = el<HTMLButtonElement>('send-all-bar');
     sendBar.disabled = sendBlocked() || sendable === 0; el('send-all-bar-count').textContent = String(sendable); el('send-all-bar-count').hidden = sendable === 0;
     sendBar.title = sendable ? 'Send ' + sendable + ' staged setting' + (sendable === 1 ? '' : 's') + ' to the FS-HDRs that are live' : 'Nothing is waiting to send to a live FS-HDR';
-    const units = doc().units, liveCount = units.filter(unit => isLive(observed, unit)).length;
-    el('fleet-status').textContent = units.length + ' unit' + (units.length === 1 ? '' : 's') + (liveCount ? ' / ' + liveCount + ' live' : ' / offline');
-    el('fleet-status').parentElement!.dataset.ready = String(liveCount > 0);
+    const units = doc().units, simulatedCount = units.filter(unit => isSimulatedLive(observed, unit)).length, liveCount = units.filter(unit => isLive(observed, unit)).length - simulatedCount;
+    const states = [liveCount ? liveCount + ' live' : '', simulatedCount ? simulatedCount + ' simulated' : ''].filter(Boolean).join(' · ');
+    el('fleet-status').textContent = units.length + ' unit' + (units.length === 1 ? '' : 's') + ' / ' + (states || 'offline');
+    el('fleet-status').parentElement!.dataset.ready = String(liveCount + simulatedCount > 0);
     const unitCount = input('unit-count'); if (document.activeElement !== unitCount) unitCount.value = String(units.length);
-    el<HTMLButtonElement>('refresh-units').disabled = busy || !units.some(hostOf); el('refresh-label').textContent = busy ? 'Working…' : 'Refresh all';
+    el<HTMLButtonElement>('refresh-units').disabled = busy || !units.some(unit => hostOf(unit) || isSimulated(unit)); el('refresh-label').textContent = busy ? 'Working…' : 'Refresh all';
     el('pending-count').textContent = String(all); el('pending-count').hidden = all === 0; el('pending-toggle').dataset.pending = String(all > 0);
     if (kind === 'master') {
       const channels = rowsFor(doc(), observed, 'channels').filter(row => row.kind === 'channel'), editing = masterRows(doc(), observed).length;
@@ -96,19 +98,26 @@ try {
     }
     saveStatus.textContent = store.error || (store.pending.length ? 'Saving…' : store.invalid.size ? 'Correct the highlighted draft' : 'Workspace saved');
     saveStatus.dataset.error = String(!!store.error || store.invalid.size > 0);
-    pendingStatus.textContent = inFlight ? inFlight + ' sending · ' + Math.max(0, all - inFlight) + ' pending' : all ? all + ' change' + (all === 1 ? '' : 's') + ' pending' : 'No changes pending';
+    const waiting = all - staged.reduce((n, rowId) => n + (rowLive(rowId) ? pending(rowId).length : 0), 0), plural = (n: number, word: string) => n + ' ' + word + (n === 1 ? '' : 's');
+    pendingStatus.textContent = inFlight ? inFlight + ' sending · ' + Math.max(0, all - inFlight) + ' pending' : !all ? 'No changes pending' : !waiting ? plural(all, 'change') + ' pending'
+      : (all > waiting ? plural(all - waiting, 'change') + ' ready · ' : '') + plural(waiting, 'preset') + ' waiting';
     pendingStatus.dataset.pending = String(all > 0);
     el('empty').hidden = units.length > 0;
     if (!el('setting-details').hidden) renderDetails();
     if (!el('pending-sends').hidden) renderPending();
     adoptNames();
   }
-  // The plan keeps the last name each unit reported, so the row still has its name when the unit is offline.
+  // The plan keeps the last name and mode each unit reported, so the row still has them when the unit is offline,
+  // and presets for it go on the channels it really has.
   function adoptNames() {
     if (store.pending.length) return;
     const edits: CellEdit[] = doc().units.flatMap(unit => {
-      const name = isLive(observed, unit) ? unitObservation(observed, unit)!.name : '', kept = unit.values['unit-name'] ?? '';
-      return name && name !== kept && !unit.values[nameField.id] ? [{ rowId: unit.id, columnId: 'unit-name', value: name, expected: kept }] : [];
+      const seen = isLive(observed, unit) ? unitObservation(observed, unit)! : undefined, name = seen?.name ?? '', kept = unit.values['unit-name'] ?? '';
+      const mode = seen && !seen.simulated ? seen.modeValue ?? '' : '', keptMode = unit.values['unit-mode'] ?? '';
+      return [
+        ...(name && name !== kept && !unit.values[nameField.id] ? [{ rowId: unit.id, columnId: 'unit-name', value: name, expected: kept }] : []),
+        ...(/^[12]$/.test(mode) && mode !== (keptMode || '1') ? [{ rowId: unit.id, columnId: 'unit-mode', value: mode, expected: keptMode }] : []),
+      ];
     });
     if (edits.length) store.submit({ kind: 'edit', edits }, false);
   }
@@ -116,12 +125,12 @@ try {
     const panel = el('detail-content'); panel.replaceChildren();
     const field = active && (active.columnId === 'unit-name' ? nameField : fieldById.get(active.columnId)), unit = active && unitOf(active.rowId);
     if (!active || !field || !unit) { panel.textContent = 'Select a setting to see what the unit has and what is staged.'; return; }
-    if (!rowLive(active.rowId)) { panel.textContent = 'This FS-HDR isn’t live.'; return; }
     const seen = seenRow(active.rowId), limits = seen?.limits[field.id], staged = valueOf(doc(), active.rowId, field.id);
+    if (!seen) { panel.textContent = 'This FS-HDR isn’t live.'; return; }
     const heading = document.createElement('h3'); heading.textContent = field.label; panel.append(heading);
     const dl = document.createElement('dl');
     const range = limits?.min !== undefined && limits.max !== undefined ? limits.min + ' to ' + limits.max + (limits.units ? ' ' + limits.units : '') + (limits.step ? ', steps of ' + limits.step : '') : limits?.maxLength !== undefined ? (limits.minLength ?? 0) + ' to ' + limits.maxLength + ' characters' : '';
-    for (const [label, value] of [['Row', rowTitle(doc(), observed, active.rowId)], ['Unit has', displayValue(observed, seen, field, seen?.values[field.id] ?? '') || 'Not reported'], ['Staged', staged ? displayValue(observed, seen, field, staged) : 'No change'], ...(range ? [['Allowed', range]] : [])]) {
+    for (const [label, value] of [['Row', rowTitle(doc(), observed, active.rowId)], ['Unit has', seen.planned ? 'Not known until it connects' : displayValue(observed, seen, field, seen.values[field.id] ?? '') || 'Not reported'], ['Staged', staged ? displayValue(observed, seen, field, staged) : 'No change'], ...(range ? [['Allowed', range]] : [])]) {
       const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = label!; dd.textContent = value!; dl.append(dt, dd);
     }
     panel.append(dl);
@@ -151,17 +160,19 @@ try {
     let total = 0, ready = 0;
     for (const rowId of stagedRowIds(doc())) {
       const waiting = pending(rowId); if (!waiting.length) continue;
-      const unit = unitOf(rowId)!, online = rowLive(rowId), seen = seenRow(rowId), raw = observed.rows[rowId], name = rowTitle(doc(), observed, rowId), state = unitObservation(observed, unit)?.state;
+      const unit = unitOf(rowId)!, online = rowLive(rowId), seen = seenRow(rowId), raw = observed.rows[rowId], name = rowTitle(doc(), observed, rowId);
       total += waiting.length; if (online) ready += waiting.length; groupsSeen.add(rowId);
       const group = pendingGroup(rowId); nodes.push(group.root);
-      group.name.textContent = name; group.detail.textContent = hostOf(unit) + ' · ' + (online ? 'Live' : state === 'connecting' ? 'Connecting' : 'Offline');
+      const where = isLive(observed, unit) ? (unitObservation(observed, unit)?.simulated ? 'Simulated' : 'Live') : waitingLabel(observed, unit);
+      group.name.textContent = name; group.detail.textContent = (hostOf(unit) && !isSimulated(unit) ? hostOf(unit) + ' · ' : '') + where;
       group.send.disabled = blocked || !online; group.send.setAttribute('aria-label', 'Send all changes to ' + name); group.cancel.setAttribute('aria-label', 'Cancel all changes for ' + name);
       for (const field of waiting) {
         const key = rowId + '/' + field.id, item = pendingItem(rowId, field.id), sending = !!raw?.sending.includes(field.id);
         items.add(key); nodes.push(item.root);
         const queued = !!unsent.get(rowId)?.some(entry => entry.id === field.id) || !!raw?.queued.includes(field.id), failure = raw?.errors[field.id], current = seen?.values[field.id];
-        item.setting.textContent = field.label; item.change.textContent = (current ? displayValue(observed, seen, field, current) : online ? '(empty)' : 'Not read') + ' → ' + displayValue(observed, seen, field, valueOf(doc(), rowId, field.id));
-        item.status.textContent = sending ? 'Sending…' : queued ? 'Queued' : failure ?? (online ? '' : 'Won’t send while this FS-HDR is offline');
+        item.setting.textContent = field.label; item.change.textContent = (current ? displayValue(observed, seen, field, current) : online ? '(empty)' : '—') + ' → ' + displayValue(observed, seen, field, valueOf(doc(), rowId, field.id));
+        // A unit that is live but in the other mode doesn't have this channel. Anything else waits for its unit to connect.
+        item.status.textContent = sending ? 'Sending…' : queued ? 'Queued' : failure ?? (online ? '' : isLive(observed, unit) ? 'Not on this FS-HDR in ' + (unitObservation(observed, unit)?.mode ?? 'its mode') : sendsAfter(observed, unit));
         item.status.dataset.kind = sending || queued ? 'active' : failure ? 'failed' : online ? '' : 'offline';
         item.cancel.disabled = sending; item.cancel.setAttribute('aria-label', 'Cancel ' + field.label + ' for ' + name);
       }
@@ -169,7 +180,9 @@ try {
     for (const [id, node] of groupNodes) if (!groupsSeen.has(id)) { node.root.remove(); groupNodes.delete(id); }
     for (const [key, node] of itemNodes) if (!items.has(key)) { node.root.remove(); itemNodes.delete(key); }
     nodes.forEach((node, index) => { if (list.children[index] !== node) list.insertBefore(node, list.children[index] ?? null); });
-    el('pending-summary').textContent = total ? total + ' setting' + (total === 1 ? '' : 's') + ' waiting. ' + (autoSendOn(doc()) ? 'New edits send as you commit them. These stay here until you press Send.' : 'Nothing goes to an FS-HDR until you press Send.') : 'Nothing is waiting to send.';
+    const presets = total - ready, plural = (n: number, word: string) => n + ' ' + word + (n === 1 ? '' : 's');
+    el('pending-summary').textContent = !total ? 'Nothing is waiting to send.' : (presets ? (ready ? plural(ready, 'setting') + ' ready to send. ' : '') + plural(presets, 'preset') + ' wait' + (presets === 1 ? 's' : '') + ' for an FS-HDR to connect, then go with Send. ' : plural(total, 'setting') + ' waiting. ')
+      + (autoSendOn(doc()) ? 'New edits send as you commit them. These stay here until you press Send.' : ready && !presets ? 'Nothing goes to an FS-HDR until you press Send.' : '');
     const all = el<HTMLButtonElement>('send-all'); all.textContent = ready ? 'Send all (' + ready + ')' : 'Send all'; all.disabled = blocked || ready === 0;
     el<HTMLButtonElement>('cancel-all').disabled = total === 0;
   }

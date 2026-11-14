@@ -1,14 +1,27 @@
-import { channelRowId, fieldById, masterRowId, masterSelection, nameField, parseRowId, rowValues, type Field, type FsDocument, type SheetKind, type Unit } from './model.js';
+import { channelRowId, fieldById, isSimulated, masterRowId, masterSelection, nameField, parseRowId, plannedChannels, rowValues, unitName, type Field, type FsDocument, type SheetKind, type Unit } from './model.js';
 import type { Observed, RowObservation, UnitObservation } from './backend.js';
 import type { Choice } from './device.js';
 
-/** What a sheet row stands for. A unit that hasn't been read yet has no channels, so it gets one blank `placeholder` row. */
+/** What a sheet row stands for. A unit that isn't live has the channels of the mode it is planned in, so its settings can be preset. */
 export interface Row { id: string; unit?: Unit; channel: number | null; kind: 'unit' | 'channel' | 'placeholder' | 'master' }
 export const hostOf = (unit: Unit): string => unit.values['unit-host'] ?? '';
-/** What the worker last saw of this unit, unless the address has been edited since. */
-export const unitObservation = (observed: Observed, unit: Unit): UnitObservation | undefined => { const seen = observed.units[unit.id]; return seen?.host === hostOf(unit) ? seen : undefined; };
+/** What the worker last saw of this unit, unless its address or Simulated tick has been changed since. */
+export const unitObservation = (observed: Observed, unit: Unit): UnitObservation | undefined => { const seen = observed.units[unit.id]; return seen?.host === hostOf(unit) && !!seen.simulated === isSimulated(unit) ? seen : undefined; };
 export const isLive = (observed: Observed, unit: Unit): boolean => unitObservation(observed, unit)?.state === 'live';
-export const rowObservation = (observed: Observed, unit: Unit | undefined, rowId: string): RowObservation | undefined => unit && isLive(observed, unit) ? observed.rows[rowId] : undefined;
+export const isSimulatedLive = (observed: Observed, unit: Unit): boolean => isLive(observed, unit) && !!unitObservation(observed, unit)?.simulated;
+/** A live row is read from its unit. A planned one has no values, only the choices and ranges its unit will offer. */
+export const rowObservation = (observed: Observed, unit: Unit | undefined, rowId: string): RowObservation | undefined => unit && unitObservation(observed, unit) ? observed.rows[rowId] : undefined;
+/** A row its unit can take a send for now: the unit is live and has that channel in the mode it is in. */
+export function rowReady(observed: Observed, doc: FsDocument, rowId: string): boolean {
+  const { unitId, channel } = parseRowId(rowId), unit = doc.units.find(item => item.id === unitId);
+  return !!unit && isLive(observed, unit) && (channel === null || !!unitObservation(observed, unit)?.channels.includes(channel));
+}
+/** What a unit that isn't live is doing, in a word or two. */
+export function waitingLabel(observed: Observed, unit: Unit): string {
+  const state = unitObservation(observed, unit)?.state ?? (isSimulated(unit) || hostOf(unit) ? 'connecting' : 'unset');
+  return ({ unset: 'Not connected', duplicate: 'Duplicate address', disabled: 'Switched off', connecting: 'Connecting', offline: 'Offline', live: isSimulated(unit) ? 'Simulated' : 'Live' } as const)[state];
+}
+export const sendsAfter = (observed: Observed, unit: Unit): string => 'Sends after ' + (shownName(observed, unit) || unitName(unit)) + ' connects';
 /** The name to show: one waiting to be sent, else the unit's own, else the one kept in the plan for when it is offline. */
 export const shownName = (observed: Observed, unit: Unit): string => unit.values[nameField.id] || (isLive(observed, unit) && unitObservation(observed, unit)!.name) || unit.values['unit-name'] || '';
 /** The 4K/UHD channel uses the first input label. */
@@ -17,7 +30,8 @@ export const shownLabel = (observed: Observed, unit: Unit, channel: number): str
 export function rowsFor(doc: FsDocument, observed: Observed, kind: SheetKind): Row[] {
   if (kind === 'setup') return doc.units.map(unit => ({ id: unit.id, unit, channel: null, kind: 'unit' as const }));
   const rows = doc.units.flatMap((unit): Row[] => {
-    const channels = unitObservation(observed, unit)?.channels ?? [];
+    // Rows of a unit that isn't live follow its planned mode straight from the plan, so changing Mode redraws them at once.
+    const channels = isLive(observed, unit) ? unitObservation(observed, unit)!.channels : plannedChannels(unit);
     return channels.length ? channels.map(channel => ({ id: channelRowId(unit.id, channel), unit, channel, kind: 'channel' as const })) : [{ id: unit.id + '#-', unit, channel: null, kind: 'placeholder' as const }];
   });
   return kind === 'master' ? [{ id: masterRowId, channel: null, kind: 'master' }, ...rows] : rows;

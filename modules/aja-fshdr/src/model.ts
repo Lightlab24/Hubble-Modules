@@ -14,7 +14,10 @@ export const fields = [nameField, ...groups.flatMap(g => g.fields)];
 export const fieldById = new Map(fields.map(f => [f.id, f]));
 export const groupById = new Map(groups.map(g => [g.id, g]));
 export const groupsOf = (scope: Scope) => groups.filter(g => g.scope === scope);
-export const planFields = ['unit-name', 'unit-host', 'unit-allow'] as const;
+/** `unit-simulated`: a built-in simulated unit stands in for this row. `unit-mode`: the operating mode a unit that isn't live is planned in. */
+export const planFields = ['unit-name', 'unit-host', 'unit-allow', 'unit-simulated', 'unit-mode'] as const;
+export const modes = [{ value: '1', label: 'HD/SD 4 Ch' }, { value: '2', label: '4K/UHD 1 Ch' }] as const;
+export const modeLabel = (mode: string): string => modes.find(item => item.value === mode)?.label ?? '';
 export const maxUnits = 16;
 export const masterRowId = 'master';
 
@@ -48,6 +51,10 @@ export function rowValues(doc: FsDocument, rowId: string): Record<string, string
 }
 export const valueOf = (doc: FsDocument, rowId: string, columnId: string): string => rowValues(doc, rowId)?.[columnId] ?? '';
 export const unitName = (unit: Unit): string => unit.values['SystemName'] || unit.values['unit-name'] || 'FS-HDR';
+export const isSimulated = (unit: Unit): boolean => unit.values['unit-simulated'] === 'TRUE';
+export const plannedMode = (unit: Unit): '1' | '2' => unit.values['unit-mode'] === '2' ? '2' : '1';
+/** The channels a unit has in the mode it is planned in: four in HD/SD, one (channel 0) in 4K/UHD. */
+export const plannedChannels = (unit: Unit): number[] => plannedMode(unit) === '2' ? [0] : [1, 2, 3, 4];
 
 export function validHost(value: string): boolean {
   const match = /^([a-zA-Z0-9.-]+)(?::([0-9]{1,5}))?$/.exec(value);
@@ -64,7 +71,8 @@ export function validateValue(scope: Scope, columnId: string, value: string): st
   if (scope === 'unit') {
     if (columnId === 'unit-name') return value.length <= 96 ? undefined : 'Enter a name of up to 96 characters.';
     if (columnId === 'unit-host') return !value || validHost(value) ? undefined : 'Enter a valid hostname or IPv4 address, with an optional port.';
-    if (columnId === 'unit-allow') return ['TRUE', 'FALSE', ''].includes(value) ? undefined : 'Choose On or Off.';
+    if (columnId === 'unit-allow' || columnId === 'unit-simulated') return ['TRUE', 'FALSE', ''].includes(value) ? undefined : 'Choose On or Off.';
+    if (columnId === 'unit-mode') return ['1', '2', ''].includes(value) ? undefined : 'Choose HD/SD 4 Ch or 4K/UHD 1 Ch.';
   }
   const field = fieldById.get(columnId);
   if (!field || field.scope !== scope) return 'This field is not editable.';
@@ -96,7 +104,7 @@ export function setUnitCount(doc: FsDocument, count: number, newId: () => string
 }
 export const newUnit = (id: string, name: string, host: string): Unit => ({ id, values: { 'unit-name': name, 'unit-host': host, 'unit-allow': 'TRUE' } });
 /** A row someone has only counted, not filled in, can go without asking. */
-export const unitHasData = (unit: Unit): boolean => Object.entries(unit.values).some(([id, value]) => !!value && id !== 'unit-allow' && (id !== 'unit-name' || !/^FS-HDR \d+$/.test(value))) || Object.values(unit.channels ?? {}).some(values => Object.values(values).some(Boolean));
+export const unitHasData = (unit: Unit): boolean => Object.entries(unit.values).some(([id, value]) => !!value && id !== 'unit-allow' && id !== 'unit-mode' && (id !== 'unit-simulated' || value === 'TRUE') && (id !== 'unit-name' || !/^FS-HDR \d+$/.test(value))) || Object.values(unit.channels ?? {}).some(values => Object.values(values).some(Boolean));
 
 export function validateView(view: View, scope: Scope): void {
   if (!view || !Array.isArray(view.order) || !Array.isArray(view.hidden)) throw Error('Invalid column layout.');

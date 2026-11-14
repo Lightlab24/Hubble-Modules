@@ -15,6 +15,20 @@ export type Limits = { precision?: number; min?: number; max?: number; step?: nu
 export type Reading = { value: string; locked?: string; choices?: Choice[]; limits?: Limits };
 export type WriteResult = { ok: boolean; message: string };
 export type Connection = 'connecting' | 'live' | 'offline';
+/** How a unit is reached: over HTTP, or a simulated unit inside the worker. It answers the same calls either way. */
+export type Transport = (path: string, query: Record<string, string>, signal: AbortSignal) => Promise<unknown>;
+export const PREREQUISITE = 'Switch on this setting’s prerequisite first.';
+
+export function httpTransport(address: string): Transport {
+  return async (path, query, signal) => {
+    const url = new URL(path, address);
+    // A space goes as %20: the unit's own pages send it that way, and a `+` may be stored as typed.
+    url.search = Object.entries(query).map(([key, value]) => encodeURIComponent(key) + '=' + encodeURIComponent(value)).join('&');
+    const response = await fetch(url, { signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]), cache: 'no-store', redirect: 'error' });
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    return await response.json() as unknown;
+  };
+}
 
 const MODE = 'eParamID_FS4Mode', REMOTE = 'eParamID_RemoteControl', SYSTEM_NAME = 'eParamID_SystemName';
 export const object = (value: unknown): value is Values => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -45,6 +59,28 @@ export function displayValue(descriptor: Descriptor, value: unknown): string {
   if (['decimal', 'integer'].includes(descriptor.param_type ?? '') && value !== '' && Number.isFinite(Number(value))) return (Number(value) / (descriptor.scale_by || 1)).toFixed(descriptor.display_precision || 0) + (descriptor.units ? ' ' + descriptor.units : '');
   return typeof value === 'object' ? JSON.stringify(value) : String(value);
 }
+const optionsOf = (descriptor: Descriptor | undefined): Choice[] => (descriptor?.enum_values ?? []).flatMap(choice => { const value = scalar(choice?.value); return value !== null && typeof choice?.text === 'string' ? [{ value, label: choice.text }] : []; });
+/** The choices or range a setting offers, from its descriptor alone. `null` for kinds the sheet can't edit. */
+export function shapeOf(descriptor: Descriptor): Pick<Reading, 'choices' | 'limits'> | null {
+  const type = descriptor.param_type ?? '';
+  if (type === 'enum') return { choices: optionsOf(descriptor) };
+  if (type === 'integer' || type === 'decimal') {
+    const scale = descriptor.scale_by || 1, precision = descriptor.display_precision || 0;
+    return { limits: { precision, ...(descriptor.min_value != null ? { min: descriptor.min_value / scale } : {}), ...(descriptor.max_value != null ? { max: descriptor.max_value / scale } : {}), step: (descriptor.adjust_by || 1) / scale, ...(descriptor.units ? { units: descriptor.units } : {}) } };
+  }
+  if (type === 'string') return { limits: { minLength: descriptor.min_length ?? 0, maxLength: descriptor.max_length ?? 1024 } };
+  return null;
+}
+/** Which stored setting a mapped one stands for now, given the value of the setting it depends on. */
+export function mappedTarget(mapping: unknown, selectorOf: (id: string) => string | null): string | null {
+  if (!object(mapping) || Number(mapping.map_scheme) === 0) return '';
+  const scheme = Number(mapping.map_scheme);
+  if (![1, 2, 3, 4, 5].includes(scheme) || !Array.isArray(mapping.depends_on) || !Array.isArray(mapping.param_maps)) return null;
+  const selector = selectorOf(String(mapping.depends_on[0]));
+  if (selector === null || !/^-?\d+$/.test(selector)) return null;
+  const target = mapping.param_maps[Number(selector) - (scheme === 5 ? 7 : 0)];
+  return typeof target === 'string' && target.startsWith('eParamID_') ? target : null;
+}
 /** The unit's own ID for a sheet setting. `Vid#` stands for the channel; the four input labels are the channels' names. */
 export function parameterId(fieldId: string, channel: number | null, mode: string): string | null {
   const label = /^ChannelName([1-4])$/.exec(fieldId);
@@ -64,7 +100,7 @@ export class Device {
   private cycle = new AbortController();
   private restarting = false;
 
-  constructor(readonly address: string, private readonly onChange: () => void) {}
+  constructor(readonly address: string, private readonly onChange: () => void, private readonly transport: Transport = httpTransport(address)) {}
 
   get connection(): Connection { return this.status; }
   get error(): string | null { return this.failure; }
@@ -75,27 +111,11 @@ export class Device {
   get remoteAllowed(): boolean { return ['0', '2'].includes(String(this.state[REMOTE])); }
   get name(): string { return scalar(this.state[SYSTEM_NAME]) ?? ''; }
 
-  private async request(path: string, query: Record<string, string>, signal: AbortSignal) {
-    const url = new URL(path, this.address);
-    // A space goes as %20: the unit's own pages send it that way, and a `+` may be stored as typed.
-    url.search = Object.entries(query).map(([key, value]) => encodeURIComponent(key) + '=' + encodeURIComponent(value)).join('&');
-    const response = await fetch(url, { signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]), cache: 'no-store', redirect: 'error' });
-    if (!response.ok) throw new Error('HTTP ' + response.status);
-    return await response.json() as unknown;
-  }
+  private request(path: string, query: Record<string, string>, signal: AbortSignal) { return this.transport(path, query, signal); }
   /** Some settings are stored in a different place for each frame-rate family or transform. This finds the one in use now. */
   private resolve(id: string): string | null {
-    const mapping = this.maps[id];
-    if (!object(mapping) || Number(mapping.map_scheme) === 0) return id;
-    const scheme = Number(mapping.map_scheme);
-    if (![1, 2, 3, 4, 5].includes(scheme) || !Array.isArray(mapping.depends_on) || !Array.isArray(mapping.param_maps)) return null;
-    const selector = scalar(this.state[String(mapping.depends_on[0])]);
-    if (selector === null || !/^-?\d+$/.test(selector)) return null;
-    const target = mapping.param_maps[Number(selector) - (scheme === 5 ? 7 : 0)];
-    return typeof target === 'string' && target.startsWith('eParamID_') ? target : null;
-  }
-  private options(descriptor: Descriptor | undefined): Choice[] {
-    return (descriptor?.enum_values ?? []).flatMap(choice => { const value = scalar(choice?.value); return value !== null && typeof choice?.text === 'string' ? [{ value, label: choice.text }] : []; });
+    const target = mappedTarget(this.maps[id], selector => scalar(this.state[selector]));
+    return target === '' ? id : target;
   }
   label(id: string): string {
     const backing = this.resolve(id), descriptor = backing ? this.descriptors.get(backing) : undefined;
@@ -118,16 +138,13 @@ export class Device {
     const present = !!target && Object.hasOwn(this.state, target), raw = target ? this.state[target] : undefined, type = descriptor.param_type ?? '';
     const enabled = descriptor.relations?.enabled_by ?? [], disabled = descriptor.relations?.disabled_by ?? [];
     const active = (!enabled.length || enabled.some(this.matches)) && !disabled.some(this.matches);
-    const reading: Reading = { value: '' };
-    if (type === 'enum') { reading.value = scalar(raw) ?? ''; reading.choices = this.options(descriptor); }
-    else if (type === 'integer' || type === 'decimal') {
-      const scale = descriptor.scale_by || 1, precision = descriptor.display_precision || 0;
-      reading.value = present && Number.isFinite(Number(raw)) ? (Number(raw) / scale).toFixed(precision) : '';
-      reading.limits = { precision, ...(descriptor.min_value != null ? { min: descriptor.min_value / scale } : {}), ...(descriptor.max_value != null ? { max: descriptor.max_value / scale } : {}), step: (descriptor.adjust_by || 1) / scale, ...(descriptor.units ? { units: descriptor.units } : {}) };
-    } else if (type === 'string') { reading.value = scalar(raw) ?? ''; reading.limits = { minLength: descriptor.min_length ?? 0, maxLength: descriptor.max_length ?? 1024 }; }
-    else return { value: displayValue(descriptor, raw), locked: 'This setting needs the unit’s own page.' };
+    const shape = shapeOf(descriptor);
+    if (!shape) return { value: displayValue(descriptor, raw), locked: 'This setting needs the unit’s own page.' };
+    const reading: Reading = { value: '', ...shape };
+    if (type === 'integer' || type === 'decimal') reading.value = present && Number.isFinite(Number(raw)) ? (Number(raw) / (descriptor.scale_by || 1)).toFixed(descriptor.display_precision || 0) : '';
+    else reading.value = scalar(raw) ?? '';
     const locked = descriptor.class_names?.includes('readonly') || original.class_names?.includes('readonly') ? 'The unit reports this value. It can’t be set.'
-      : !present ? 'The unit has not reported this value.' : !active ? 'Switch on this setting’s prerequisite first.' : undefined;
+      : !present ? 'The unit has not reported this value.' : !active ? PREREQUISITE : undefined;
     if (locked) reading.locked = locked;
     return reading;
   }

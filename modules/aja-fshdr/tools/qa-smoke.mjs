@@ -274,17 +274,78 @@ try {
   assert.deepEqual([String(await sim(0, 'eParamID_Vid1CustomHPosition')), String(await sim(1, 'eParamID_Vid1CustomHPosition'))], [String(Math.round(together * 10)), String(Math.round(together * 10))]);
   await f.locator('#master-none').click();
   check('a Mixed Master cell stays text until typed, then one Master drag stages on both ticked channels and Send all writes both units');
+  // A unit that isn't connected takes presets: labels in Setup, settings on its sheet rows, sliders included.
   await tab(/Setup/).click();
   await f.locator('#unit-count').fill('4'); await f.locator('#unit-count').press('Enter');
   await expect.poll(async () => (await state()).document.units.length).toBe(4);
   const added = (await state()).document.units[3].id;
   await type(added, 'unit-host', '127.0.0.1:9');
   await expect(cell(added, 'connection-status')).toHaveText('Offline', { timeout: 15000 });
+  await type(added, 'ChannelName1', 'CAM 21');
+  await expect(cell(added, 'ChannelName1')).toHaveAttribute('data-pending', 'true');
+  // The rows follow the mode it is planned in, at once.
+  await choose(added, 'unit-mode', '4K/UHD 1 Ch');
   await tab(/HDR/).click();
-  await expect(cell(added + '#-', 'row-signal')).toHaveText('Offline');
-  await expect(cell(added + '#-', 'Vid#ColorHDRTransform')).toHaveAttribute('aria-readonly', 'true');
-  await shot('sheet-offline');
-  check('a fourth unit that does not answer shows Offline with one blank, locked row');
+  await expect(cell(added + '#0', 'row-signal')).toHaveText('Offline');
+  await expect(cell(added + '#1', 'row-signal')).toHaveCount(0);
+  await tab(/Setup/).click(); await choose(added, 'unit-mode', 'HD/SD 4 Ch');
+  await tab(/HDR/).click();
+  await expect(cell(added + '#1', 'row-signal')).toHaveText('Offline');
+  await expect(cell(added + '#1', 'row-label')).toHaveText('CAM 21');
+  await expect(cell(added + '#1', 'Vid#ColorHDRTransform')).toHaveAttribute('aria-readonly', 'false');
+  await choose(added + '#1', 'Vid#ColorHDRTransform', 'BBC HLG LUT');
+  await expect(cell(added + '#1', 'Vid#ColorHDRTransform')).toHaveAttribute('data-pending', 'true');
+  // Custom Size goes in before the setting that switches it on. Its slider appears once it has a value.
+  await type(added + '#1', 'Vid#CustomSize', '110');
+  await expect(number(added + '#1', 'Vid#CustomSize')).toHaveText('110.0 %');
+  await choose(added + '#1', 'Vid#CustomSizePos', 'On');
+  await f.locator('#pending-toggle').click();
+  await expect(f.locator('.pending-item[data-row-id="' + added + '#1"][data-setting-id="Vid#ColorHDRTransform"] .status')).toHaveText('Sends after FS-HDR 4 connects');
+  await expect(f.locator('#pending-summary')).toContainText('4 presets wait for an FS-HDR to connect');
+  await expect(f.locator('#send-all-bar')).toBeDisabled();
+  await shot('presets-waiting');
+  await f.locator('#pending-close').click();
+  check('a unit that is not connected takes presets in Setup and on its sheet rows, its rows follow the mode it is planned in, and Pending sends holds them');
+  // When it connects, the presets stay staged and go with Send all, Custom Size included.
+  await tab(/Setup/).click();
+  await type(added, 'unit-host', hosts[3]);
+  await expect(cell(added, 'connection-status')).toHaveText('Live', { timeout: 15000 });
+  assert.equal(await sim(3, 'eParamID_Vid1ColorHDRTransform'), '3', 'connecting sends nothing by itself');
+  await tab(/HDR/).click();
+  await expect(cell(added + '#1', 'Vid#ColorHDRTransform')).toHaveAttribute('data-pending', 'true');
+  await sendAll();
+  assert.deepEqual([await sim(3, 'eParamID_Vid1ColorHDRTransform'), await sim(3, 'eParamID_Vid1CustomSizePos'), String(await sim(3, 'eParamID_Vid1CustomSize')), await sim(3, 'eParamID_Vid1_ChannelName')], ['1', '1', '1100', 'CAM 21']);
+  await expect(cell(added + '#1', 'Vid#ColorHDRTransform')).toHaveAttribute('data-pending', 'false');
+  check('once it connects the presets stay staged until Send all, which writes them all, a setting after its prerequisite');
+
+  // A simulated unit: ticked in Setup it is live with no address and takes sends. Turned off, what was set on it stays as presets.
+  await tab(/Setup/).click();
+  await f.locator('#unit-count').fill('5'); await f.locator('#unit-count').press('Enter');
+  await expect.poll(async () => (await state()).document.units.length).toBe(5);
+  const simulated = (await state()).document.units[4].id;
+  await cell(simulated, 'unit-simulated').locator('[role=checkbox]').click();
+  await expect(cell(simulated, 'connection-status')).toHaveText('Simulated', { timeout: 10000 });
+  await expect(f.locator('#fleet-status')).toHaveText('5 units / 4 live · 1 simulated');
+  await shot('setup-simulated');
+  await tab(/HDR/).click();
+  await expect(cell(simulated + '#2', 'row-signal')).toHaveText('Simulated');
+  await choose(simulated + '#2', 'Vid#ColorHDRTransform', 'Colorfront Engine-TV');
+  await sendAll();
+  await expect(cell(simulated + '#2', 'Vid#ColorHDRTransform')).toHaveText('Colorfront Engine-TV');
+  await expect(cell(simulated + '#2', 'Vid#ColorHDRTransform')).toHaveAttribute('data-pending', 'false');
+  assert.equal((await state()).simulated.units[simulated]?.eParamID_Vid2ColorHDRTransform, '8', 'the simulated unit’s settings are saved in the workspace');
+  check('a ticked Simulated unit is live with no address, takes a send and confirms it, and its settings are saved');
+  await tab(/Setup/).click();
+  await cell(simulated, 'unit-simulated').locator('[role=checkbox]').click();
+  await expect(cell(simulated, 'connection-status')).toHaveText('');
+  await tab(/HDR/).click();
+  await expect(cell(simulated + '#2', 'row-signal')).toHaveText('Not connected');
+  await expect(cell(simulated + '#2', 'Vid#ColorHDRTransform')).toHaveText('Colorfront Engine-TV');
+  await expect(cell(simulated + '#2', 'Vid#ColorHDRTransform')).toHaveAttribute('data-pending', 'true');
+  assert.equal(await staged(simulated + '#2', 'Vid#ColorHDRTransform'), '8');
+  await expect.poll(async () => JSON.stringify((await state()).simulated.units)).toBe('{}');
+  await shot('simulated-to-presets');
+  check('turning Simulated off keeps what was set on it as presets for the real unit');
   assert.deepEqual(errors, []);
   console.log('PASS');
 } catch (error) { await shot('failure'); console.log('ERRORS', errors); console.log('STATE', JSON.stringify((await state()).logs).slice(0, 800)); throw error; }

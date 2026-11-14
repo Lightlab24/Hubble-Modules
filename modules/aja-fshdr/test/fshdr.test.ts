@@ -17,8 +17,8 @@ const edit = (rowId: string, columnId: string, value: string, expected = ''): Mu
  * The worker code with a stand-in for Hubble's document store, so a test sees exactly what the page would.
  * Like Hubble, the store refuses a write unless a page command or a button press is running.
  */
-function host(plan: FsDocument, options: { settings?: Record<string, unknown>; earlier?: unknown; connectionEnabled?: boolean } = {}) {
-  const stored = new Map<string, { revision: number; value: unknown }>([['fshdr-plan', { revision: 1, value: plan }], ['setup', { revision: 1, value: options.earlier ?? {} }]]);
+function host(plan: FsDocument, options: { settings?: Record<string, unknown>; earlier?: unknown; connectionEnabled?: boolean; simulated?: unknown } = {}) {
+  const stored = new Map<string, { revision: number; value: unknown }>([['fshdr-plan', { revision: 1, value: plan }], ['setup', { revision: 1, value: options.earlier ?? {} }], ['fshdr-sim', { revision: 1, value: options.simulated ?? { version: 1, units: {} } }]]);
   const record = (id: string) => ({ id, version: 1, revision: String(stored.get(id)!.revision), value: stored.get(id)!.value });
   const states: { values: Observed & { revision: string } }[] = [], feedback: { id: string; state: string }[] = [], logs: { level: string; message: string }[] = [], lifetime = new AbortController();
   const services = { async request(_service: string, _version: number, input: { method: string; id: string; expectedRevision?: string; value?: unknown }, signal?: AbortSignal) {
@@ -31,7 +31,7 @@ function host(plan: FsDocument, options: { settings?: Record<string, unknown>; e
   const worker: ModuleInstance = createBackend({ services, connectionEnabled: options.connectionEnabled ?? true, settings: options.settings ?? {}, log: (entry: never) => logs.push(entry), publishState: (value: never) => states.push(value), publishFeedback: (value: never) => feedback.push(value) } as unknown as ModuleContext);
   const backend: ModuleInstance = { ...worker, call: (...input) => during(async () => worker.call!(...input)), execute: (...input) => during(async () => worker.execute!(...input)) } as ModuleInstance;
   const call = (commandId: string, value?: unknown) => backend.call!('page.fshdr', { sectionId: 'frontend', commandId, value } as never, { signal: lifetime.signal } as never) as unknown as Promise<Observed & { document: FsDocument; outcomes?: { fieldId: string; status: string; message?: string }[] }>;
-  return { backend, call, states, feedback, logs, plan: () => stored.get('fshdr-plan')!.value as FsDocument, observed: () => states.at(-1)!.values, save: (operation: Mutation) => call('save', { operation }), async stop() { lifetime.abort(); await backend.dispose?.(); } };
+  return { backend, call, states, feedback, logs, plan: () => stored.get('fshdr-plan')!.value as FsDocument, simulated: () => stored.get('fshdr-sim')!.value as { version: 1; units: Record<string, Record<string, string>> }, observed: () => states.at(-1)!.values, save: (operation: Mutation) => call('save', { operation }), async stop() { lifetime.abort(); await backend.dispose?.(); } };
 }
 const planFor = (...units: FakeUnit[]) => { const plan = defaultDocument(); plan.units = units.map((unit, index) => newUnit('u' + (index + 1), 'FS-HDR ' + (index + 1), unit.host)); return plan; };
 
@@ -132,7 +132,9 @@ test('the worker reads each unit, follows changes made at it, and reports its ch
     assert.deepEqual(seen.choiceSets[seen.rows['u1#2']!.choices['Vid#ColorHDRTransform']!]!.find(choice => choice.value === '8'), { value: '8', label: 'Colorfront Engine-TV' });
     assert.equal(seen.rows.u2!.values.ChannelName1, 'UHD'); assert.match(seen.rows.u2!.locked.ChannelName2!, /operating mode/);
     assert.equal(seen.rows['u1#1']!.values['Vid#OutputFormat'], '1');
-    assert.deepEqual(rowsFor(h.plan(), seen, 'channels').map(row => row.id), ['u1#1', 'u1#2', 'u1#3', 'u1#4', 'u2#0', 'u3#-', 'u4#-']);
+    // A unit that isn't live has the rows of the mode it is planned in, ready for presets.
+    assert.deepEqual(rowsFor(h.plan(), seen, 'channels').map(row => row.id), ['u1#1', 'u1#2', 'u1#3', 'u1#4', 'u2#0', 'u3#1', 'u3#2', 'u3#3', 'u3#4', 'u4#1', 'u4#2', 'u4#3', 'u4#4']);
+    assert.equal(seen.units.u3!.planned, true); assert.deepEqual(seen.units.u3!.channels, [1, 2, 3, 4]); assert.equal(seen.units.u3!.mode, 'HD/SD 4 Ch');
     assert.equal(shownName(seen, h.plan().units[0]!), 'Truck A'); assert.equal(shownLabel(seen, h.plan().units[1]!, 0), 'UHD');
     assert.ok(h.feedback.every(item => item.id !== 'all-online' || item.state === 'unavailable'), 'a unit with no address keeps All online off');
     four.change('eParamID_Vid2ColorHDRTransform', '1'); four.change('eParamID_FrameRateMode', '1');
@@ -171,13 +173,13 @@ test('Send writes only what is staged, confirms by readback, and leaves a refuse
     assert.ok(h.logs.some(entry => entry.level === 'info' && /Vid#ColorHDRTransform = 8: Confirmed/.test(entry.message)));
   } finally { await h.stop(); await unit.close(); }
 });
-test('the Master selection covers ticked channels of live units only', async () => {
+test('the Master selection covers ticked channels, including those of a unit that is not connected, which take presets', async () => {
   const unit = await fakeUnit(), plan = planFor(unit); plan.units.push(newUnit('u2', 'Away', '127.0.0.1:9')); plan.master = ['u1#1', 'u1#3', 'u2#1'];
   const h = host(plan);
   try {
     await h.backend.start!();
     await until(() => h.observed().units.u1?.state === 'live');
-    assert.deepEqual(masterRows(h.plan(), h.observed()).map(row => row.id), ['u1#1', 'u1#3']);
+    assert.deepEqual(masterRows(h.plan(), h.observed()).map(row => row.id), ['u1#1', 'u1#3', 'u2#1']);
     await h.save({ kind: 'units', add: [], remove: [h.plan().units[1]!] });
     assert.deepEqual(h.plan().master, ['u1#1', 'u1#3']);
   } finally { await h.stop(); await unit.close(); }
@@ -249,4 +251,79 @@ test('with the connection switched off in Hubble nothing is contacted or sent', 
     await assert.rejects(h.call('send', { rowId: 'u1', fieldIds: ['ChannelName1'] }), /switched off/);
     assert.equal(unit.writes.length, 0);
   } finally { await h.stop(); await unit.close(); }
+});
+
+test('a unit that is not connected takes presets with the firmware list’s choices and ranges, and they send once it is live', async () => {
+  const unit = await fakeUnit(), plan = planFor(unit); plan.units[0]!.values['unit-host'] = '127.0.0.1:9';
+  const h = host(plan);
+  try {
+    await h.backend.start!();
+    await h.save({ kind: 'view', sheetId: 'hdr', view: withColumnVisibility(sheetList(h.plan()).find(sheet => sheet.id === 'hdr')!.view, [{ id: 'Vid#CustomSizePos', visible: true }, { id: 'Vid#CustomSize', visible: true }]), expected: sheetList(h.plan()).find(sheet => sheet.id === 'hdr')!.view });
+    await until(() => h.observed().rows['u1#1']?.planned === true && h.observed().rows['u1#1']!.limits['Vid#CustomSize'] !== undefined, 'planned rows');
+    const seen = h.observed(), row = seen.rows['u1#1']!;
+    assert.deepEqual(Object.keys(row.values), [], 'nothing is known about the unit yet');
+    assert.deepEqual(row.limits['Vid#CustomSize'], { precision: 1, min: 10, max: 200, step: 0.1, units: '%' });
+    assert.equal(row.locked['Vid#CustomSize'], undefined, 'a preset is not held back by a prerequisite the unit might already have on');
+    assert.ok(seen.choiceSets[row.choices['Vid#ColorHDRTransform']!]!.some(choice => choice.label === 'BBC HLG LUT'));
+    assert.match(String((normalize(row, fields.find(field => field.id === 'Vid#CustomSize')!, '250') as { error?: string }).error), /from 10 to 200/);
+    // Custom Size is staged before the setting that switches it on. One Send still lands both.
+    await h.save({ kind: 'edit', edits: [{ rowId: 'u1#1', columnId: 'Vid#CustomSize', value: '120.0', expected: '' }, { rowId: 'u1#1', columnId: 'Vid#CustomSizePos', value: '1', expected: '' }] });
+    assert.deepEqual(pendingFields(h.plan(), h.observed(), 'u1#1').map(field => field.id), ['Vid#CustomSize', 'Vid#CustomSizePos']);
+    await assert.rejects(h.call('send', { rowId: 'u1#1', fieldIds: ['Vid#CustomSize'] }), /offline/);
+    await h.save(edit('u1', 'unit-host', unit.host, '127.0.0.1:9'));
+    await until(() => h.observed().units.u1?.state === 'live', 'the unit connects');
+    assert.equal(valueOf(h.plan(), 'u1#1', 'Vid#CustomSize'), '120.0', 'presets stay staged when the unit connects');
+    assert.equal(unit.writes.length, 0, 'connecting sends nothing by itself');
+    const sent = await h.call('send', { rowId: 'u1#1', fieldIds: ['Vid#CustomSize', 'Vid#CustomSizePos'] });
+    assert.deepEqual(sent.outcomes!.map(outcome => outcome.fieldId + ' ' + outcome.status), ['Vid#CustomSizePos verified', 'Vid#CustomSize verified']);
+    assert.deepEqual([unit.values.eParamID_Vid1CustomSizePos, unit.values.eParamID_Vid1CustomSize], ['1', '1200']);
+  } finally { await h.stop(); await unit.close(); }
+});
+test('a simulated unit runs inside the worker with no address, takes sends, and keeps them over a restart', async () => {
+  const plan = defaultDocument(); plan.units = [{ ...newUnit('s1', 'Sim 1', ''), values: { ...newUnit('s1', 'Sim 1', '').values, 'unit-simulated': 'TRUE' } }];
+  const h = host(plan);
+  let again: ReturnType<typeof host> | undefined;
+  try {
+    await h.backend.start!();
+    await until(() => h.observed().units.s1?.state === 'live', 'the simulated unit is live');
+    const seen = h.observed().units.s1!;
+    assert.deepEqual([seen.simulated, seen.channels, seen.mode, seen.name, seen.remote], [true, [1, 2, 3, 4], 'HD/SD 4 Ch', 'Sim 1', true]);
+    assert.equal(h.observed().rows['s1#1']!.signal, 'No Input');
+    await h.save({ kind: 'edit', edits: [{ rowId: 's1#2', columnId: 'Vid#ColorHDRTransform', value: '8', expected: '' }, { rowId: 's1', columnId: 'ChannelName1', value: 'CAM 1', expected: '' }] });
+    assert.deepEqual((await h.call('send', { rowId: 's1#2', fieldIds: ['Vid#ColorHDRTransform'] })).outcomes, [{ fieldId: 'Vid#ColorHDRTransform', status: 'verified' }]);
+    assert.deepEqual((await h.call('send', { rowId: 's1', fieldIds: ['ChannelName1'] })).outcomes, [{ fieldId: 'ChannelName1', status: 'verified' }]);
+    await until(() => h.observed().rows['s1#2']!.values['Vid#ColorHDRTransform'] === '8', 'the simulated unit reports the new value');
+    assert.deepEqual(h.observed().units.s1!.changes, { 's1#2': { 'Vid#ColorHDRTransform': '8' }, s1: { ChannelName1: 'CAM 1' } });
+    assert.deepEqual(h.simulated().units.s1, { eParamID_Vid2ColorHDRTransform: '8', eParamID_Vid1_ChannelName: 'CAM 1' }, 'saved by the send command');
+    await h.stop();
+    again = host(h.plan(), { simulated: h.simulated() });
+    await again.backend.start!();
+    await until(() => again!.observed().rows['s1#2']?.values['Vid#ColorHDRTransform'] === '8', 'the restarted worker brings the simulated unit back with its settings');
+    // A new mode is a restart of the simulated unit, with one channel.
+    await again.save(edit('s1', 'unit-mode', '2'));
+    await until(() => again!.observed().units.s1?.state === 'live' && again!.observed().units.s1!.channels.join() === '0', 'the simulated unit restarts in 4K/UHD');
+    // Turned off, the row is a plain unit again and the simulated settings go.
+    await again.save(edit('s1', 'unit-simulated', 'FALSE', 'TRUE'));
+    await until(() => again!.observed().units.s1?.state === 'unset', 'no longer simulated');
+    assert.deepEqual(again.simulated().units, {});
+  } finally { await h.stop(); await again?.stop(); }
+});
+test('buttons never control a simulated unit, and it does not count towards All online', async () => {
+  const real = await fakeUnit(), plan = planFor(real);
+  plan.units.push({ ...newUnit('s2', 'Sim 2', '10.0.0.42'), values: { ...newUnit('s2', 'Sim 2', '10.0.0.42').values, 'unit-simulated': 'TRUE' } });
+  const h = host(plan);
+  try {
+    await h.backend.start!();
+    await until(() => h.observed().units.u1?.state === 'live' && h.observed().units.s2?.state === 'live');
+    await until(() => h.feedback.some(item => item.id === 'all-online' && item.state === 'active'), 'All online counts the real unit only');
+    const values = { 'module.targets': 'all', 'module.processor': '2', 'module.transform': '8' };
+    const all = await h.backend.execute!('set-hdr-transform', { values } as never, { signal: new AbortController().signal } as never) as { status: string };
+    assert.equal(all.status, 'success'); assert.equal(real.values.eParamID_Vid2ColorHDRTransform, '8');
+    assert.notEqual(h.observed().rows['s2#2']!.values['Vid#ColorHDRTransform'], '8', 'All configured units leaves the simulated unit alone');
+    const named = await h.backend.execute!('set-hdr-transform', { values: { ...values, 'module.targets': '10.0.0.42' } } as never, { signal: new AbortController().signal } as never) as { status: string };
+    assert.equal(named.status, 'failure');
+    assert.ok(h.logs.length >= 0);
+    const choices = await h.backend.discoverChoices!({ provider: 'fshdr-targets', search: '', limit: 10 } as never, { signal: new AbortController().signal } as never) as { choices: { id: string }[] };
+    assert.deepEqual(choices.choices.map(choice => choice.id), ['all', 'http://' + real.host]);
+  } finally { await h.stop(); await real.close(); }
 });

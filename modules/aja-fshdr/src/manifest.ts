@@ -18,6 +18,8 @@ export default defineModuleManifest({
   documents: [
     { id: 'fshdr-plan', label: 'FS-HDR plan', version: 1, defaultValue: ModuleDocumentValueSchema.parse(defaultDocument()) },
     { id: 'setup', label: 'FS-HDR setup (earlier version)', version: 1, defaultValue: {} },
+    // What has been written to each simulated unit, so it keeps its settings over a restart.
+    { id: 'fshdr-sim', label: 'FS-HDR simulated units', version: 1, defaultValue: { version: 1, units: {} } },
   ],
   settings: [],
   actions: [...actions],
