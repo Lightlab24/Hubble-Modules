@@ -25,11 +25,13 @@ columns and legacy CCC/router pages are not additional datasets in this candidat
 Modules publish their tables explicitly as those workflows are extracted. Do not
 invent a private-message fallback for a source absent from the catalog.
 
-The consumer can read its own instance's published tables. The operator separately
-grants access to other modules' shared data and to shared Hubble data. Existing
-module-data approval does not grant Hubble-data access. Revocation blocks pending
+The consumer can read its own instance's published tables. Every module in the
+workspace can read shared Hubble data (`button-matrix`) without a grant. Reading
+other modules' shared data needs the operator's **Allow access to other modules'
+data**, at the bottom of the module's Settings. Revoking that grant blocks pending
 requests before the permission save finishes. Workspace/package/generation changes
-invalidate the caller. Read approval does not grant action execution.
+invalidate the caller. Read approval does not grant action execution. Older hosts
+asked for Hubble data separately; a saved `allowWorkspaceData` is kept but ignored.
 
 ## Public client and failure handling
 
