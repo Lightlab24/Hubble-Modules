@@ -1,6 +1,6 @@
 # AJA FS-HDR
 
-Module ID `aja-fshdr`, version 2.0.0. Controls AJA FS-HDR frame synchronizers and HDR converters over their REST interface, from one page built on Hubble's shared spreadsheet controls. It needs Hubble 2.2.0 or later.
+Module ID `aja-fshdr`, version 2.0.1. Controls AJA FS-HDR frame synchronizers and HDR converters over their REST interface, from one page built on Hubble's shared spreadsheet controls. It needs Hubble 2.2.0 or later.
 
 ## The page
 
@@ -30,7 +30,7 @@ The Button Matrix action **Set HDR transform** takes a unit or All configured un
 
 ## Saved data
 
-Everything is in one workspace document, `fshdr-plan`: the units, staged settings, tabs and their columns, the Master selection and the Auto send choice. It travels with workspace export and import. Units set up in 1.x are brought across once, the first time 2.0.0 starts with an empty plan, keeping whether each could be controlled. They are read straight away, and saved into the plan by the first page command or button press, because Hubble lets a module save its documents only during a command. Removing them later doesn't bring them back.
+Everything is in one workspace document, `fshdr-plan`: the units, staged settings, tabs and their columns, the Master selection and the Auto send choice. It travels with workspace export and import. Units set up in 1.x are brought across once, the first time 2.0 starts with an empty plan, keeping whether each could be controlled. They are read straight away, and saved into the plan by the first page command or button press, because Hubble lets a module save its documents only during a command. Removing them later doesn't bring them back.
 
 ## Not covered
 
