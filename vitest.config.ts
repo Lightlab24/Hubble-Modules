@@ -9,6 +9,7 @@ export default defineConfig({
     exclude: [
       "packages/module-tools/**",
       // These use node:test and run through scripts/modules.mjs test <module>.
+      "modules/aja-fshdr/test/**",
       "modules/cyanview-config/test/**",
       "modules/venice-camera-control/test/**",
       "templates/**",

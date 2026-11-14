@@ -17,6 +17,7 @@ for (const name of names)
   );
 
 const series: Record<string, readonly string[]> = {
+  "aja-fshdr": [],
   "aja-kumo": ["source", "destination"],
   "blackmagic-videohub": ["source", "destination"],
   ccc: ["cameraId"],

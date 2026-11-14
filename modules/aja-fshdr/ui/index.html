@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>FS-HDR</title><link rel="stylesheet" href="./app.css"></head>
+<body>
+<div class="camera-app" id="app">
+  <header class="app-header">
+    <div class="app-title"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="7" width="19" height="10" rx="2"/><path d="M6 12h.01M9.5 12h.01M13 10.5h5M13 13.5h5"/></svg><div><h1>FS-HDR</h1><p>AJA FS-HDR</p></div></div>
+    <div class="header-status"><span class="status-dot"></span><span id="fleet-status">Loading workspace…</span><div class="segment send-mode" role="group" aria-label="Send mode"><button id="send-manual" aria-pressed="true" title="Edits wait in Pending sends until you press Send all">Manual</button><button id="send-auto" aria-pressed="false" title="Enter, Tab or leaving a cell sends that edit to its FS-HDR">Auto send</button></div></div>
+  </header>
+  <div class="toolbar" role="toolbar" aria-label="FS-HDR controls">
+    <button id="add-unit" class="primary" data-for="setup"><span aria-hidden="true">+</span> Add FS-HDR</button>
+    <label class="camera-count" data-for="setup">Units<input id="unit-count" type="number" min="0" max="16" step="1" autocomplete="off" aria-label="Number of FS-HDRs"></label>
+    <span class="selection-summary" id="master-summary" data-for="master"></span>
+    <button id="master-all" data-for="master">Select all</button><button id="master-none" data-for="master">Select none</button>
+    <span class="toolbar-divider" data-for="setup master"></span>
+    <button id="refresh-units" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M5 8a8 8 0 0 1 13-3l2 3M4 16l2 3a8 8 0 0 0 13-3"/></svg><span id="refresh-label">Refresh all</span></button>
+    <button id="send-all-bar" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h13M12 6l6 6-6 6"/></svg>Send all <span class="count" id="send-all-bar-count" hidden>0</span></button>
+    <button id="pending-toggle" aria-expanded="false" aria-controls="pending-sends">Pending sends <span class="count" id="pending-count" hidden>0</span></button>
+    <span class="toolbar-spacer"></span>
+    <div class="segment" role="group" aria-label="Sheet layout for this tab" data-for="channels"><button id="view-rows" aria-pressed="true">Channels in rows</button><button id="view-columns" aria-pressed="false">Channels in columns</button></div>
+    <div id="text-size" aria-label="Sheet text size"></div>
+    <button id="expand-all">Expand all</button><button id="collapse-all">Collapse all</button>
+    <div id="columns-setup" data-for="setup" title="Choose which settings this tab shows"></div><div id="columns-master" data-for="master" title="Choose which settings this tab shows"></div><div id="columns-channels" data-for="channels" title="Choose which settings this tab shows"></div>
+    <button id="details-toggle" class="icon-button" aria-label="Setting details" aria-expanded="false">ⓘ</button>
+  </div>
+  <div id="error" class="notice error" role="alert" hidden></div>
+  <main class="work-area">
+    <div class="sheet-scroll" id="viewport-setup"><table id="grid-setup" role="grid" aria-label="FS-HDR setup" tabindex="0"><colgroup></colgroup></table></div>
+    <div class="sheet-scroll" id="viewport-master" hidden><table id="grid-master" role="grid" aria-label="FS-HDR master control" tabindex="0"><colgroup></colgroup></table></div>
+    <div class="sheet-scroll" id="viewport-channels" hidden><table id="grid-channels" role="grid" aria-label="FS-HDR settings" tabindex="0"><colgroup></colgroup></table></div>
+    <aside id="setting-details" hidden aria-label="Setting details"><h2>Setting details</h2><div id="detail-content">Select a setting.</div></aside>
+    <aside id="pending-sends" hidden aria-label="Pending sends"><header><h2>Pending sends</h2><button id="pending-close" class="icon-button" aria-label="Close pending sends">×</button></header><p id="pending-summary"></p><div class="pending-actions"><button id="send-all" class="primary">Send all</button><button id="cancel-all">Cancel all</button></div><div id="pending-list"></div></aside>
+    <div id="loading" class="loading" role="status">Connecting to workspace…</div>
+    <div id="empty" class="empty" hidden><h2>Add an FS-HDR</h2><p>Set how many FS-HDRs you have in the toolbar, then drag to fill their IPs. Or add one by address.</p><button id="empty-add" class="primary">Add FS-HDR</button></div>
+  </main>
+  <div id="sheet-tabs" class="sheet-tabs"></div>
+  <footer class="app-footer"><output id="save-status" aria-live="polite">Loading…</output><span title="Pinch or Ctrl+scroll to zoom the whole sheet"><output id="zoom-status" aria-label="Sheet zoom">100%</output> · Pinch to zoom</span><span id="pending-status">Draft settings stay local until you send.</span></footer>
+</div>
+<dialog id="unit-dialog"><form id="unit-form"><header><h2 id="dialog-title">Add FS-HDR</h2><button type="button" id="close-dialog" aria-label="Close">×</button></header><div class="dialog-body"><p id="dialog-context">Add an FS-HDR to this workspace. Its name is read from the unit once it answers.</p><label id="host-label">Host / IP<input id="unit-host" autocomplete="off" spellcheck="false" placeholder="192.0.2.201"></label><p id="dialog-error" role="alert" hidden></p></div><footer><button type="button" id="cancel-dialog">Cancel</button><button id="dialog-submit" type="submit" class="primary">Add FS-HDR</button></footer></form></dialog>
+<dialog id="remove-dialog" aria-labelledby="remove-title"><header><h2 id="remove-title">Remove FS-HDRs?</h2></header><div class="dialog-body"><p id="remove-context">This takes the last FS-HDRs out of the plan, with their addresses and staged settings. Undo brings them back.</p><p>Filled in: <span id="remove-names"></span></p></div><footer><button type="button" id="remove-cancel">Cancel</button><button type="button" id="remove-confirm" class="primary">Remove FS-HDRs</button></footer></dialog>
+<script type="module" src="./app.js"></script>
+</body></html>
