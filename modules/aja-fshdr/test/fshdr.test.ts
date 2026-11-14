@@ -13,17 +13,23 @@ import { fakeUnit, type FakeUnit } from './fake-unit.js';
 const until = async (check: () => boolean, message = 'condition') => { for (let i = 0; i < 400 && !check(); i++) await delay(10); assert.ok(check(), message); };
 const edit = (rowId: string, columnId: string, value: string, expected = ''): Mutation => ({ kind: 'edit', edits: [{ rowId, columnId, value, expected }] });
 
-/** The worker code with a stand-in for Hubble's document store, so a test sees exactly what the page would. */
+/**
+ * The worker code with a stand-in for Hubble's document store, so a test sees exactly what the page would.
+ * Like Hubble, the store refuses a write unless a page command or a button press is running.
+ */
 function host(plan: FsDocument, options: { settings?: Record<string, unknown>; earlier?: unknown; connectionEnabled?: boolean } = {}) {
   const stored = new Map<string, { revision: number; value: unknown }>([['fshdr-plan', { revision: 1, value: plan }], ['setup', { revision: 1, value: options.earlier ?? {} }]]);
   const record = (id: string) => ({ id, version: 1, revision: String(stored.get(id)!.revision), value: stored.get(id)!.value });
   const states: { values: Observed & { revision: string } }[] = [], feedback: { id: string; state: string }[] = [], logs: { level: string; message: string }[] = [], lifetime = new AbortController();
   const services = { async request(_service: string, _version: number, input: { method: string; id: string; expectedRevision?: string; value?: unknown }, signal?: AbortSignal) {
     if (input.method === 'watch') return await new Promise((_resolve, reject) => signal?.addEventListener('abort', () => reject(Error('cancelled')), { once: true }));
-    if (input.method === 'write') { if (input.expectedRevision !== String(stored.get(input.id)!.revision)) return { status: 'conflict', document: record(input.id) }; stored.set(input.id, { revision: stored.get(input.id)!.revision + 1, value: input.value }); }
+    if (input.method === 'write') { if (!commands) throw Error('Document edits require an active command'); if (input.expectedRevision !== String(stored.get(input.id)!.revision)) return { status: 'conflict', document: record(input.id) }; stored.set(input.id, { revision: stored.get(input.id)!.revision + 1, value: input.value }); }
     return { status: 'document', document: record(input.id) };
   } };
-  const backend: ModuleInstance = createBackend({ services, connectionEnabled: options.connectionEnabled ?? true, settings: options.settings ?? {}, log: (entry: never) => logs.push(entry), publishState: (value: never) => states.push(value), publishFeedback: (value: never) => feedback.push(value) } as unknown as ModuleContext);
+  let commands = 0;
+  const during = async <T>(run: () => Promise<T>): Promise<T> => { commands++; try { return await run(); } finally { commands--; } };
+  const worker: ModuleInstance = createBackend({ services, connectionEnabled: options.connectionEnabled ?? true, settings: options.settings ?? {}, log: (entry: never) => logs.push(entry), publishState: (value: never) => states.push(value), publishFeedback: (value: never) => feedback.push(value) } as unknown as ModuleContext);
+  const backend: ModuleInstance = { ...worker, call: (...input) => during(async () => worker.call!(...input)), execute: (...input) => during(async () => worker.execute!(...input)) } as ModuleInstance;
   const call = (commandId: string, value?: unknown) => backend.call!('page.fshdr', { sectionId: 'frontend', commandId, value } as never, { signal: lifetime.signal } as never) as unknown as Promise<Observed & { document: FsDocument; outcomes?: { fieldId: string; status: string; message?: string }[] }>;
   return { backend, call, states, feedback, logs, plan: () => stored.get('fshdr-plan')!.value as FsDocument, observed: () => states.at(-1)!.values, save: (operation: Mutation) => call('save', { operation }), async stop() { lifetime.abort(); await backend.dispose?.(); } };
 }
@@ -176,12 +182,40 @@ test('the Master selection covers ticked channels of live units only', async () 
     assert.deepEqual(h.plan().master, ['u1#1', 'u1#3']);
   } finally { await h.stop(); await unit.close(); }
 });
-test('units from the earlier version come across once, keeping whether they could be controlled', async () => {
-  const unit = await fakeUnit(), h = host(defaultDocument(), { earlier: { devices: [{ id: 'unit-1', values: { name: 'Bench', address: 'http://' + unit.host, access: 'control' } }, { id: 'unit-2', values: { name: '', address: 'http://10.9.9.9', access: 'monitor' } }] } });
+test('units from version 1 are used at once, saved by the first command, and not brought back after being removed', async () => {
+  const unit = await fakeUnit(), earlier = { devices: [{ id: 'unit-1', values: { name: 'Bench', address: 'http://' + unit.host, access: 'control' } }, { id: 'unit-2', values: { name: '', address: 'http://10.9.9.9', access: 'monitor' } }] };
+  const h = host(defaultDocument(), { earlier });
+  let saved: FsDocument;
   try {
     await h.backend.start!();
-    assert.deepEqual(h.plan().units.map(item => [item.id, item.values['unit-name'], item.values['unit-host'], item.values['unit-allow']]), [['unit-1', 'Bench', unit.host, 'TRUE'], ['unit-2', 'FS-HDR 2', '10.9.9.9', 'FALSE']]);
+    // Nothing can be saved while the worker starts, but the unit is already being read and a button could reach it.
+    assert.deepEqual(h.plan().units, []);
+    assert.deepEqual(h.logs.filter(entry => entry.level === 'error'), []);
     await until(() => h.observed().units['unit-1']?.state === 'live');
+    const opened = await h.call('snapshot');
+    assert.deepEqual(opened.document.units.map(item => [item.id, item.values['unit-name'], item.values['unit-host'], item.values['unit-allow']]), [['unit-1', 'Bench', unit.host, 'TRUE'], ['unit-2', 'FS-HDR 2', '10.9.9.9', 'FALSE']]);
+    assert.deepEqual(h.plan().units, opened.document.units);
+    assert.equal(h.plan().adopted, true);
+    await h.save({ kind: 'units', add: [], remove: h.plan().units });
+    saved = h.plan();
+    assert.deepEqual(saved.units, []);
+  } finally { await h.stop(); }
+  const again = host(saved!, { earlier });
+  try {
+    await again.backend.start!();
+    assert.deepEqual((await again.call('snapshot')).document.units, []);
+  } finally { await again.stop(); await unit.close(); }
+});
+test('units saved in 1.3.1’s connection settings come across view-only, and a button press saves them too', async () => {
+  const unit = await fakeUnit(), id = '0f0e0d0c-0b0a-4908-8706-050403020100';
+  const h = host(defaultDocument(), { settings: { devicesLayout: { version: 1 }, devices: [{ id, values: { name: '1', address: unit.host, access: 'monitor' } }] } });
+  try {
+    await h.backend.start!();
+    await until(() => h.observed().units[id]?.state === 'live');
+    const result = await h.backend.execute!('set-hdr-transform', { values: { 'module.targets': 'all', 'module.processor': '2', 'module.transform': '8' } } as never, { signal: new AbortController().signal } as never) as { status: string };
+    assert.notEqual(result.status, 'success');
+    assert.deepEqual(unit.writes, []);
+    assert.deepEqual(h.plan().units.map(item => [item.id, item.values['unit-name'], item.values['unit-host'], item.values['unit-allow']]), [[id, '1', unit.host, 'FALSE']]);
   } finally { await h.stop(); await unit.close(); }
 });
 test('a button press sets one transform on the chosen units, and its feedback follows the unit', async () => {

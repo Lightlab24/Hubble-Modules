@@ -25,7 +25,8 @@ export type SheetKind = 'setup' | 'master' | 'channels';
 export interface Sheet { id: string; name: string; kind: SheetKind; orientation: Orientation; view?: View }
 export type FullSheet = Sheet & { view: View };
 /** `autoSend`: a committed edit goes to its unit as soon as it saves. `master`: the channel rows the Master tab edits together. */
-export interface FsDocument { version: 1; units: Unit[]; view: View; sheets: Sheet[]; activeSheetId: string; autoSend?: boolean; master?: string[] }
+/** `adopted` is set once units from version 1 have been brought across, so removing them later doesn't bring them back. */
+export interface FsDocument { version: 1; units: Unit[]; view: View; sheets: Sheet[]; activeSheetId: string; autoSend?: boolean; master?: string[]; adopted?: boolean }
 export interface CellEdit { rowId: string; columnId: string; value: string; expected: string }
 export type Mutation = { kind: 'edit'; edits: CellEdit[] } | { kind: 'view'; view: View; expected: View; sheetId?: string } | { kind: 'select-sheet'; sheetId: string } | { kind: 'sheets'; sheets: FullSheet[]; expected: FullSheet[]; activeSheetId?: string } | { kind: 'units'; add: Unit[]; remove: Unit[] } | { kind: 'auto-send'; autoSend: boolean; expected: boolean } | { kind: 'master'; selected: string[]; expected: string[] };
 
@@ -199,6 +200,7 @@ export function validateDocument(value: unknown): FsDocument {
   }
   validateSheets(doc);
   if (doc.autoSend !== undefined && typeof doc.autoSend !== 'boolean') throw Error('Invalid send mode.');
+  if (doc.adopted !== undefined && typeof doc.adopted !== 'boolean') throw Error('Invalid plan.');
   if (doc.master !== undefined && (!Array.isArray(doc.master) || doc.master.length > maxUnits * 4 || doc.master.some(id => typeof id !== 'string'))) throw Error('Invalid Master selection.');
   if (JSON.stringify(doc).length > 220000) throw Error('This FS-HDR plan exceeds the workspace document limit.');
   return doc;

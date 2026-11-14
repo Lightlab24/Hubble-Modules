@@ -2,7 +2,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { createModuleDocumentClient, ModuleDocumentConflictError, ModuleDocumentValueSchema, ModuleTableRowsSchema, type ModuleContext, type ModuleFeedbackSubscription, type ModuleInstance, type ModuleJsonValue } from '@hubble/module-sdk';
 import { Device, object, parameterId, type Choice, type Limits, type WriteResult } from './device.js';
 import { ACTION, MATCHES, TARGET_CHOICES, createActions, readCommand, type Command } from './actions.js';
-import { applyMutation, channelRowId, defaultDocument, fieldById, newUnit, parseRowId, unitName, validHost, validateDocument, valueOf, watchedFieldIds, type FsDocument, type Mutation, type Unit } from './model.js';
+import { applyMutation, channelRowId, clone, defaultDocument, fieldById, maxUnits, newUnit, parseRowId, unitName, validHost, validateDocument, valueOf, watchedFieldIds, type FsDocument, type Mutation, type Unit } from './model.js';
 
 export const PLAN = 'fshdr-plan', LEGACY_SETUP = 'setup';
 /** `unset` has no address yet, and `duplicate` shares one with an earlier row. `disabled` means the connection is switched off in Hubble. */
@@ -24,6 +24,8 @@ export function createBackend(context: ModuleContext): ModuleInstance {
   let observed: Observed = { units: {}, rows: {}, choiceSets: [] };
   let subscriptions: readonly ModuleFeedbackSubscription[] = [], subscriptionSignal: AbortSignal | undefined, lastOnline: boolean | undefined;
   const waiters = new Set<() => void>();
+  let carried: Unit[] = [];
+  const withCarried = (doc: FsDocument): FsDocument => carried.length && !doc.adopted && !doc.units.length ? { ...doc, units: clone(carried), adopted: true } : doc;
   const transientFor = (rowId: string) => { let entry = transient.get(rowId); if (!entry) transient.set(rowId, entry = { errors: {}, sending: [], queued: [] }); return entry; };
   const hostOf = (unit: Unit) => unit.values['unit-host'] ?? '';
 
@@ -118,31 +120,38 @@ export function createBackend(context: ModuleContext): ModuleInstance {
   async function readPlan(signal: AbortSignal): Promise<FsDocument> {
     const saved = await documents.read(PLAN, signal);
     latestRevision = saved.revision;
-    planChanged(validateDocument(saved.value));
+    planChanged(withCarried(validateDocument(saved.value)));
     return plan;
   }
   async function savePlan(operation: Mutation, signal: AbortSignal): Promise<FsDocument> {
     for (let attempt = 0; attempt < 3; attempt++) {
-      const saved = await documents.read(PLAN, signal), next = applyMutation(validateDocument(saved.value), operation);
+      const saved = await documents.read(PLAN, signal), next = applyMutation(withCarried(validateDocument(saved.value)), operation);
       try { const result = await documents.write(saved, ModuleDocumentValueSchema.parse(next), signal); latestRevision = result.revision; planChanged(next); publish(); return next; }
       catch (error) { if (!(error instanceof ModuleDocumentConflictError) || attempt === 2) throw error; }
     }
     throw Error('The FS-HDR plan changed before saving.');
   }
-  /** Units set up in the previous version of this module come across once, when the new plan is still empty. */
-  async function adoptEarlierSetup(signal: AbortSignal) {
-    if (plan.units.length) return;
+  /**
+   * Units set up in version 1 come across once, while the new plan has never held any. Hubble lets a module save its
+   * documents only during a command, so they are used from memory straight away and saved by the first command.
+   */
+  async function earlierUnits(signal: AbortSignal): Promise<Unit[]> {
     let rows = ModuleTableRowsSchema.safeParse(context.settings.devices ?? []).data ?? [];
     try { const earlier = await documents.read(LEGACY_SETUP, signal); if (object(earlier.value) && Array.isArray(earlier.value.devices)) rows = ModuleTableRowsSchema.parse(earlier.value.devices); } catch { /* No earlier setup to bring across. */ }
-    const add = rows.flatMap((row, index) => {
+    const ids = new Set<string>();
+    return rows.flatMap((row, index) => {
       const host = typeof row.values.address === 'string' ? row.values.address.trim().replace(/^https?:\/\//, '').replace(/\/$/, '') : '';
-      if (!validHost(host)) return [];
-      const unit = newUnit(/^[^#]+$/.test(row.id) && row.id !== 'master' ? row.id : 'unit-' + (index + 1), typeof row.values.name === 'string' && row.values.name.trim() ? row.values.name.trim().slice(0, 96) : 'FS-HDR ' + (index + 1), host);
+      const id = /^[^#]+$/.test(row.id) && row.id !== 'master' ? row.id : 'unit-' + (index + 1);
+      if (!validHost(host) || ids.has(id)) return [];
+      ids.add(id);
+      const unit = newUnit(id, typeof row.values.name === 'string' && row.values.name.trim() ? row.values.name.trim().slice(0, 96) : 'FS-HDR ' + (index + 1), host);
       unit.values['unit-allow'] = row.values.access === 'control' ? 'TRUE' : 'FALSE';
       return [unit];
-    });
-    if (add.length) await savePlan({ kind: 'units', add, remove: [] }, signal).catch(error => context.log({ level: 'error', stage: 'fshdr-plan', message: 'Earlier FS-HDR setup was not brought across: ' + (error instanceof Error ? error.message : String(error)) }));
+    }).slice(0, maxUnits);
   }
+  let saving: Promise<void> | undefined;
+  /** Saves the carried-over units. Called at the start of every command until it has worked. */
+  const saveCarried = (signal: AbortSignal): Promise<void> | undefined => carried.length ? saving ??= savePlan({ kind: 'units', add: [], remove: [] }, signal).then(() => { carried = []; }, error => context.log({ level: 'error', stage: 'fshdr-plan', message: 'Earlier FS-HDR setup could not be saved: ' + (error instanceof Error ? error.message : String(error)) })).finally(() => { saving = undefined; }) : undefined;
   const targets = (list: string[]): (Unit | undefined)[] => list.length === 1 && list[0] === 'all' ? plan.units.filter(unit => devices.has(unit.id))
     : [...new Set(list.map(entry => unitAddress(entry.replace(/^https?:\/\//, '').replace(/\/$/, '')) ?? entry))].map(address => plan.units.find(unit => devices.get(unit.id)?.address === address));
   const sendRefusal = (unit: Unit): string | null => !canConnect || !started ? 'Device connections are switched off in Hubble.' : unit.values['unit-allow'] !== 'TRUE' ? 'Allow sends is off for ' + unitName(unit) + ' in Setup.' : null;
@@ -168,12 +177,12 @@ export function createBackend(context: ModuleContext): ModuleInstance {
       if (started || lifetime.signal.aborted) return;
       started = true;
       await readPlan(lifetime.signal);
-      await adoptEarlierSetup(lifetime.signal);
+      if (!plan.adopted && !plan.units.length) { carried = await earlierUnits(lifetime.signal); planChanged(withCarried(plan)); }
       if (canConnect) for (const running of devices.values()) running.task ??= running.device.run(AbortSignal.any([lifetime.signal, running.controller.signal]));
       publish();
       void (async () => {
         while (!lifetime.signal.aborted) {
-          try { for await (const saved of documents.watch(PLAN, lifetime.signal)) { if (saved.revision === latestRevision) continue; latestRevision = saved.revision; planChanged(validateDocument(saved.value)); publish(); } }
+          try { for await (const saved of documents.watch(PLAN, lifetime.signal)) { if (saved.revision === latestRevision) continue; latestRevision = saved.revision; planChanged(withCarried(validateDocument(saved.value))); publish(); } }
           catch { if (lifetime.signal.aborted) return; await delay(1000, undefined, { signal: lifetime.signal }).catch(() => {}); }
         }
       })();
@@ -182,6 +191,7 @@ export function createBackend(context: ModuleContext): ModuleInstance {
       if (method !== 'page.fshdr' || !object(raw) || raw.sectionId !== 'frontend') throw Error('Unknown FS-HDR page command.');
       const { signal } = execution, input = object(raw.value) ? raw.value : {};
       signal.throwIfAborted();
+      await saveCarried(signal);
       if (raw.commandId === 'snapshot') { const document = await readPlan(signal); observed = observe(); return reply({ document, revision: latestRevision }); }
       if (raw.commandId === 'save') { const document = await savePlan(input.operation as Mutation, signal); return reply({ document, revision: latestRevision }); }
       if (raw.commandId === 'changes') {
@@ -242,6 +252,7 @@ export function createBackend(context: ModuleContext): ModuleInstance {
       } finally { held.sending = []; held.queued = []; publish(); }
     },
     async execute(id, fields, execution) {
+      await saveCarried(execution.signal);
       if (id === ACTION && object(fields.values)) return actions.execute(fields.values.enabled === false ? null : readCommand(fields.values, true), execution);
       return actions.generic.execute(id, fields, execution);
     },
