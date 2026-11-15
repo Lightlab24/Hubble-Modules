@@ -1,6 +1,13 @@
 import { channelRowId, fieldById, isSimulated, masterRowId, masterSelection, nameField, parseRowId, plannedChannels, rowValues, unitName, type Field, type FsDocument, type SheetKind, type Unit } from './model.js';
-import type { Observed, RowObservation, UnitObservation } from './backend.js';
+import type { Observed, RowObservation, UnitObservation, WireObserved } from './backend.js';
 import type { Choice } from './device.js';
+
+/** The worker's state with each row's locks, choices and limits looked up again from the shared `shapes`. */
+export function fromWire(wire: Pick<WireObserved, 'units' | 'rows' | 'choiceSets' | 'shapes'>): Observed {
+  const rows: Observed['rows'] = {};
+  for (const [rowId, { shape, ...rest }] of Object.entries(wire.rows)) rows[rowId] = { ...rest, ...(wire.shapes[shape] ?? { locked: {}, choices: {}, limits: {} }) };
+  return { units: wire.units, rows, choiceSets: wire.choiceSets };
+}
 
 /** What a sheet row stands for. A unit that isn't live has the channels of the mode it is planned in, so its settings can be preset. */
 export interface Row { id: string; unit?: Unit; channel: number | null; kind: 'unit' | 'channel' | 'placeholder' | 'master' }

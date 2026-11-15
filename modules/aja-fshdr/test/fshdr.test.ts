@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { ModuleContext, ModuleInstance } from '@hubble/module-sdk';
 import manifest from '../src/manifest.js';
-import { createBackend, type Observed } from '../src/backend.js';
+import { createBackend, type Observed, type WireObserved } from '../src/backend.js';
 import { parameterId } from '../src/device.js';
 import { addSheet, applyMutation, channelRowId, defaultDocument, fieldById, fields, groups, inverse, moveSheet, newUnit, removeSheet, renameSheet, setUnitCount, sheetList, validateDocument, valueOf, visibleFields, watchedFieldIds, withColumnVisibility, type FsDocument, type Mutation } from '../src/model.js';
-import { masterRows, normalize, pendingFields, rowsFor, shownLabel, shownName } from '../src/rows.js';
+import { fromWire, masterRows, normalize, pendingFields, rowsFor, shownLabel, shownName } from '../src/rows.js';
 import { DraftStore } from '../src/draft-store.js';
 import { fakeUnit, type FakeUnit } from './fake-unit.js';
 
@@ -20,7 +20,7 @@ const edit = (rowId: string, columnId: string, value: string, expected = ''): Mu
 function host(plan: FsDocument, options: { settings?: Record<string, unknown>; earlier?: unknown; connectionEnabled?: boolean; simulated?: unknown } = {}) {
   const stored = new Map<string, { revision: number; value: unknown }>([['fshdr-plan', { revision: 1, value: plan }], ['setup', { revision: 1, value: options.earlier ?? {} }], ['fshdr-sim', { revision: 1, value: options.simulated ?? { version: 1, units: {} } }]]);
   const record = (id: string) => ({ id, version: 1, revision: String(stored.get(id)!.revision), value: stored.get(id)!.value });
-  const states: { values: Observed & { revision: string } }[] = [], feedback: { id: string; state: string }[] = [], logs: { level: string; message: string }[] = [], lifetime = new AbortController();
+  const states: { values: WireObserved & { revision: string } }[] = [], feedback: { id: string; state: string }[] = [], logs: { level: string; message: string }[] = [], lifetime = new AbortController();
   const services = { async request(_service: string, _version: number, input: { method: string; id: string; expectedRevision?: string; value?: unknown }, signal?: AbortSignal) {
     if (input.method === 'watch') return await new Promise((_resolve, reject) => signal?.addEventListener('abort', () => reject(Error('cancelled')), { once: true }));
     if (input.method === 'write') { if (!commands) throw Error('Document edits require an active command'); if (input.expectedRevision !== String(stored.get(input.id)!.revision)) return { status: 'conflict', document: record(input.id) }; stored.set(input.id, { revision: stored.get(input.id)!.revision + 1, value: input.value }); }
@@ -30,8 +30,8 @@ function host(plan: FsDocument, options: { settings?: Record<string, unknown>; e
   const during = async <T>(run: () => Promise<T>): Promise<T> => { commands++; try { return await run(); } finally { commands--; } };
   const worker: ModuleInstance = createBackend({ services, connectionEnabled: options.connectionEnabled ?? true, settings: options.settings ?? {}, log: (entry: never) => logs.push(entry), publishState: (value: never) => states.push(value), publishFeedback: (value: never) => feedback.push(value) } as unknown as ModuleContext);
   const backend: ModuleInstance = { ...worker, call: (...input) => during(async () => worker.call!(...input)), execute: (...input) => during(async () => worker.execute!(...input)) } as ModuleInstance;
-  const call = (commandId: string, value?: unknown) => backend.call!('page.fshdr', { sectionId: 'frontend', commandId, value } as never, { signal: lifetime.signal } as never) as unknown as Promise<Observed & { document: FsDocument; outcomes?: { fieldId: string; status: string; message?: string }[] }>;
-  return { backend, call, states, feedback, logs, plan: () => stored.get('fshdr-plan')!.value as FsDocument, simulated: () => stored.get('fshdr-sim')!.value as { version: 1; units: Record<string, Record<string, string>> }, observed: () => states.at(-1)!.values, save: (operation: Mutation) => call('save', { operation }), async stop() { lifetime.abort(); await backend.dispose?.(); } };
+  const call = (commandId: string, value?: unknown) => backend.call!('page.fshdr', { sectionId: 'frontend', commandId, value } as never, { signal: lifetime.signal } as never) as unknown as Promise<WireObserved & { document: FsDocument; outcomes?: { fieldId: string; status: string; message?: string }[] }>;
+  return { backend, call, states, feedback, logs, plan: () => stored.get('fshdr-plan')!.value as FsDocument, simulated: () => stored.get('fshdr-sim')!.value as { version: 1; units: Record<string, Record<string, string>> }, observed: () => fromWire(states.at(-1)!.values), save: (operation: Mutation) => call('save', { operation }), async stop() { lifetime.abort(); await backend.dispose?.(); } };
 }
 const planFor = (...units: FakeUnit[]) => { const plan = defaultDocument(); plan.units = units.map((unit, index) => newUnit('u' + (index + 1), 'FS-HDR ' + (index + 1), unit.host)); return plan; };
 
@@ -326,4 +326,22 @@ test('buttons never control a simulated unit, and it does not count towards All 
     const choices = await h.backend.discoverChoices!({ provider: 'fshdr-targets', search: '', limit: 10 } as never, { signal: new AbortController().signal } as never) as { choices: { id: string }[] };
     assert.deepEqual(choices.choices.map(choice => choice.id), ['all', 'http://' + real.host]);
   } finally { await h.stop(); await real.close(); }
+});
+test('sixteen units that are not connected, with every column shown, stay well inside Hubble’s 256K state limit', async () => {
+  const plan = defaultDocument();
+  plan.units = Array.from({ length: 16 }, (_, index) => newUnit('u' + (index + 1), 'FS-HDR ' + (index + 1), '127.0.0.1:' + (9 + index)));
+  // The worker reads every setting a sheet can show, so with nothing hidden it observes them all.
+  const showAll = (view: FsDocument['view']) => ({ ...view, hidden: [], hiddenGroups: [] });
+  plan.sheets = plan.sheets.map(sheet => sheet.view ? { ...sheet, view: showAll(sheet.view) } : sheet);
+  plan.view = showAll(plan.view);
+  const h = host(plan);
+  try {
+    await h.backend.start!();
+    await until(() => Object.values(h.observed().rows).filter(row => row.planned).length === 16 * 5, 'every unit and channel row is planned');
+    const sent = JSON.stringify(h.states.at(-1)!.values);
+    assert.ok(sent.length < 128 * 1024, 'published state is ' + sent.length + ' characters');
+    const row = h.observed().rows['u16#4']!;
+    assert.deepEqual(row.limits['Vid#CustomSize'], { precision: 1, min: 10, max: 200, step: 0.1, units: '%' }, 'every row gets its limits back from the shared shape');
+    assert.ok(h.observed().choiceSets[row.choices['Vid#ColorHDRTransform']!]!.some(choice => choice.label === 'BBC HLG LUT'));
+  } finally { await h.stop(); }
 });

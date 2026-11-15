@@ -21,6 +21,24 @@ const emptySimulated = (): SimulatedDocument => ({ version: 1, units: {} });
 const validSimulated = (value: unknown): SimulatedDocument => object(value) && value.version === 1 && object(value.units) && Object.values(value.units).every(changes => object(changes) && Object.values(changes).every(item => typeof item === 'string')) ? clone(value) as unknown as SimulatedDocument : emptySimulated();
 const simulatedKey = (unit: Unit) => 'simulated:' + unit.id + ':' + plannedMode(unit);
 export interface Observed { units: Record<string, UnitObservation>; rows: Record<string, RowObservation>; choiceSets: Choice[][]; sequence?: number }
+/** Which settings a row has, how each is held back, and the choices and limits each offers. */
+export type RowShape = Pick<RowObservation, 'locked' | 'choices' | 'limits'>;
+/**
+ * What the page receives. Rows of the same kind share one shape, sent once in `shapes`, because every row of ten units that
+ * aren't connected repeats the same locks, choices and limits, and the copies went past Hubble's 256K state limit.
+ */
+export type WireRow = Omit<RowObservation, keyof RowShape> & { shape: number };
+export interface WireObserved { units: Record<string, UnitObservation>; rows: Record<string, WireRow>; choiceSets: Choice[][]; shapes: RowShape[]; sequence?: number }
+export function toWire(observed: Observed): WireObserved {
+  const shapes: RowShape[] = [], index = new Map<string, number>(), rows: Record<string, WireRow> = {};
+  for (const [rowId, { locked, choices, limits, ...rest }] of Object.entries(observed.rows)) {
+    const shape = { locked, choices, limits }, signature = JSON.stringify(shape);
+    let at = index.get(signature);
+    if (at === undefined) { at = shapes.push(shape) - 1; index.set(signature, at); }
+    rows[rowId] = { ...rest, shape: at };
+  }
+  return { units: observed.units, rows, choiceSets: observed.choiceSets, shapes };
+}
 interface Running { device: Device; address: string; controller: AbortController; task?: Promise<void> }
 interface Transient { errors: Record<string, string>; sending: string[]; queued: string[] }
 
@@ -145,7 +163,7 @@ export function createBackend(context: ModuleContext): ModuleInstance {
       phase: live > 0 || simulatedLive ? 'ready' : states.includes('connecting') ? 'connecting' : 'unavailable',
       message: live > 0 ? null : simulatedLive ? 'Simulated FS-HDRs only' : plan.units.length ? 'Waiting for FS-HDRs' : 'Add FS-HDRs in Setup',
       observedAt: new Date().toISOString(),
-      values: { revision: latestRevision, sequence, ...(ModuleDocumentValueSchema.parse(observed) as Record<string, ModuleJsonValue>) },
+      values: { revision: latestRevision, sequence, ...(ModuleDocumentValueSchema.parse(toWire(observed)) as Record<string, ModuleJsonValue>) },
     });
     publishFeedback();
     for (const wake of [...waiters]) wake();
@@ -153,7 +171,7 @@ export function createBackend(context: ModuleContext): ModuleInstance {
   // A unit can report many values at once, so the page hears about them at most ten times a second.
   let publishTimer: ReturnType<typeof setTimeout> | undefined;
   const publishSoon = () => { publishTimer ??= setTimeout(() => { publishTimer = undefined; publish(); }, 100); };
-  const reply = (extra: Record<string, unknown> = {}) => ({ ...extra, ...observed, sequence }) as unknown as ModuleJsonValue;
+  const reply = (extra: Record<string, unknown> = {}) => ({ ...extra, ...toWire(observed), sequence }) as unknown as ModuleJsonValue;
 
   /** Keeps one connection per addressed unit and one simulated unit per Simulated row, and drops the ones whose row, address or mode has gone. */
   function planChanged(next: FsDocument) {

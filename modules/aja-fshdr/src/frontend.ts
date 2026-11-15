@@ -1,13 +1,13 @@
 import { connectModuleFrontend, ModuleFrontendValueSchema } from '@hubble/module-sdk/frontend';
 import { mountSpreadsheetSheets, mountSpreadsheetToolbar, type SpreadsheetAddress } from '@hubble/module-sdk/spreadsheet-controls';
 import { activeKind, activeSheet, activeSheetId, addSheet, autoSendOn, clone, fieldById, groupsOf, isFlipped, isSimulated, masterSelection, moveSheet, nameField, newUnit, parseRowId, removeSheet, renameSheet, scopeOf, setOrientation, setUnitCount, sheetList, unitHasData, validHost, valueOf, viewChange, type CellEdit, type Field, type Mutation, type Orientation, type SheetKind, type Unit } from './model.js';
-import { displayValue, hostOf, isLive, isSimulatedLive, masterRows, pendingFields, rowObservation, rowReady, rowTitle, rowsFor, sendsAfter, shownName, stagedRowIds, unitObservation, waitingLabel } from './rows.js';
+import { displayValue, fromWire, hostOf, isLive, isSimulatedLive, masterRows, pendingFields, rowObservation, rowReady, rowTitle, rowsFor, sendsAfter, shownName, stagedRowIds, unitObservation, waitingLabel } from './rows.js';
 import { DraftStore, type SaveReceipt } from './draft-store.js';
 import { createGrid } from './ui-grid.js';
-import type { Observed } from './backend.js';
+import type { Observed, WireObserved } from './backend.js';
 import './frontend.css';
 
-type Reply = Partial<Observed> & { sequence?: number };
+type Reply = Partial<WireObserved> & { sequence?: number };
 type Snapshot = SaveReceipt & Reply;
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const errorBox = el('error'), saveStatus = el<HTMLOutputElement>('save-status'), pendingStatus = el('pending-status');
@@ -21,9 +21,9 @@ let errorTimer: ReturnType<typeof setTimeout> | undefined, lastSaveError = '';
 // Hubble delivers state on its own slow cycle, so an older copy can arrive after a newer reply.
 let newestState = 0;
 function adopt(next: Reply) {
-  if (!next.units || !next.rows || !next.choiceSets) return;
+  if (!next.units || !next.rows || !next.choiceSets || !next.shapes) return;
   if (typeof next.sequence === 'number') { if (next.sequence < newestState) return; newestState = next.sequence; }
-  observed = { units: next.units, rows: next.rows, choiceSets: next.choiceSets };
+  observed = fromWire({ units: next.units, rows: next.rows, choiceSets: next.choiceSets, shapes: next.shapes });
 }
 function report(message: string) { clearTimeout(errorTimer); errorBox.getAnimations().forEach(animation => animation.cancel()); errorBox.textContent = message; errorBox.hidden = !message; if (message) { errorBox.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 250, delay: 4250, fill: 'forwards' }); errorTimer = setTimeout(() => { errorBox.hidden = true; }, 4500); } }
 try {
