@@ -1,6 +1,6 @@
 # AJA FS-HDR
 
-Module ID `aja-fshdr`, version 2.1.0. Controls AJA FS-HDR frame synchronizers and HDR converters over their REST interface, from one page built on Hubble's shared spreadsheet controls. It needs Hubble 2.2.0 or later.
+Module ID `aja-fshdr`, version 2.1.1. Controls AJA FS-HDR frame synchronizers and HDR converters over their REST interface, from one page built on Hubble's shared spreadsheet controls. It needs Hubble 2.2.0 or later.
 
 ## The page
 
