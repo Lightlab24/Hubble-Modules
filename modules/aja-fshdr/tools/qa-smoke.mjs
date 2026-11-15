@@ -25,9 +25,11 @@ async function show(label) { await f.locator('.toolbar [data-for]:not([hidden]) 
 const sendAll = async () => { await expect(f.locator('#send-all-bar')).toBeEnabled(); await f.locator('#send-all-bar').click(); await expect(f.locator('#pending-status')).toHaveText('No changes pending', { timeout: 15000 }); };
 const number = (row, column) => cell(row, column).locator('.hubble-slider-value');
 const reading = async (row, column) => Number((await number(row, column).textContent()).replace(/\s*%$/, ''));
-/** A real pointer drag along a slider's track, from one fraction of its length to another. */
+/** Clicks a cell's edge, outside its slider, so it becomes the active cell. A slider only moves once its cell is active. */
+async function selectCell(row, column) { await cell(row, column).scrollIntoViewIfNeeded(); const box = await cell(row, column).boundingBox(); await page.mouse.click(box.x + 3, box.y + 3); await expect(cell(row, column)).toHaveAttribute('data-hubble-spreadsheet-active', 'true'); }
+/** A real pointer drag along a slider's track, from one fraction of its length to another, after making its cell active. */
 async function drag(row, column, from, to) {
-  await cell(row, column).scrollIntoViewIfNeeded();
+  await selectCell(row, column);
   const box = await cell(row, column).locator('.hubble-slider-root').boundingBox(), y = box.y + box.height / 2;
   await page.mouse.move(box.x + box.width * from, y); await page.mouse.down();
   for (let step = 1; step <= 8; step++) await page.mouse.move(box.x + box.width * (from + (to - from) * step / 8), y);

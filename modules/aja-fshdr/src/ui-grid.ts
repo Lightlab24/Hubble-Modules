@@ -18,12 +18,12 @@ export interface GridOptions {
   onRefresh: (unitId: string) => void; onRemove: (unitId: string) => void; onError: (message: string) => void;
   onEdited?: (edits: CellEdit[]) => void;
   /** Slider values while a drag or a held − / + is still going. `final` is the release, which is also staged as usual. */
-  onLive?: (writes: LiveWrite[], final: boolean) => void;
+  onLive?: (writes: LiveWrite[], final: boolean) => boolean;
 }
 export interface LiveWrite { rowId: string; fieldId: string; value: string }
 interface Meta { id: string; label: string; width: number; fill: 'series' | 'copy'; resizable: boolean }
 /** Hubble's slider in one cell. `drag` is where the thumb is while the pointer is down; `last` is kept for while the cell is being taken down. */
-interface SliderCell { address: SpreadsheetAddress; slot: HTMLElement; controls?: SliderControls; drag?: number; last: SliderState; gone?: boolean; steps?: HTMLButtonElement[] }
+interface SliderCell { address: SpreadsheetAddress; slot: HTMLElement; controls?: SliderControls; drag?: number; last: SliderState; gone?: boolean; steps?: HTMLButtonElement[]; sentLive?: boolean; range?: SliderRange }
 type SliderRange = Limits & { min: number; max: number; step: number };
 const channelMeta: Meta[] = [
   { id: 'row-unit', label: 'FS-HDR', width: 130, fill: 'copy', resizable: true }, { id: 'row-label', label: 'Input label', width: 110, fill: 'copy', resizable: true }, { id: 'row-signal', label: 'Input signal', width: 124, fill: 'copy', resizable: true },
@@ -131,10 +131,19 @@ export async function createGrid(options: GridOptions) {
     const from = row.kind === 'master' ? editedRows().find(target => !fieldCell(target, field).readOnly) : row;
     return from && seen(from)?.limits[field.id];
   }
-  /** A slider needs a number to show and a range from the unit. A blank, Mixed or offline cell stays text. */
+  /**
+   * A slider needs a number to show and a range from the unit. A blank, Mixed or offline cell stays text, except while its slider
+   * is being dragged or held: on a Master row the channels disagree for a moment as values land, and the slider must not
+   * vanish under the pointer, which lost the release.
+   */
   function sliderRange(address: SpreadsheetAddress): SliderRange | undefined {
     const row = rowById.get(address.rowId), field = fieldById.get(address.columnId);
     if (!row || !field?.slider || field.scope !== scope) return undefined;
+    const held = sliders.get(addressKey(address)), range = currentRange(row, field, address);
+    if (range && held) held.range = range;
+    return range ?? (held?.drag !== undefined ? held.range : undefined);
+  }
+  function currentRange(row: Row, field: Field, address: SpreadsheetAddress): SliderRange | undefined {
     const cell = cellValue(address), limits = limitsOf(row, field);
     if (!cell || cell.mixed || !cell.value || !Number.isFinite(Number(cell.value)) || !limits) return undefined;
     const { min, max, step } = limits;
@@ -142,7 +151,7 @@ export async function createGrid(options: GridOptions) {
   }
   function sliderState(slider: SliderCell): SliderState {
     const { address } = slider, row = rowById.get(address.rowId), field = fieldById.get(address.columnId), range = sliderRange(address);
-    if (!row || !field || !range) return slider.last;
+    if (!row || !field || !range) return slider.drag === undefined ? slider.last : slider.last = { ...slider.last, value: slider.drag };
     const cell = cellValue(address)!, current = row.kind === 'master' ? undefined : seen(row), reported = current?.values[field.id] ?? '';
     const waiting = (target: Row) => { const value = staged(target, field.id); return !!value && value !== seen(target)?.values[field.id]; };
     const pending = row.kind === 'master' ? editedRows().some(waiting) : waiting(row);
@@ -180,6 +189,13 @@ export async function createGrid(options: GridOptions) {
     });
     slider.steps = steps;
     slot.append(steps[0]!, track, steps[1]!); cell.replaceChildren(slot); refreshSteps(slider);
+    // A slider only moves once its cell is the active one. The first press on another cell's slider or − / + just selects that cell.
+    slot.addEventListener('pointerdown', event => {
+      if (event.button !== 0 || !(event.target as Element).closest('.hubble-slider-root, .slider-step')) return;
+      if (active && addressKey(active) === key) return;
+      event.preventDefault(); event.stopPropagation();
+      controls.select(position(address));
+    }, { capture: true });
     // The sheet takes the pointer for a range selection on any press in a cell, so a press on the track is kept for the slider. It still selects the cell.
     slot.addEventListener('pointerdown', event => {
       if (!(event.target as Element).closest('.hubble-slider-root')) return;
@@ -206,11 +222,16 @@ export async function createGrid(options: GridOptions) {
     const targets = row.kind === 'master' ? editedRows().filter(target => !fieldCell(target, field).readOnly) : [row];
     return targets.filter(live).flatMap(target => { const checked = normalize(seen(target), field, String(value)); return 'error' in checked || !checked.value ? [] : [{ rowId: target.id, fieldId: field.id, value: checked.value }]; });
   }
-  function sendLive(slider: SliderCell, value: number, final: boolean) { const writes = liveWrites(slider.address, value); if (writes.length) options.onLive?.(writes, final); }
+  function sendLive(slider: SliderCell, value: number, final: boolean) { const writes = liveWrites(slider.address, value); if (writes.length && options.onLive?.(writes, final)) slider.sentLive = true; }
+  /**
+   * The release stages its value and, with Auto send on, sends it through each row's Send queue. After a live drag the unit
+   * usually has it already, but it is still sent that way, so a Send left over from an earlier step can't land after it.
+   */
   function release(slider: SliderCell, value: number) {
     slider.drag = undefined;
     sendLive(slider, value, true);
-    submit([{ ...slider.address, value: String(value) }]);
+    const sent = !!slider.sentLive; slider.sentLive = false;
+    submit([{ ...slider.address, value: String(value) }], undefined, sent);
   }
   /** The value one or more steps from where the thumb is now, kept on the unit's grid and inside its range. */
   function stepFrom(slider: SliderCell, steps: number): number | undefined {
@@ -294,7 +315,7 @@ export async function createGrid(options: GridOptions) {
   function settingRow(id: string) { let row = settingRows.get(id); if (!row) { row = document.createElement('tr'); row.dataset.settingId = id; settingRows.set(id, row); } return row; }
 
   /** Turns what the shared controls hand over into plan edits: the Master row fans out, a name is also staged for the unit, numbers are checked. */
-  function submit(edits: readonly SpreadsheetEdit[], expected?: string): boolean {
+  function submit(edits: readonly SpreadsheetEdit[], expected?: string, keepSame = false): boolean {
     const changes: CellEdit[] = [], claimed = new Set<string>();
     let selection: Set<string> | undefined, refused = false;
     const add = (rowId: string, columnId: string, value: string, from?: string) => {
@@ -306,7 +327,7 @@ export async function createGrid(options: GridOptions) {
       const checked = normalize(seen(row), field, typed);
       if ('error' in checked) { refused = true; store.refuse({ rowId: row.id, columnId: field.id, value: typed, expected: from ?? staged(row, field.id) }, checked.error); return; }
       // Putting back what the unit already has is not a change to send.
-      add(row.id, field.id, checked.value === seen(row)?.values[field.id] ? '' : checked.value, from);
+      add(row.id, field.id, !keepSame && checked.value === seen(row)?.values[field.id] ? '' : checked.value, from);
     };
     for (const edit of edits) {
       // An edit already open when its unit drops offline still saves. Only an open editor passes `expected`.

@@ -200,7 +200,10 @@ export function createBackend(context: ModuleContext): ModuleInstance {
     }
   }
   /** Saves what has been written to simulated units. Hubble only lets a module save during a command, so commands call this. */
-  async function saveSimulated(signal: AbortSignal): Promise<void> {
+  // One save at a time: several commands finishing together each tried to save and ran into each other's revision.
+  let simulatedSaving: Promise<void> = Promise.resolve();
+  const saveSimulated = (signal: AbortSignal): Promise<void> => { const run = simulatedSaving.then(() => saveSimulatedNow(signal)); simulatedSaving = run.catch(() => {}); return run; };
+  async function saveSimulatedNow(signal: AbortSignal): Promise<void> {
     if (!simulatedDirty) return;
     const next: SimulatedDocument = { version: 1, units: Object.fromEntries(Object.entries(simulated.units).filter(([, changes]) => Object.keys(changes).length)) };
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -352,6 +355,9 @@ export function createBackend(context: ModuleContext): ModuleInstance {
       const refusal = sendRefusal(unit) ?? (running.device.connection !== 'live' ? unitName(unit) + ' is offline.' : !running.device.remoteAllowed ? 'Remote control is switched off on ' + unitName(unit) + '.' : null);
       if (refusal) throw Error(refusal);
       const outcomes: { fieldId: string; status: string; message?: string }[] = [];
+      // The value each confirmed setting has on the unit now. It comes from the saved plan at the moment of writing, which can be
+      // older than what the page has if its latest edit hadn't saved yet, so the page only clears an edit whose value matches.
+      const confirmed: Record<string, string> = {};
       // Queued first, so a cancel while an earlier setting is being written still counts. A setting another one in the batch
       // depends on goes first, so Custom Size/Pos is on before Custom Size arrives.
       const asked = [...new Set(input.fieldIds as string[])], backing = (fieldId: string) => { const id = parameterId(fieldId, channel, running.device.mode); return id ? running.device.lookupId(id) : null; };
@@ -369,19 +375,19 @@ export function createBackend(context: ModuleContext): ModuleInstance {
             delete held.errors[fieldId];
             if (!value || hostOf(latest.units.find(item => item.id === unitId) ?? unit) !== hostOf(unit)) continue;
             if (!id) { held.errors[fieldId] = 'Not available in this operating mode.'; outcomes.push({ fieldId, status: 'failed', message: held.errors[fieldId] }); continue; }
-            if (running.device.read(id).value === value) { outcomes.push({ fieldId, status: 'verified' }); continue; }
+            if (running.device.read(id).value === value) { confirmed[fieldId] = value; outcomes.push({ fieldId, status: 'verified' }); continue; }
             held.sending = [fieldId]; publish();
             const result = await running.device.write(id, value, AbortSignal.any([signal, lifetime.signal, running.controller.signal]));
             held.sending = [];
             if (!result.ok && result.message === PREREQUISITE && !retried.has(fieldId)) { retried.add(fieldId); later.push(fieldId); continue; }
             context.log({ level: result.ok ? 'info' : 'error', stage: 'fshdr-send', message: (unitName(unit) + (channel === null ? '' : ' channel ' + channel) + ' ' + fieldId + ' = ' + value + ': ' + result.message).slice(0, 600) });
-            if (result.ok) outcomes.push({ fieldId, status: 'verified' }); else { held.errors[fieldId] = result.message; outcomes.push({ fieldId, status: 'failed', message: result.message }); }
+            if (result.ok) { confirmed[fieldId] = value; outcomes.push({ fieldId, status: 'verified' }); } else { held.errors[fieldId] = result.message; outcomes.push({ fieldId, status: 'failed', message: result.message }); }
             publish();
           }
           if (!later.length) break;
           held.queued = later.splice(0);
         }
-        return reply({ status: 'sent', outcomes });
+        return reply({ status: 'sent', outcomes, confirmed });
       } finally { held.sending = []; held.queued = []; if (isSimulated(unit)) await saveSimulatedQuietly(signal); publish(); }
     },
     async execute(id, fields, execution) {

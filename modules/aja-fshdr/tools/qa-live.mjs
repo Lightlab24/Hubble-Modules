@@ -26,9 +26,11 @@ const staged = async (row, column) => { const { document } = await state(), [uni
 async function type(row, column, value) { await cell(row, column).scrollIntoViewIfNeeded(); const shown = cell(row, column).locator('.hubble-slider-value'); await ((await shown.count()) ? shown : cell(row, column)).dblclick(); const input = cell(row, column).locator('input.cell-input'); await expect(input).toBeVisible(); await input.fill(value); await input.press('Enter'); }
 async function show(label) { await f.locator('.toolbar [data-for]:not([hidden]) button[aria-label="Choose visible columns"]').click(); const search = f.getByRole('searchbox', { name: 'Search columns' }); await search.fill(label); const item = f.getByRole('menuitemcheckbox', { name: label, exact: true }); if (await item.getAttribute('aria-checked') !== 'true') await item.click(); await search.press('Escape'); }
 const shot = async name => { if (shots) await page.screenshot({ path: shots + '/' + name + '.png' }); };
+/** Clicks a cell's edge, outside its slider, so it becomes the active cell. */
+async function selectCell(row, column) { await cell(row, column).scrollIntoViewIfNeeded(); const box = await cell(row, column).boundingBox(); await page.mouse.click(box.x + 3, box.y + 3); await expect(cell(row, column)).toHaveAttribute('data-hubble-spreadsheet-active', 'true'); }
 /** Presses on a slider's track and moves along it slowly, giving back the unit's value part-way and at the end, before letting go. */
 async function slowDrag(row, column, from, to, readMid) {
-  await cell(row, column).scrollIntoViewIfNeeded();
+  await selectCell(row, column);
   const box = await cell(row, column).locator('.hubble-slider-root').boundingBox(), y = box.y + box.height / 2;
   await page.mouse.move(box.x + box.width * from, y); await page.mouse.down();
   let mid;
@@ -77,6 +79,7 @@ try {
 
   // − and + step by the unit's own step. Shift steps ten. Held, they keep going and send as they go.
   const plus = cell(ch, 'Vid#CustomSize').locator('.slider-step').nth(1), minus = cell(ch, 'Vid#CustomSize').locator('.slider-step').nth(0);
+  await selectCell(ch, 'Vid#CustomSize');
   await plus.click();
   await expect(number(ch, 'Vid#CustomSize')).toHaveText((released + 0.1).toFixed(1) + ' %');
   await expect.poll(unitValue).toBe(Number((released + 0.1).toFixed(1)));
@@ -121,6 +124,44 @@ try {
   await expect(f.locator('#pending-status')).toHaveText('No changes pending', { timeout: 15000 });
   await shot('master-live');
   check('a Master drag with 40 channels ticked sends as it moves (' + masterMid + ' of 40 moved half-way) and all 40 end on ' + masterFinal + ' %');
+  await f.locator('#send-manual').click();
+
+  // A slider on a cell that isn't active ignores the press: the first press only makes the cell active.
+  await tab(/HDR/).click();
+  const other = unit(2) + '#3';
+  await cell(unit(0) + '#1', 'Vid#CustomSize').scrollIntoViewIfNeeded();
+  await selectCell(unit(0) + '#1', 'Vid#CustomSize');
+  const otherWas = await reading(other, 'Vid#CustomSize');
+  const otherBox = await cell(other, 'Vid#CustomSize').locator('.hubble-slider-root').boundingBox();
+  await page.mouse.move(otherBox.x + otherBox.width * 0.5, otherBox.y + otherBox.height / 2); await page.mouse.down();
+  await page.mouse.move(otherBox.x + otherBox.width * 0.9, otherBox.y + otherBox.height / 2, { steps: 6 }); await page.mouse.up();
+  await expect(cell(other, 'Vid#CustomSize')).toHaveAttribute('data-hubble-spreadsheet-active', 'true');
+  await page.waitForTimeout(300);
+  assert.equal(await reading(other, 'Vid#CustomSize'), otherWas, 'the first press only selected the cell');
+  await cell(unit(2) + '#4', 'Vid#CustomSize').locator('.slider-step').nth(1).click();
+  await expect(cell(unit(2) + '#4', 'Vid#CustomSize')).toHaveAttribute('data-hubble-spreadsheet-active', 'true');
+  assert.equal(await staged(unit(2) + '#4', 'Vid#CustomSize'), '', 'the first + press only selected the cell');
+  await slowDrag(other, 'Vid#CustomSize', 0.5, 0.9, async () => 0);
+  assert.notEqual(await reading(other, 'Vid#CustomSize'), otherWas, 'once active, the slider moves');
+  await f.locator('#pending-toggle').click(); await f.locator('#cancel-all').click(); await f.locator('#pending-close').click();
+  await expect(f.locator('#pending-status')).toHaveText('No changes pending');
+  check('a slider or its − / + on a cell that isn\u2019t active only selects the cell; once active it moves');
+
+  // Quick steps on Master with Auto send: the units all end on the last value, not an earlier one sent late.
+  await f.locator('#send-auto').click();
+  await tab(/Master/).click();
+  await selectCell('master', 'Vid#CustomSize');
+  const masterPlus = cell('master', 'Vid#CustomSize').locator('.slider-step').nth(1);
+  for (let press = 0; press < 12; press++) await masterPlus.click({ delay: 10 });
+  await slowDrag('master', 'Vid#CustomSize', 0.2, 0.25, async () => 0);
+  for (let press = 0; press < 8; press++) await masterPlus.click({ delay: 10 });
+  const wanted = await reading('master', 'Vid#CustomSize');
+  await expect(f.locator('#pending-status')).toHaveText('No changes pending', { timeout: 30000 });
+  await page.waitForTimeout(1500);
+  const landed = await everySim('eParamID_Vid#CustomSize'), wrong = landed.filter(value => Number(value) / 10 !== wanted);
+  assert.deepEqual(wrong, [], wrong.length + ' of 40 channels ended on another value than ' + wanted + ' %: ' + [...new Set(landed)].join(', '));
+  await expect(cell('master', 'Vid#CustomSize')).not.toHaveText('Mixed');
+  check('quick − / + presses and a drag on Master with Auto send leave all 40 channels on the last value (' + wanted + ' %)');
   await f.locator('#send-manual').click();
 
   // Custom Size/Pos off: Custom Size, Position and Crop stay editable.

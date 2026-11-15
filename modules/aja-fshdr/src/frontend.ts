@@ -278,11 +278,12 @@ try {
   // A slider being dragged, or a held − / +, with Auto send on. One request at a time; whatever arrived meanwhile goes next,
   // newest value only, so a long drag never piles up behind the unit.
   let liveWaiting = new Map<string, LiveWrite>(), liveFinal = false, liveBusy = false, liveFailure = '';
-  function sendLive(writes: LiveWrite[], final: boolean) {
-    if (!autoSendOn(doc())) return;
+  function sendLive(writes: LiveWrite[], final: boolean): boolean {
+    if (!autoSendOn(doc())) return false;
     for (const write of writes) liveWaiting.set(write.rowId + '/' + write.fieldId, write);
     liveFinal ||= final;
     void pumpLive();
+    return true;
   }
   async function pumpLive() {
     if (liveBusy || !liveWaiting.size) return;
@@ -304,15 +305,19 @@ try {
     await store.whenSaved();
     try {
       for (let waiting = unsent.get(rowId) ?? []; waiting.length; waiting = unsent.get(rowId) ?? []) {
-        if (!unitOf(rowId)) break;
+        // The worker sends what the workspace has saved, so a quick second edit waits for its own save before it goes.
+        await store.whenSaved(); waiting = unsent.get(rowId) ?? [];
+        if (!unitOf(rowId) || !waiting.length) break;
         unsent.set(rowId, waiting.slice(32));
         // A save that failed or a newer edit means this is no longer the value to send.
         const batch = waiting.slice(0, 32).filter(entry => valueOf(doc(), rowId, entry.id) === entry.value && !store.invalid.has(rowId + '/' + entry.id));
         if (!batch.length) continue;
-        const reply = await inLane(() => client.call('send', { rowId, fieldIds: batch.map(entry => entry.id) })) as unknown as Reply & { outcomes?: { fieldId: string; status: string; message?: string }[] };
+        const reply = await inLane(() => client.call('send', { rowId, fieldIds: batch.map(entry => entry.id) })) as unknown as Reply & { outcomes?: { fieldId: string; status: string; message?: string }[]; confirmed?: Record<string, string> };
         adopt(reply);
         for (const outcome of reply.outcomes ?? []) if (outcome.status === 'failed') messages.push(rowTitle(doc(), observed, rowId) + ', ' + (fieldById.get(outcome.fieldId)?.label ?? 'Setting') + ': ' + outcome.message);
-        dropConfirmed(rowId, batch.filter(entry => reply.outcomes?.some(outcome => outcome.fieldId === entry.id && outcome.status === 'verified')));
+        // Only a value the unit confirmed stops being staged. If the worker sent an older saved value, this one is sent next time round.
+        dropConfirmed(rowId, batch.filter(entry => reply.confirmed?.[entry.id] === entry.value));
+        for (const entry of batch) if (reply.confirmed?.[entry.id] !== undefined && reply.confirmed[entry.id] !== entry.value && valueOf(doc(), rowId, entry.id) === entry.value) unsent.set(rowId, [...(unsent.get(rowId) ?? []).filter(item => item.id !== entry.id), entry]);
         refreshGrid(); update();
       }
     } catch (error) { if (unitOf(rowId)) messages.push(failureOf(rowId, error)); }
