@@ -34,6 +34,7 @@ export default defineModuleManifest({
       { id: 'snapshot', label: 'Read the FS-HDR plan' }, { id: 'save', label: 'Save the FS-HDR plan' },
       { id: 'refresh', label: 'Read every unit again' }, { id: 'send', label: 'Send settings to a unit' },
       { id: 'cancel-send', label: 'Cancel queued settings' }, { id: 'changes', label: 'Wait for the next change at a unit' },
+      { id: 'live', label: 'Send a slider value while it moves' },
     ],
   }] }],
 });

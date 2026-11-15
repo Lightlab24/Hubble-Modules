@@ -16,7 +16,7 @@ A unit in HD/SD mode has four channels and a unit in 4K/UHD mode has one. The FS
 
 ## Staging and sending
 
-An edit is staged: the cell turns amber and nothing reaches a unit. **Send all** writes every staged setting to the units that are live, and **Pending sends** lists them with a Send and a Cancel for each row and each setting. With **Auto send** on, an edit is sent as it is committed; one Master edit sends to every ticked channel. Auto send is saved with the workspace and never sends anything by itself when the page opens.
+An edit is staged: the cell turns amber and nothing reaches a unit. **Send all** writes every staged setting to the units that are live, and **Pending sends** lists them with a Send and a Cancel for each row and each setting. With **Auto send** on, an edit is sent as it is committed; one Master edit sends to every ticked channel. Auto send is saved with the workspace and never sends anything by itself when the page opens. Sends go out a few at a time, a unit at a time in turn, because Hubble lets a page have only 32 requests waiting; Send all to 40 channels goes in one press.
 
 Every write is checked against the unit's own limits, sent, and confirmed by reading the value back. A setting the unit refuses or does not confirm stays staged with the reason. Writes to one unit go one at a time; different units are written side by side. A unit whose Allow sends tick is off, or whose Remote Control setting is Local Only, is never written to.
 
@@ -26,7 +26,7 @@ The worker keeps one event connection to each unit whether or not the page is op
 
 A unit that isn't live (no address yet, Offline, Connecting or switched off) still has its sheet rows, one per channel of the operating mode chosen for it in Setup's **Mode** column. Its cells can be set: input labels in Setup and any setting on the sheets, with Master and the Framing sliders too. The choices and ranges come from the FS-HDR firmware 4.3.2.5 list built into the module, and a "—" means the unit's own value isn't known until it connects. A preset shows in amber like any staged change, and Pending sends lists it as "Sends after … connects". Send all only counts units that are live.
 
-When the unit connects, its own mode replaces the planned one, presets it already matches drop away, and the rest stay amber until **Send** or **Send all** is pressed, even with Auto send on. Each is checked against the unit's own limits before it goes. A setting whose prerequisite is off is tried again after the rest of its row, so Custom Size can go in the same Send as the Custom Size/Pos that switches it on. A preset for a channel the unit doesn't have in its mode stays listed so it can be cancelled.
+When the unit connects, its own mode replaces the planned one, presets it already matches drop away, and the rest stay amber until **Send** or **Send all** is pressed, even with Auto send on. Each is checked against the unit's own limits before it goes. Within one Send a setting that others depend on goes first, so Custom Size/Pos is on before Custom Size arrives, and a setting whose prerequisite is still off is tried again after the rest of its row. A preset for a channel the unit doesn't have in its mode stays listed so it can be cancelled.
 
 ## Simulated units
 
@@ -36,9 +36,9 @@ Unticking Simulated keeps every setting written to the simulated unit as a prese
 
 Buttons never control a simulated unit: All configured units leaves it out, a button aimed at its address fails and says it is simulated, and it doesn't count towards All FS-HDRs online. A press during a show can't look confirmed by a unit that isn't there.
 
-Framing settings the unit gives in percent (Custom Size, Custom H and V Pos, the four Custom crops and the four ROI edges) show as a slider with the number beside it. The range and step are the unit's own. Releasing the slider stages one value, the same as typing it, so with Auto send on it goes to the unit on release, not while dragging. Double-click the number, or select the cell and type, to enter an exact value. A Master cell that reads Mixed stays text until a value is typed.
+Framing settings the unit gives in percent (Custom Size, Custom H and V Pos, the four Custom crops and the four ROI edges) show as a slider with the number beside it. The range and step are the unit's own. **−** and **+** either side step it by the unit's own step (0.1 %); Shift steps ten, and held they keep going, faster the longer they are held. With Auto send on, a drag or a held − / + sends as it moves: one value at a time, the newest each time the unit answers, so the picture follows without a queue building up. On a Master row it goes to every ticked channel. Letting go then stages and sends the final value as usual. With Auto send off, a drag or a press stages one value, the same as typing it, and nothing reaches the unit until Send. Double-click the number, or select the cell and type, to enter an exact value. A Master cell that reads Mixed stays text until a value is typed.
 
-A setting can be locked on a unit, with the reason as its tooltip: the unit reports it but does not let it be set, it belongs to the other operating mode, or its prerequisite is off (Custom Size needs Custom Size/Pos on). Settings that are stored once per frame-rate family or per transform are followed to the copy in use.
+A setting can be locked on a unit, with the reason as its tooltip: the unit reports it but does not let it be set, it belongs to the other operating mode, or its prerequisite is off (ROI edges need Region Of Interest on). Custom Size, Position and Crop stay editable while Custom Size/Pos is off: the unit's own page greys them out, but the unit takes them, so they can be set before it is switched on. Settings that are stored once per frame-rate family or per transform are followed to the copy in use.
 
 ## Buttons
 
@@ -71,5 +71,7 @@ PLAYWRIGHT=<path to @playwright/test/index.mjs> CHROME=<path to a Chromium> node
 ```
 
 The first command starts four simulator processes, puts the first three in Setup and serves the page on port 43971; the fourth stands in for a unit that is connected later. It uses the shared controls from the installed Hubble. The second drives it with real clicks and typing and reads each result back from the simulators. [The simulator notes](../../docs/fs-hdr-simulator.md) say where the simulator lives. The preview is not the installed app.
+
+`tools/qa-live.mjs` checks Send all to 40 channels, sending while dragging and the − and + buttons, against ten simulators. Its header has the commands. The preview refuses a page's 33rd waiting request, as Hubble does.
 
 `src/fields.json` lists the settings a sheet can show, and `src/catalog.json` holds what the worker needs for presets and simulated units: those settings' descriptors, the settings they map onto or depend on, and the bench values. `scripts/build-fields.mjs` regenerates both from a firmware capture; the bundled list is from firmware 4.3.2.5. Playwright's own Chromium works for the browser checks; Google Chrome 157 drops some of Playwright's clicks into the sandboxed page.

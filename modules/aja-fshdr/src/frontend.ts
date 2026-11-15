@@ -3,7 +3,7 @@ import { mountSpreadsheetSheets, mountSpreadsheetToolbar, type SpreadsheetAddres
 import { activeKind, activeSheet, activeSheetId, addSheet, autoSendOn, clone, fieldById, groupsOf, isFlipped, isSimulated, masterSelection, moveSheet, nameField, newUnit, parseRowId, removeSheet, renameSheet, scopeOf, setOrientation, setUnitCount, sheetList, unitHasData, validHost, valueOf, viewChange, type CellEdit, type Field, type Mutation, type Orientation, type SheetKind, type Unit } from './model.js';
 import { displayValue, fromWire, hostOf, isLive, isSimulatedLive, masterRows, pendingFields, rowObservation, rowReady, rowTitle, rowsFor, sendsAfter, shownName, stagedRowIds, unitObservation, waitingLabel } from './rows.js';
 import { DraftStore, type SaveReceipt } from './draft-store.js';
-import { createGrid } from './ui-grid.js';
+import { createGrid, type LiveWrite } from './ui-grid.js';
 import type { Observed, WireObserved } from './backend.js';
 import './frontend.css';
 
@@ -211,6 +211,7 @@ try {
     onZoom: ratio => { el('zoom-status').textContent = Math.round(ratio * 100) + '%'; },
     onRefresh: unitId => void refreshUnits([unitId]),
     onEdited: autoSend,
+    onLive: sendLive,
     onRemove: unitId => { const unit = doc().units.find(item => item.id === unitId); if (unit) store.submit({ kind: 'units', add: [], remove: [clone(unit)] }); },
     onError: report,
   }));
@@ -258,6 +259,47 @@ try {
     catch (error) { messages.push(error instanceof Error ? error.message : 'Refresh failed.'); }
     finish(messages);
   }
+  // Hubble refuses a page's 33rd request in flight, so Send all to 40 channels at once lost the last few. Sends take turns
+  // through a few lanes, which also leaves room for saves, the change watch and slider moves.
+  const sendLanes = 12, laneQueue: (() => void)[] = [];
+  let lanesBusy = 0;
+  async function inLane<T>(job: () => Promise<T>): Promise<T> {
+    if (lanesBusy >= sendLanes) await new Promise<void>(resolve => laneQueue.push(resolve)); else lanesBusy++;
+    try { return await job(); } finally { const next = laneQueue.shift(); if (next) next(); else lanesBusy--; }
+  }
+  // Each unit takes one setting at a time, so rows go out a unit at a time in turn: one from each unit, then the next.
+  function byUnitInTurn(rowIds: string[]): string[] {
+    const byUnit = new Map<string, string[]>();
+    for (const rowId of rowIds) { const unitId = parseRowId(rowId).unitId; byUnit.set(unitId, [...byUnit.get(unitId) ?? [], rowId]); }
+    const lists = [...byUnit.values()], out: string[] = [];
+    for (let index = 0; out.length < rowIds.length; index++) for (const list of lists) if (list[index] !== undefined) out.push(list[index]!);
+    return out;
+  }
+  // A slider being dragged, or a held − / +, with Auto send on. One request at a time; whatever arrived meanwhile goes next,
+  // newest value only, so a long drag never piles up behind the unit.
+  let liveWaiting = new Map<string, LiveWrite>(), liveFinal = false, liveBusy = false, liveFailure = '';
+  function sendLive(writes: LiveWrite[], final: boolean) {
+    if (!autoSendOn(doc())) return;
+    for (const write of writes) liveWaiting.set(write.rowId + '/' + write.fieldId, write);
+    liveFinal ||= final;
+    void pumpLive();
+  }
+  async function pumpLive() {
+    if (liveBusy || !liveWaiting.size) return;
+    liveBusy = true;
+    const writes = [...liveWaiting.values()], final = liveFinal;
+    liveWaiting = new Map(); liveFinal = false;
+    try {
+      const reply = await client.call('live', ModuleFrontendValueSchema.parse({ writes, final })) as unknown as { outcomes?: { status: string; message?: string }[] };
+      const failed = reply.outcomes?.find(outcome => outcome.status === 'failed')?.message ?? '';
+      // One message per problem, not one per step of the drag.
+      if (failed && failed !== liveFailure) report(failed);
+      liveFailure = failed;
+    } catch (error) { const message = error instanceof Error ? error.message : 'The FS-HDR did not take the change.'; if (message !== liveFailure) report(message); liveFailure = message; }
+    finally { liveBusy = false; }
+    if (final && !liveWaiting.size) liveFailure = '';
+    void pumpLive();
+  }
   async function drainSends(rowId: string, messages: string[]) {
     await store.whenSaved();
     try {
@@ -267,7 +309,7 @@ try {
         // A save that failed or a newer edit means this is no longer the value to send.
         const batch = waiting.slice(0, 32).filter(entry => valueOf(doc(), rowId, entry.id) === entry.value && !store.invalid.has(rowId + '/' + entry.id));
         if (!batch.length) continue;
-        const reply = await client.call('send', { rowId, fieldIds: batch.map(entry => entry.id) }) as unknown as Reply & { outcomes?: { fieldId: string; status: string; message?: string }[] };
+        const reply = await inLane(() => client.call('send', { rowId, fieldIds: batch.map(entry => entry.id) })) as unknown as Reply & { outcomes?: { fieldId: string; status: string; message?: string }[] };
         adopt(reply);
         for (const outcome of reply.outcomes ?? []) if (outcome.status === 'failed') messages.push(rowTitle(doc(), observed, rowId) + ', ' + (fieldById.get(outcome.fieldId)?.label ?? 'Setting') + ': ' + outcome.message);
         dropConfirmed(rowId, batch.filter(entry => reply.outcomes?.some(outcome => outcome.fieldId === entry.id && outcome.status === 'verified')));
@@ -285,7 +327,7 @@ try {
     if (busy) return;
     busy = true; report('');
     const messages: string[] = [];
-    const runs = rowIds.map(rowId => queueSend(rowId, pending(rowId).map(field => ({ id: field.id, value: valueOf(doc(), rowId, field.id) })), messages));
+    const runs = byUnitInTurn(rowIds).map(rowId => queueSend(rowId, pending(rowId).map(field => ({ id: field.id, value: valueOf(doc(), rowId, field.id) })), messages));
     update();
     await Promise.all(runs);
     finish(messages);
@@ -295,7 +337,7 @@ try {
   function autoSend(edits: CellEdit[]) {
     if (!autoSendOn(doc())) return;
     const messages: string[] = [], runs: Promise<void>[] = [];
-    for (const rowId of new Set(edits.map(edit => edit.rowId))) {
+    for (const rowId of byUnitInTurn([...new Set(edits.map(edit => edit.rowId))])) {
       const entries = edits.filter(edit => edit.rowId === rowId && edit.value && fieldById.has(edit.columnId)).map(edit => ({ id: edit.columnId, value: edit.value }));
       if (entries.length && rowLive(rowId)) runs.push(queueSend(rowId, entries, messages));
     }

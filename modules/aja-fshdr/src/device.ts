@@ -18,6 +18,11 @@ export type Connection = 'connecting' | 'live' | 'offline';
 /** How a unit is reached: over HTTP, or a simulated unit inside the worker. It answers the same calls either way. */
 export type Transport = (path: string, query: Record<string, string>, signal: AbortSignal) => Promise<unknown>;
 export const PREREQUISITE = 'Switch on this setting’s prerequisite first.';
+/**
+ * The unit's own page greys out Custom Size, Position and Crop while Custom Size/Pos is off, but the unit takes them
+ * (checked on a real FS-HDR, firmware 4.3.2.5), so they can be set up before it is switched on.
+ */
+export const advisory = (condition: { paramid: string; value: unknown }) => /^eParamID_Vid[0-4#]CustomSizePos$/.test(condition.paramid) && String(condition.value) === '0';
 
 export function httpTransport(address: string): Transport {
   return async (path, query, signal) => {
@@ -131,12 +136,19 @@ export class Device {
     const backing = this.resolve(condition.paramid);
     return !!backing && Object.hasOwn(this.state, backing) && String(this.state[backing]) === String(condition.value);
   };
+  /** The stored setting a sheet setting stands for now. */
+  lookupId(id: string): string | null { return this.resolve(id); }
+  /** The settings this one's availability depends on, as the unit names them now, including ones its page only greys it out for. */
+  prerequisites(id: string): string[] {
+    const { descriptor } = this.lookup(id), relations = descriptor?.relations ?? {};
+    return [...relations.enabled_by ?? [], ...relations.disabled_by ?? []].flatMap(condition => { const backing = this.resolve(condition.paramid); return backing ? [backing] : []; });
+  }
   /** A setting as the sheet shows it: enum values by their raw number, numbers scaled the way the unit displays them. */
   read(id: string): Reading {
     const { original, target, descriptor } = this.lookup(id);
     if (!original || !descriptor) return { value: '', locked: 'This unit does not have this setting.' };
     const present = !!target && Object.hasOwn(this.state, target), raw = target ? this.state[target] : undefined, type = descriptor.param_type ?? '';
-    const enabled = descriptor.relations?.enabled_by ?? [], disabled = descriptor.relations?.disabled_by ?? [];
+    const enabled = descriptor.relations?.enabled_by ?? [], disabled = (descriptor.relations?.disabled_by ?? []).filter(condition => !advisory(condition));
     const active = (!enabled.length || enabled.some(this.matches)) && !disabled.some(this.matches);
     const shape = shapeOf(descriptor);
     if (!shape) return { value: displayValue(descriptor, raw), locked: 'This setting needs the unit’s own page.' };

@@ -17,10 +17,13 @@ export interface GridOptions {
   onZoom?: (ratio: number) => void;
   onRefresh: (unitId: string) => void; onRemove: (unitId: string) => void; onError: (message: string) => void;
   onEdited?: (edits: CellEdit[]) => void;
+  /** Slider values while a drag or a held − / + is still going. `final` is the release, which is also staged as usual. */
+  onLive?: (writes: LiveWrite[], final: boolean) => void;
 }
+export interface LiveWrite { rowId: string; fieldId: string; value: string }
 interface Meta { id: string; label: string; width: number; fill: 'series' | 'copy'; resizable: boolean }
 /** Hubble's slider in one cell. `drag` is where the thumb is while the pointer is down; `last` is kept for while the cell is being taken down. */
-interface SliderCell { address: SpreadsheetAddress; slot: HTMLElement; controls?: SliderControls; drag?: number; last: SliderState; gone?: boolean }
+interface SliderCell { address: SpreadsheetAddress; slot: HTMLElement; controls?: SliderControls; drag?: number; last: SliderState; gone?: boolean; steps?: HTMLButtonElement[] }
 type SliderRange = Limits & { min: number; max: number; step: number };
 const channelMeta: Meta[] = [
   { id: 'row-unit', label: 'FS-HDR', width: 130, fill: 'copy', resizable: true }, { id: 'row-label', label: 'Input label', width: 110, fill: 'copy', resizable: true }, { id: 'row-signal', label: 'Input signal', width: 124, fill: 'copy', resizable: true },
@@ -157,10 +160,26 @@ export async function createGrid(options: GridOptions) {
   }
   function showSlider(cell: HTMLTableCellElement, address: SpreadsheetAddress) {
     const key = addressKey(address), existing = sliders.get(key);
-    if (existing?.slot.parentElement === cell) { existing.controls?.refresh(); return; }
+    if (existing?.slot.parentElement === cell) { existing.controls?.refresh(); refreshSteps(existing); return; }
     if (existing) dropSlider(key);
-    const slot = document.createElement('div'), slider: SliderCell = { address, slot, last: { value: 0, min: 0, max: 1, step: 1 } };
-    slot.className = 'cell-slider'; slider.last = sliderState(slider); sliders.set(key, slider); cell.replaceChildren(slot);
+    const slot = document.createElement('div'), track = document.createElement('div'), slider: SliderCell = { address, slot, last: { value: 0, min: 0, max: 1, step: 1 } };
+    slot.className = 'cell-slider'; track.className = 'cell-slider-track'; slider.last = sliderState(slider); sliders.set(key, slider);
+    const row = rowById.get(address.rowId), label = (settingLabel(address.columnId) ?? 'Setting') + (row ? ' for ' + rowName(row) : '');
+    // One step down or up per press, the unit's own step. Held, it keeps going and speeds up, and sends as it goes like a drag.
+    const steps = ([-1, 1] as const).map(direction => {
+      const node = document.createElement('button');
+      node.type = 'button'; node.className = 'slider-step'; node.tabIndex = -1; node.textContent = direction < 0 ? '−' : '+';
+      node.setAttribute('aria-label', (direction < 0 ? 'Decrease ' : 'Increase ') + label); node.title = (direction < 0 ? 'Down' : 'Up') + ' one step. Hold to keep going, Shift for ten steps.';
+      node.addEventListener('pointerdown', event => {
+        if (event.button !== 0 || node.disabled) return;
+        event.preventDefault(); event.stopPropagation();
+        controls.select(position(address));
+        holdStep(slider, node, direction * (event.shiftKey ? 10 : 1), event.pointerId);
+      });
+      return node;
+    });
+    slider.steps = steps;
+    slot.append(steps[0]!, track, steps[1]!); cell.replaceChildren(slot); refreshSteps(slider);
     // The sheet takes the pointer for a range selection on any press in a cell, so a press on the track is kept for the slider. It still selects the cell.
     slot.addEventListener('pointerdown', event => {
       if (!(event.target as Element).closest('.hubble-slider-root')) return;
@@ -170,15 +189,66 @@ export async function createGrid(options: GridOptions) {
     // The slider takes keyboard focus on a press. Afterwards the arrow keys move around the sheet again, and typing edits the number.
     const giveBack = () => { if (!slider.gone && slot.contains(document.activeElement)) controls.select(position(address)); };
     slot.addEventListener('pointerup', giveBack); slot.addEventListener('lostpointercapture', giveBack);
-    const row = rowById.get(address.rowId);
     void mountSlider({
-      root: slot, layout: 'cell', label: (settingLabel(address.columnId) ?? 'Setting') + (row ? ' for ' + rowName(row) : ''),
+      root: track, layout: 'cell', label,
       getState: () => sliderState(slider),
-      onValueChange(value) { slider.drag = value; },
+      // With Auto send on, the value goes to the unit as the thumb moves.
+      onValueChange(value) { slider.drag = value; refreshSteps(slider); sendLive(slider, value, false); },
       // One release stages one value, the same as typing it. With Auto send on, it goes to the unit.
-      onValueCommit(value) { slider.drag = undefined; submit([{ ...address, value: String(value) }]); },
+      onValueCommit(value) { release(slider, value); },
       onError: error => options.onError(error.message),
     }).then(mounted => { if (slider.gone) mounted.dispose(); else slider.controls = mounted; }, (error: unknown) => { if (!slider.gone) options.onError(error instanceof Error ? error.message : 'The slider could not be shown.'); });
+  }
+  /** What a slider value means for each unit: the row itself, or every ticked channel for the Master row. Only live rows take it. */
+  function liveWrites(address: SpreadsheetAddress, value: number): LiveWrite[] {
+    const row = rowById.get(address.rowId), field = fieldById.get(address.columnId);
+    if (!row || !field) return [];
+    const targets = row.kind === 'master' ? editedRows().filter(target => !fieldCell(target, field).readOnly) : [row];
+    return targets.filter(live).flatMap(target => { const checked = normalize(seen(target), field, String(value)); return 'error' in checked || !checked.value ? [] : [{ rowId: target.id, fieldId: field.id, value: checked.value }]; });
+  }
+  function sendLive(slider: SliderCell, value: number, final: boolean) { const writes = liveWrites(slider.address, value); if (writes.length) options.onLive?.(writes, final); }
+  function release(slider: SliderCell, value: number) {
+    slider.drag = undefined;
+    sendLive(slider, value, true);
+    submit([{ ...slider.address, value: String(value) }]);
+  }
+  /** The value one or more steps from where the thumb is now, kept on the unit's grid and inside its range. */
+  function stepFrom(slider: SliderCell, steps: number): number | undefined {
+    const range = sliderRange(slider.address); if (!range) return undefined;
+    const from = slider.drag ?? sliderState(slider).value, count = Math.round((from - range.min) / range.step) + steps;
+    return Math.min(range.max, Math.max(range.min, Number((range.min + count * range.step).toFixed(10))));
+  }
+  function refreshSteps(slider: SliderCell) {
+    const state = sliderState(slider), range = sliderRange(slider.address), value = slider.drag ?? state.value;
+    const [down, up] = slider.steps ?? [];
+    if (down) down.disabled = !range || !!state.disabled || value <= state.min;
+    if (up) up.disabled = !range || !!state.disabled || value >= state.max;
+  }
+  /** A press steps once. Held, it repeats after a moment, faster the longer it is held, until the pointer lets go. */
+  function holdStep(slider: SliderCell, node: HTMLButtonElement, steps: number, pointerId: number) {
+    let timer: ReturnType<typeof setTimeout> | undefined, repeats = 0, moved = false;
+    // After about two seconds held it moves five steps at a time, so a long way doesn't take a long time.
+    const move = () => {
+      const next = stepFrom(slider, repeats < 40 ? steps : steps * 5); if (next === undefined || next === (slider.drag ?? sliderState(slider).value)) return false;
+      slider.drag = next; moved = true; slider.controls?.refresh(); refreshSteps(slider);
+      return true;
+    };
+    const tick = () => {
+      if (slider.gone || !move()) return;
+      sendLive(slider, slider.drag!, false); repeats++;
+      timer = setTimeout(tick, repeats < 6 ? 120 : repeats < 20 ? 50 : 35);
+    };
+    const stop = () => {
+      clearTimeout(timer);
+      node.removeEventListener('pointerup', stop); node.removeEventListener('pointercancel', stop); node.removeEventListener('lostpointercapture', stop);
+      if (moved && !slider.gone && slider.drag !== undefined) release(slider, slider.drag);
+      else slider.drag = undefined;
+      if (!slider.gone) { slider.controls?.refresh(); refreshSteps(slider); }
+    };
+    try { node.setPointerCapture(pointerId); } catch { /* The pointer has already gone. */ }
+    node.addEventListener('pointerup', stop); node.addEventListener('pointercancel', stop); node.addEventListener('lostpointercapture', stop);
+    if (!move()) { stop(); return; }
+    timer = setTimeout(tick, 400);
   }
   function layout(next: View) { store.submit(viewChange(store.document, next)); }
   function groupDescriptor(id: string): SpreadsheetColumnGroup {
@@ -392,7 +462,7 @@ export async function createGrid(options: GridOptions) {
     if (cell && (event.key === 'F2' || event.key === 'Enter' || event.key.length === 1) && startEdit(cell, event.key.length === 1 ? event.key : undefined)) { event.preventDefault(); event.stopImmediatePropagation(); }
   }, { capture: true });
   // Two quick presses on a slider move it twice. A double-click on its number opens the number for typing.
-  table.addEventListener('dblclick', event => { const target = document.elementFromPoint(event.clientX, event.clientY); if (target?.closest('.hubble-slider-root')) return; const cell = target?.closest<HTMLTableCellElement>('td'); if (cell && table.contains(cell) && !editor) startEdit(cell); });
+  table.addEventListener('dblclick', event => { const target = document.elementFromPoint(event.clientX, event.clientY); if (target?.closest('.hubble-slider-root, .slider-step')) return; const cell = target?.closest<HTMLTableCellElement>('td'); if (cell && table.contains(cell) && !editor) startEdit(cell); });
   function ensureRow(row: Row) {
     if (rowNodes.has(row.id)) return;
     const tr = document.createElement('tr'); tr.dataset.rowId = row.id; if (row.kind === 'master') tr.className = 'master-row'; rowNodes.set(row.id, tr);

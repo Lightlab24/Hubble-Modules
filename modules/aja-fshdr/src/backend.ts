@@ -54,7 +54,7 @@ export function createBackend(context: ModuleContext): ModuleInstance {
   let subscriptions: readonly ModuleFeedbackSubscription[] = [], subscriptionSignal: AbortSignal | undefined, lastOnline: boolean | undefined;
   const waiters = new Set<() => void>();
   let carried: Unit[] = [];
-  let simulated = emptySimulated(), simulatedDirty = false;
+  let simulated = emptySimulated(), simulatedDirty = false, liveSaved = 0;
   const withCarried = (doc: FsDocument): FsDocument => carried.length && !doc.adopted && !doc.units.length ? { ...doc, units: clone(carried), adopted: true } : doc;
   const transientFor = (rowId: string) => { let entry = transient.get(rowId); if (!entry) transient.set(rowId, entry = { errors: {}, sending: [], queued: [] }); return entry; };
   const hostOf = (unit: Unit) => unit.values['unit-host'] ?? '';
@@ -315,6 +315,29 @@ export function createBackend(context: ModuleContext): ModuleInstance {
         publish();
         return reply({ status: 'read' });
       }
+      if (raw.commandId === 'live') {
+        // A slider value while it is still being dragged, with Auto send on. Each goes straight to its unit, nothing is
+        // staged, and the page sends the next one when this returns. Only the release is logged, then staged and sent as usual.
+        const writes = Array.isArray(input.writes) ? input.writes : [];
+        if (writes.length > 64 || !writes.every(item => object(item) && typeof item.rowId === 'string' && typeof item.fieldId === 'string' && typeof item.value === 'string' && fieldById.get(item.fieldId)?.slider)) throw Error('Invalid live setting.');
+        const outcomes = await Promise.all((writes as { rowId: string; fieldId: string; value: string }[]).map(async ({ rowId, fieldId, value }) => {
+          const { unitId, channel } = parseRowId(rowId), unit = plan.units.find(item => item.id === unitId), running = devices.get(unitId);
+          if (!unit || !running || channel === null) return { rowId, fieldId, status: 'failed', message: 'Choose an FS-HDR in this workspace.' };
+          const refusal = sendRefusal(unit) ?? (running.device.connection !== 'live' ? unitName(unit) + ' is offline.' : null), id = parameterId(fieldId, channel, running.device.mode);
+          if (refusal || !id) return { rowId, fieldId, status: 'failed', message: refusal ?? 'Not available in this operating mode.' };
+          if (running.device.read(id).value === value) return { rowId, fieldId, status: 'verified' };
+          const result = await running.device.write(id, value, AbortSignal.any([signal, lifetime.signal, running.controller.signal]));
+          return result.ok ? { rowId, fieldId, status: 'verified' } : { rowId, fieldId, status: 'failed', message: unitName(unit) + ' channel ' + channel + ': ' + result.message };
+        }));
+        // The release is logged, so the log says where a drag ended even when the unit already had it and nothing more is sent.
+        if (input.final === true) for (const [index, outcome] of outcomes.entries()) {
+          const write = writes[index] as { rowId: string; fieldId: string; value: string }, unit = plan.units.find(item => item.id === parseRowId(write.rowId).unitId);
+          context.log({ level: outcome.status === 'verified' ? 'info' : 'error', stage: 'fshdr-send', message: ((unit ? unitName(unit) : 'FS-HDR') + ' channel ' + parseRowId(write.rowId).channel + ' ' + write.fieldId + ' = ' + write.value + ' (slider): ' + (outcome.status === 'verified' ? 'Confirmed' : outcome.message)).slice(0, 600) });
+        }
+        // A simulated unit's settings are saved at the release, and at most every two seconds while dragging.
+        if (simulatedDirty && (input.final === true || Date.now() - liveSaved > 2000)) { liveSaved = Date.now(); await saveSimulatedQuietly(signal); }
+        return { status: 'sent', outcomes } as unknown as ModuleJsonValue;
+      }
       const rowId = String(input.rowId ?? ''), { unitId, channel } = parseRowId(rowId), held = transientFor(rowId);
       if (raw.commandId === 'cancel-send') {
         // Whatever is mid-write finishes. Everything behind it comes out of the queue.
@@ -329,8 +352,11 @@ export function createBackend(context: ModuleContext): ModuleInstance {
       const refusal = sendRefusal(unit) ?? (running.device.connection !== 'live' ? unitName(unit) + ' is offline.' : !running.device.remoteAllowed ? 'Remote control is switched off on ' + unitName(unit) + '.' : null);
       if (refusal) throw Error(refusal);
       const outcomes: { fieldId: string; status: string; message?: string }[] = [];
-      // Queued first, so a cancel while an earlier setting is being written still counts.
-      held.queued = [...new Set(input.fieldIds as string[])]; publish();
+      // Queued first, so a cancel while an earlier setting is being written still counts. A setting another one in the batch
+      // depends on goes first, so Custom Size/Pos is on before Custom Size arrives.
+      const asked = [...new Set(input.fieldIds as string[])], backing = (fieldId: string) => { const id = parameterId(fieldId, channel, running.device.mode); return id ? running.device.lookupId(id) : null; };
+      const needed = new Set(asked.flatMap(fieldId => { const id = parameterId(fieldId, channel, running.device.mode); return id ? running.device.prerequisites(id) : []; }));
+      held.queued = [...asked.filter(fieldId => needed.has(backing(fieldId) ?? '')), ...asked.filter(fieldId => !needed.has(backing(fieldId) ?? ''))]; publish();
       // A setting whose prerequisite is off waits for the rest of the batch, which may switch it on, and is tried once more.
       const later: string[] = [], retried = new Set<string>();
       try {

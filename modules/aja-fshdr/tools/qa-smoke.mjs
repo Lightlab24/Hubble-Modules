@@ -127,9 +127,9 @@ try {
   await expect(cell(unit(1) + '#3', 'Vid#ColorHDRTransform')).toHaveText('Off', { timeout: 5000 });
   check('a change made at the unit appears on the sheet');
 
-  // A setting with a prerequisite is locked until the prerequisite is on, and its range is checked as typed.
+  // The unit's own page greys out Custom Size while Custom Size/Pos is off, but the unit takes it, so it stays editable here. Its range is checked as typed.
   await show('Custom Size/Pos'); await show('Custom Size');
-  await expect(cell(unit(0) + '#1', 'Vid#CustomSize')).toHaveAttribute('aria-readonly', 'true');
+  await expect(cell(unit(0) + '#1', 'Vid#CustomSize')).toHaveAttribute('aria-readonly', 'false');
   await choose(unit(0) + '#1', 'Vid#CustomSizePos', 'On');
   await sendAll();
   await expect(cell(unit(0) + '#1', 'Vid#CustomSize')).toHaveAttribute('aria-readonly', 'false');
@@ -140,14 +140,14 @@ try {
   await expect(number(unit(0) + '#1', 'Vid#CustomSize')).toHaveText('120.0 %');
   await sendAll();
   assert.equal(String(await sim(0, 'eParamID_Vid1CustomSize')), '1200');
-  check('a locked setting unlocks once its prerequisite is sent, an out-of-range number is refused, and 120 is sent as 120.0 %');
+  check('Custom Size stays editable with Custom Size/Pos off, an out-of-range number is refused, and 120 is sent as 120.0 %');
 
   // Framing settings in % are sliders with their number. A drag stages one value on release, and nothing reaches the unit until it is sent.
-  await show('Custom H Pos');
+  await show('Custom H Pos'); await show('ROI Left');
   const ch1 = unit(0) + '#1';
   await expect(cell(ch1, 'Vid#CustomHPosition').getByRole('slider')).toHaveAttribute('aria-valuemin', '-100');
   await expect(number(ch1, 'Vid#CustomHPosition')).toHaveText('0.0 %');
-  await expect(cell(unit(1) + '#1', 'Vid#CustomSize').getByRole('slider')).toHaveAttribute('data-disabled', '');
+  await expect(cell(unit(1) + '#1', 'Vid#ROILeft').getByRole('slider')).toHaveAttribute('data-disabled', '');
   await drag(ch1, 'Vid#CustomHPosition', 0.5, 0.8);
   const moved = await reading(ch1, 'Vid#CustomHPosition');
   assert.ok(moved > 0, 'the drag moved H Pos right: ' + moved);
@@ -160,11 +160,13 @@ try {
   await expect(f.locator('.sheet-scroll:not([hidden]) [data-hubble-spreadsheet-active="true"]')).toHaveAttribute('data-hubble-column', 'Vid#CustomSize');
   await shot('slider-staged');
   check('a slider drag stages one value in amber, the number follows it, the unit is untouched, and the arrow keys still move around the sheet');
-  // A locked slider doesn't move.
-  await drag(unit(1) + '#1', 'Vid#CustomSize', 0.5, 0.9);
-  await expect(number(unit(1) + '#1', 'Vid#CustomSize')).toHaveText('100.0 %');
-  assert.equal(await staged(unit(1) + '#1', 'Vid#CustomSize'), '');
-  check('a slider locked by its prerequisite does not move');
+  // A locked slider doesn't move, and neither do its − and +. ROI Left waits for Region Of Interest.
+  await drag(unit(1) + '#1', 'Vid#ROILeft', 0.5, 0.2);
+  await expect(number(unit(1) + '#1', 'Vid#ROILeft')).toHaveText('100.0 %');
+  await expect(cell(unit(1) + '#1', 'Vid#ROILeft').locator('.slider-step')).toHaveCount(2);
+  for (const step of await cell(unit(1) + '#1', 'Vid#ROILeft').locator('.slider-step').all()) await expect(step).toBeDisabled();
+  assert.equal(await staged(unit(1) + '#1', 'Vid#ROILeft'), '');
+  check('a slider locked by its prerequisite does not move, and its − and + are off');
   await sendAll();
   assert.equal(String(await sim(0, 'eParamID_Vid1CustomHPosition')), String(Math.round(moved * 10)));
   await expect(number(ch1, 'Vid#CustomHPosition')).toHaveText(moved.toFixed(1) + ' %');

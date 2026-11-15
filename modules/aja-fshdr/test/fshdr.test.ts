@@ -146,22 +146,28 @@ test('Send writes only what is staged, confirms by readback, and leaves a refuse
   try {
     await h.backend.start!();
     await until(() => h.observed().units.u1?.state === 'live');
-    await h.save({ kind: 'view', sheetId: 'hdr', view: withColumnVisibility(sheetList(h.plan()).find(sheet => sheet.id === 'hdr')!.view, [{ id: 'Vid#CustomSizePos', visible: true }, { id: 'Vid#CustomSize', visible: true }]), expected: sheetList(h.plan()).find(sheet => sheet.id === 'hdr')!.view });
-    assert.match(h.observed().rows['u1#1']!.locked['Vid#CustomSize']!, /prerequisite/);
+    await h.save({ kind: 'view', sheetId: 'hdr', view: withColumnVisibility(sheetList(h.plan()).find(sheet => sheet.id === 'hdr')!.view, [{ id: 'Vid#CustomSizePos', visible: true }, { id: 'Vid#CustomSize', visible: true }, { id: 'Vid#RegionOfInterest', visible: true }, { id: 'Vid#ROILeft', visible: true }]), expected: sheetList(h.plan()).find(sheet => sheet.id === 'hdr')!.view });
+    // Custom Size/Pos is off, and the unit still takes Custom Size. ROI Left really does wait for Region Of Interest.
+    assert.equal(h.observed().rows['u1#1']!.locked['Vid#CustomSize'], undefined);
+    assert.match(h.observed().rows['u1#1']!.locked['Vid#ROILeft']!, /prerequisite/);
     assert.deepEqual(h.observed().rows['u1#1']!.limits['Vid#CustomSize'], { precision: 1, min: 10, max: 200, step: 0.1, units: '%' });
-    await h.save({ kind: 'edit', edits: [{ rowId: 'u1', columnId: 'ChannelName1', value: 'CAM 13', expected: '' }, { rowId: 'u1', columnId: 'SystemName', value: 'Truck A', expected: '' }, { rowId: 'u1#1', columnId: 'Vid#ColorHDRTransform', value: '8', expected: '' }, { rowId: 'u1#1', columnId: 'Vid#CustomSize', value: '120.0', expected: '' }] });
+    await h.save({ kind: 'edit', edits: [{ rowId: 'u1', columnId: 'ChannelName1', value: 'CAM 13', expected: '' }, { rowId: 'u1', columnId: 'SystemName', value: 'Truck A', expected: '' }, { rowId: 'u1#1', columnId: 'Vid#ColorHDRTransform', value: '8', expected: '' }, { rowId: 'u1#1', columnId: 'Vid#ROILeft', value: '50.0', expected: '' }] });
     assert.deepEqual(pendingFields(h.plan(), h.observed(), 'u1').map(f => f.id).sort(), ['ChannelName1', 'SystemName']);
     assert.equal(unit.writes.length, 0, 'staging sends nothing');
     assert.deepEqual((await h.call('send', { rowId: 'u1', fieldIds: ['ChannelName1', 'SystemName'] })).outcomes, [{ fieldId: 'ChannelName1', status: 'verified' }, { fieldId: 'SystemName', status: 'verified' }]);
     assert.deepEqual(unit.writes, [{ id: 'eParamID_Vid1_ChannelName', value: 'CAM 13' }, { id: 'eParamID_SystemName', value: 'Truck A' }]);
-    const sent = await h.call('send', { rowId: 'u1#1', fieldIds: ['Vid#ColorHDRTransform', 'Vid#CustomSize'] });
+    const sent = await h.call('send', { rowId: 'u1#1', fieldIds: ['Vid#ColorHDRTransform', 'Vid#ROILeft'] });
     assert.equal(sent.outcomes![0]!.status, 'verified'); assert.equal(sent.outcomes![1]!.status, 'failed'); assert.match(sent.outcomes![1]!.message!, /prerequisite/);
-    assert.equal(unit.values.eParamID_Vid1ColorHDRTransform, '8'); assert.equal(unit.values.eParamID_Vid1CustomSize, '1000');
-    assert.match(h.observed().rows['u1#1']!.errors['Vid#CustomSize']!, /prerequisite/);
-    await h.save(edit('u1#1', 'Vid#CustomSizePos', '1'));
-    assert.deepEqual((await h.call('send', { rowId: 'u1#1', fieldIds: ['Vid#CustomSizePos', 'Vid#CustomSize'] })).outcomes!.map(outcome => outcome.status), ['verified', 'verified']);
-    assert.equal(unit.values.eParamID_Vid1CustomSize, '1200');
-    assert.equal(h.observed().rows['u1#1']!.errors['Vid#CustomSize'], undefined);
+    assert.equal(unit.values.eParamID_Vid1ColorHDRTransform, '8'); assert.equal(unit.values.eParamID_Vid1ROILeft, '100');
+    assert.match(h.observed().rows['u1#1']!.errors['Vid#ROILeft']!, /prerequisite/);
+    // The setting that switches it on is listed later in the same Send, and Send puts it first.
+    await h.save({ kind: 'edit', edits: [{ rowId: 'u1#1', columnId: 'Vid#RegionOfInterest', value: '3', expected: '' }, { rowId: 'u1#1', columnId: 'Vid#CustomSize', value: '120.0', expected: '' }] });
+    assert.deepEqual((await h.call('send', { rowId: 'u1#1', fieldIds: ['Vid#ROILeft', 'Vid#RegionOfInterest', 'Vid#CustomSize'] })).outcomes!.map(outcome => outcome.fieldId + ' ' + outcome.status), ['Vid#RegionOfInterest verified', 'Vid#ROILeft verified', 'Vid#CustomSize verified']);
+    assert.equal(unit.values.eParamID_Vid1ROILeft, '500'); assert.equal(unit.values.eParamID_Vid1CustomSize, '1200'); assert.equal(unit.values.eParamID_Vid1CustomSizePos, '0');
+    assert.equal(h.observed().rows['u1#1']!.errors['Vid#ROILeft'], undefined);
+    // AFD still holds Custom Size, as on the unit.
+    unit.change('eParamID_Vid1AFDActive', '1');
+    await until(() => !!h.observed().rows['u1#1']!.locked['Vid#CustomSize'], 'AFD locks Custom Size');
     unit.ignoreWrites = true;
     await h.save(edit('u1#2', 'Vid#ColorHDRTransform', '1'));
     const unconfirmed = await h.call('send', { rowId: 'u1#2', fieldIds: ['Vid#ColorHDRTransform'] });
@@ -266,7 +272,7 @@ test('a unit that is not connected takes presets with the firmware list’s choi
     assert.equal(row.locked['Vid#CustomSize'], undefined, 'a preset is not held back by a prerequisite the unit might already have on');
     assert.ok(seen.choiceSets[row.choices['Vid#ColorHDRTransform']!]!.some(choice => choice.label === 'BBC HLG LUT'));
     assert.match(String((normalize(row, fields.find(field => field.id === 'Vid#CustomSize')!, '250') as { error?: string }).error), /from 10 to 200/);
-    // Custom Size is staged before the setting that switches it on. One Send still lands both.
+    // Custom Size is staged before the setting it depends on. Send puts Custom Size/Pos first.
     await h.save({ kind: 'edit', edits: [{ rowId: 'u1#1', columnId: 'Vid#CustomSize', value: '120.0', expected: '' }, { rowId: 'u1#1', columnId: 'Vid#CustomSizePos', value: '1', expected: '' }] });
     assert.deepEqual(pendingFields(h.plan(), h.observed(), 'u1#1').map(field => field.id), ['Vid#CustomSize', 'Vid#CustomSizePos']);
     await assert.rejects(h.call('send', { rowId: 'u1#1', fieldIds: ['Vid#CustomSize'] }), /offline/);
@@ -344,4 +350,29 @@ test('sixteen units that are not connected, with every column shown, stay well i
     assert.deepEqual(row.limits['Vid#CustomSize'], { precision: 1, min: 10, max: 200, step: 0.1, units: '%' }, 'every row gets its limits back from the shared shape');
     assert.ok(h.observed().choiceSets[row.choices['Vid#ColorHDRTransform']!]!.some(choice => choice.label === 'BBC HLG LUT'));
   } finally { await h.stop(); }
+});
+
+test('a slider being dragged sends straight to the unit, without staging or logging, and only where sends are allowed', async () => {
+  const unit = await fakeUnit(), h = host(planFor(unit));
+  try {
+    await h.backend.start!();
+    await until(() => h.observed().units.u1?.state === 'live');
+    const live = (writes: unknown[], final = false) => h.call('live', { writes, final }) as unknown as Promise<{ outcomes: { rowId: string; status: string; message?: string }[] }>;
+    const before = h.logs.length;
+    assert.deepEqual((await live([{ rowId: 'u1#1', fieldId: 'Vid#CustomSize', value: '101.5' }, { rowId: 'u1#2', fieldId: 'Vid#CustomSize', value: '101.5' }])).outcomes.map(o => o.status), ['verified', 'verified']);
+    assert.equal(unit.values.eParamID_Vid1CustomSize, '1015'); assert.equal(unit.values.eParamID_Vid2CustomSize, '1015');
+    assert.equal(valueOf(h.plan(), 'u1#1', 'Vid#CustomSize'), '', 'nothing is staged');
+    assert.equal(h.logs.length, before, 'drag steps are not logged');
+    // The same value again is not written twice.
+    const writes = unit.writes.length;
+    await live([{ rowId: 'u1#1', fieldId: 'Vid#CustomSize', value: '101.5' }], true);
+    assert.equal(unit.writes.length, writes);
+    assert.deepEqual(h.logs.slice(before).map(entry => entry.message), ['FS-HDR 1 channel 1 Vid#CustomSize = 101.5 (slider): Confirmed'], 'the release is logged');
+    // Out of range comes back as a failure; a setting that isn't a slider is refused outright.
+    assert.equal((await live([{ rowId: 'u1#1', fieldId: 'Vid#CustomSize', value: '250.0' }])).outcomes[0]!.status, 'failed');
+    await assert.rejects(live([{ rowId: 'u1#1', fieldId: 'Vid#ColorHDRTransform', value: '1' }]), /Invalid live setting/);
+    await h.save(edit('u1', 'unit-allow', 'FALSE', 'TRUE'));
+    const refused = await live([{ rowId: 'u1#1', fieldId: 'Vid#CustomSize', value: '102.0' }]);
+    assert.match(refused.outcomes[0]!.message!, /Allow sends is off/); assert.equal(unit.values.eParamID_Vid1CustomSize, '1015');
+  } finally { await h.stop(); await unit.close(); }
 });

@@ -23,7 +23,11 @@ export async function fakeUnit(options: { name?: string; mode?: '1' | '2' } = {}
       { param_id: id('ColorHDRTransform'), param_name: 'Transform', param_type: 'enum', enum_values: transforms },
       { param_id: id('DetectedInputFormat'), param_name: 'Detected Input Format', param_type: 'enum', class_names: ['readonly'], enum_values: enumOf('No Input', '1080p 23.98') },
       { param_id: id('CustomSizePos'), param_name: 'Custom Size/Pos', param_type: 'enum', enum_values: enumOf('Off', 'On') },
-      { param_id: id('CustomSize'), param_name: 'Custom Size', param_type: 'decimal', min_value: 100, max_value: 2000, adjust_by: 1, scale_by: 10, display_precision: 1, units: '%', relations: { enabled_by: [{ paramid: id('CustomSizePos'), value: 1 }] } },
+      { param_id: id('CustomSize'), param_name: 'Custom Size', param_type: 'decimal', min_value: 100, max_value: 2000, adjust_by: 1, scale_by: 10, display_precision: 1, units: '%', relations: { disabled_by: [{ paramid: id('CustomSizePos'), value: 0 }, { paramid: id('AFDActive'), value: 1 }] } },
+      // The real unit's own rules: Custom Size only greys out on its page while Custom Size/Pos is off, ROI really waits for Region Of Interest.
+      { param_id: id('AFDActive'), param_name: 'AFDActive', param_type: 'enum', enum_values: enumOf('Off', 'On') },
+      { param_id: id('RegionOfInterest'), param_name: 'Region Of Interest', param_type: 'enum', enum_values: enumOf('Off', 'Setup', 'On Square', 'On Full') },
+      { param_id: id('ROILeft'), param_name: 'ROI Left', param_type: 'decimal', min_value: 100, max_value: 1000, adjust_by: 1, scale_by: 10, display_precision: 1, units: '%', relations: { disabled_by: [{ paramid: id('RegionOfInterest'), value: 0 }, { paramid: id('AFDActive'), value: 1 }] } },
       // Output Format is stored once per frame-rate family; the logical ID maps onto the one in use.
       { param_id: id('OutputFormat'), param_name: 'Output Format', param_type: 'enum', enum_values: enumOf('Follow INPUT', '1080p2398') },
       { param_id: id('OutputFormat_5923'), param_name: 'Output Format', param_type: 'enum', enum_values: enumOf('Follow INPUT', '1080p2398') },
@@ -31,7 +35,7 @@ export async function fakeUnit(options: { name?: string; mode?: '1' | '2' } = {}
       { param_id: id('OutputFormat_6024'), param_name: 'Output Format', param_type: 'enum', enum_values: enumOf('Follow INPUT', '1080p24') },
     );
     maps[id('OutputFormat')] = { map_scheme: 1, depends_on: ['eParamID_FrameRateMode'], param_maps: [id('OutputFormat_5923'), id('OutputFormat_5025'), id('OutputFormat_6024')] };
-    Object.assign(values, { [id('_ChannelName')]: n === 0 ? 'UHD' : 'Video ' + n, [id('ColorHDRTransform')]: '3', [id('DetectedInputFormat')]: '1', [id('CustomSizePos')]: '0', [id('CustomSize')]: '1000', [id('OutputFormat_5923')]: '1', [id('OutputFormat_5025')]: '0', [id('OutputFormat_6024')]: '0' });
+    Object.assign(values, { [id('_ChannelName')]: n === 0 ? 'UHD' : 'Video ' + n, [id('ColorHDRTransform')]: '3', [id('DetectedInputFormat')]: '1', [id('CustomSizePos')]: '0', [id('CustomSize')]: '1000', [id('AFDActive')]: '0', [id('RegionOfInterest')]: '0', [id('ROILeft')]: '100', [id('OutputFormat_5923')]: '1', [id('OutputFormat_5025')]: '0', [id('OutputFormat_6024')]: '0' });
   }
   const strings = new Set(descriptors.filter(d => d.param_type === 'string').map(d => d.param_id as string));
   const queue: Record<string, string>[] = [], waiting = new Set<() => void>();

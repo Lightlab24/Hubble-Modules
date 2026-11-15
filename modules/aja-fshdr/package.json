@@ -1,6 +1,6 @@
 {
   "name": "@hubble-module/aja-fshdr",
-  "version": "2.1.3",
+  "version": "2.1.4",
   "private": true,
   "type": "module",
   "description": "AJA FS-HDR control using Hubble spreadsheet controls",
@@ -20,7 +20,7 @@
     "build": "hubble-module build .",
     "test": "hubble-module test .",
     "typecheck": "tsc --noEmit",
-    "package": "hubble-module build . && hubble-module test . && hubble-module pack . ../../artifacts/aja-fshdr-2.1.3.hubble-module"
+    "package": "hubble-module build . && hubble-module test . && hubble-module pack . ../../artifacts/aja-fshdr-2.1.4.hubble-module"
   },
   "dependencies": {
     "@hubble/module-sdk": "workspace:1.8.0"

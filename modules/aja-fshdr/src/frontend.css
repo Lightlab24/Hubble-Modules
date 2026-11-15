@@ -138,3 +138,10 @@ dialog::backdrop{background:#0009}dialog header{display:flex;align-items:center;
 :is(#grid-setup,#grid-master,#grid-channels) td.slider-cell{padding:0 10px 0 8px;white-space:nowrap}
 .cell-slider{width:100%;min-width:0}
 .cell-slider .hubble-slider{font:inherit;--slider-value-color:currentColor;--slider-thumb-size:14px;--slider-hit-size:26px}
+/* − and + either side of a slider step it by the unit's own step; held, they keep going. */
+.cell-slider{display:flex;align-items:center;gap:4px}
+.cell-slider-track{flex:1;min-width:0}
+.cell-slider .slider-step{flex:none;width:20px;height:20px;min-height:0;padding:0;border-radius:5px;border-color:#3b3b3b;background:#1c1c1c;color:#bbb;font-size:14px;line-height:1;touch-action:none;user-select:none}
+.cell-slider .slider-step:hover:not(:disabled){background:#2e2e2e;border-color:#666;color:#f4f4f4}
+.cell-slider .slider-step:active:not(:disabled){background:#3a3a3a}
+.cell-slider .slider-step:disabled{opacity:.3}
