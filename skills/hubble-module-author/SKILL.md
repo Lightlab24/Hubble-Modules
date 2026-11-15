@@ -26,6 +26,9 @@ under `ui/` that is listed in `files` (at most 256 KB) and require `module-page-
 Hubble fits it into the 16-pixel icon slot in full colour, so prefer an SVG or a PNG of at
 least 128 pixels so it stays sharp when HubDash is zoomed. The operator can still pick their
 own icon for the tab.
+A page can also set `pages[].wideIcon`, a wide logo such as a wordmark, with the same file
+rules, requiring `module-page-wide-icons-v1`. Hubble shows it beside the label in the expanded
+sidebar, fitted into 44 by 16 pixels, and `icon` when the sidebar is collapsed.
 For Button Matrix controls inside a custom layout, read
 [the spreadsheet controls API](references/spreadsheet-controls.md) and build
 the `custom-spreadsheet` example from the kit. For module-owned controls,

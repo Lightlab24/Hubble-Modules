@@ -46,4 +46,12 @@ describe("module page icons", () => {
     expect(() => ModuleManifestSchema.parse(manifest({ icon: "ui/logo.gif" }))).toThrow()
     expect(() => ModuleManifestSchema.parse(manifest({ icon: "https://example.com/a.svg" }))).toThrow()
   })
+
+  it("accepts a wide logo with its own host feature, from the package files, on a sidebar page", () => {
+    const wide = ["module-pages-v1", "module-page-icons-v1", "module-page-wide-icons-v1"]
+    expect(ModuleManifestSchema.parse(manifest({ icon: "ui/logo.svg", wideIcon: "ui/photo.png" }, wide)).pages?.[0]?.wideIcon).toBe("ui/photo.png")
+    expect(() => ModuleManifestSchema.parse(manifest({ wideIcon: "ui/logo.svg" }))).toThrow("module-page-wide-icons-v1")
+    expect(() => ModuleManifestSchema.parse(manifest({ wideIcon: "ui/missing.svg" }, wide))).toThrow("one of the package files")
+    expect(() => ModuleManifestSchema.parse(manifest({ wideIcon: "ui/logo.gif" }, wide))).toThrow()
+  })
 })
