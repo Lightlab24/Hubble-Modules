@@ -14,7 +14,24 @@
     if(row.lens!==undefined&&!Array.isArray(row.enabledLensAxes)){
       restored.enabledLensAxes=[...new Set([...dirty].map(lensAxisForField).filter(Boolean))];
     }
+    // A live update used to put a changed address back on Keep, which Send then refused. Typing an
+    // address picks Replace or Add (Edit on a WAN), so a row saved that way gets the same again.
+    if(row.operation==='Keep'&&row.planned!==undefined&&dirty.has('planned')&&row.planned!==row.current){
+      restored.operation=row.type==='WAN'?'Edit':row.current?'Replace':'Add';
+    }
     return restored;
+  }
+  // One controller element is one row. A row whose send created an element the controller had already
+  // reported was briefly listed twice; the copy that holds no edit of its own goes.
+  function withoutDuplicateRows(collection){
+    const kept=new Map();
+    for(const row of collection){
+      if(!row.elementKey){continue;}
+      const id=row.device+'\u0000'+row.elementKey,other=kept.get(id);
+      const ownsWork=item=>item.pending||item.jobs||item.dirty?.size;
+      if(!other||ownsWork(row)&&!ownsWork(other))kept.set(id,row);
+    }
+    return collection.filter(row=>!row.elementKey||kept.get(row.device+'\u0000'+row.elementKey)===row);
   }
   // Earlier versions stored made-up motor and limit values on every camera, even with the axis off.
   const formerLensDefaults={irisMotor:'3',zoomMotor:'5',focusMotor:'2',irisMin:'1.6',irisMax:'32',irisTorque:'2',zoomTorque:'2',focusTorque:'2',irisDirection:'left',zoomDirection:'left',focusDirection:'left'};
@@ -32,6 +49,9 @@
   }
   function applyReceipts(plan){
     for(const collection of ['cameras','lans'])for(const saved of plan[collection]||[]){const local=(collection==='cameras'?cameras:lans).find(item=>item.id===saved.id);if(local)for(const field of ['elementKey','newElementKey','createState','needsInitialization'])if(saved[field]!==undefined)local[field]=saved[field];}
+    const before=lans.length;
+    lans=withoutDuplicateRows(lans);
+    if(lans.length!==before){renderLans();remember();}
   }
   let liveObservations={};
   // Online and Offline only come from something that answered, or from a connection that was tried and failed.
@@ -71,7 +91,7 @@
       const plan=await moduleBridge.read();
       applyCameraControlState(await moduleBridge.controlState());
       await restoreCameraChoiceCatalogs();
-      if(plan){devices.splice(0,devices.length,...plan.devices);cameras=(plan.cameras||[]).map(row=>withoutFormerLensDefaults(restoredRow(row)));lans=(plan.lans||[]).map(restoredRow);deviceOrder=devices.map(item=>item.id);openControllers.clear();openNetworkDevices.clear();if(devices[0]){openControllers.add(devices[0].id);openNetworkDevices.add(devices[0].id);}discoveryCard.open=!devices.length;syncConnections();syncFilter();renderLans();renderCameras();if(plan.uiState)restore(plan.uiState);}
+      if(plan){devices.splice(0,devices.length,...plan.devices);cameras=(plan.cameras||[]).map(row=>withoutFormerLensDefaults(restoredRow(row)));lans=withoutDuplicateRows((plan.lans||[]).map(restoredRow));deviceOrder=devices.map(item=>item.id);openControllers.clear();openNetworkDevices.clear();if(devices[0]){openControllers.add(devices[0].id);openNetworkDevices.add(devices[0].id);}discoveryCard.open=!devices.length;syncConnections();syncFilter();renderLans();renderCameras();if(plan.uiState)restore(plan.uiState);}
       moduleBridge.onReceipt(applyReceipts);
       moduleBridge.subscribe(applyLiveState);
       if(plan?.uiState?.privateContent?.ui?.discoveryVersion!==2&&ui.discoveryMethod==='broadcast')ui.discoveryMethod='ping';
@@ -110,10 +130,14 @@
       const collection=name==='cameras'?cameras:lans;
       for(const remote of remoteRows){
         let local=collection.find(item=>item.device===current.id&&item.elementKey===remote.elementKey);
+        // An element a row's own send is making is that row's, and the send links it when it finishes.
+        if(!local&&collection.some(item=>item.device===current.id&&item.newElementKey===remote.elementKey))continue;
         if(local){
           const changingLens=name==='cameras'&&local.dirty.has('lens')&&local.lens!==remote.lens;
           for(const [field,value]of Object.entries(remote)){
             if(['id','device','dirty','pending','result','revision','jobs','online'].includes(field)||local.dirty.has(field))continue;
+            // Replace, Add or Edit is what an unsent address change is for; the controller only ever says Keep.
+            if(field==='operation'&&(local.pending||local.dirty.size))continue;
             if(changingLens&&(isLensSetting(field)||field.startsWith('lensParams')))continue;
             local[field]=value;
           }
@@ -123,6 +147,7 @@
       }
       for(let index=collection.length-1;index>=0;index--){const local=collection[index];if(local.device===current.id&&local.elementKey&&!local.pending&&!local.jobs&&!remoteRows.some(item=>item.elementKey===local.elementKey))collection.splice(index,1);}
     }
+    lans=withoutDuplicateRows(lans);
   }
   function applyLiveState(values){
     if(values.observations)liveObservations=values.observations;
