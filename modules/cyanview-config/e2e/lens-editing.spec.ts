@@ -330,13 +330,16 @@ test('a dropdown with a known list opens without waiting for the controller', as
   await expect.poll(() => held.length).toBe(1);
   await page.keyboard.press('Escape');
 
-  // Nothing has ever listed this lens's connections, so that one has to ask.
+  // Nothing has listed this lens's connections yet, and a RIO's ports still open at once while the
+  // controller is asked for its own list.
   await cell(row, 'connection').click();
+  const opened = Date.now();
   await sheet.press('Enter');
-  await expect(f.getByRole('dialog').getByText('Loading choices…')).toBeVisible();
-  await expect.poll(() => held.length).toBe(2);
+  await expect(f.getByRole('dialog').getByRole('option', { name: 'RIO-1-10 : 2', exact: true })).toBeVisible();
+  expect(Date.now() - opened).toBeLessThan(500);
+  await expect(f.getByRole('dialog').getByText('Loading choices…')).toHaveCount(0);
+  await expect.poll(() => held.length).toBeGreaterThanOrEqual(2);
   await Promise.all(held.splice(0).map(route => route.continue()));
-  await expect(f.getByRole('dialog').getByRole('option', { name: 'None', exact: true })).toBeVisible({ timeout: 4000 });
   await page.unroute('**/__rpc');
 });
 
