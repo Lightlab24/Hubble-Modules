@@ -164,6 +164,45 @@ test('a new camera with no Source yet can be any camera Cyanview supports', asyn
   await expect(cell(added, 'model')).toContainText('Burano');
 });
 
+test('a new camera with lens None has no lens change to send, even one saved by an earlier version', async ({ page, request }) => {
+  const f = await open(page, request);
+  await showSetup(f);
+  const rows = setup(f).locator('tbody tr[data-id]'), before = await rows.count();
+  await setup(f).locator('[data-count-step="1"]').click();
+  await expect(rows).toHaveCount(before + 1);
+  const name = await cell(rows.last(), 'name').locator('input').inputValue(), added = () => named(setup(f), name);
+  await expect(cell(added(), 'lens')).toHaveText('None');
+  for (const column of ['lens', 'connection']) await expect(cell(added(), column)).not.toHaveClass(/hc-changed/);
+  await expect(cell(added(), 'name')).toHaveClass(/hc-changed/);
+  await expect(f.locator('[data-role="saved-label"]')).toContainText('Workspace saved');
+  await expect.poll(async () => (await (await request.get('/__inspect')).json()).planSavePending).toBe(0);
+
+  // Earlier versions saved new rows with their lens cells marked as changed.
+  const rpc = rpcOf(request), { revision, plan } = await rpc('read-plan');
+  const saved = plan.uiState.privateContent.remiView.unassigned.find((row: { name: string }) => row.name === name);
+  expect(saved.dirty).not.toContain('lens');
+  saved.dirty = [...saved.dirty, 'lens', 'lensPort'];
+  await rpc('save-plan', { revision, plan });
+  await page.reload();
+  await showSetup(f);
+  for (const column of ['lens', 'connection']) await expect(cell(added(), column)).not.toHaveClass(/hc-changed/);
+
+  // Picking None again changes nothing, and Send creates the camera with no lens command.
+  await cell(added(), 'lens').click();
+  await gridOf(added()).press('Enter');
+  await f.getByRole('dialog').getByRole('option', { name: 'None', exact: true }).click();
+  await expect(cell(added(), 'lens')).not.toHaveClass(/hc-changed/);
+  await cell(added(), 'ip').locator('input').fill('10.20.20.43');
+  await cell(added(), 'ip').locator('input').press('Enter');
+  await setSource(f, name, 'Downstream RCP');
+  await sendAll(f);
+  await settle(f);
+  await expect(cell(added(), 'sync')).toHaveText('Verified');
+  const made = Object.values((await fleet(request))[2]!.config.Camera).find(camera => camera.Name === name)!;
+  expect(made.IP).toBe('10.20.20.43');
+  expect(JSON.stringify((await fleet(request))[2]!.actions)).not.toContain('lens-');
+});
+
 test('REMI Matrix can switch to the sheets of each controller and remembers which', async ({ page, request }) => {
   const f = await open(page, request, { direct: true });
   await expect(matrix(f)).toBeVisible();

@@ -439,6 +439,9 @@ import { PresentationLedger } from './presentation-ledger.js';
       for(const dirty of item.dirty)if(isLensSetting(dirty)&&!lensFieldUsed(item,dirty))item.dirty.delete(dirty);
       if(item.lens==='None'){
         item.lensPort='None';
+        // Nothing about a lens is sent for None, so a camera not on a controller yet has nothing to send.
+        item.dirty.delete('lensPort');
+        if(!item.elementKey)item.dirty.delete('lens');
         // No lens leaves nothing to set up, so choosing one later starts clean.
         item.enabledLensAxes=[];
         for(const definition of Object.values(axisDefinitions).flat())item[definition.id]='';
@@ -1154,6 +1157,9 @@ import { PresentationLedger } from './presentation-ledger.js';
   }
   function restoredRow(row){
     const dirty=new Set(row.dirty||[]);
+    // Lens None sends nothing, so it is never an unsent change: earlier versions marked it on every new
+    // row. A camera already on a controller keeps a changed lens, since None then takes its lens off.
+    if(!row.lens||row.lens==='None'){dirty.delete('lensPort');if(!row.elementKey)dirty.delete('lens');}
     const restored={...row,deleting:false,dirty,revision:Number(row.revision||0),jobs:0};
     if(row.lens!==undefined&&!Array.isArray(row.enabledLensAxes)){
       restored.enabledLensAxes=[...new Set([...dirty].map(lensAxisForField).filter(Boolean))];
@@ -2986,7 +2992,8 @@ import { PresentationLedger } from './presentation-ledger.js';
     const { id, elementKey, newElementKey, createState, needsInitialization, remi, remiPeer, routeDraft, sentValues, jobs, deleting, dirty, ...settings } = camera;
     const moved = { ...settings, id: 'moved-camera-' + Date.now() + '-' + (++movedCameraSequence), device: target.id, enabledLensAxes: [...(camera.enabledLensAxes ?? [])], usb: 'USB · Automatic', lensPort: 'None', online: null, isNew: true, pending: true, result: 'Sending', revision: 0, jobs: 0, dirty: new Set() };
     const lensFields = [...Object.values(axisDefinitions).flat().map(definition => definition.id), 'lensIp'].filter(field => lensFieldUsed(moved, field) && moved[field]);
-    const fields = ['number', 'name', 'model', 'ip', 'port', 'login', 'password', 'usb', 'lens', ...lensFields];
+    // Lens None sends nothing, so a camera with no lens arrives with no lens change.
+    const fields = ['number', 'name', 'model', 'ip', 'port', 'login', 'password', 'usb', ...(moved.lens && moved.lens !== 'None' ? ['lens'] : []), ...lensFields];
     moved.dirty = new Set(fields);
     const controlWasOn = cameraControlEnabled(camera);
     movesInFlight.add(moved);
@@ -4497,7 +4504,7 @@ import { PresentationLedger } from './presentation-ledger.js';
     let next = Math.max(0, ...(deviceId ? cameras.filter(camera => camera.device === deviceId) : cameras).map(camera => Number(camera.number)).filter(Number.isFinite)) + 1;
     const added = Array.from({ length: Math.min(count, room) }, () => {
       const number = String(next++);
-      return { id: 'new-camera-' + crypto.randomUUID(), device: deviceId, number, name: 'Camera ' + number, model, ip: '', lens: 'None', lensPort: 'None', online: null, pending: true, result: usb ? 'Pending' : 'Incomplete', port: usb ? '' : '80', login: usb ? '' : 'admin', password: '', isNew: true, dirty: new Set(['number', 'name', 'model', 'ip', 'lens', 'lensPort']), revision: 0, jobs: 0 };
+      return { id: 'new-camera-' + crypto.randomUUID(), device: deviceId, number, name: 'Camera ' + number, model, ip: '', lens: 'None', lensPort: 'None', online: null, pending: true, result: usb ? 'Pending' : 'Incomplete', port: usb ? '' : '80', login: usb ? '' : 'admin', password: '', isNew: true, dirty: new Set(['number', 'name', 'model', 'ip']), revision: 0, jobs: 0 };
     });
     cameras.push(...added);
     if (deviceId) openControllers.add(deviceId);

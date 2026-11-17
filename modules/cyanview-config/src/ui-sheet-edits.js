@@ -19,6 +19,9 @@
       for(const dirty of item.dirty)if(isLensSetting(dirty)&&!lensFieldUsed(item,dirty))item.dirty.delete(dirty);
       if(item.lens==='None'){
         item.lensPort='None';
+        // Nothing about a lens is sent for None, so a camera not on a controller yet has nothing to send.
+        item.dirty.delete('lensPort');
+        if(!item.elementKey)item.dirty.delete('lens');
         // No lens leaves nothing to set up, so choosing one later starts clean.
         item.enabledLensAxes=[];
         for(const definition of Object.values(axisDefinitions).flat())item[definition.id]='';

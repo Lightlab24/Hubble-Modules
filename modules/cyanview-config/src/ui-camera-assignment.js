@@ -546,7 +546,8 @@
     const { id, elementKey, newElementKey, createState, needsInitialization, remi, remiPeer, routeDraft, sentValues, jobs, deleting, dirty, ...settings } = camera;
     const moved = { ...settings, id: 'moved-camera-' + Date.now() + '-' + (++movedCameraSequence), device: target.id, enabledLensAxes: [...(camera.enabledLensAxes ?? [])], usb: 'USB · Automatic', lensPort: 'None', online: null, isNew: true, pending: true, result: 'Sending', revision: 0, jobs: 0, dirty: new Set() };
     const lensFields = [...Object.values(axisDefinitions).flat().map(definition => definition.id), 'lensIp'].filter(field => lensFieldUsed(moved, field) && moved[field]);
-    const fields = ['number', 'name', 'model', 'ip', 'port', 'login', 'password', 'usb', 'lens', ...lensFields];
+    // Lens None sends nothing, so a camera with no lens arrives with no lens change.
+    const fields = ['number', 'name', 'model', 'ip', 'port', 'login', 'password', 'usb', ...(moved.lens && moved.lens !== 'None' ? ['lens'] : []), ...lensFields];
     moved.dirty = new Set(fields);
     const controlWasOn = cameraControlEnabled(camera);
     movesInFlight.add(moved);

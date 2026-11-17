@@ -7,6 +7,9 @@
   }
   function restoredRow(row){
     const dirty=new Set(row.dirty||[]);
+    // Lens None sends nothing, so it is never an unsent change: earlier versions marked it on every new
+    // row. A camera already on a controller keeps a changed lens, since None then takes its lens off.
+    if(!row.lens||row.lens==='None'){dirty.delete('lensPort');if(!row.elementKey)dirty.delete('lens');}
     const restored={...row,deleting:false,dirty,revision:Number(row.revision||0),jobs:0};
     if(row.lens!==undefined&&!Array.isArray(row.enabledLensAxes)){
       restored.enabledLensAxes=[...new Set([...dirty].map(lensAxisForField).filter(Boolean))];
