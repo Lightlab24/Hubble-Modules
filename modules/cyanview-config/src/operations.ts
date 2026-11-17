@@ -207,7 +207,8 @@ export class ConfigurationOperations {
     if (!/^\d+$/.test(String(item.number)) || Number(item.number) < 1 || !String(item.name ?? '').trim() || String(item.name).length > 160) throw new Error('Enter a camera number and name');
     const usb = item.model === 'Alpha-USB' || normalizedLabel(item.model) === 'sonyalphausb';
     if (!usb && !validIp(String(item.ip ?? ''))) throw new Error('Enter a valid camera IP address');
-    if (!usb && (!/^\d+$/.test(String(item.port || '80')) || Number(item.port || 80) < 1 || Number(item.port || 80) > 65535)) throw new Error('Enter a camera port between 1 and 65535');
+    const port = String(item.port ?? '').trim();
+    if (!usb && fields.includes('port') && port && (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535)) throw new Error('Enter a camera port between 1 and 65535');
     if (item.lens === 'cmotion cGate' && fields.some(field => field === 'lens' || field === 'lensPort' || advanced(field))) throw new Error('cGate configuration is not available yet');
     const sameLens = normalizedLabel(before?.LensModel) === normalizedLabel(item.lens);
     const parameters = lensParameters(item, fields, sameLens ? String(before?.LensParams ?? '') : '');
@@ -234,8 +235,14 @@ export class ConfigurationOperations {
       await client.waitFor(config => normalizedLabel(config.Camera?.[key]?.Model) === normalizedLabel(choice.label), signal);
     }
     for (const [field, property, label] of [['number', 'number', 'Number'], ['name', 'name', 'Name']] as const) if (created || fields.includes(field)) { await client.update(key, { [property]: String(item[field]) }, signal); expected[label] = String(item[field]); }
+    // The controller gives each model its own port (a Burano's endpoint needs 22, which a RIO sets with the
+    // model and doesn't list on the camera). Sending Hubble's blank Port emptied that endpoint and the RIO
+    // never built the camera's control (Nov 17, 2026). The user's rule: the port the RIO loads stands, and
+    // goes only when someone types one, never with a new camera or a model change.
     if (!usb) for (const [field, label] of [['ip', 'IP'], ['port', 'Port'], ['login', 'Login'], ['password', 'Password']] as const) if (created || fields.includes('model') || fields.includes(field)) {
-      const mapping = await client.mapping(key, label, signal), value = String(item[field] ?? (field === 'port' ? '80' : ''));
+      const value = String(item[field] ?? '').trim();
+      if (field === 'port' && (!value || !fields.includes('port'))) continue;
+      const mapping = await client.mapping(key, label, signal);
       await client.update(mapping.key, { [mapping.property]: value }, signal); expected[label] = value;
     }
     if (usb && (created || fields.includes('usb'))) {
@@ -319,6 +326,12 @@ export class ConfigurationOperations {
     } finally { if (!session) fresh.close(); }
     const patch = { elementKey: key, createState: null, needsInitialization: false, isNew: false };
     const result: RecordValue = { elementKey: key, verified: true };
+    // A new camera or a new model takes the controller's port for that model. When the controller doesn't
+    // list it on the camera (a Burano's 22), its endpoint says it, so the row shows what the RIO loaded.
+    if (!usb && (created || fields.includes('model')) && !('Port' in object(client.config.Camera?.[key]))) {
+      const ports = await client.readEndpointPorts(signal);
+      if (ports.has(key)) result.port = ports.get(key);
+    }
     // How long the controller took to report the change back, which is its own time and not the send's.
     if (session) result.confirmMs = Math.round(performance.now() - waited);
     if (session) session.receipts.push({ item, patch });

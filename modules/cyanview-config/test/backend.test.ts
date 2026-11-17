@@ -11,7 +11,7 @@ import { decodeLensParameters, emptyPlan, lensParameters, type RecordValue } fro
 import { ModuleFrontendValueSchema } from '@hubble/module-sdk/frontend';
 import { parseAnnouncement } from '../src/announcements.js';
 import { parseNeighbors } from '../src/neighbors.js';
-import { CyanviewClient } from '../src/transport.js';
+import { CyanviewClient, endpointPorts } from '../src/transport.js';
 import { baseFromSerial } from '../src/service.js';
 import { cameraChoiceKey } from '../src/choice-context.js';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -189,6 +189,91 @@ test('a camera whose model the controller lists with no Port is created and veri
     const made = fake.config.Camera[reply.results[0].elementKey];
     assert.equal(made.Model, 'Sony - Burano'); assert.equal(made.IP, '10.20.100.103'); assert.equal('Port' in made, false);
     assert.equal((await f.repository.read(f.signal)).plan.cameras[0]!.needsInitialization, false);
+  } finally { await f.instance.dispose(); await fake.close(); }
+});
+
+// On a real RIO (10.192.90.156, Nov 17, 2026) a Burano made in Cyanview's page had endpoint port 22 and was
+// online; one made by Hubble had port "" because the blank Port cell was sent, and the RIO never built its
+// camera control. A blank Port now leaves the port the controller gave the model.
+test('a blank Port keeps the port the controller gave the model, and a typed one is sent', async () => {
+  const fake = new FakeController(); await fake.start(); const f = fixture();
+  fake.modelChoices.push(['Sony - Burano', 'SonyBurano']);
+  const endpointPort = new Map<string, string>();
+  const endpoints = (fake as any).endpoints as Map<string, string>;
+  const apply = (fake as any).apply.bind(fake);
+  (fake as any).apply = (request: RecordValue) => {
+    const update = request.update;
+    const result = apply(request);
+    if (update?.changes?.model === 'SonyBurano') endpointPort.set(update.key, '22');
+    if (update && endpoints.has(update.key) && update.changes.port !== undefined) endpointPort.set(endpoints.get(update.key)!, update.changes.port);
+    // A RIO never lists a Burano's port on the camera.
+    for (const row of Object.values(fake.config.Camera) as RecordValue[]) if (row.Model === 'Sony - Burano') delete row.Port;
+    return result;
+  };
+  // The element list reports each camera's endpoint and its port, as a RIO's does.
+  fake.endpointElements = () => [...endpointPort].flatMap(([camera, port]) => [
+    { key: 'ctrl-' + camera, module: 'CyElement.CamCtrl', parents: ['endpoint-of-' + camera, camera], properties: {} },
+    { key: 'endpoint-of-' + camera, module: 'CyElement.IpEndpoint', parents: [], properties: { port } },
+  ]);
+  try {
+    const plan = planFor(fake), device = plan.devices[0]!.id;
+    const blank: RecordValue = { id: 'burano-blank-port', device, number: '1', name: 'BUR 25-1000 - 1', model: 'Burano', ip: '10.20.100.105', port: '', login: 'admin', password: 'ABCD1234', lens: 'None', lensPort: 'None', isNew: true };
+    const typed: RecordValue = { ...blank, id: 'burano-typed-port', number: '2', name: 'BUR 25-1000 - 2', port: '2222' };
+    // A row added with Number of cameras carries 80 as a placeholder that nobody typed.
+    const counted: RecordValue = { ...blank, id: 'burano-counted', number: '3', name: 'BUR 25-1000 - 3', port: '80' };
+    plan.cameras.push(blank, typed, counted); await f.repository.write(null, plan, f.signal);
+    const operations = new ConfigurationOperations(f.repository, fake.client);
+    const typedFields = ['number', 'name', 'model', 'ip', 'port', 'login', 'password'];
+    const reply = await operations.run({ items: [
+      { kind: 'camera', item: blank, fields: typedFields },
+      { kind: 'camera', item: typed, fields: typedFields },
+      { kind: 'camera', item: counted, fields: ['number', 'name', 'model', 'ip'] },
+    ] }, f.signal);
+    assert.deepEqual(reply.results.map((result: RecordValue) => result.error), [undefined, undefined, undefined]);
+    const [first, second, third] = reply.results.map((result: RecordValue) => String(result.elementKey));
+    assert.equal(endpointPort.get(first!), '22', 'the blank Port left the model\'s port');
+    assert.equal(endpointPort.get(second!), '2222');
+    assert.equal(endpointPort.get(third!), '22', 'a placeholder port nobody typed isn\'t sent');
+    // Each new camera's row is told the port the RIO loaded.
+    assert.deepEqual(reply.results.map((result: RecordValue) => result.port), ['22', '2222', '22']);
+    assert.equal(fake.actions.some(action => action.update?.changes?.port === ''), false, 'no empty port is ever sent');
+    // Editing the row later with Port still blank leaves the port alone too.
+    await operations.run({ kind: 'camera', item: { ...blank, elementKey: first, isNew: false, name: 'Renamed' }, fields: ['name', 'port'] }, f.signal);
+    assert.equal(endpointPort.get(first!), '22');
+  } finally { await f.instance.dispose(); await fake.close(); }
+});
+
+// The element list a real RIO (10.192.90.156) reported on Nov 17, 2026: Hubble's Burano with its port emptied,
+// and the one made in Cyanview's page with port 22.
+test('each camera\'s port is read from its network endpoint', () => {
+  const ports = endpointPorts([
+    { key: 'zp3b7u', module: 'CyElement.CamCtrl', parents: ['1r9uvra', 'h8618e'], build: false, properties: { auto_camera: '0' } },
+    { key: '1r9uvra', module: 'CyElement.IpEndpoint', parents: [], build: false, properties: { ip: '10.20.100.105', login: 'admin', password: 'ABCD1234', port: '' } },
+    { key: '71cdnp', module: 'CyElement.CamCtrl', parents: ['xu6ia9', 'ozqifq'], build: true, properties: { auto_camera: '0' } },
+    { key: 'xu6ia9', module: 'CyElement.IpEndpoint', parents: [], build: true, properties: { ip: '10.20.100.105', login: 'admin', password: 'ABCD1234', port: '22' } },
+    { key: 'h8618e_l', module: 'CyElement.Lens', parents: ['h8618e'], properties: { model: 'sony' } },
+  ]);
+  assert.deepEqual([...ports], [['h8618e', ''], ['ozqifq', '22']]);
+  assert.deepEqual([...endpointPorts(null)], []);
+});
+
+test('a camera whose model\'s port the controller doesn\'t list shows the port its endpoint holds', async () => {
+  const fake = new FakeController(); await fake.start();
+  fake.config.Camera.burano = { Number: '2', Name: 'Burano', Model: 'Sony - Burano', IP: '10.20.100.105', Login: 'admin', Password: 'ABCD1234' };
+  fake.config.Camera.venice = { Number: '3', Name: 'Venice', Model: 'Sony - Venice-IP', IP: '10.20.100.106', Port: '80' };
+  fake.endpointElements = () => [
+    { key: 'ctrl', module: 'CyElement.CamCtrl', parents: ['endpoint', 'burano'], properties: {} },
+    { key: 'endpoint', module: 'CyElement.IpEndpoint', parents: [], properties: { ip: '10.20.100.105', port: '22' } },
+  ];
+  const f = fixture({}, { client: fake.client });
+  try {
+    await f.instance.start();
+    const found = await f.call('probe', { address: '10.192.1.10' });
+    const imported = await f.call('import-device', { id: found.device.id, address: '10.192.1.10' });
+    const { cameras } = await f.call('import-part', { token: imported.token, offset: 0 });
+    const port = (key: string) => cameras.find((camera: RecordValue) => camera.elementKey === key)?.port;
+    assert.equal(port('burano'), '22');
+    assert.equal(port('venice'), '80', 'a port the controller lists on the camera stays as listed');
   } finally { await f.instance.dispose(); await fake.close(); }
 });
 

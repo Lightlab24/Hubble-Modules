@@ -80,9 +80,17 @@ export class CyanviewService {
     try { await client.connect(signal); return await this.read(client, signal, catalog); } finally { client.close(); }
   }
   /** What an open socket says the controller has now. */
-  private async read(client: CyanviewClient, signal: AbortSignal, catalog = true) {
+  private async read(client: CyanviewClient, signal: AbortSignal, catalog = true, endpoints = true) {
     const snapshot = normalizeSnapshot(client.config, client.address);
     this.noteNeighbours(client.config);
+    // A camera whose model's port the controller doesn't list (a Burano's 22) shows the port its endpoint
+    // holds. A read on the held socket after each change opens nothing else, so it leaves the port the page
+    // already has rather than blanking it.
+    const unlisted = snapshot.cameras.filter(camera => !('Port' in object(object(client.config.Camera)[String(camera.elementKey)])));
+    if (unlisted.length && endpoints) {
+      const ports = await client.readEndpointPorts(signal);
+      for (const camera of unlisted) if (ports.has(String(camera.elementKey))) camera.port = ports.get(String(camera.elementKey))!;
+    } else for (const camera of unlisted) Reflect.deleteProperty(camera, 'port');
     if (catalog) await this.remi.readCameraReferences(snapshot, client, signal);
     if (catalog && snapshot.cameras[0]) {
       try { snapshot.device.modelCatalog = optionEntries(await client.option(snapshot.cameras[0].elementKey, 'Model', signal)).map(entry => ({ label: entry.label, id: object(entry.request).update?.changes?.model ?? '' })); } catch { /* The verified snapshot remains usable if option discovery is unavailable. */ }
@@ -188,7 +196,7 @@ export class CyanviewService {
       const generation = this.generations.get(device.id) || 0, current = () => generation === (this.generations.get(device.id) || 0);
       try {
         const held = live ? this.live?.connection(device.id) : undefined;
-        const snapshot = held ? await this.read(held, signal) : await this.baseSnapshot(device, signal) ?? await this.snapshot(device.address || device.base, signal);
+        const snapshot = held ? await this.read(held, signal, true, false) : await this.baseSnapshot(device, signal) ?? await this.snapshot(device.address || device.base, signal);
         if (!current()) return;
         if (snapshot.device.serial !== device.serial) throw new Error('Controller identity changed');
         snapshots.push(snapshot);

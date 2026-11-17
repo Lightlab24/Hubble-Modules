@@ -33,6 +33,8 @@
       if(report.remiRefresh)remiChanged=true;
       if(report.remiError)remiWarnings.push({device:item.device,error:report.remiError});
       for(const field of ['elementKey','newElementKey','createState','needsInitialization'])if(report[field]!==undefined)item[field]=report[field];
+      // A new camera or model shows the port the controller gave it, unless someone has typed one.
+      if(kind==='camera'&&typeof report.port==='string'&&!item.dirty.has('port'))item.port=report.port;
       if(report.error){if(deleting)item.deleting=false;item.result='Error';errors.push(report.error);}
       else{
         if(report.devicePatch)Object.assign(device(item.device),report.devicePatch);

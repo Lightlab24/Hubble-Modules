@@ -2,6 +2,21 @@ import WebSocket from 'ws';
 import { stable, validIp, type RecordValue } from './model.js';
 import type { RemiSelector } from './remi-model.js';
 
+/**
+ * Each camera's port as its network endpoint holds it. A RIO gives a model its port when the model is set
+ * (a Burano's is 22) but doesn't list it on the camera; the endpoint is the camera control's first parent.
+ */
+export function endpointPorts(elements: unknown): Map<string, string> {
+  const rows = (Array.isArray(elements) ? elements : []).filter(row => row && typeof row === 'object') as RecordValue[];
+  const endpoints = new Map(rows.filter(row => row.module === 'CyElement.IpEndpoint' && typeof row.key === 'string').map(row => [row.key as string, row]));
+  const ports = new Map<string, string>();
+  for (const row of rows) {
+    if (row.module !== 'CyElement.CamCtrl' || !Array.isArray(row.parents)) continue;
+    const [endpointKey, cameraKey] = row.parents, endpoint = endpoints.get(String(endpointKey));
+    if (endpoint && typeof cameraKey === 'string' && typeof endpoint.properties?.port === 'string') ports.set(cameraKey, endpoint.properties.port);
+  }
+  return ports;
+}
 export type SocketFactory = (url: string, options: WebSocket.ClientOptions) => WebSocket;
 export type ClientOptions = { timeout?: number; socket?: SocketFactory };
 export class CyanviewClient {
@@ -140,6 +155,30 @@ export class CyanviewClient {
           selectors.set(row.key, { connection: row.parents[0], deviceId: row.properties.device_id });
         }
         finish(selectors);
+      });
+    });
+  }
+  /** Each camera's endpoint port, read from the element list. Empty when the list can't be read. */
+  async readEndpointPorts(signal: AbortSignal): Promise<Map<string, string>> {
+    if (!this.connected || signal.aborted) return new Map();
+    const socket = (this.options.socket ?? ((url, options) => new WebSocket(url, options)))('ws://' + this.address + '/ws', {
+      origin: 'http://' + this.address, handshakeTimeout: this.options.timeout ?? 5000, maxPayload: 8 * 1024 * 1024,
+    });
+    return new Promise(resolve => {
+      let settled = false;
+      const finish = (ports: Map<string, string>) => {
+        if (settled) return;
+        settled = true; clearTimeout(timer); signal.removeEventListener('abort', abort); socket.terminate(); resolve(ports);
+      };
+      const abort = () => finish(new Map());
+      const timer = setTimeout(abort, this.options.timeout ?? 5000);
+      signal.addEventListener('abort', abort, { once: true });
+      socket.on('error', abort);
+      socket.on('close', abort);
+      socket.on('message', raw => {
+        let message: RecordValue;
+        try { message = JSON.parse(raw.toString()); } catch { return; }
+        if (Array.isArray(message.elements)) finish(endpointPorts(message.elements));
       });
     });
   }

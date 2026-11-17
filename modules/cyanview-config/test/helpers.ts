@@ -95,6 +95,8 @@ export class FakeController {
   holdAction = '';
   heldActionReplies: (() => void)[] = [];
   replyTextHeartbeat = true;
+  /** Extra elements the /ws element list reports, such as a camera's network endpoint and camera control. */
+  endpointElements?: () => RecordValue[];
   /** Sees every action as it arrives, so a test can check the order across controllers. */
   onAction?: (request: RecordValue) => void;
   modelChoices = [['Sony - Venice-IP', 'VeniceCBM'], ['Sony - Alpha-USB', 'SonyDslr'], ['Sony - Alpha-IP', 'SonyDslrIP']];
@@ -114,8 +116,8 @@ export class FakeController {
       this.wss.handleUpgrade(request, socket, head, ws => {
         this.sockets.add(ws); this.opened++; this.origins.push(String(request.headers.origin));
         ws.once('close', () => this.sockets.delete(ws));
-        if (url.pathname === '/ws' && this.remiFleet) {
-          ws.send(JSON.stringify({ elements: this.remiFleet.elements(this), version: 1 })); return;
+        if (url.pathname === '/ws' && (this.remiFleet || this.endpointElements)) {
+          ws.send(JSON.stringify({ elements: [...(this.remiFleet?.elements(this) ?? []), ...(this.endpointElements?.() ?? [])], version: 1 })); return;
         }
         const config = structuredClone(this.config);
         if (this.wrongIdentity && address !== '10.192.1.10' && address !== '10.20.101.200') config.Product.Serial = 'ANOTHER-CONTROLLER';
