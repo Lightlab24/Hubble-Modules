@@ -246,11 +246,18 @@ export class ConfigurationOperations {
       if (!choice && wanted !== '*') throw new Error('The selected USB camera is unavailable');
       if (choice) expected.usb = wanted;
     }
-    if (fields.includes('lens') || created && item.lens && item.lens !== 'None') {
+    // Lens None means nothing about the lens is sent, so a camera with no lens never waits on one. The
+    // only exception is a camera that already had a lens before this send: None then takes it off,
+    // if the controller offers a way to.
+    const noLens = !item.lens || item.lens === 'None';
+    const removeLens = noLens && !created && fields.includes('lens') && !!before?.LensModel;
+    if (noLens ? removeLens : fields.includes('lens') || created) {
       const choices = optionEntries(await client.option(key, 'LensModel', signal));
-      const choice = choices.find(choice => normalizedLabel(choice.label) === normalizedLabel(item.lens) || item.lens === 'None' && !choice.label);
-      if (choice) { await client.action(choice.request, signal); expected.LensModel = item.lens === 'None' ? '' : choice.label; }
-      else if (item.lens !== 'None' || client.config.Camera?.[key]?.LensModel) throw new Error('Selected lens model is unavailable');
+      const choice = noLens
+        ? choices.find(choice => !choice.label || normalizedLabel(choice.label) === 'none')
+        : choices.find(choice => normalizedLabel(choice.label) === normalizedLabel(item.lens));
+      if (choice) { await client.action(choice.request, signal); expected.LensModel = noLens ? '' : choice.label; }
+      else if (!noLens) throw new Error('Selected lens model is unavailable');
     }
     if (fields.includes('lensPort') && item.lens !== 'None' && item.lensPort) {
       const choices = optionEntries(await client.option(key, 'LensInterface', signal));

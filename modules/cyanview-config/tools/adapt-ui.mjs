@@ -170,6 +170,7 @@ export async function buildUiAdapter() {
   const imports = [
     "import { createSpreadsheetContextMenu, mountSpreadsheetControls, mountSpreadsheetColumnGroup, mountSpreadsheetResize, mountSpreadsheetColumnEditor, mountSpreadsheetViewport } from '@hubble/module-sdk/spreadsheet-controls';",
     "import { cameraChoiceKey } from './choice-context.js';",
+    "import { cyanviewCameraModels } from './camera-models.js';",
     "import { PresentationLedger } from './presentation-ledger.js';",
   ].join('\n');
   await writeFile(path.join(root, 'src/ui-controller.js'), imports + '\n' + source);

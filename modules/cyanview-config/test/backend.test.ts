@@ -119,6 +119,42 @@ test('camera creation resolves generated endpoint IDs and verifies credentials w
   } finally { await f.instance.dispose(); await fake.close(); }
 });
 
+test('a new camera with lens None sends nothing about the lens, whatever lens list the controller has', async () => {
+  const fake = new FakeController(); await fake.start(); const f = fixture();
+  // Some controllers list no blank lens and give a new camera a lens of their own.
+  fake.lensChoices = fake.lensChoices.filter(([, id]) => id !== '');
+  const apply = (fake as any).apply.bind(fake);
+  (fake as any).apply = (request: RecordValue) => {
+    const result = apply(request);
+    if (request?.new?.[0] === 'CyElement.Camera') fake.config.Camera[result[1]].LensModel = 'B4 Generic';
+    return result;
+  };
+  try {
+    const plan = planFor(fake), camera: RecordValue = { id: 'no-lens-camera', device: plan.devices[0]!.id, number: '1', name: 'Burano', model: 'Venice-IP', ip: '10.20.100.101', port: '80', login: 'admin', password: 'password', lens: 'None', lensPort: 'None', isNew: true };
+    plan.cameras.push(camera); await f.repository.write(null, plan, f.signal);
+    const operations = new ConfigurationOperations(f.repository, fake.client);
+    // A new row marks its lens cells as changed, so they arrive with the send.
+    const result = await operations.run({ kind: 'camera', item: camera, fields: ['number', 'name', 'model', 'ip', 'lens', 'lensPort'] }, f.signal);
+    assert.equal(result.verified, true);
+    assert.deepEqual(fake.options.filter(field => field === 'LensModel' || field === 'LensInterface'), []);
+    assert.equal(fake.actions.some(action => JSON.stringify(action).includes('lens-')), false);
+  } finally { await f.instance.dispose(); await fake.close(); }
+});
+
+test('lens None still takes a lens off a camera that had one', async () => {
+  const fake = new FakeController(); await fake.start(); const f = fixture();
+  try {
+    const plan = planFor(fake), camera: RecordValue = { id: 'lens-camera', device: plan.devices[0]!.id, number: '1', name: 'Wide', model: 'Venice-IP', ip: '10.20.100.101', port: '80', login: 'admin', password: 'password', lens: 'B4 Generic', lensPort: 'None', isNew: true };
+    plan.cameras.push(camera); await f.repository.write(null, plan, f.signal);
+    const operations = new ConfigurationOperations(f.repository, fake.client);
+    const made = await operations.run({ kind: 'camera', item: camera, fields: ['number', 'name', 'model', 'ip', 'lens'] }, f.signal);
+    assert.equal(fake.config.Camera[made.elementKey].LensModel, 'B4 Generic');
+    const stored = (await f.repository.read(f.signal)).plan.cameras[0]!;
+    await operations.run({ kind: 'camera', item: { ...stored, lens: 'None' }, fields: ['lens'] }, f.signal);
+    assert.equal(fake.config.Camera[made.elementKey].LensModel, '');
+  } finally { await f.instance.dispose(); await fake.close(); }
+});
+
 test('partial camera failure retains the create receipt and retries the same object', async () => {
   const fake = new FakeController(); await fake.start(); const f = fixture();
   try {

@@ -40,7 +40,7 @@
     const live=catalog&&controllerChoices(field,catalog.entries);
     let entries=[];
     if(field==='model'){
-      entries=(live||modelChoices(camera).map(value=>choiceEntry(value,value,'Sony'))).filter(option=>option.value!=='Choose model…');
+      entries=(live||modelChoices(camera)).filter(option=>option.value!=='Choose model…');
     }else if(field==='lens'){
       entries=live||lensModels.map(value=>choiceEntry(value));
     }else if(field==='lensPort'){

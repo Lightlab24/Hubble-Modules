@@ -143,6 +143,27 @@ test('a new camera needs no controller, and choosing its Source then Send create
   await expect(cell(row(f, newName), 'source')).toHaveText('Downstream RCP');
 });
 
+test('a new camera with no Source yet can be any camera Cyanview supports', async ({ page, request }) => {
+  const f = await open(page, request);
+  await showSetup(f);
+  const rows = setup(f).locator('tbody tr[data-id]'), before = await rows.count();
+  await setup(f).locator('[data-count-step="1"]').click();
+  await expect(rows).toHaveCount(before + 1);
+  const added = named(setup(f), await cell(rows.last(), 'name').locator('input').inputValue());
+  await expect(cell(added, 'source')).toHaveText('Choose source');
+  await cell(added, 'model').click();
+  await gridOf(added).press('Enter');
+  const dialog = f.getByRole('dialog', { name: 'Select Camera model' });
+  // Not just the handful of Sony models the page used to fall back on.
+  await expect.poll(() => dialog.getByRole('option').count()).toBeGreaterThan(150);
+  for (const brand of ['Sony', 'Canon', 'Panasonic', 'RED', 'ARRI', 'Blackmagic']) await expect(dialog.getByRole('group', { name: brand, exact: true })).toHaveCount(1);
+  await expect(dialog.getByRole('option', { name: 'Cyan - Imported', exact: true })).toHaveCount(0);
+  await dialog.getByRole('combobox').fill('burano');
+  await expect(dialog.getByRole('option')).toHaveText(['Burano']);
+  await dialog.getByRole('combobox').press('Enter');
+  await expect(cell(added, 'model')).toContainText('Burano');
+});
+
 test('REMI Matrix can switch to the sheets of each controller and remembers which', async ({ page, request }) => {
   const f = await open(page, request, { direct: true });
   await expect(matrix(f)).toBeVisible();

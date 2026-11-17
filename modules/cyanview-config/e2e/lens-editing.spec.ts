@@ -347,7 +347,7 @@ test('an offline controller never holds a dropdown up', async ({ page, request }
   let asked = 0;
   await page.route('**/__rpc', route => { if (route.request().postDataJSON()?.commandId === 'options') asked++; void route.continue(); });
 
-  for (const [column, option] of [['lens', 'ARRI - cforce'], ['connection', 'None']] as const) {
+  for (const [column, option] of [['model', 'Alpha-IP'], ['lens', 'ARRI - cforce'], ['connection', 'None']] as const) {
     await cell(row, column).click();
     const started = Date.now();
     await sheet.press('Enter');

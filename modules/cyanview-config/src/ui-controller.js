@@ -1,5 +1,6 @@
 import { createSpreadsheetContextMenu, mountSpreadsheetControls, mountSpreadsheetColumnGroup, mountSpreadsheetResize, mountSpreadsheetColumnEditor, mountSpreadsheetViewport } from '@hubble/module-sdk/spreadsheet-controls';
 import { cameraChoiceKey } from './choice-context.js';
+import { cyanviewCameraModels } from './camera-models.js';
 import { PresentationLedger } from './presentation-ledger.js';
 (() => {
   const root=document.getElementById('cyanview-design'); if(!root)return;
@@ -1223,7 +1224,28 @@ import { PresentationLedger } from './presentation-ledger.js';
     }catch(error){devices.splice(0);cameras=[];lans=[];renderLans();renderCameras();toast(error.message||'Configuration could not be loaded');}
     root.hidden=false;icons();
   }
-  function modelChoices(camera){const catalog=device(camera.device)?.modelCatalog;return [...new Set(['Choose model…',...(catalog?.length?catalog.map(item=>String(item.label).replace(/^Sony\s*-\s*/,'')):['Venice-IP','Alpha-USB','Alpha-IP','Sony FX6','Sony FX9','Sony FR7']),camera.model])];}
+  // The models a camera can be given when its controller's own list isn't loaded: the list its controller
+  // gave in this session's read, otherwise every model any controller has listed plus every model
+  // Cyanview offers, so a new camera with no Source yet can be any camera.
+  function modelChoices(camera){
+    const catalog=device(camera.device)?.modelCatalog;
+    if(catalog?.length)return controllerChoices('model',catalog);
+    const labels=[];
+    for(const [key,{entries}] of cameraChoiceCatalogs){
+      let parts;try{parts=JSON.parse(key);}catch{continue;}
+      if(parts?.[1]==='Model')for(const item of entries)labels.push(String(item?.label??''));
+    }
+    // Brands stay together however the lists interleave them.
+    const groups=new Map(),seen=new Set();
+    for(const option of controllerChoices('model',[...labels,...cyanviewCameraModels].filter(label=>label&&label!=='Cyan - Imported').map(label=>({label})))){
+      if(seen.has(option.value))continue;
+      seen.add(option.value);
+      const group=option.group??'';
+      if(!groups.has(group))groups.set(group,[]);
+      groups.get(group).push(option);
+    }
+    return [...groups.values()].flat();
+  }
   function mergeSnapshot(snapshot){
     const current=device(snapshot.device.id);if(!current)return;
     // A snapshot is a one-off read, so it says nothing about live status.
@@ -1743,7 +1765,7 @@ import { PresentationLedger } from './presentation-ledger.js';
     const live=catalog&&controllerChoices(field,catalog.entries);
     let entries=[];
     if(field==='model'){
-      entries=(live||modelChoices(camera).map(value=>choiceEntry(value,value,'Sony'))).filter(option=>option.value!=='Choose model…');
+      entries=(live||modelChoices(camera)).filter(option=>option.value!=='Choose model…');
     }else if(field==='lens'){
       entries=live||lensModels.map(value=>choiceEntry(value));
     }else if(field==='lensPort'){

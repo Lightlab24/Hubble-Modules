@@ -112,8 +112,8 @@ test('cameras in columns edit, fill, paste and report the same settings as camer
 
   await flipped(group, 'model', 'cam3').click();
   await sheet.press('Enter');
-  await f.getByRole('dialog', { name: 'Select Camera model' }).getByRole('option', { name: 'Sony FR7', exact: true }).click();
-  await expect(flipped(group, 'model', 'cam3').locator('[data-field="model"]')).toHaveAttribute('value', 'Sony FR7');
+  await f.getByRole('dialog', { name: 'Select Camera model' }).getByRole('option', { name: 'FR7', exact: true }).click();
+  await expect(flipped(group, 'model', 'cam3').locator('[data-field="model"]')).toHaveAttribute('value', 'FR7');
 
   await flipped(group, 'controlEnabled', 'cam2').getByRole('checkbox').check();
   await expect(group.locator('[data-control-count="rcp1"]')).toContainText('1 enabled');

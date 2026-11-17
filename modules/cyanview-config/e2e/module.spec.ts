@@ -628,16 +628,16 @@ test('camera cells use the Hubble choice editor, clipboard and series fill', asy
   const search = choiceDialog.getByRole('combobox');
   await expect(search).toHaveValue('f');
   await search.fill('fr7');
-  await expect(choiceDialog.getByRole('option', { name: 'Sony FR7', exact: true })).toBeVisible();
+  await expect(choiceDialog.getByRole('option', { name: 'FR7', exact: true })).toBeVisible();
   await search.press('Enter');
-  await expect(model).toHaveAttribute('value', 'Sony FR7');
+  await expect(model).toHaveAttribute('value', 'FR7');
 
   await selectCameraCell(model);
   await trigger.click();
-  await expect(choiceDialog.getByRole('option', { name: 'Sony FR7', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expect(choiceDialog.getByRole('option', { name: 'FR7', exact: true })).toHaveAttribute('aria-selected', 'true');
   await expect(choiceDialog.getByRole('group', { name: 'Sony', exact: true })).toBeVisible();
   await expect(group.locator('[data-camera-location]')).toHaveText('Camera 1 · Camera model');
-  await expect(group.locator('[data-camera-value]')).toHaveText('Sony FR7');
+  await expect(group.locator('[data-camera-value]')).toHaveText('FR7');
   await expect(group.locator('.hc-camera-bands th')).toHaveText(['', 'Camera', 'Lens', 'Sync']);
   await search.press('Escape');
 
@@ -662,7 +662,7 @@ test('camera cells use the Hubble choice editor, clipboard and series fill', asy
   await expect(rows.nth(1).locator('[data-field="model"]')).toHaveAttribute('value', 'Alpha-IP');
   await sheet.press(modifier + '+z');
   await expect(firstName).toHaveValue('Venice 2 — tight');
-  await expect(model).toHaveAttribute('value', 'Sony FR7');
+  await expect(model).toHaveAttribute('value', 'FR7');
   await sheet.press(modifier + '+Shift+z');
   await expect.poll(names).toEqual(initialNames);
 
