@@ -141,6 +141,34 @@ test('a new camera with lens None sends nothing about the lens, whatever lens li
   } finally { await f.instance.dispose(); await fake.close(); }
 });
 
+test('one send sets a new lens and its connection, even on a controller that drops the first connection', async () => {
+  const fake = new FakeController(); await fake.start(); const f = fixture();
+  // As a RIO did on Nov 17, 2026: a connection made just after a lens change is gone a moment later.
+  let dropNext = false;
+  const apply = (fake as any).apply.bind(fake);
+  (fake as any).apply = (request: RecordValue) => {
+    const result = apply(request);
+    if (request?.update && String(request.update.key).startsWith('lens-') && request.update.changes?.model !== undefined) dropNext = true;
+    else if (request?.connect && dropNext) {
+      dropNext = false;
+      const camera = fake.config.Camera[(fake as any).lenses.get(request.connect[1])];
+      setTimeout(() => { camera.LensInterface = {}; fake.broadcast(); }, 0);
+    }
+    return result;
+  };
+  try {
+    const plan = planFor(fake), camera: RecordValue = { id: 'lens-port-camera', device: plan.devices[0]!.id, number: '1', name: 'Burano', model: 'Venice-IP', ip: '10.20.100.101', port: '80', login: 'admin', password: 'password', lens: 'None', lensPort: 'None', isNew: true };
+    plan.cameras.push(camera); await f.repository.write(null, plan, f.signal);
+    const operations = new ConfigurationOperations(f.repository, fake.client);
+    const made = await operations.run({ kind: 'camera', item: camera, fields: ['number', 'name', 'model', 'ip'] }, f.signal);
+    const stored = (await f.repository.read(f.signal)).plan.cameras[0]!;
+    const result = await operations.run({ kind: 'camera', item: { ...stored, lens: 'B4 Generic', lensPort: 'RIO-1-10 : 1' }, fields: ['lens', 'lensPort'] }, f.signal);
+    assert.equal(result.verified, true);
+    assert.equal(fake.config.Camera[made.elementKey].LensModel, 'B4 Generic');
+    assert.equal(fake.config.Camera[made.elementKey].LensInterface.port, '1');
+  } finally { await f.instance.dispose(); await fake.close(); }
+});
+
 test('lens None still takes a lens off a camera that had one', async () => {
   const fake = new FakeController(); await fake.start(); const f = fixture();
   try {

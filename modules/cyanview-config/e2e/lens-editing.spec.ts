@@ -360,9 +360,16 @@ test('a lens picked but not sent yet lists its connections, and one Send sets bo
 
   await choose(f, row, 'lens', 'B4 Generic');
   await cell(row, 'connection').click();
+  // It opens at once with the RIO's ports, without waiting on the controller.
+  let asked = 0;
+  await page.route('**/__rpc', route => { if (route.request().postDataJSON()?.commandId === 'options') asked++; setTimeout(() => void route.continue(), 1500); });
+  const started = Date.now();
   await f.getByRole('grid').press('Enter');
   const dialog = f.getByRole('dialog');
-  for (const port of ['RIO-1-10 : 1', 'RIO-1-10 : 2']) await expect(dialog.getByRole('option', { name: port, exact: true })).toBeVisible({ timeout: 4000 });
+  for (const port of ['RIO-1-10 : 1', 'RIO-1-10 : 2']) await expect(dialog.getByRole('option', { name: port, exact: true })).toBeVisible();
+  expect(Date.now() - started).toBeLessThan(500);
+  await expect(dialog.getByText('Loading choices…')).toHaveCount(0);
+  await page.unroute('**/__rpc');
   await expect(f.locator('[data-role="toast"]')).not.toContainText('different configuration');
   await dialog.getByRole('option', { name: 'RIO-1-10 : 1', exact: true }).click();
   await expect(cell(row, 'connection')).toContainText('RIO-1-10 : 1');

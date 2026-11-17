@@ -260,20 +260,32 @@ export class ConfigurationOperations {
       else if (!noLens) throw new Error('Selected lens model is unavailable');
     }
     if (fields.includes('lensPort') && item.lens !== 'None' && item.lensPort) {
-      // The connections a controller lists are for the lens it has, so a lens set in this send has to land first.
-      if (expected.LensModel !== undefined) await client.waitFor(config => config.Camera?.[key]?.LensModel === expected.LensModel, signal);
-      const choices = optionEntries(await client.option(key, 'LensInterface', signal));
-      if (item.lensPort === 'None') {
-        if (object(client.config.Camera?.[key]?.LensInterface).port) {
-          const choice = choices.find(choice => !choice.label || normalizedLabel(choice.label) === 'none');
-          if (!choice) throw new Error('This controller does not offer a verified lens disconnect command');
-          await client.action(choice.request, signal); expected.lensDisconnected = true;
+      // The connections a controller lists are for the lens it has, so a lens set in this send has to land
+      // first. A RIO then sets that lens up for a moment and can drop a connection made meanwhile, so it
+      // is left to go quiet first, and a connection that still didn't hold is made again.
+      const lensChanged = expected.LensModel !== undefined;
+      if (lensChanged) {
+        await client.waitFor(config => config.Camera?.[key]?.LensModel === expected.LensModel, signal);
+        await client.settle(300, 1500, signal);
+      }
+      const connected = (description: unknown) => ['device', 'port'].every(part => String(object(client.config.Camera?.[key]?.LensInterface)[part]) === String(object(description)[part]));
+      for (let attempt = 0; ; attempt++) {
+        const choices = optionEntries(await client.option(key, 'LensInterface', signal));
+        if (item.lensPort === 'None') {
+          if (object(client.config.Camera?.[key]?.LensInterface).port) {
+            const choice = choices.find(choice => !choice.label || normalizedLabel(choice.label) === 'none');
+            if (!choice) throw new Error('This controller does not offer a verified lens disconnect command');
+            await client.action(choice.request, signal); expected.lensDisconnected = true;
+          }
+          break;
         }
-      } else {
         const choice = choices.find(choice => normalizedLabel(choice.label) === normalizedLabel(item.lensPort));
         if (!choice) throw new Error('The selected lens connection is unavailable');
         if (choice.description?.status !== 'current') await client.action(choice.request, signal);
         expected.lensConnection = choice.description;
+        if (!lensChanged || attempt === 2) break;
+        await client.settle(300, 1500, signal);
+        if (connected(choice.description)) break;
       }
     }
     if (parameters !== undefined) {

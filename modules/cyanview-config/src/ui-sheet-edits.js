@@ -17,6 +17,7 @@
         }
       }
       for(const dirty of item.dirty)if(isLensSetting(dirty)&&!lensFieldUsed(item,dirty))item.dirty.delete(dirty);
+      if(item.lens!=='None')prefetchLensConnections(item);
       if(item.lens==='None'){
         item.lensPort='None';
         // Nothing about a lens is sent for None, so a camera not on a controller yet has nothing to send.

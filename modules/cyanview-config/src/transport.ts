@@ -66,6 +66,18 @@ export class CyanviewClient {
       this.configListeners.add(changed); signal.addEventListener('abort', abort, { once: true }); if (signal.aborted) abort();
     });
   }
+  /** Resolves once the controller has pushed no configuration change for quietMs, or after limitMs at most. */
+  async settle(quietMs: number, limitMs: number, signal: AbortSignal) {
+    await new Promise<void>((resolve, reject) => {
+      const cleanup = () => { clearTimeout(quiet); clearTimeout(limit); this.configListeners.delete(changed); signal.removeEventListener('abort', abort); };
+      const done = () => { cleanup(); resolve(); };
+      let quiet = setTimeout(done, quietMs);
+      const limit = setTimeout(done, limitMs);
+      const changed = () => { clearTimeout(quiet); quiet = setTimeout(done, quietMs); };
+      const abort = () => { cleanup(); reject(new Error('Operation cancelled')); };
+      this.configListeners.add(changed); signal.addEventListener('abort', abort, { once: true }); if (signal.aborted) abort();
+    });
+  }
   private failPending(message: string) { const pending = this.pending; if (!pending) return; this.pending = undefined; clearTimeout(pending.timer); pending.cleanup(); pending.reject(new Error(message)); }
   request(kind: 'action' | 'option', request: unknown, signal: AbortSignal): Promise<any> {
     const task = this.tail.catch(() => undefined).then(() => {

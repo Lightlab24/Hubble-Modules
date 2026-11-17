@@ -51,7 +51,18 @@
       if(order<rank){rank=order;best=[];}
       if(order===rank)best.push(...entries);
     }
+    // A RIO that has never listed any has its two lens ports, named as every RIO names them, so the
+    // list opens at once instead of waiting on the controller.
+    if(!best&&/^CY-RIO-/i.test(String(controller.serial)))best=[1,2].map(port=>({label:String(controller.serial).replace(/^CY-/i,'')+' : '+port}));
     return best&&controllerChoices('lensPort',best);
+  }
+  // Picking a lens asks its controller for the connections straight away, so they are ready to open.
+  function prefetchLensConnections(camera){
+    const controller=device(camera.device);
+    if(!moduleBridge||moduleBridge.preview||!camera.elementKey||!controller||controller.online===false)return;
+    moduleBridge.options({device:camera.device,rowId:camera.id,field:'LensInterface'})
+      .then(({key,entries,saved})=>{if(key&&entries?.length)cameraChoiceCatalogs.set(key,{entries,saved});})
+      .catch(()=>{ /* The list still opens from what is known, and asks again when opened. */ });
   }
   function cameraCellChoices(camera,field){
     const catalog=cameraChoiceCatalogs.get(choiceContext(camera,field));
