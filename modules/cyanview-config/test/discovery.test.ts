@@ -90,3 +90,79 @@ test('cancelling a hung native ping process waits for process termination',async
     assert.ok(pid);controller.abort();await assert.rejects(task,/cancelled/);assert.throws(()=>process.kill(pid,0));
   }finally{controller.abort();await rm(directory,{recursive:true,force:true});}
 });
+
+// macOS drops a first packet to a host it hasn't resolved once 1024 are waiting for ARP, but still sends the ARP
+// request, so the host shows up in the neighbor cache without ever having answered the probe.
+const waitUntil=async(condition:()=>boolean,ms=2000)=>{const deadline=Date.now()+ms;while(!condition()&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,5));assert.ok(condition(),'Timed out');};
+
+test('a controller whose ping was dropped is found once its ARP reply reaches the neighbor cache',async()=>{
+  let arp:string[]=[],final:any;const reads:number[]=[];
+  const discovery=new Discovery(async address=>({id:address,serial:'CY-RCP-'+address,address}),state=>{if(state.state!=='scanning')final=state;},async()=>true,{
+    // The sweep hears nothing from 10.192.46.197; the kernel resolved it while dropping the echo.
+    ping:async(range,receive,progress)=>{receive(['10.192.0.10']);arp=['10.192.46.197','10.20.1.5','10.192.0.10'];await new Promise(resolve=>setTimeout(resolve,30));progress(range.count);},
+    neighbors:async(_signal,accept)=>{reads.push(Date.now());return arp.filter(address=>accept?.(address)??true);},
+    neighborIntervalMs:10,neighborSettleMs:5,
+  });
+  discovery.start('10.192.0.0/16');await waitUntil(()=>final);
+  assert.equal(final.state,'complete');assert.deepEqual(final.results.map((row:any)=>row.address).sort(),['10.192.0.10','10.192.46.197']);
+  assert.ok(reads.length>=2,'reads the cache during and after the sweep');discovery.dispose();
+});
+
+test('an address whose first connection was lost gets one more check after it answers ARP',async()=>{
+  let arp:string[]=[],final:any;const attempts=new Map<string,number>();
+  const discovery=new Discovery(async address=>({id:address,serial:'CY-RIO-'+address,address}),state=>{if(state.state!=='scanning')final=state;},async address=>{const n=(attempts.get(address)??0)+1;attempts.set(address,n);return n>1&&address==='10.192.54.19';},{
+    seeds:async receive=>receive(['10.192.54.19','10.192.54.20']),
+    ping:async(range,_receive,progress)=>{await new Promise(resolve=>setTimeout(resolve,20));arp=['10.192.54.19','10.192.54.20'];progress(range.count);},
+    neighbors:async()=>arp,neighborIntervalMs:5,neighborSettleMs:5,
+  });
+  discovery.start('10.192.0.0/16');await waitUntil(()=>final);
+  assert.deepEqual(final.results.map((row:any)=>row.address),['10.192.54.19']);
+  assert.equal(attempts.get('10.192.54.19'),2);assert.equal(attempts.get('10.192.54.20'),2,'one retry only, never a loop');discovery.dispose();
+});
+
+test('a busy /16 still verifies a controller that answers after hundreds of other hosts',async()=>{
+  let final:any;const others=Array.from({length:600},(_,i)=>'10.192.'+(1+Math.floor(i/250))+'.'+(1+i%250));
+  const discovery=new Discovery(async address=>{if(address!=='10.192.46.197')throw new Error('Not a configurable Cyanview controller');return {id:address,serial:'CY-RCP-46-197',address};},state=>{if(state.state!=='scanning')final=state;},async()=>true,{
+    seeds:async receive=>receive(others.slice(0,300)),
+    ping:async(range,receive,progress)=>{receive(others.slice(300));receive(['10.192.46.197']);progress(range.count);},
+  });
+  discovery.start('10.192.0.0/16');await waitUntil(()=>final,5000);
+  assert.deepEqual(final.results.map((row:any)=>row.serial),['CY-RCP-46-197']);discovery.dispose();
+});
+
+test('Full IP scan checks a passed-over address again once it answers ARP, without counting it twice',async()=>{
+  let arp:string[]=[],final:any;const attempts=new Map<string,number>();
+  const discovery=new Discovery(async address=>({id:address,serial:'CY-GWY-'+address,address}),state=>{if(state.state!=='scanning')final=state;},async address=>{
+    const n=(attempts.get(address)??0)+1;attempts.set(address,n);if(address==='10.192.10.54'&&n===1){arp=['10.192.10.54','10.192.10.60'];return false;}return n>1&&address==='10.192.10.54';
+  },{neighbors:async(_signal,accept)=>arp.filter(address=>accept?.(address)??true),neighborIntervalMs:1000,neighborSettleMs:5});
+  discovery.start('10.192.10.0/24','ip');await waitUntil(()=>final);
+  assert.equal(final.state,'complete');assert.deepEqual(final.results.map((row:any)=>row.address),['10.192.10.54']);
+  assert.equal(final.checked,254);assert.equal(attempts.get('10.192.10.54'),2);assert.equal(attempts.get('10.192.10.60'),2);discovery.dispose();
+});
+
+test('stopping a sweep stops reading the neighbor cache',async()=>{
+  let reads=0,final:any;
+  const discovery=new Discovery(async address=>({id:address,serial:address,address}),state=>{if(state.state!=='scanning')final=state;},async()=>false,{
+    ping:async(_range,_receive,_progress,signal)=>{await new Promise<void>(resolve=>signal.addEventListener('abort',()=>resolve(),{once:true}));},
+    neighbors:async()=>{reads++;return [];},neighborIntervalMs:5,neighborSettleMs:5,
+  });
+  discovery.start('10.192.0.0/16');await waitUntil(()=>reads>=2);discovery.stop();await waitUntil(()=>final);
+  const after=reads;await new Promise(resolve=>setTimeout(resolve,40));assert.equal(final.state,'stopped');assert.equal(reads,after);
+});
+
+test('neighbor reads keep in-range addresses even behind thousands of others',async()=>{
+  const { parseNeighbors } = await import('../src/neighbors.js');
+  const text=Array.from({length:5000},(_,i)=>'? (172.16.'+Math.floor(i/250)+'.'+(1+i%250)+') at 02:00:00:00:00:01 on en0 ifscope [ethernet]').concat('? (10.192.46.197) at 02:00:00:6:ab:be on en7 ifscope [ethernet]','? (10.192.46.198) at (incomplete) on en7 ifscope [ethernet]').join('\n');
+  assert.deepEqual(parseNeighbors(text,networkRange('10.192.0.0/16').contains),['10.192.46.197']);
+  assert.equal(parseNeighbors(text).length,4096);
+});
+
+test('a tiny range still retries a known address whose check outlasts the sweep',async()=>{
+  let final:any,first=true;const attempts:number[]=[];
+  const discovery=new Discovery(async address=>({id:address,serial:'CY-RCP-'+address,address}),state=>{if(state.state!=='scanning')final=state;},async()=>{attempts.push(Date.now());if(first){first=false;await new Promise(resolve=>setTimeout(resolve,60));return false;}return true;},{
+    seeds:async receive=>receive(['10.192.46.197']),ping:async(range,_receive,progress)=>progress(range.count),
+    neighbors:async()=>['10.192.46.197'],neighborIntervalMs:1000,neighborSettleMs:5,
+  });
+  discovery.start('10.192.46.197/32');await waitUntil(()=>final);
+  assert.equal(attempts.length,2);assert.deepEqual(final.results.map((row:any)=>row.address),['10.192.46.197']);discovery.dispose();
+});

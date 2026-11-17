@@ -48,6 +48,7 @@ export class CyanviewService {
       if (!/^CY-(RCP|RIO|GATEWAY|GWY)-/i.test(snapshot.device.serial)) throw new Error('Not a configurable Cyanview controller');
       return this.rememberCandidate(snapshot.device);
     }, () => this.emit(), options.reachable, {
+      neighbors: options.neighbors ?? readNeighbors,
       ...options.discovery,
       seeds: options.discovery?.seeds ?? (async(receive,signal)=>{
         const addresses=(devices:RecordValue[])=>devices.flatMap(device=>[device.address,device.base,device.alias,...(device.addresses??[])]).filter(validIp);
