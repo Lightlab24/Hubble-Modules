@@ -101,6 +101,9 @@ export async function createMonitorGrid(options: GridOptions) {
       const value = edit.value === "" ? clearedValue(edit.columnId) : edit.value;
       return [{ rowId: edit.rowId, columnId: edit.columnId, value, expected: expected ?? valueOf(row, edit.columnId) }];
     });
+    // Putting back the saved value is no change to save, but it does settle a red draft in that cell.
+    for (const change of changes)
+      if (change.value === change.expected && store.invalid.has(key(change))) store.discard(change.rowId, change.columnId);
     const real = changes.filter((change) => change.value !== change.expected);
     return real.length ? store.submit({ kind: "edit", edits: real }) : true;
   }
