@@ -29,14 +29,21 @@
       }
     }
     if(isLan){
+      const wan=item.type==='WAN';
       if(field==='dhcp'){
         item.planned=value?'DHCP':'';
         item.operation='Edit';
         item.dirty.add('planned');
         fields.push('planned');
+        // Turning DHCP on blanks a WAN's gateway and DNS on the controller in the same command, so they show blank here.
+        if(wan&&value)for(const setting of ['gateway','dns1','dns2'])if(item[setting]){item[setting]='';item.dirty.add(setting);fields.push(setting);}
       }else if(item.operation==='Keep'&&field!=='operation'){
-        item.operation=item.current?'Replace':'Add';
+        item.operation=wan?'Edit':item.current?'Replace':'Add';
       }
+      // A WAN's mode and its address go to the controller together.
+      if(wan&&field==='planned'&&item.dirty.has('dhcp'))fields.push('dhcp');
+      // Keep puts a WAN back the way the controller has it, which it says again for the gateway and DNS.
+      if(wan&&field==='operation'&&item.operation==='Keep'&&item.elementKey){cancelLanDrafts(item.device,item.id);return [];}
       if(field==='operation'&&item.operation==='Keep'){
         item.planned=item.current;
         item.dirty.clear();

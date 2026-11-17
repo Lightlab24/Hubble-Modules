@@ -87,10 +87,10 @@
       case 'base': return cell('<span class="hc-mono hc-muted">' + esc(d.base || '') + '</span>');
       case 'lan1': return cell(input('lan1', net.lan[0]?.planned, 'LAN IP', busy) + (deviceSheet.lanOpen ? '' : waiting(net.lan.slice(1))), !!net.lan[0]?.pending);
       case 'lan2': return cell(input('lan2', net.lan[1]?.planned, 'LAN IP 2', busy) + waiting(net.lan.slice(2)), !!net.lan[1]?.pending);
-      case 'wan': return cell(net.wan ? (net.wan.dhcp || net.wan.current ? esc(net.wan.dhcp ? 'DHCP' : net.wan.current) : quiet('Not set')) + waiting([net.wan]) : quiet('—'), !!net.wan?.pending);
-      // The controllers haven't shown how a WAN address or DHCP is written, so these two are read, not set.
-      case 'wanMode': return cell(net.wan ? quiet(net.wan.dhcp ? 'DHCP' : net.wan.current ? 'Static' : 'Not set') : quiet('—'), false, ' title="WAN mode can’t be set from Hubble yet. Gateway and DNS can."');
-      case 'wanIp': return cell(net.wan ? '<span class="hc-mono hc-muted">' + esc(net.wan.dhcp ? '' : net.wan.current) + '</span>' : '', false, ' title="A WAN address can’t be set from Hubble yet. Gateway and DNS can."');
+      // Folded away, the WAN shows what it will be once sent.
+      case 'wan': return cell(net.wan ? (net.wan.dhcp || net.wan.planned ? esc(net.wan.dhcp ? 'DHCP' : net.wan.planned) : quiet('Not set')) + waiting([net.wan]) : quiet('—'), !!net.wan?.pending);
+      case 'wanMode': return cell(net.wan ? '<select class="hc-cell-input" data-device-cell="' + id + ':wanMode" aria-label="' + esc('WAN mode for ' + d.name) + '"' + (busy ? ' disabled' : '') + '>' + options(['DHCP', 'Static'], net.wan.dhcp ? 'DHCP' : 'Static') + '</select>' : quiet('—'), !!net.wan?.dirty.has('dhcp'));
+      case 'wanIp': return cell(net.wan ? input('wanIp', net.wan.dhcp ? '' : net.wan.planned, 'WAN IP', busy || net.wan.dhcp) : '', !!net.wan && !net.wan.dhcp && net.wan.dirty.has('planned'));
       case 'gateway': case 'dns1': case 'dns2': return cell(net.wan ? input(column.id, net.wan[column.id], column.label, busy || net.wan.dhcp) : '', !!net.wan?.dirty.has(column.id));
       case 'connected': return cell(quiet(deviceConnectedOn(d)), false, ' data-device-connected="' + id + '"');
       case 'cameras': return cell(deviceCamerasMarkup(d), false, ' data-device-cameras="' + id + '"');
@@ -222,9 +222,30 @@
     } else {
       const wan = net.wan;
       if (!wan) return;
-      if (!['gateway', 'dns1', 'dns2'].includes(field)) return;
-      if (value && !ipv4(value)) { refuse('Enter a valid IP address'); return; }
-      if (value !== String(wan[field] ?? '')) stageCell(wan, field, value, true);
+      const onlyAddress = () => [...wan.dirty].every(dirty => dirty === 'planned' || dirty === 'dhcp');
+      if (field === 'wanMode') {
+        const dhcp = value === 'DHCP';
+        if (dhcp === wan.dhcp) return;
+        // Choosing the mode the device already has puts the WAN back the way the device has it. Its
+        // gateway and DNS go back too, since DHCP blanks them and they can't be edited under it.
+        if (dhcp === (wan.current === 'DHCP') && wan.pending) { cancelLanDrafts(id, wan.id); return; }
+        stageCell(wan, 'dhcp', dhcp, true);
+      } else if (field === 'wanIp') {
+        if (wan.dhcp) return;
+        if (!value) {
+          if (wan.planned && plainAddress(wan.current) && !wan.dirty.has('dhcp')) { refuse('A WAN address can be changed here, but not removed.'); return; }
+          if (wan.planned) stageCell(wan, 'planned', '', true);
+        } else {
+          const planned = value.includes('/') ? value : value + '/' + maskOf(wan.current, mask);
+          if (!cidr(planned)) { refuse('Enter an address such as 10.20.101.212/16'); return; }
+          if (planned === wan.current && wan.pending && !wan.dirty.has('dhcp') && onlyAddress()) { cancelLanDrafts(id, wan.id); return; }
+          if (planned !== wan.planned) stageCell(wan, 'planned', planned, true);
+        }
+      } else {
+        if (!['gateway', 'dns1', 'dns2'].includes(field)) return;
+        if (value && !ipv4(value)) { refuse('Enter a valid IP address'); return; }
+        if (value !== String(wan[field] ?? '')) stageCell(wan, field, value, true);
+      }
     }
     renderLans();
     remember();

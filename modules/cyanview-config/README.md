@@ -88,7 +88,7 @@ Broadcast discovery listens for Cyanview UDP/3838 announcements. If another app 
 
 Camera model, endpoint, USB, lens model and lens connection commands resolve current options from each controller instead of reusing captured element IDs. Tilta Nucleus-M and direct ARRI cforce parameter editors use the documented formats only when the controller exposes a writable LensParams mapping; fresh readback confirms saved configuration. Unrecognized existing parameter formats remain blank and disabled to preserve their values.
 
-REMI imports require the source controller to advertise the camera. Chained refresh and recovery are verified with simulated controllers. cGate configuration, calibration and WAN address/DHCP writes await separate captures. Gateway/DNS writes require a live writable mapping. Physical camera and lens operation require hardware verification.
+REMI imports require the source controller to advertise the camera. Chained refresh and recovery are verified with simulated controllers. cGate configuration and calibration await separate captures. A WAN's DHCP or Static mode, address, mask, gateway and DNS are written with the commands a RIO WAN's own page sent (captured Nov 17, 2026): DHCP through the on or off command the controller offers, then the address and mask as separate writes. What a RIO shows for an address a DHCP server hands out hasn't been captured yet, so a DHCP send checks only the mode. Physical camera and lens operation require hardware verification.
 
 The approved design hashes are recorded in `design-reference/ui-source-provenance.json`.
 

@@ -399,6 +399,53 @@ test('LAN Add preserves the existing address; Replace verifies new identity befo
   } finally { await f.instance.dispose(); await fake.close(); }
 });
 
+// The commands below are the ones Cyanview's own page sent to a RIO WAN on Nov 17, 2026.
+test('a WAN goes static with an address, mask and gateway, then back to DHCP, with the commands its own page sends', async () => {
+  const fake = new FakeController(); fake.addWan(); await fake.start(); const f = fixture();
+  try {
+    const plan = planFor(fake), wan = plan.lans.find(row => row.type === 'WAN')!;
+    assert.equal(wan.current, 'DHCP'); assert.equal(wan.dhcp, true);
+    await f.repository.write(null, plan, f.signal); const operations = new ConfigurationOperations(f.repository, fake.client);
+
+    const staticWan = { ...wan, dhcp: false, planned: '10.20.101.102/16', operation: 'Edit', gateway: '10.20.100.1' };
+    const result = await operations.run({ kind: 'lan', item: staticWan, fields: ['dhcp', 'planned', 'gateway'] }, f.signal);
+    assert.deepEqual(result, { elementKey: 'wan', verified: true });
+    assert.deepEqual(fake.actions, [
+      { update: { changes: { dhcp: 'no' }, key: 'wan' } },
+      { update: { key: 'wan', changes: { ip: '10.20.101.102' } } },
+      { update: { key: 'wan', changes: { mask: '16' } } },
+      { update: { key: 'wan', changes: { gateway: '10.20.100.1' } } },
+    ], 'DHCP off as the controller offers it, then the address and the mask on their own, then the gateway');
+    assert.deepEqual(fake.options, ['DHCP', 'mask', 'Gateway']);
+    assert.equal(fake.snapshot().lans.find(row => row.type === 'WAN')!.current, '10.20.101.102/16');
+
+    // Sending the same address again writes nothing; only the DNS that changed goes.
+    fake.actions.length = 0;
+    await operations.run({ kind: 'lan', item: { ...staticWan, dns1: '10.20.100.2' }, fields: ['planned', 'dns1'] }, f.signal);
+    assert.deepEqual(fake.actions, [{ update: { key: 'wan', changes: { dns: '10.20.100.2' } } }]);
+
+    // DHCP on is the controller's own command, which blanks everything else with it.
+    fake.actions.length = 0;
+    await operations.run({ kind: 'lan', item: { ...staticWan, dhcp: true, planned: 'DHCP', gateway: '', dns1: '' }, fields: ['dhcp', 'planned', 'gateway', 'dns1'] }, f.signal);
+    assert.deepEqual(fake.actions, [{ update: { changes: { dhcp: 'yes', dns: '', dns2: '', gateway: '', ip: '', mask: '' }, key: 'wan' } }]);
+    assert.deepEqual(fake.config.IP.wan, { ...fake.config.IP.wan, DHCP: true, IP: '', mask: '', Gateway: '', DNS1: '' });
+    assert.equal(fake.snapshot().lans.find(row => row.type === 'WAN')!.current, 'DHCP');
+  } finally { await f.instance.dispose(); await fake.close(); }
+});
+
+test('a WAN sends nothing for a bad address, or when the controller offers no DHCP command', async () => {
+  const fake = new FakeController(); fake.addWan(); await fake.start(); const f = fixture();
+  try {
+    const plan = planFor(fake), wan = plan.lans.find(row => row.type === 'WAN')!;
+    await f.repository.write(null, plan, f.signal); const operations = new ConfigurationOperations(f.repository, fake.client);
+    await assert.rejects(() => operations.run({ kind: 'lan', item: { ...wan, dhcp: false, planned: '10.20.101.102' }, fields: ['dhcp', 'planned'] }, f.signal), /valid address and prefix/);
+    (fake as unknown as { option: () => unknown }).option = () => [];
+    await assert.rejects(() => operations.run({ kind: 'lan', item: { ...wan, dhcp: false, planned: '10.20.101.102/16' }, fields: ['dhcp', 'planned'] }, f.signal), /doesn’t offer DHCP/);
+    assert.equal(fake.actions.length, 0);
+    assert.equal(fake.config.IP.wan.DHCP, true);
+  } finally { await f.instance.dispose(); await fake.close(); }
+});
+
 test('protected management addresses and deferred cGate writes cause no control request', async () => {
   const fake = new FakeController(); await fake.start(); const f = fixture();
   try {

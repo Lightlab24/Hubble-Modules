@@ -149,6 +149,66 @@ test('an address typed into LAN IP 2 waits in Pending sends, can be cancelled, a
   await expect(cell(f, LEAF, 'lan2')).toHaveValue('');
 });
 
+// The RIO's WAN starts on DHCP, and the commands are the ones a real RIO WAN's own page sent on Nov 17, 2026.
+test('a WAN goes Static with an address and gateway through Pending sends, and back to DHCP', async ({ page, request }) => {
+  const f = await open(page, request, { wan: true });
+  await group(f, 'wan').click();
+  const mode = cell(f, RIO, 'wanMode'), address = cell(f, RIO, 'wanIp'), gateway = cell(f, RIO, 'gateway');
+  await expect(mode).toHaveValue('DHCP');
+  await expect(address).toBeDisabled();
+  await expect(gateway).toBeDisabled();
+
+  await mode.selectOption('Static');
+  await expect(address).toBeEnabled();
+  await expect(row(f, RIO).locator('[data-device-column="wanMode"]')).toHaveClass(/hc-changed/);
+  await address.fill('10.20.101.102');
+  await address.press('Enter');
+  // The mask comes from the LAN address beside it.
+  await expect(address).toHaveValue('10.20.101.102/16');
+  await gateway.fill('10.20.100.1');
+  await gateway.press('Enter');
+  await showPending(f);
+  const line = panel(f).locator('[data-pending-lan-line]');
+  await expect(line).toContainText('WAN');
+  await expect(line).toContainText('DHCP → 10.20.101.102/16 · gateway 10.20.100.1');
+  expect((await fleet(request))[0]!.actions).toHaveLength(0);
+
+  await panel(f).locator('[data-pending-lan-send]').click();
+  await expect(panel(f)).toContainText('Nothing is waiting to send');
+  let rio = (await fleet(request))[0]!;
+  expect(rio.config.IP.wan).toMatchObject({ DHCP: false, IP: '10.20.101.102', mask: '16', Gateway: '10.20.100.1' });
+  expect(rio.actions).toEqual([
+    { update: { changes: { dhcp: 'no' }, key: 'wan' } },
+    { update: { key: 'wan', changes: { ip: '10.20.101.102' } } },
+    { update: { key: 'wan', changes: { mask: '16' } } },
+    { update: { key: 'wan', changes: { gateway: '10.20.100.1' } } },
+  ]);
+  await expect(mode).toHaveValue('Static');
+  await expect(row(f, RIO).locator('[data-device-column="wanMode"]')).not.toHaveClass(/hc-changed/);
+  await expect(row(f, RIO).locator('[data-device-column="wanIp"]')).not.toHaveClass(/hc-changed/);
+
+  // DHCP blanks the address and gateway at once. Picking Static again before sending drops the change.
+  await mode.selectOption('DHCP');
+  await expect(address).toHaveValue('');
+  await expect(gateway).toHaveValue('');
+  await expect(gateway).toBeDisabled();
+  await expect(line).toContainText('10.20.101.102/16 → DHCP · gateway blank');
+  await mode.selectOption('Static');
+  await expect(panel(f)).toContainText('Nothing is waiting to send');
+  await expect(address).toHaveValue('10.20.101.102/16');
+  await expect(gateway).toHaveValue('10.20.100.1');
+
+  await mode.selectOption('DHCP');
+  await panel(f).locator('[data-pending-lan-send]').click();
+  await expect(panel(f)).toContainText('Nothing is waiting to send');
+  rio = (await fleet(request))[0]!;
+  expect(rio.config.IP.wan).toMatchObject({ DHCP: true, IP: '', mask: '', Gateway: '' });
+  expect(rio.actions.slice(4)).toEqual([{ update: { changes: { dhcp: 'yes', dns: '', dns2: '', gateway: '', ip: '', mask: '' }, key: 'wan' } }]);
+  await expect(mode).toHaveValue('DHCP');
+  await group(f, 'wan').click();
+  await expect(row(f, RIO).locator('[data-device-column="wan"]')).toHaveText('DHCP');
+});
+
 test('a device is added by typing its IP in the last row', async ({ page, request }) => {
   const f = await open(page, request);
   await row(f, LEAF).locator('[data-action="remove-device"]').click();

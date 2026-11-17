@@ -16,7 +16,7 @@ let releasePlanWrites: (() => void) | undefined;
 let planSaves = 0, planSavePending = 0;
 let sampleSetting = true, sessionOptions: Parameters<typeof fixture>[1], statePaused = false;
 const rendererState = () => session.states.at(-1) as Parameters<typeof session.context.publishState>[0];
-async function reset(sample: boolean, remi = false, gateway = false, direct = false, extra = false, live = false) {
+async function reset(sample: boolean, remi = false, gateway = false, direct = false, extra = false, live = false, wan = false) {
   statePaused = false;
   pingDelayMs = 0;
   releaseControlWrites?.(); releaseControlWrites = undefined;
@@ -28,6 +28,8 @@ async function reset(sample: boolean, remi = false, gateway = false, direct = fa
   mqtt = await broker();
   controller = new FakeController();
   controllers = [controller];
+  // The first controller is a RIO WAN, on DHCP like the one captured on Nov 17, 2026.
+  if (wan) controller.addWan();
   if (gateway) {
     controller.config.Product = { Serial:'CY-GWY-1-10',Name:'GATEWAY',MaxCam:'unlimited' };
     controller.config.Camera.wide = { Number:'1',Name:'Wide',Model:'Sony - Venice-IP',IP:'10.20.20.1',Port:'80',Enabled:'1' };
@@ -109,7 +111,7 @@ const server = createServer(async (request, response) => {
     if (request.method === 'POST') {
       const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk));
       const input = JSON.parse(Buffer.concat(chunks).toString() || '{}');
-      if (url.pathname === '/__reset') { await reset(input.sample !== false, input.remi === true, input.gateway === true, input.direct === true, input.extra === true, input.live === true); send({ reset: true }); return; }
+      if (url.pathname === '/__reset') { await reset(input.sample !== false, input.remi === true, input.gateway === true, input.direct === true, input.extra === true, input.live === true, input.wan === true); send({ reset: true }); return; }
       if (url.pathname === '/__restart') {
         // The equipment and saved documents stay, as they do when Hubble restarts a module's worker.
         const { records } = session;

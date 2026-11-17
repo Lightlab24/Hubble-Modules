@@ -147,6 +147,13 @@ export class FakeController {
       });
     });
   }
+  /**
+   * A WAN setting like the one a RIO WAN showed on Nov 17, 2026: on DHCP, nothing else set, and kept
+   * across restarts. Its page writes it through the commands this fake answers below.
+   */
+  addWan(values: RecordValue = {}) {
+    this.config.IP.wan = { DHCP: true, DNS1: '', DNS2: '', Gateway: '', IP: '', Interface: 'LAN1', Locked: true, NoDelete: true, ReadOnly: false, Type: 'WAN', mask: '', ...values };
+  }
   /** Gives a camera already on the controller the address fields its model would have. */
   addressable(...keys: string[]) { for (const key of keys) this.endpoints.set('endpoint-' + key, key); }
   releaseActionReplies() { this.holdAction = ''; for (const reply of this.heldActionReplies.splice(0)) reply(); }
@@ -156,6 +163,13 @@ export class FakeController {
   client = (address: string) => new CyanviewClient(address, { socket: this.socket, timeout: 250 });
   snapshot(address = '10.192.1.10') { return normalizeSnapshot(this.config, address); }
   private option([key, field]: string[]) {
+    // What a RIO WAN answered for its WAN setting. DHCP comes as the controller's own on and off commands,
+    // and turning it on blanks the address, mask, gateway and DNS in the same write.
+    if (this.config.IP[key!]?.Type === 'WAN') {
+      if (field === 'DHCP') return [[false, { update: { changes: { dhcp: 'no' }, key } }], [true, { update: { changes: { dhcp: 'yes', dns: '', dns2: '', gateway: '', ip: '', mask: '' }, key } }]];
+      const property = ({ DNS1: 'dns', DNS2: 'dns2', Gateway: 'gateway', mask: 'mask' } as RecordValue)[field!];
+      return property ? { key, property } : [];
+    }
     if (this.remiFleet && key === 'relay' && field === 'Tags') return { key, property: 'tags' };
     if (field === 'Enabled') return this.config.Camera[key!] ? { key, property: 'enabled' } : [];
     if (field === 'Model') return this.modelChoices.map(([label, model]) => [label, { update: { key, changes: { model } } }]);
@@ -196,7 +210,7 @@ export class FakeController {
       }
       else if (this.endpoints.has(key)) { const target = this.config.Camera[this.endpoints.get(key)!]; for (const [field, value] of Object.entries(changes)) { if (field === 'content') target.Interface = { device: 'SN', port: value }; else target[({ ip: 'IP', port: 'Port', login: 'Login', password: 'Password' } as RecordValue)[field] ?? field] = value; } }
       else if (this.lenses.has(key)) { const target = this.config.Camera[this.lenses.get(key)!]; if (changes.model !== undefined) target.LensModel = changes.model === '' ? '' : this.lensChoices.find(([, id]) => id === changes.model)?.[0] ?? ''; if (changes.params !== undefined) target.LensParams = changes.params; }
-      else if (this.config.IP[key]) { for (const [field, value] of Object.entries(changes)) this.config.IP[key][({ ip: 'IP', interface: 'Interface' } as RecordValue)[field] ?? field] = value; }
+      else if (this.config.IP[key]) { for (const [field, value] of Object.entries(changes)) this.config.IP[key][({ ip: 'IP', interface: 'Interface', dhcp: 'DHCP', dns: 'DNS1', dns2: 'DNS2', gateway: 'Gateway' } as RecordValue)[field] ?? field] = field === 'dhcp' ? value === 'yes' : value; }
       else return ['error', 'unknown element'];
       return ['ok', key];
     }

@@ -335,25 +335,62 @@ export class ConfigurationOperations {
     }
     return result;
   }
+  /**
+   * A WAN's mode, address, gateway and DNS, written the way Cyanview's own page wrote them on a RIO WAN
+   * (captured Nov 17, 2026): DHCP through the on or off command the controller itself offers, then the
+   * address and the mask as separate writes. Turning DHCP on blanks the address, mask, gateway and DNS in
+   * that one command, so nothing else is sent with it.
+   */
+  private async wan(client: CyanviewClient, item: RecordValue, key: string, old: RecordValue, fields: string[], signal: AbortSignal): Promise<RecordValue> {
+    if (!key || enabled(old.ReadOnly)) throw new Error('This network interface is read-only');
+    const addressing = fields.some(field => ['dhcp', 'planned'].includes(field)), wasDhcp = enabled(old.DHCP);
+    const expected: RecordValue = {};
+    if (addressing && item.dhcp === true) {
+      if (!wasDhcp) await client.action(await this.dhcpCommand(client, key, true, signal), signal);
+      // What a DHCP server hands out hasn't been seen yet, so only the mode is checked.
+      expected.DHCP = true;
+    } else {
+      if (addressing) {
+        const desired = addressParts(String(item.planned));
+        if (wasDhcp) await client.action(await this.dhcpCommand(client, key, false, signal), signal);
+        if (wasDhcp || String(old.IP ?? '') !== desired.ip) await client.update(key, { ip: desired.ip }, signal);
+        if (wasDhcp || String(old.mask ?? '') !== desired.mask) {
+          const mapping = await client.mapping(key, 'mask', signal);
+          await client.update(mapping.key, { [mapping.property]: desired.mask }, signal);
+        }
+        Object.assign(expected, { DHCP: false, IP: desired.ip, mask: desired.mask });
+      }
+      for (const [field, label] of [['gateway', 'Gateway'], ['dns1', 'DNS1'], ['dns2', 'DNS2']] as const) if (fields.includes(field)) {
+        const value = String(item[field] ?? '').trim();
+        if (value && !validIp(value)) throw new Error('Enter a valid gateway or DNS address');
+        expected[label] = value;
+        if (String(old[label] ?? '') === value) continue;
+        const mapping = await client.mapping(key, label, signal);
+        await client.update(mapping.key, { [mapping.property]: value }, signal);
+      }
+    }
+    // The controller pushes its whole configuration after each write, so the check reads the same socket.
+    const written = (config: RecordValue) => {
+      const row = object(object(config.IP)[key]);
+      return Object.entries(expected).every(([field, value]) => field === 'DHCP' ? enabled(row.DHCP) === value : String(row[field] ?? '') === value);
+    };
+    try { await client.waitFor(written, signal); }
+    catch { signal.throwIfAborted(); throw new Error('Network settings could not be verified'); }
+    return { elementKey: key, verified: true };
+  }
+  /** The controller's own command for turning its WAN's DHCP on or off, the one its page sends. */
+  private async dhcpCommand(client: CyanviewClient, key: string, on: boolean, signal: AbortSignal): Promise<RecordValue> {
+    const reply = await client.option(key, 'DHCP', signal);
+    const command = object((Array.isArray(reply) ? reply : []).find(entry => Array.isArray(entry) && entry[0] === on)?.[1]);
+    const update = object(command.update);
+    if (update.key !== key || typeof object(update.changes).dhcp !== 'string') throw new Error('This controller doesn’t offer DHCP for its WAN');
+    return command;
+  }
   private async lan(client: CyanviewClient, device: RecordValue, item: RecordValue, input: RecordValue, signal: AbortSignal): Promise<RecordValue> {
     const rows = object(client.config.IP), fields: string[] = Array.isArray(input.fields) ? input.fields : [];
     const oldKey = String(item.elementKey ?? Object.keys(rows).find(key => rows[key].IP === String(item.current).split('/')[0] && rows[key].Interface === item.iface) ?? '');
     const old = object(rows[oldKey]);
-    if (item.type === 'WAN') {
-      if (!oldKey || enabled(old.ReadOnly)) throw new Error('This network interface is read-only');
-      const updates: { key: string; changes: RecordValue }[] = [];
-      const expected: RecordValue = {};
-      for (const [field, label] of [['gateway', 'Gateway'], ['dns1', 'DNS1'], ['dns2', 'DNS2']] as const) if (fields.includes(field)) {
-        if (item[field] && !validIp(String(item[field]))) throw new Error('Enter a valid gateway or DNS address');
-        const mapping = await client.mapping(oldKey, label, signal);
-        updates.push({ key: mapping.key, changes: { [mapping.property]: String(item[field] ?? '') } }); expected[label] = String(item[field] ?? '');
-      }
-      if (fields.some(field => ['dhcp', 'planned'].includes(field))) throw new Error('Address and DHCP writes on this WAN interface require a verified mapping');
-      for (const update of updates) await client.update(update.key, update.changes, signal);
-      const fresh = await this.connect(device, signal);
-      try { for (const [field, value] of Object.entries(expected)) if (String(fresh.config.IP?.[oldKey]?.[field] ?? '') !== value) throw new Error('Network settings could not be verified'); } finally { fresh.close(); }
-      return { elementKey: oldKey, verified: true };
-    }
+    if (item.type === 'WAN') return this.wan(client, item, oldKey, old, fields, signal);
     if (!['Add', 'Replace', 'Keep'].includes(item.operation)) throw new Error('Choose Add or Replace');
     if (item.operation === 'Keep') {
       if (item.planned !== item.current) throw new Error('Choose Add or Replace for the changed address');

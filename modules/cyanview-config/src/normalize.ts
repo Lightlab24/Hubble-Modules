@@ -26,8 +26,10 @@ export function normalizeSnapshot(config: RecordValue, address: string) {
       ...(remi ? { remi } : {}), ...(remiPeer ? { remiPeer } : {}) };
   });
   const lans = ips.map(row => {
-    const ip = String(row.IP ?? ''), mask = String(row.mask ?? '16'), dhcp = flag(row.DHCP), current = validIp(ip) ? `${ip}/${mask}` : dhcp ? 'DHCP' : '';
-    return { id: `${id}:lan:${row.key}`, device: id, elementKey: row.key, type: String(row.Type ?? 'LAN').toUpperCase().includes('WAN') ? 'WAN' : 'LAN', iface: String(row.Interface ?? 'LAN1'), current, planned: current, operation: 'Keep', result: 'In sync', dhcp, gateway: String(row.Gateway ?? ''), dns1: String(row.DNS1 ?? ''), dns2: String(row.DNS2 ?? ''), readOnly: flag(row.ReadOnly), noDelete: flag(row.NoDelete), pending: false, dirty: [], revision: 0 };
+    // A WAN on DHCP reads as DHCP whatever address it was given. An address whose mask is still blank shows on its own.
+    const ip = String(row.IP ?? ''), mask = String(row.mask ?? '16'), dhcp = flag(row.DHCP), type = String(row.Type ?? 'LAN').toUpperCase().includes('WAN') ? 'WAN' : 'LAN';
+    const current = type === 'WAN' && dhcp ? 'DHCP' : validIp(ip) ? (mask ? `${ip}/${mask}` : ip) : dhcp ? 'DHCP' : '';
+    return { id: `${id}:lan:${row.key}`, device: id, elementKey: row.key, type, iface: String(row.Interface ?? 'LAN1'), current, planned: current, operation: 'Keep', result: 'In sync', dhcp, gateway: String(row.Gateway ?? ''), dns1: String(row.DNS1 ?? ''), dns2: String(row.DNS2 ?? ''), readOnly: flag(row.ReadOnly), noDelete: flag(row.NoDelete), pending: false, dirty: [], revision: 0 };
   });
   return { device, cameras, lans };
 }
