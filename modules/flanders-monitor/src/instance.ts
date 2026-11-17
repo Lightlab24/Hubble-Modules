@@ -60,8 +60,9 @@ export function createInstance(context: ModuleContext, options: InstanceOptions 
       typeof settings === "string"
         ? { phase: "error", message: settings, observedAt: new Date().toISOString(), values: {} }
         : {
+            // Hubble shows any message as a connection error, so a ready monitor has none.
             phase: "ready",
-            message: "Connects only while sending a key",
+            message: null,
             observedAt: new Date().toISOString(),
             values: { host: settings.host, port: settings.port, whenInUse: settings.whenInUse },
           },

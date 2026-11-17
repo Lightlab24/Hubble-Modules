@@ -120,7 +120,8 @@ describe("Flanders module", () => {
       { type: "client-closed", client: 1 },
     ]);
     await until(() => fake.openClients.length === 0, "nothing stays connected");
-    expect(harness.states.at(-1)).toMatchObject({ phase: "ready" });
+    // No message: Hubble would show one as a connection error.
+    expect(harness.states.at(-1)).toMatchObject({ phase: "ready", message: null });
   });
 
   it("leaves another app's connection alone and says which app it is", async () => {
