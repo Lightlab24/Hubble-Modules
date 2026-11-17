@@ -1,6 +1,6 @@
 import type { HubbleModule } from "@hubble/module-sdk";
-import { createInstance } from "./instance.js";
+import { createBackend } from "./backend.js";
 
 export default {
-  createInstance: (context) => createInstance(context),
+  createInstance: (context) => createBackend(context),
 } satisfies HubbleModule;
