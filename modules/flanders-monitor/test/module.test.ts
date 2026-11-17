@@ -11,6 +11,12 @@ import { defaultDocument, DOCUMENT_ID, type MonitorDocument, type Mutation } fro
 import source from "../src/manifest.js";
 import { FakeMonitor } from "./fake-monitor.js";
 
+// Hubble runs on macOS, where the in-use check reads this Mac's connection table with netstat.
+// GitHub's Linux runner has no netstat, so there presses use an empty table and the tests that
+// read the real table run on macOS only.
+const mac = process.platform === "darwin";
+const connectionTable: BackendOptions = mac ? {} : { listConnections: async () => [] };
+
 const cleanup: (() => unknown)[] = [];
 afterEach(async () => {
   for (const step of cleanup.splice(0).reverse()) await step();
@@ -120,7 +126,7 @@ function backend(monitors: MonitorDocument["monitors"], options: BackendOptions 
     publishState: (state: never) => states.push(state),
     publishFeedback: (value: unknown) => feedback.push(value),
   } as unknown as ModuleContext;
-  const instance = createBackend(context, { now: () => new Date("2026-11-17T10:42:03"), ...options });
+  const instance = createBackend(context, { now: () => new Date("2026-11-17T10:42:03"), ...connectionTable, ...options });
   cleanup.push(() => instance.dispose());
   const execution = (signal = new AbortController().signal) => ({ executionId: "x", signal, gesture: "press" as const, wrap: false, log: (trace: { message: string }) => logs.push(trace.message) });
   const page = (commandId: string, value?: unknown) =>
@@ -167,7 +173,7 @@ describe("Flanders module", () => {
     await until(() => two.fake.openClients.length === 0, "nothing stays connected");
   });
 
-  it("holds a key back while another app on this Mac is connected to that monitor, and says which", async () => {
+  it.runIf(mac)("holds a key back while another app on this Mac is connected to that monitor, and says which", async () => {
     const { fake, port } = await monitor();
     const other = await otherApp(port, fake);
     const flanders = backend([row("a", "Grade 1", port)]);
@@ -260,7 +266,7 @@ describe("Flanders module", () => {
     expect(two.fake.keys).toEqual([0x31]);
   });
 
-  it("checks this Mac for other apps on every monitor without contacting any monitor", async () => {
+  it.runIf(mac)("checks this Mac for other apps on every monitor without contacting any monitor", async () => {
     const one = await monitor();
     const two = await monitor();
     await otherApp(two.port, two.fake);
