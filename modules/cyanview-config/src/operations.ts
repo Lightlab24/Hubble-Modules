@@ -260,6 +260,8 @@ export class ConfigurationOperations {
       else if (!noLens) throw new Error('Selected lens model is unavailable');
     }
     if (fields.includes('lensPort') && item.lens !== 'None' && item.lensPort) {
+      // The connections a controller lists are for the lens it has, so a lens set in this send has to land first.
+      if (expected.LensModel !== undefined) await client.waitFor(config => config.Camera?.[key]?.LensModel === expected.LensModel, signal);
       const choices = optionEntries(await client.option(key, 'LensInterface', signal));
       if (item.lensPort === 'None') {
         if (object(client.config.Camera?.[key]?.LensInterface).port) {

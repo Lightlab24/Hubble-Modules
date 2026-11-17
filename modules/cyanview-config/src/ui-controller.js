@@ -1766,6 +1766,24 @@ import { PresentationLedger } from './presentation-ledger.js';
       return [choiceEntry(label||'None')];
     });
   }
+  // A controller lists the connections for the lens a camera has on it now, so a lens picked but not
+  // sent yet, or a camera not on its controller yet, has no list of its own. It is offered what the
+  // same controller listed before: for this lens if it ever did, otherwise for this camera, otherwise
+  // for any of its cameras. Send sets the lens first and then checks the connection against it.
+  function knownLensConnections(camera){
+    const controller=device(camera.device);
+    if(!controller)return null;
+    const lens=String(camera.lens||'None').trim().toLowerCase();
+    let best=null,rank=3;
+    for(const [key,{entries}] of cameraChoiceCatalogs){
+      let parts;try{parts=JSON.parse(key);}catch{continue;}
+      if(parts?.[0]!==controller.serial||parts[1]!=='LensInterface'||!entries?.length)continue;
+      const order=parts[4]===lens?0:camera.elementKey&&parts[2]===camera.elementKey?1:2;
+      if(order<rank){rank=order;best=[];}
+      if(order===rank)best.push(...entries);
+    }
+    return best&&controllerChoices('lensPort',best);
+  }
   function cameraCellChoices(camera,field){
     const catalog=cameraChoiceCatalogs.get(choiceContext(camera,field));
     const live=catalog&&controllerChoices(field,catalog.entries);
@@ -1778,7 +1796,7 @@ import { PresentationLedger } from './presentation-ledger.js';
       const sample=(!moduleBridge||moduleBridge.preview)
         ?camera.lens==='ARRI - cforce'?['USB · CAN adapter']:['RIO 01 : 1','RIO 01 : 2','RIO 02 : 1','RIO 02 : 2','USB · Serial converter']
         :[];
-      entries=[choiceEntry('None'),...(live||sample.map(value=>choiceEntry(value,value,value.includes(' : ')?value.split(' : ')[0]:undefined)))];
+      entries=[choiceEntry('None'),...(live||knownLensConnections(camera)||sample.map(value=>choiceEntry(value,value,value.includes(' : ')?value.split(' : ')[0]:undefined)))];
     }else if(field==='usb'){
       entries=[choiceEntry('USB · Automatic'),...(live||[])];
     }else if(field.endsWith('Torque')){
@@ -1815,7 +1833,7 @@ import { PresentationLedger } from './presentation-ledger.js';
     // Asking the controller opens a new connection, and an unreachable one takes 5 seconds to give up.
     // So a list we already have shows straight away and the controller only freshens it for next time.
     return (_query, signal) => {
-      const known = field !== 'lensPort' || cameraChoiceCatalogs.has(context);
+      const known = field !== 'lensPort' || cameraChoiceCatalogs.has(context) || !!knownLensConnections(camera)?.length;
       if(device(camera.device)?.online === false) {
         if(!known) tell('Controller offline · its lens connections will list once it is reachable');
         return cameraCellChoices(camera,field);
@@ -1824,8 +1842,10 @@ import { PresentationLedger } from './presentation-ledger.js';
       if(known) return cameraCellChoices(camera,field);
       return answered.then(() => {
         signal.throwIfAborted();
-        tell(warning);
-        return cameraCellChoices(camera,field);
+        const choices = cameraCellChoices(camera,field);
+        // The controller's list for the lens it has now still offers its ports for the one picked.
+        if(field !== 'lensPort' || choices.length <= 1) tell(warning);
+        return choices;
       });
     };
   }

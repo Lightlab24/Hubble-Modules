@@ -340,6 +340,40 @@ test('a dropdown with a known list opens without waiting for the controller', as
   await page.unroute('**/__rpc');
 });
 
+test('a lens picked but not sent yet lists its connections, and one Send sets both', async ({ page, request }) => {
+  await request.post('/__reset', { data: { sample: false } });
+  await page.goto('/');
+  const f = ui(page);
+  await expect(f.locator('[data-role="saved-label"]')).toContainText('Workspace saved');
+  await f.locator('[data-device-view="details"]').click();
+  await f.locator('[data-role="manual-ip"]').fill('10.192.1.10');
+  await f.getByRole('button', { name: 'Find', exact: true }).click();
+  await f.locator('[data-action="add-discovered"]').click();
+  await expect(f.locator('[data-role="device-count"]')).toHaveText('1');
+  await f.locator('[data-tab="assignment"]').click().then(() => f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
+  await f.getByRole('button', { name: 'Expand all device spreadsheets', exact: true }).click();
+  const group = f.locator('[data-controller]'), row = group.locator('tr[data-id]').first();
+  // A camera with no lens is on the controller, and nothing has listed its lens connections yet.
+  await addCamera(f, group, 'Alpha-USB');
+  await group.locator('[data-action="send-controller"]').click();
+  await expect(cell(row, 'sync')).toHaveText('Verified');
+
+  await choose(f, row, 'lens', 'B4 Generic');
+  await cell(row, 'connection').click();
+  await f.getByRole('grid').press('Enter');
+  const dialog = f.getByRole('dialog');
+  for (const port of ['RIO-1-10 : 1', 'RIO-1-10 : 2']) await expect(dialog.getByRole('option', { name: port, exact: true })).toBeVisible({ timeout: 4000 });
+  await expect(f.locator('[data-role="toast"]')).not.toContainText('different configuration');
+  await dialog.getByRole('option', { name: 'RIO-1-10 : 1', exact: true }).click();
+  await expect(cell(row, 'connection')).toContainText('RIO-1-10 : 1');
+  await group.locator('[data-action="send-controller"]').click();
+  await expect(cell(row, 'sync')).toHaveText('Verified');
+  const { config } = await (await request.get('/__inspect')).json();
+  const camera = Object.values(config.Camera as Record<string, { LensModel: string; LensInterface?: { port?: string } }>)[0]!;
+  expect(camera.LensModel).toBe('B4 Generic');
+  expect(camera.LensInterface?.port).toBe('1');
+});
+
 test('an offline controller never holds a dropdown up', async ({ page, request }) => {
   const { f, group, row, sheet } = await sentCamera(page, request);
   await request.post('/__simulate', { data: { closeBroker: true } });
