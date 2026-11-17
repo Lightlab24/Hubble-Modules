@@ -298,6 +298,9 @@ export class ConfigurationOperations {
       if (field === 'lensDisconnected') return !object(row.LensInterface).port;
       if (field === 'lensConnection') return ['device', 'port'].every(part => String(object(row.LensInterface)[part]) === String(object(value)[part]));
       if (field === 'Model') return normalizedLabel(row.Model) === normalizedLabel(value);
+      // A model can take a setting the controller never lists on the camera: a real RIO took a Burano's
+      // Port and didn't show it (Nov 17, 2026), so it can't be checked and isn't held against the send.
+      if (['IP', 'Port', 'Login', 'Password'].includes(field) && Object.keys(row).length && !(field in row)) return true;
       return String(row[field] ?? '') === String(value);
     };
     // The socket a send shares gets the controller's own push of what changed.

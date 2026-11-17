@@ -169,6 +169,29 @@ test('one send sets a new lens and its connection, even on a controller that dro
   } finally { await f.instance.dispose(); await fake.close(); }
 });
 
+test('a camera whose model the controller lists with no Port is created and verified in one send', async () => {
+  const fake = new FakeController(); await fake.start(); const f = fixture();
+  // A real RIO stores a Burano's port but never lists Port on the camera.
+  fake.modelChoices.push(['Sony - Burano', 'Burano']);
+  const apply = (fake as any).apply.bind(fake);
+  (fake as any).apply = (request: RecordValue) => {
+    const result = apply(request);
+    for (const row of Object.values(fake.config.Camera) as RecordValue[]) if (row.Model === 'Sony - Burano') delete row.Port;
+    return result;
+  };
+  try {
+    const plan = planFor(fake), camera: RecordValue = { id: 'burano-camera', device: plan.devices[0]!.id, number: '3', name: 'BUR 25-1000 - 3', model: 'Burano', ip: '10.20.100.103', port: '80', login: 'admin', password: 'ABCD1234', lens: 'None', lensPort: 'None', isNew: true };
+    plan.cameras.push(camera); await f.repository.write(null, plan, f.signal);
+    const operations = new ConfigurationOperations(f.repository, fake.client);
+    const reply = await operations.run({ items: [{ kind: 'camera', item: camera, fields: ['number', 'name', 'model', 'ip'] }] }, f.signal);
+    assert.equal(reply.results[0].error, undefined);
+    assert.equal(reply.results[0].verified, true);
+    const made = fake.config.Camera[reply.results[0].elementKey];
+    assert.equal(made.Model, 'Sony - Burano'); assert.equal(made.IP, '10.20.100.103'); assert.equal('Port' in made, false);
+    assert.equal((await f.repository.read(f.signal)).plan.cameras[0]!.needsInitialization, false);
+  } finally { await f.instance.dispose(); await fake.close(); }
+});
+
 test('lens None still takes a lens off a camera that had one', async () => {
   const fake = new FakeController(); await fake.start(); const f = fixture();
   try {
