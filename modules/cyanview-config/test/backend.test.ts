@@ -350,8 +350,10 @@ test('discovery respects subnet boundaries and deduplicates aliases without cont
   assert.deepEqual([networkRange('10.20.1.2/30').count, networkRange('10.20.1.2/30').address(0), networkRange('10.20.1.2/30').address(1)], [2, '10.20.1.1', '10.20.1.2']);
   assert.throws(() => networkRange('10.20.0.0/8'), /16/);
   let final: any;
-  await new Promise<void>(resolve => { const discovery = new Discovery(async address => ({ id: 'same', serial: 'same', address }), value => { if (value.state === 'complete') { final = value; resolve(); } }, async () => true); discovery.start('10.20.1.0/30','ip'); });
-  assert.equal(final.results.length, 1); assert.equal(final.results[0].addresses.length, 2);
+  const checked: string[] = [];
+  await new Promise<void>(resolve => { const discovery = new Discovery(async address => ({ id: 'same', serial: 'same', address }), value => { if (value.state === 'complete') { final = value; resolve(); } }, async address => { checked.push(address); return true; },
+    { ping: async (range, receive, progress) => { receive(['10.20.1.1', '10.20.1.2', '10.20.1.5']); progress(range.count); } }); discovery.start('10.20.1.0/30','ping'); });
+  assert.deepEqual(checked.sort(), ['10.20.1.1', '10.20.1.2']); assert.equal(final.results.length, 1); assert.equal(final.results[0].addresses.length, 2);
 });
 
 test('large saved fleets transfer in bounded bridge messages and restore all rows', async () => {
@@ -436,9 +438,9 @@ test('quick discovery probes announced addresses, finds both devices and never s
 
 test('manual IP lookups remain in public discovery state after an empty scan and exclude credentials', async () => {
   const fake=new FakeController();await fake.start();
-  const f=fixture({}, {client:fake.client,reachable:async()=>false});await f.instance.start();
+  const f=fixture({}, {client:fake.client,reachable:async()=>false,discovery:{ping:async(range,_receive,progress)=>progress(range.count)}});await f.instance.start();
   try {
-    await f.call('scan',{range:'10.20.101.250/32',method:'ip'});
+    await f.call('scan',{range:'10.20.101.250/32',method:'ping'});
     await f.call('probe',{address:'10.192.1.10'});
     const state:any=f.states.at(-1);assert.equal(state.values.lookupResults.length,1);assert.equal(state.values.lookupResults[0].serial,'CY-RIO-1-10');
     await f.call('refresh');assert.equal((f.states.at(-1) as any).values.lookupResults.length,1);

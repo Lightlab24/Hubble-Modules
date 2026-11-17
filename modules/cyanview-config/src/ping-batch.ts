@@ -16,7 +16,7 @@ async function executable() {
   for (const file of ['/usr/bin/fping', '/usr/sbin/fping', '/opt/homebrew/sbin/fping', '/opt/homebrew/bin/fping', '/usr/local/sbin/fping', '/usr/local/bin/fping']) {
     try { await access(file, constants.X_OK); return file; } catch { /* Try another standard installation location. */ }
   }
-  throw new Error('Fast IP discovery requires fping on this computer. Use Full IP scan or Find by IP.');
+  throw new Error('Fast IP discovery requires fping on this computer. Use Find by IP.');
 }
 
 /** One bounded, cancellable system-utility call, owned by the declared host helper. */
@@ -41,7 +41,7 @@ export async function runPingBatch(value: unknown, signal: AbortSignal, command?
       buffer += text; let at: number; while ((at = buffer.indexOf('\n')) >= 0) { line(buffer.slice(0, at)); buffer = buffer.slice(at + 1); }
     });
     child.stderr.setEncoding('utf8'); child.stderr.on('data', (text: string) => { diagnostic = (diagnostic + text).slice(0, 500); });
-    child.once('error', () => finish(new Error('Could not start fping. Use Full IP scan or Find by IP.')));
+    child.once('error', () => finish(new Error('Could not start fping. Use Find by IP.')));
     child.once('close', code => finish(failure ?? (code === 0 || code === 1 ? undefined : new Error('Ping scanner failed' + (diagnostic ? ': ' + diagnostic.trim() : '')))));
   });
 }

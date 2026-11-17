@@ -453,9 +453,11 @@ test('Find by IP stays visible through completed scans and repeated host state u
   await f.getByRole('button',{name:'Find',exact:true}).click();
   const rows=f.getByRole('table',{name:'Discovered devices'}).locator('tbody tr');
   await expect(rows).toHaveCount(1);
-  await pick(f, 'Discovery method', 'Full IP scan');
+  await f.getByRole('button',{name:'Discovery method',exact:true}).click();
+  await expect(f.getByRole('listbox',{name:'Discovery method'}).getByRole('option')).toHaveText(['Fast IP discovery','Broadcast discovery']);
+  await f.getByRole('listbox',{name:'Discovery method'}).getByRole('option',{name:'Fast IP discovery',exact:true}).click();
   await f.getByRole('button',{name:'Discover',exact:true}).click();
-  await expect(f.locator('[data-role="scan-label"]')).toContainText('IP scan complete');
+  await expect(f.locator('[data-role="scan-label"]')).toContainText('Discovery complete');
   await f.getByRole('button',{name:'Refresh all',exact:true}).click();
   await expect(f.locator('[data-role="toast"]')).toHaveText('Settings refreshed');
   await expect(rows).toHaveCount(1);

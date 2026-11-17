@@ -11,8 +11,7 @@ export function networkRange(cidr: string) {
   const start = network + (prefix < 31 ? 1 : 0), count = block - (prefix < 31 ? 2 : 0);
   const address = (at: number) => [24, 16, 8, 0].map(shift => Math.floor((start + at) / 2 ** shift) % 256).join('.');
   const contains = (value: string) => validIp(value) && Math.floor(value.split('.').reduce((sum, part) => sum * 256 + Number(part), 0) / block) * block === network;
-  const index = (value: string) => value.split('.').reduce((sum, part) => sum * 256 + Number(part), 0) - start;
-  return { count, address, contains, index };
+  return { count, address, contains };
 }
 export type NeighborReader = (signal: AbortSignal, accept?: (address: string) => boolean) => Promise<string[]>;
 /**
@@ -23,22 +22,19 @@ export type NeighborReader = (signal: AbortSignal, accept?: (address: string) =>
  * after. Their ARP replies still land in the neighbor cache, so a sweep reads that cache as it goes and once
  * more when it ends.
  */
-export function harvestNeighbors(read: NeighborReader, accept: (address: string) => boolean, receive: (addresses: string[]) => void, signal: AbortSignal, intervalMs = 5000, settleMs = 250) {
-  let busy: Promise<void> | undefined;
+export function harvestNeighbors(read: NeighborReader, accept: (address: string) => boolean, receive: (addresses: string[]) => void, signal: AbortSignal, intervalMs = 5000) {
+  let busy: Promise<void> | undefined, latest: string[] = [];
   const once = () => busy ??= (async () => {
-    try { const addresses = await read(signal, accept); if (!signal.aborted) receive(addresses.filter(accept)); }
+    try { const addresses = (await read(signal, accept)).filter(accept); if (!signal.aborted) { latest = addresses; receive(addresses); } }
     catch { /* A neighbor cache that can't be read only loses this round's extra addresses. */ }
     finally { busy = undefined; }
   })();
   const timer = setInterval(() => void once(), intervalMs);
   return {
-    async finish() {
-      clearInterval(timer); await busy;
-      if (signal.aborted) return;
-      // The last batch's ARP replies arrive within its ping timeout; this covers a slow one.
-      await new Promise<void>(resolve => { const wait = setTimeout(resolve, settleMs); signal.addEventListener('abort', () => { clearTimeout(wait); resolve(); }, { once: true }); });
-      if (!signal.aborted) await once();
-    },
+    /** fping has already waited out its timeout after the last address, so every ARP reply is in by now. */
+    async finish() { clearInterval(timer); await busy; if (!signal.aborted) await once(); },
+    /** What the latest read saw, for checks that failed after it. */
+    latest: () => latest,
   };
 }
 /** Addresses a sweep will check for a Cyanview identity, and how many at once. */
@@ -55,9 +51,9 @@ export async function tcpReachable(address: string, signal: AbortSignal): Promis
     socket.setTimeout(800, () => finish(false)); socket.once('connect', () => finish(true)); socket.once('error', () => finish(false));
   });
 }
-export type DiscoveryMethod = 'ping' | 'broadcast' | 'ip';
+export type DiscoveryMethod = 'ping' | 'broadcast';
 export type DiscoveryProgress = { id: string; method: DiscoveryMethod; range: string; state: 'scanning' | 'complete' | 'stopped'; checked: number; total: number; results: RecordValue[]; error?: string };
-export type DiscoveryOptions = { ping?: PingSweep; announcements?: AnnouncementListener; durationMs?: number; seeds?: (receive: (addresses: string[]) => void, signal: AbortSignal) => Promise<void>; neighbors?: NeighborReader; neighborIntervalMs?: number; neighborSettleMs?: number };
+export type DiscoveryOptions = { ping?: PingSweep; announcements?: AnnouncementListener; durationMs?: number; seeds?: (receive: (addresses: string[]) => void, signal: AbortSignal) => Promise<void>; neighbors?: NeighborReader; neighborIntervalMs?: number };
 export class Discovery {
   private controller: AbortController | undefined;
   private completion: Promise<void> = Promise.resolve();
@@ -65,11 +61,11 @@ export class Discovery {
   constructor(private probe: (address: string, signal: AbortSignal) => Promise<RecordValue>, private publish: (progress: DiscoveryProgress) => void, private reachable = tcpReachable, private options: DiscoveryOptions = {}) {}
   start(cidr: string, method: DiscoveryMethod = 'ping') {
     const range = networkRange(cidr);
-    if (!['ping', 'broadcast', 'ip'].includes(method)) throw new Error('Choose a discovery method');
+    if (!['ping', 'broadcast'].includes(method)) throw new Error('Choose a discovery method');
     this.stop();
     const controller = new AbortController(); this.controller = controller;
     const state: DiscoveryProgress = { id: randomUUID(), method, range: cidr, state: 'scanning', checked: 0, total: method === 'broadcast' ? 0 : range.count, results: [] }; this.progress = state;
-    const found = new Map<string, RecordValue>(); let next = 0, last = 0;
+    const found = new Map<string, RecordValue>(); let last = 0;
     const emit = (force = false) => { if (this.progress !== state) return; if (force || Date.now() - last > 250) { last = Date.now(); state.results = [...found.values()]; this.publish({ ...state }); } };
     const remember = (device: RecordValue, address: string) => {
       const previous = found.get(device.serial);
@@ -106,17 +102,19 @@ export class Discovery {
       };
       // Previously verified/cached addresses are checked even when ICMP replies are blocked.
       const seeds = this.options.seeds?.(receive, controller.signal).catch(() => {}) ?? Promise.resolve();
-      const neighbors = this.options.neighbors && harvestNeighbors(this.options.neighbors, range.contains, resolved, controller.signal, this.options.neighborIntervalMs, this.options.neighborSettleMs);
+      const neighbors = this.options.neighbors && harvestNeighbors(this.options.neighbors, range.contains, resolved, controller.signal, this.options.neighborIntervalMs);
       this.completion = (async () => {
         try {
-          if (!this.options.ping) throw new Error('Fast IP discovery is unavailable. Use Full IP scan or Find by IP.');
+          if (!this.options.ping) throw new Error('Fast IP discovery is unavailable. Use Find by IP.');
           await this.options.ping(range, receive, checked => { if (!controller.signal.aborted) { state.checked = checked; emit(); } }, controller.signal);
         } catch (error) { if (!controller.signal.aborted) state.error = error instanceof Error ? error.message : 'IP discovery failed'; }
         finally {
           await seeds;
-          // Checks still running may yet fail and want a retry from the final read, so let them settle first.
-          while (!controller.signal.aborted && pending.size) await Promise.allSettled([...pending]);
+          // Read once more straight away, alongside the checks still running.
           await neighbors?.finish();
+          while (!controller.signal.aborted && pending.size) await Promise.allSettled([...pending]);
+          // A check that failed after that read still gets its retry from what the read saw, without reading again.
+          if (neighbors) resolved(neighbors.latest());
           while (!controller.signal.aborted && pending.size) await Promise.allSettled([...pending]);
           await Promise.allSettled([...pending]);
           state.state = controller.signal.aborted ? 'stopped' : 'complete'; emit(true);
@@ -124,7 +122,8 @@ export class Discovery {
       })();
       return { id: state.id, method, total: range.count };
     }
-    if (method === 'broadcast') {
+    // Broadcast discovery.
+    {
       const attempted = new Map<string,number>(), pending = new Set<Promise<void>>(), queue: string[] = [];
       let expired = false;
       const pump = () => {
@@ -157,29 +156,6 @@ export class Discovery {
       })();
       return { id: state.id, method, total: 0 };
     }
-    // A connection attempt the kernel dropped while waiting for ARP times out before TCP resends it, so an
-    // address already passed over is checked again once the neighbor cache shows it answering.
-    const reached = new Set<string>(), retried = new Set<string>(), retry: string[] = [];
-    const check = async (address: string) => {
-      try { if (await this.reachable(address, controller.signal)) {
-        reached.add(address); const device = await this.probe(address, controller.signal); if (!controller.signal.aborted) remember(device, address);
-      } } catch { /* Non-Cyanview endpoints and unreachable hosts are not discoveries. */ }
-    };
-    const work = () => Promise.all(Array.from({ length: Math.min(64, range.count) }, async () => {
-      while (!controller.signal.aborted) {
-        const again = retry.shift(); if (again) { await check(again); continue; }
-        const index = next++; if (index >= range.count) return;
-        await check(range.address(index));
-        state.checked++; emit();
-      }
-    }));
-    const resolved = (addresses: string[]) => {
-      for (const address of addresses) if (range.index(address) < next && !reached.has(address) && !retried.has(address) && retried.size < verifyPolicy.addresses) { retried.add(address); retry.push(address); }
-    };
-    const neighbors = this.options.neighbors && harvestNeighbors(this.options.neighbors, range.contains, resolved, controller.signal, this.options.neighborIntervalMs, this.options.neighborSettleMs);
-    void (async () => { try { await work(); } finally { await neighbors?.finish(); } await work(); })()
-      .then(() => { state.state = controller.signal.aborted ? 'stopped' : 'complete'; emit(true); }).catch(() => { state.state = 'stopped'; emit(true); });
-    return { id: state.id, method, total: range.count };
   }
   async waitForCompletion(signal: AbortSignal) {
     const controller = this.controller, completion = this.completion;

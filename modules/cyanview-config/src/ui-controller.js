@@ -1207,7 +1207,7 @@ import { PresentationLedger } from './presentation-ledger.js';
     });
   }
   async function initializeBackend(){
-    const methodField=document.createElement('label');methodField.className='hc-field';methodField.innerHTML='<span>Discovery method</span><select data-role="discovery-method" aria-label="Discovery method"><option value="ping">Fast IP discovery</option><option value="broadcast">Broadcast discovery</option><option value="ip">Full IP scan</option></select>';
+    const methodField=document.createElement('label');methodField.className='hc-field';methodField.innerHTML='<span>Discovery method</span><select data-role="discovery-method" aria-label="Discovery method"><option value="ping">Fast IP discovery</option><option value="broadcast">Broadcast discovery</option></select>';
     action('scan').before(methodField);ui.discoveryMethod='ping';ui.discoveryVersion=2;
     $('discovery-method').addEventListener('change',()=>{ui.discoveryMethod=$('discovery-method').value;remember();});
     try{
@@ -1218,7 +1218,7 @@ import { PresentationLedger } from './presentation-ledger.js';
       moduleBridge.onReceipt(applyReceipts);
       moduleBridge.subscribe(applyLiveState);
       if(plan?.uiState?.privateContent?.ui?.discoveryVersion!==2&&ui.discoveryMethod==='broadcast')ui.discoveryMethod='ping';
-      $('discovery-method').value=['ping','ip','broadcast'].includes(ui.discoveryMethod)?ui.discoveryMethod:'ping';
+      $('discovery-method').value=['ping','broadcast'].includes(ui.discoveryMethod)?ui.discoveryMethod:'ping';
       persistence='saved';syncSummary();preferBaseAddresses();
     }catch(error){devices.splice(0);cameras=[];lans=[];renderLans();renderCameras();toast(error.message||'Configuration could not be loaded');}
     root.hidden=false;icons();
@@ -1261,11 +1261,11 @@ import { PresentationLedger } from './presentation-ledger.js';
     root.querySelector('.hc-progress').hidden=quick;
     $('scan-progress').style.width=percent+'%';root.querySelector('.hc-progress').setAttribute('aria-valuenow',String(percent));
     $('scan-addresses').textContent=quick?(scan.results||[]).length+' found':scan.checked.toLocaleString()+' / '+scan.total.toLocaleString();
-    $('scan-label').textContent=(quick?(scan.state==='scanning'?'Live discovery · ':scan.state==='complete'?'Discovery complete · ':'Discovery stopped · '):scan.method==='ping'?(scan.state==='scanning'?'Pinging IP addresses · ':scan.state==='complete'?'Discovery complete · ':'Discovery stopped · '):(scan.state==='scanning'?'Scanning IP addresses · ':scan.state==='complete'?'IP scan complete · ':'IP scan stopped · '))+scan.range;
+    $('scan-label').textContent=(quick?(scan.state==='scanning'?'Live discovery · ':scan.state==='complete'?'Discovery complete · ':'Discovery stopped · '):(scan.state==='scanning'?'Pinging IP addresses · ':scan.state==='complete'?'Discovery complete · ':'Discovery stopped · '))+scan.range;
     action('scan').disabled=scan.state==='scanning'&&!quick||!$('scan-range').value;action('stop-scan').hidden=scan.state!=='scanning';
     scanDiscoveries=scan.results||[];mergeDiscoveries();
     if(scan.error){$('discovery-error').textContent=scan.error;$('discovery-error').hidden=false;}
-    if(!results.length&&scan.state!=='scanning')$('discovery-results').innerHTML='<div class="hc-state-empty"><strong>'+(quick?'No Cyanview devices announced on this range':'No Cyanview devices found')+'</strong><span class="hc-caption">'+(quick?'Try Find by IP, or use Full IP scan for routed networks.':'Check the network range or try a known device IP.')+'</span></div>';
+    if(!results.length&&scan.state!=='scanning')$('discovery-results').innerHTML='<div class="hc-state-empty"><strong>'+(quick?'No Cyanview devices announced on this range':'No Cyanview devices found')+'</strong><span class="hc-caption">'+(quick?'Try Find by IP, or Fast IP discovery for routed networks.':'Check the network range or try a known device IP.')+'</span></div>';
   }
   async function startLiveScan(){
     const range=$('scan-range').value==='custom'?$('custom-range').value.trim():$('scan-range').value;

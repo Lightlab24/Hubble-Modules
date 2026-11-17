@@ -24,7 +24,7 @@ export function createHostPing(services: ModuleHostServices) {
   return {
     async prepare(signal: AbortSignal) {
       const status = await helper.start(signal);
-      if (status.status !== 'helper' || status.state !== 'ready') throw new Error((status.status === 'helper' ? status.message : null) || 'Fast IP discovery is unavailable; use Full IP scan or Find by IP.');
+      if (status.status !== 'helper' || status.state !== 'ready') throw new Error((status.status === 'helper' ? status.message : null) || 'Fast IP discovery is unavailable; use Find by IP.');
     },
     sweep: createPingSweep(async (value, signal) => {
       const result = object(await helper.call('batch', value, signal));
