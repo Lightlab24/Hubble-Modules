@@ -26,6 +26,7 @@ const series: Record<string, readonly string[]> = {
   "cyanview-studio": ["feedNumber", "feedId"],
   "dit-browse": [],
   "evertz-quartz": ["source", "destination"],
+  "flanders-monitor": [],
   "http-requests": [],
   lightencode: [],
   livegrade: ["sequence", "slotId"],

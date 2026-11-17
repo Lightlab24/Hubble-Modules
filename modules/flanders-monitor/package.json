@@ -1,0 +1,25 @@
+{
+  "name": "@hubble-module/flanders-monitor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Flanders Scientific monitor keys from Hubble buttons",
+  "hubble": {
+    "id": "flanders-monitor",
+    "name": "Flanders"
+  },
+  "scripts": {
+    "build": "hubble-module build .",
+    "test": "hubble-module test .",
+    "typecheck": "tsc --noEmit",
+    "package": "hubble-module build . && hubble-module test . && hubble-module pack . ../../artifacts/flanders-monitor-0.1.0.hubble-module"
+  },
+  "dependencies": {
+    "@hubble/module-sdk": "workspace:1.8.0"
+  },
+  "devDependencies": {
+    "@hubble/module-tools": "workspace:1.5.0",
+    "@types/node": "22.19.17",
+    "typescript": "6.0.3"
+  }
+}
