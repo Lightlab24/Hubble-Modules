@@ -10,7 +10,7 @@ export const matrix = ModuleMatrixSchema.parse({
     { id: 'actionType', label: 'Action', type: 'choice', default: '', required: false, fill: 'copy', width: 255,
       choices: commands.map(([value, label]) => ({ value, label })), choiceProvider: 'control-actions' },
     // The shared Matrix stores dynamic references as text and presents the provider's labels.
-    { id: 'module.controllerId', label: 'Cyanview controller', type: 'text', default: '', required: true, fill: 'copy', width: 240,
+    { id: 'module.controllerId', label: 'Cyanview Controller', type: 'text', default: '', required: true, fill: 'copy', width: 240,
       choiceProvider: 'control-controllers', emptyMessage: 'Add a controller on Cyanview’s Devices page.',
       enabledWhen: [{ field: 'actionType', values: commands.map(([value]) => value) }],
       // These only change the saved ticks, so nothing needs a controller. Left blank, they cover every controller.
@@ -18,7 +18,7 @@ export const matrix = ModuleMatrixSchema.parse({
     { id: 'module.cameraNumber', label: 'Camera', type: 'number', default: null, required: true, integer: true, min: 1, max: 999999,
       formula: true, fill: 'series', width: 240, choiceProvider: 'control-cameras', choiceFields: ['module.cameraNumber'],
       enabledWhen: [{ field: 'actionType', values: [...cameraCommands] }] },
-    { id: 'module.feedbackEnabled', label: 'Button Feedback', type: 'boolean', default: true, fill: 'copy', width: 130,
+    { id: 'module.feedbackEnabled', label: 'Feedback', type: 'boolean', default: true, fill: 'copy', width: 130,
       enabledWhen: [{ field: 'actionType', values: feedbackCommands }] },
     // On Hubble with feedback triggers this cell shows and edits the row's trigger looks; older hosts use the colour pair.
     { id: 'module.feedbackColor', label: 'Feedback Color', type: 'color', colorMode: 'pair', default: '#3A3A40 | #37A65B', fill: 'copy', width: 155,

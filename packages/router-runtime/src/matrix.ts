@@ -285,7 +285,7 @@ export function routerMatrix(type: RouterType) {
       {
         fill: "copy",
         id: "drivesTally",
-        label: "Button Feedback",
+        label: "Feedback",
         type: "boolean",
         default: true,
         width: 112,

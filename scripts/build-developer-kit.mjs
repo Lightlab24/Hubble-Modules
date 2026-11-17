@@ -152,6 +152,7 @@ try {
     "skills/hubble-module-author/references/sliders.md",
     "skills/hubble-module-author/references/controls.md",
     "skills/hubble-module-author/references/spreadsheet-styling.md",
+    "skills/hubble-module-author/references/naming.md",
     "examples/custom-canvas/src/manifest.ts",
     "examples/custom-canvas/src/index.ts",
     "examples/custom-canvas/src/frontend.ts",

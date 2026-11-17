@@ -41,7 +41,7 @@ export const matrix = ModuleMatrixSchema.parse({
   inactiveWhen: [{ field: TARGETS, values: [""] }],
   fields: [
     {
-      id: TARGETS, label: "FS-HDR target", type: "text", default: "", required: true, width: 170,
+      id: TARGETS, label: "FS-HDR Target", type: "text", default: "", required: true, width: 170,
       choiceProvider: TARGET_CHOICES, fill: "copy", formula: true,
     },
     {
@@ -53,7 +53,7 @@ export const matrix = ModuleMatrixSchema.parse({
       ],
     },
     {
-      id: TRANSFORM, label: "HDR transform", type: "choice", default: "3", required: true, width: 170, fill: "copy",
+      id: TRANSFORM, label: "HDR Transform", type: "choice", default: "3", required: true, width: 170, fill: "copy",
       choices: transforms.map(({ id, label }) => ({ value: id, label })),
     },
   ],

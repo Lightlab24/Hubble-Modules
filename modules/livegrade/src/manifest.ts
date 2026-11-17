@@ -55,7 +55,7 @@ export default defineModuleManifest({
     },
     {
       id: "requestTimeoutMs",
-      label: "Menu request timeout (ms)",
+      label: "Request timeout (ms)",
       type: "number",
       default: 1500,
       required: true,

@@ -26,7 +26,7 @@ export default defineModuleManifest({
   settings: [
     {
       id: 'host',
-      label: 'Host',
+      label: 'Host or IP address',
       type: 'text',
       default: '127.0.0.1',
       required: true,
