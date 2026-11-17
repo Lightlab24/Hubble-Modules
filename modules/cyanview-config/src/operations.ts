@@ -354,14 +354,18 @@ export class ConfigurationOperations {
       expected.DHCP = true;
     } else {
       if (addressing) {
-        const desired = addressParts(String(item.planned));
+        // Static can have no address. The RIO's own page clears the address with an empty ip and the
+        // mask with "0", and DHCP on already leaves both blank, so a blank address writes only what's set.
+        const blank = !String(item.planned ?? '').trim();
+        const desired = blank ? { ip: '', mask: '0' } : addressParts(String(item.planned));
         if (wasDhcp) await client.action(await this.dhcpCommand(client, key, false, signal), signal);
-        if (wasDhcp || String(old.IP ?? '') !== desired.ip) await client.update(key, { ip: desired.ip }, signal);
-        if (wasDhcp || String(old.mask ?? '') !== desired.mask) {
+        if (blank ? String(old.IP ?? '') !== '' : wasDhcp || String(old.IP ?? '') !== desired.ip) await client.update(key, { ip: desired.ip }, signal);
+        if (blank ? !['', '0'].includes(String(old.mask ?? '')) : wasDhcp || String(old.mask ?? '') !== desired.mask) {
           const mapping = await client.mapping(key, 'mask', signal);
           await client.update(mapping.key, { [mapping.property]: desired.mask }, signal);
         }
-        Object.assign(expected, { DHCP: false, IP: desired.ip, mask: desired.mask });
+        Object.assign(expected, { DHCP: false, IP: desired.ip });
+        if (!blank) expected.mask = desired.mask;
       }
       for (const [field, label] of [['gateway', 'Gateway'], ['dns1', 'DNS1'], ['dns2', 'DNS2']] as const) if (fields.includes(field)) {
         const value = String(item[field] ?? '').trim();

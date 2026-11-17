@@ -209,6 +209,58 @@ test('a WAN goes Static with an address and gateway through Pending sends, and b
   await expect(row(f, RIO).locator('[data-device-column="wan"]')).toHaveText('DHCP');
 });
 
+// Every change redraws the sheet. Committing it while the focus was moving left nothing focused, so
+// typing after Tab or a click went nowhere, and Enter dropped the focus on purpose (Nov 17, 2026).
+test('Tab, a click and Enter keep the keyboard in the sheet, and Enter moves down', async ({ page, request }) => {
+  const f = await open(page, request, { wan: true });
+  await group(f, 'wan').click();
+  await group(f, 'lan').click();
+  const focusedCell = () => f.locator('body').evaluate(() => (document.activeElement as HTMLElement)?.dataset?.deviceCell ?? document.activeElement?.tagName);
+  await cell(f, RIO, 'wanMode').selectOption('Static');
+  await cell(f, RIO, 'wanIp').click();
+  await page.keyboard.type('10.20.101.102');
+  await page.keyboard.press('Tab');
+  await expect.poll(focusedCell).toBe(RIO + ':gateway');
+  await page.keyboard.type('10.20.100.1');
+  await expect(cell(f, RIO, 'gateway')).toHaveValue('10.20.100.1');
+  await expect(cell(f, RIO, 'wanIp')).toHaveValue('10.20.101.102/16');
+  // A click on another cell keeps it.
+  await cell(f, RIO, 'dns1').click();
+  await expect.poll(focusedCell).toBe(RIO + ':dns1');
+  await page.keyboard.type('10.20.100.2');
+  await expect(cell(f, RIO, 'gateway')).toHaveValue('10.20.100.1');
+  await expect(row(f, RIO).locator('[data-device-column="gateway"]')).toHaveClass(/hc-changed/);
+  // Enter moves down the column.
+  await cell(f, MASTER, 'lan2').click();
+  await page.keyboard.type('10.20.101.212');
+  await page.keyboard.press('Enter');
+  await expect.poll(focusedCell).toBe(LEAF + ':lan2');
+  await expect(cell(f, MASTER, 'lan2')).toHaveValue('10.20.101.212/16');
+  await page.keyboard.type('10.20.101.213');
+  await page.keyboard.press('Enter');
+  // The last row keeps its cell.
+  await expect.poll(focusedCell).toBe(LEAF + ':lan2');
+  await expect(cell(f, LEAF, 'lan2')).toHaveValue('10.20.101.213/16');
+  expect((await fleet(request)).map(device => device.actions.length)).toEqual([0, 0, 0]);
+});
+
+test('a WAN on Static can be sent with no address', async ({ page, request }) => {
+  const f = await open(page, request, { wan: true });
+  await group(f, 'wan').click();
+  await cell(f, RIO, 'wanMode').selectOption('Static');
+  await expect(cell(f, RIO, 'wanIp')).toHaveValue('');
+  await showPending(f);
+  const line = panel(f).locator('[data-pending-lan-line]');
+  await expect(line).toContainText('DHCP → Blank');
+  await panel(f).locator('[data-pending-lan-send]').click();
+  await expect(panel(f)).toContainText('Nothing is waiting to send');
+  const rio = (await fleet(request))[0]!;
+  expect(rio.config.IP.wan).toMatchObject({ DHCP: false, IP: '' });
+  expect(rio.actions).toEqual([{ update: { changes: { dhcp: 'no' }, key: 'wan' } }]);
+  await expect(cell(f, RIO, 'wanMode')).toHaveValue('Static');
+  await expect(row(f, RIO).locator('[data-device-column="wanMode"]')).not.toHaveClass(/hc-changed/);
+});
+
 test('a device is added by typing its IP in the last row', async ({ page, request }) => {
   const f = await open(page, request);
   await row(f, LEAF).locator('[data-action="remove-device"]').click();

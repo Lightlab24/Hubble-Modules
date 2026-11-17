@@ -456,6 +456,28 @@ test('a WAN goes static with an address, mask and gateway, then back to DHCP, wi
   } finally { await f.instance.dispose(); await fake.close(); }
 });
 
+test('a WAN on Static can be left with no address, cleared the way its own page clears it', async () => {
+  const fake = new FakeController(); fake.addWan(); await fake.start(); const f = fixture();
+  try {
+    const plan = planFor(fake), wan = plan.lans.find(row => row.type === 'WAN')!;
+    await f.repository.write(null, plan, f.signal); const operations = new ConfigurationOperations(f.repository, fake.client);
+    // From DHCP, which already left everything blank, only DHCP goes off.
+    assert.deepEqual(await operations.run({ kind: 'lan', item: { ...wan, dhcp: false, planned: '' }, fields: ['dhcp', 'planned'] }, f.signal), { elementKey: 'wan', verified: true });
+    assert.deepEqual(fake.actions, [{ update: { changes: { dhcp: 'no' }, key: 'wan' } }]);
+    assert.equal(fake.snapshot().lans.find(row => row.type === 'WAN')!.current, '');
+    // From an address, the address empties and the mask goes to "0", as the RIO's page sent them.
+    await operations.run({ kind: 'lan', item: { ...wan, dhcp: false, planned: '10.20.101.102/16', gateway: '10.20.100.1' }, fields: ['planned', 'gateway'] }, f.signal);
+    fake.actions.length = 0;
+    await operations.run({ kind: 'lan', item: { ...wan, dhcp: false, planned: '', gateway: '' }, fields: ['planned', 'gateway'] }, f.signal);
+    assert.deepEqual(fake.actions, [
+      { update: { key: 'wan', changes: { ip: '' } } },
+      { update: { key: 'wan', changes: { mask: '0' } } },
+      { update: { key: 'wan', changes: { gateway: '' } } },
+    ]);
+    assert.deepEqual(fake.config.IP.wan, { ...fake.config.IP.wan, DHCP: false, IP: '', mask: '0', Gateway: '' });
+  } finally { await f.instance.dispose(); await fake.close(); }
+});
+
 test('a WAN sends nothing for a bad address, or when the controller offers no DHCP command', async () => {
   const fake = new FakeController(); fake.addWan(); await fake.start(); const f = fixture();
   try {

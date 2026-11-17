@@ -313,7 +313,7 @@ import { PresentationLedger } from './presentation-ledger.js';
   }
   const ipv4=s=>/^\d{1,3}(\.\d{1,3}){3}$/.test(s)&&s.split('.').every(x=>Number(x)<=255);
   function valid(item,kind,fields=[]){
-    if(kind==='lan'){if(item.dhcp&&item.type==='WAN')return '';const parts=String(item.planned).split('/');return parts.length===2&&ipv4(parts[0])&&/^\d{1,2}$/.test(parts[1])&&Number(parts[1])<=32?'':'Invalid IP';}
+    if(kind==='lan'){if(item.type==='WAN'&&(item.dhcp||!String(item.planned||'').trim()))return '';const parts=String(item.planned).split('/');return parts.length===2&&ipv4(parts[0])&&/^\d{1,2}$/.test(parts[1])&&Number(parts[1])<=32?'':'Invalid IP';}
     if(!item.number||!item.name||item.model==='Choose model…')return 'Incomplete';
     if(item.model!=='Alpha-USB'&&!ipv4(item.ip))return 'Incomplete';
     initializeLensFields(item);const p=lensCapabilities(item);
@@ -3933,7 +3933,7 @@ import { PresentationLedger } from './presentation-ledger.js';
   // stay as the Details view, and every edit here goes through the same rows and sends they use.
   // The remove button sits beside the name, where it is on the camera sheets.
   const deviceSheet = { lanOpen: false, wanOpen: false, sort: null, details: false };
-  let selectedDeviceId = '', deviceAddNote = '', deviceAddBusy = false;
+  let selectedDeviceId = '', deviceAddNote = '', deviceAddBusy = false, committingDeviceCell = '';
   const deviceGroups = {
     lan: { label: 'LAN IP settings', open: [['lan1', 'LAN IP', 158], ['lan2', 'LAN IP 2', 158]], closed: [['lan1', 'LAN IP', 190]] },
     wan: { label: 'WAN settings', open: [['wanMode', 'Mode', 96], ['wanIp', 'WAN IP', 158], ['gateway', 'Gateway', 130], ['dns1', 'DNS 1', 122], ['dns2', 'DNS 2', 122]], closed: [['wan', 'WAN', 150]] },
@@ -4056,9 +4056,11 @@ import { PresentationLedger } from './presentation-ledger.js';
     if (focus) {
       const element = focus.key === 'add' ? host.querySelector('[data-device-add]') : host.querySelector('[data-device-cell="' + CSS.escape(focus.key) + '"]');
       if (element && !element.disabled) {
-        if (element.tagName === 'INPUT') element.value = focus.value;
+        // Typing in another cell carries over a redraw. The cell just committed shows what it now holds.
+        const committed = focus.key === committingDeviceCell;
+        if (element.tagName === 'INPUT' && !committed) element.value = focus.value;
         element.focus({ preventScroll: true });
-        try { element.setSelectionRange?.(focus.start, focus.end); } catch { /* A select has no caret. */ }
+        try { if (committed) element.select?.(); else element.setSelectionRange?.(focus.start, focus.end); } catch { /* A select has no caret. */ }
       }
     }
     paintDeviceView();
@@ -4161,9 +4163,11 @@ import { PresentationLedger } from './presentation-ledger.js';
         stageCell(wan, 'dhcp', dhcp, true);
       } else if (field === 'wanIp') {
         if (wan.dhcp) return;
+        // A WAN on Static can be left with no address, as the RIO's own page allows.
         if (!value) {
-          if (wan.planned && plainAddress(wan.current) && !wan.dirty.has('dhcp')) { refuse('A WAN address can be changed here, but not removed.'); return; }
-          if (wan.planned) stageCell(wan, 'planned', '', true);
+          if (!wan.planned) return;
+          if (!wan.current && wan.pending && !wan.dirty.has('dhcp') && onlyAddress()) { cancelLanDrafts(id, wan.id); return; }
+          stageCell(wan, 'planned', '', true);
         } else {
           const planned = value.includes('/') ? value : value + '/' + maskOf(wan.current, mask);
           if (!cidr(planned)) { refuse('Enter an address such as 10.20.101.212/16'); return; }
@@ -4355,15 +4359,38 @@ import { PresentationLedger } from './presentation-ledger.js';
     const row = event.target.closest?.('tr[data-device-row]');
     if (row && row.dataset.deviceRow !== selectedDeviceId) { selectedDeviceId = row.dataset.deviceRow; paintDeviceSheet(); }
   });
+  // A change fires while the focus is moving to the next cell (Tab, a click), and committing it redraws
+  // the sheet. Committing once the focus has landed lets the redraw put it back where it went;
+  // committing at once left nothing focused, so typing after Tab went nowhere (Nov 17, 2026).
   root.addEventListener('change', event => {
     const element = event.target;
     if (!element.dataset?.deviceCell || element.dataset.deviceSetting) return;
     const [id, field] = [element.dataset.deviceCell.slice(0, element.dataset.deviceCell.lastIndexOf(':')), element.dataset.deviceCell.slice(element.dataset.deviceCell.lastIndexOf(':') + 1)];
-    commitDeviceCell(id, field, element.value);
+    const value = element.value;
+    setTimeout(() => {
+      committingDeviceCell = element.dataset.deviceCell;
+      try { commitDeviceCell(id, field, value); } finally { committingDeviceCell = ''; }
+    }, 0);
   });
+  // Enter commits and moves down to the same column on the next device, as in the Button Matrix.
+  function deviceCellBelow(element) {
+    const key = element.dataset.deviceCell, field = key.slice(key.lastIndexOf(':') + 1);
+    const rows = [...root.querySelectorAll('[data-role="device-sheet"] tr[data-device-row]')];
+    const index = rows.indexOf(element.closest('tr[data-device-row]'));
+    for (const row of rows.slice(index + 1)) {
+      const below = row.querySelector('[data-device-cell="' + CSS.escape(row.dataset.deviceRow + ':' + field) + '"]');
+      if (below && !below.disabled) return below;
+    }
+    return null;
+  }
   root.addEventListener('keydown', event => {
     const element = event.target;
-    if (event.key === 'Enter' && element.dataset?.deviceCell && element.tagName === 'INPUT') { event.preventDefault(); element.blur(); }
+    if (event.key === 'Enter' && element.dataset?.deviceCell && element.tagName === 'INPUT') {
+      event.preventDefault();
+      const below = deviceCellBelow(element);
+      if (below) { below.focus({ preventScroll: false }); below.select?.(); }
+      else { element.dispatchEvent(new Event('change', { bubbles: true })); element.select(); }
+    }
     else if (event.key === 'Escape' && element.dataset?.deviceCell && element.tagName === 'INPUT') { event.stopPropagation(); renderDeviceSheet(); }
     else if (event.key === 'Enter' && element.hasAttribute?.('data-device-add')) { event.preventDefault(); void addDevicesByIp(element.value); }
   });
