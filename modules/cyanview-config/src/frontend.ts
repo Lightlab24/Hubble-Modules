@@ -2,6 +2,7 @@ import { connectModuleFrontend } from '@hubble/module-sdk/frontend';
 import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { icons } from 'lucide-react';
+import { isStaleDraft } from './save-conflict.js';
 import './approved-ui.css';
 import './frame.css';
 import './workbook-controls.css';
@@ -57,12 +58,22 @@ if (window.parent !== window) {
         try {
         const resolved = typeof plan === 'function' ? plan() : plan;
         const text = JSON.stringify(resolved);
-        let result: { revision: string };
-        if (text.length < 180000) result = await client.call('save-plan', payload({ revision, plan: resolved })) as unknown as { revision: string };
-        else {
+        const write = async (): Promise<{ revision: string }> => {
+          if (text.length < 180000) return await client.call('save-plan', payload({ revision, plan: resolved })) as unknown as { revision: string };
           const transfer = await client.call('save-begin', { revision }) as { id: string };
           for (let offset = 0, index = 0; offset < text.length; offset += 60000, index++) await client.call('save-part', { id: transfer.id, index, text: text.slice(offset, offset + 60000) });
-          result = await client.call('save-commit', { id: transfer.id }) as { revision: string };
+          return await client.call('save-commit', { id: transfer.id }) as { revision: string };
+        };
+        let result: { revision: string };
+        try { result = await write(); }
+        catch (error) {
+          // Another page saved this workspace after this one read it (Nov 17, 2026: a second window left
+          // the open page refusing every save, and sends couldn't find what it added). This page holds
+          // what its user is working on, so it saves again over that. What controllers reported back
+          // (element keys, creates) is kept by the worker.
+          if (!isStaleDraft(error)) throw error;
+          revision = (await readPlan()).revision;
+          result = await write();
         }
         revision = result.revision;
         saved?.();

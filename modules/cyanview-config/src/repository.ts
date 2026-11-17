@@ -3,6 +3,7 @@ import { emptyPlan, json, object, stripEphemeral, validatePlan, type Plan, type 
 import type { RemiData } from './remi-model.js';
 import { choiceDocumentDefinitions } from './choice-catalogs.js';
 import { selectionDocuments } from './control/selection.js';
+import { staleDraftMessage } from './save-conflict.js';
 
 export const ROOTS = ['plan', 'sample-plan'] as const;
 type DocumentDefinition = NonNullable<ModuleManifest['documents']>[number];
@@ -48,7 +49,7 @@ export class PlanRepository {
   }
   private async writeNow(revision: string | null, input: Plan, signal: AbortSignal, preserveReceipts = false) {
     const before = await this.read(signal);
-    if (before.revision !== revision && !(preserveReceipts && before.revision === this.receiptHead && this.receiptRevisions.has(revision))) throw new Error('Configuration changed in another editor. Your draft is retained; refresh before saving.');
+    if (before.revision !== revision && !(preserveReceipts && before.revision === this.receiptHead && this.receiptRevisions.has(revision))) throw new Error(staleDraftMessage);
     const plan = validatePlan(input);
     // Saves can overlap sends. Only our own receipts may advance a draft's
     // revision; a different editor's draft still causes a conflict.
