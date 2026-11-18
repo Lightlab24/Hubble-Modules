@@ -1507,6 +1507,62 @@ test('ND rows light ND in when every checked camera with ND has it in, Some ND i
   } finally { await s.close(); }
 });
 
+test('Base Gain Up and Down work on a camera an RCP reports, and leave out a camera with no base gain', async () => {
+  const s = await fleet();
+  try {
+    const network = s.networks[0]!;
+    await s.run('toggle-camera-enabled', 0, 1);
+    await s.run('toggle-camera-enabled', 0, 2);
+    await eventually(() => s.sessions[0]?.snapshot().phase === 'ready');
+    // RCP 1 holds camera 1's base gain under volatile only (Nov 18 2026), which Base Gain refused before 0.1.84.
+    network.send('unit/a/camhead/status/volatile/gain_mode', 'High', true);
+    await eventually(() => s.sessions[0]!.cameraObservations().some(camera => camera.address === 'unit/a' && camera.baseGain === 'High'));
+    const down = await s.run('base-gain-down-enabled-cameras');
+    assert.equal(down.status, 'success', JSON.stringify(down));
+    assert.deepEqual(network.commands.map(command => [command.topic, command.value]), [['unit/a/camhead/action/prev/gain_mode', '']],
+      'What RCP 1’s panel sent for Low, and nothing to camera 2, which reports no base gain');
+    const { cameras } = await s.state();
+    const tight = s.plan.cameras.find(row => row.device === s.ids[0] && row.elementKey === 'b');
+    assert.equal(cameras[tight!.id]!.message, 'No base gain on this camera');
+    network.send('unit/b/camhead/status/volatile/gain_mode', 'Low');
+    await eventually(() => s.sessions[0]!.cameraObservations().some(camera => camera.address === 'unit/b' && camera.baseGain === 'Low'));
+    assert.equal((await s.run('base-gain-up-enabled-cameras')).status, 'success');
+    assert.deepEqual(network.commands.slice(1).map(command => [command.topic, command.value]).sort(),
+      [['unit/a/camhead/action/next/gain_mode', ''], ['unit/b/camhead/action/next/gain_mode', '']]);
+  } finally { await s.close(); }
+});
+
+test('Base Gain keys light High base, Low base, or Mixed base when the checked cameras differ', async () => {
+  const declared = matrix.triggers!.filter(trigger => trigger.id.startsWith('base-'));
+  assert.deepEqual(declared.map(trigger => [trigger.id, trigger.label, trigger.part, trigger.color, trigger.when?.[0]?.values]), [
+    ['base-high', 'High base', 'background', '#37A65B', ['base-gain-up-enabled-cameras']],
+    ['base-low', 'Low base', 'background', '#37A65B', ['base-gain-down-enabled-cameras']],
+    ['base-mixed', 'Mixed base', 'bar', '#F59E0B', ['base-gain-up-enabled-cameras', 'base-gain-down-enabled-cameras']]]);
+  assert.ok(matrix.triggers!.length > 16 && manifest.host && 'requiredFeatures' in manifest.host
+    && manifest.host.requiredFeatures?.includes('module-feedback-triggers-64-v1'), 'More than 16 states needs a host that takes them');
+  const s = await fleet();
+  try {
+    const network = s.networks[0]!;
+    const row = (actionType: string) => ({ actionId: `row-${actionType}`, actionColumnId: 'column-one', values: { enabled: true, actionType,
+      'module.controllerId': s.ids[0]!, 'module.feedbackEnabled': true, 'module.feedbackColor': '#333333 | #00FF00' } });
+    const triggers = () => JSON.stringify(object(object(s.f.feedback.at(-1)).appearance).triggers);
+    await s.run('toggle-camera-enabled', 0, 1);
+    await s.run('toggle-camera-enabled', 0, 2);
+    await s.f.instance.subscribeFeedback!([{ id: 'camera-control', fields: row('base-gain-down-enabled-cameras') }], { signal: s.f.signal });
+    await eventually(() => s.sessions[0]?.snapshot().phase === 'ready');
+    // Camera 2 reports no base gain, so camera 1 alone decides.
+    network.send('unit/a/camhead/status/volatile/gain_mode', 'Low');
+    await eventually(() => triggers() === '["base-low"]');
+    network.send('unit/b/camhead/status/volatile/gain_mode', 'High');
+    await eventually(() => triggers() === '["base-mixed"]');
+    network.send('unit/a/camhead/status/volatile/gain_mode', 'High');
+    await eventually(() => triggers() === '[]');
+    await s.f.instance.subscribeFeedback!([{ id: 'camera-control', fields: row('base-gain-up-enabled-cameras') }], { signal: s.f.signal });
+    await eventually(() => triggers() === '["base-high"]');
+    assert.equal(network.commands.length, 0, 'Watching sends nothing');
+  } finally { await s.close(); }
+});
+
 test('Select camera lights as soon as the controller acknowledges, and the RCP report confirms or corrects it', async () => {
   const s = await fleet({ selectHoldMs: 300 });
   try {

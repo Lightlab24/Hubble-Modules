@@ -704,7 +704,12 @@ export class RcpSession {
           ...(scope === "persist" ? { variableNd: ndClear !== null } : {}),
         };
       }
-      else if (scope === "persist" && field === "gain_mode")
+      // A camera's own broker keeps its base gain under persist, an RCP or Gateway under volatile: RCP 1
+      // reported camera 1, a Burano, as volatile "Low" and "High" when its panel stepped it (Nov 18 2026).
+      else if (
+        (scope === "persist" || scope === "volatile") &&
+        field === "gain_mode"
+      )
         next = { ...prior, baseGain: payload.trim() || null };
       else if (scope === "volatile" && field === "control")
         // An empty report is the RCP clearing the one it kept, as when the camera's RIO goes: nothing reaches it now.

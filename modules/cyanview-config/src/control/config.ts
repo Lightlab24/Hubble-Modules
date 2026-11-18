@@ -36,7 +36,9 @@ export const cameraCommands: readonly string[] = ['select-camera', 'record-camer
 export const localCommands: readonly string[] = ['toggle-camera-enabled', 'enable-all-cameras', 'single-switch'];
 /** Put the ND in, take it out, or one then the other, on every checked camera that has ND in/out. */
 export const ndCommands: readonly string[] = ['nd-in-enabled-cameras', 'nd-out-enabled-cameras', 'nd-toggle-enabled-cameras'];
-export const feedbackCommands = [...localCommands, 'select-camera', 'record-camera', 'roll-enabled-cameras', 'stop-enabled-cameras', 'roll-toggle-enabled-cameras', ...ndCommands];
+/** Step the base gain of every checked camera that reports one: Up to High, Down to Low on a two-base camera. */
+export const baseGainCommands: readonly string[] = ['base-gain-up-enabled-cameras', 'base-gain-down-enabled-cameras'];
+export const feedbackCommands = [...localCommands, 'select-camera', 'record-camera', 'roll-enabled-cameras', 'stop-enabled-cameras', 'roll-toggle-enabled-cameras', ...ndCommands, ...baseGainCommands];
 export const forActions = (...actions: string[]) => [{ field: 'actionType', values: actions }];
 /** A tap starts these and only a hold this long stops them, so a stray tap can't cut a take. */
 export const holdToStop = { ms: 2000 as const, when: forActions('record-camera') };
@@ -73,4 +75,8 @@ export const feedbackTriggers = [
   // Counted over the checked cameras that have ND in/out; a camera without one doesn't count either way.
   { id: 'nd-in', label: 'ND in', part: 'background', color: '#37A65B', when: forActions(...ndCommands) },
   { id: 'some-nd-in', label: 'Some ND in', part: 'bar', color: '#F59E0B', when: forActions(...ndCommands) },
+  // Counted over the checked cameras that report Low or High; one reporting anything else doesn't count.
+  { id: 'base-high', label: 'High base', part: 'background', color: '#37A65B', when: forActions('base-gain-up-enabled-cameras') },
+  { id: 'base-low', label: 'Low base', part: 'background', color: '#37A65B', when: forActions('base-gain-down-enabled-cameras') },
+  { id: 'base-mixed', label: 'Mixed base', part: 'bar', color: '#F59E0B', when: forActions(...baseGainCommands) },
 ] as const;

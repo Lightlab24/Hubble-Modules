@@ -25,6 +25,8 @@ export default defineModuleManifest({
     'module-matrix-hold-v1',
     // The connection path's three states are one Connection setting in the trigger popup.
     'module-feedback-trigger-groups-v1',
+    // ND In/Out and Base Gain have their own key states, which takes Cyanview past 16 triggers.
+    'module-feedback-triggers-64-v1',
   ] },
   capabilities: ['host.documents', 'host.helpers', 'service.page.studio', 'state-feedback'],
   settings: [{ id: 'sampleData', label: 'Use sample devices', type: 'boolean', required: true, default: false }],

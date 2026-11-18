@@ -3,7 +3,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import type { ModuleContext, ModuleExecutionContext, ModuleFeedbackSubscription, ModuleValues } from '@hubble/module-sdk';
 import { controlDevice, controllerLabel, emptyPlan, object, selectsCamera, type Plan, type RecordValue } from '../model.js';
 import type { PlanRepository } from '../repository.js';
-import { commands, commandGroup, cameraCommands, localCommands, feedbackCommands, ndCommands, type Command, type CyanViewRcpConnectionDefinition } from './config.js';
+import { commands, commandGroup, cameraCommands, localCommands, feedbackCommands, ndCommands, baseGainCommands, type Command, type CyanViewRcpConnectionDefinition } from './config.js';
 import { ControlSelection, everyControllerMutations, type SelectionMutation } from './selection.js';
 import { RcpSession, type CyanViewCameraTarget, type CyanViewCameraParameterStep } from './rcp-session.js';
 import { RecordingCoordinator } from './recording-coordinator.js';
@@ -326,6 +326,8 @@ export class CameraControl {
         const connected = session;
         const nd = ndCommands.includes(command) ? this.ndPlan(command, captured) : null;
         if (nd) captured = nd.captured;
+        if (baseGainCommands.includes(command))
+          captured = this.leaveOut(captured, observation => observation.baseGain === null, 'No base gain on this camera', 'No checked camera on this controller reports a base gain');
         const completion = Promise.all(captured.map(async ({ row, target, error }): Promise<RecordingTargetResult> => {
           const send = async (): Promise<RecordingTargetResult> => {
             const key = `${device.id}/${target?.address ?? row.id}`;
@@ -375,13 +377,22 @@ export class CameraControl {
    * them have it in, and otherwise puts it in, so one press brings them all the same way.
    */
   private ndPlan<T extends { row: RecordValue; target?: CyanViewCameraTarget }>(command: Command, captured: readonly T[]) {
-    const without = captured.filter(item => item.target?.observation.online === true && item.target.observation.ndClear === null);
-    if (without.length) this.note(without.map(item => item.row), 'No ND in/out on this camera');
-    const left = captured.filter(item => !without.includes(item));
-    if (!left.length) throw new Error('No checked camera on this controller has ND in/out');
+    const left = this.leaveOut(captured, observation => observation.ndClear === null, 'No ND in/out on this camera', 'No checked camera on this controller has ND in/out');
     const known = left.flatMap(item => item.target?.observation.online === true && item.target.observation.ndClear !== null ? [item.target.observation.ndClear] : []);
     const clear = command === 'nd-out-enabled-cameras' || (command === 'nd-toggle-enabled-cameras' && known.length > 0 && known.every(value => !value));
     return { captured: left, clear };
+  }
+  /**
+   * Leaves out the connected cameras that lack what a press needs, so a rig of mixed cameras can be pressed together,
+   * and says so on each one. A press that leaves no camera is refused. A camera that isn't connected stays in and fails.
+   */
+  private leaveOut<T extends { row: RecordValue; target?: CyanViewCameraTarget }>(captured: readonly T[],
+    lacks: (observation: CyanViewCameraTarget['observation']) => boolean, note: string, none: string): T[] {
+    const without = captured.filter(item => item.target?.observation.online === true && lacks(item.target.observation));
+    if (without.length) this.note(without.map(item => item.row), note);
+    const left = captured.filter(item => !without.includes(item));
+    if (!left.length) throw new Error(none);
+    return left;
   }
   /** Waits for the camera's own report of the ND state a press asked for. A camera already there has reported it. */
   private async ndReported(session: RcpSession, target: CyanViewCameraTarget, clear: boolean, signal: AbortSignal) {
@@ -554,6 +565,21 @@ export class CameraControl {
           all = states.length > 0 && states.every(clear => clear === false);
           some = !all && states.some(clear => clear === false);
         }
+        if (baseGainCommands.includes(command)) {
+          // Only checked cameras reporting Low or High count. One that is offline leaves the key unknown.
+          const wanted = command === 'base-gain-up-enabled-cameras' ? 'high' : 'low';
+          const states = rows.filter(row => selected.enabled[row.id]).flatMap(row => {
+            try {
+              const observation = session.captureCamera(Number(row.number)).observation;
+              const base = observation.baseGain?.toLowerCase() ?? null;
+              if (observation.online === true && base !== 'low' && base !== 'high') return [];
+              return [this.appliedRow(row) && observation.online === true ? base : null];
+            } catch { return [null]; }
+          });
+          if (states.length && states.every(value => value !== null)) active = states.every(base => base === wanted);
+          all = states.length > 0 && states.every(base => base === wanted);
+          some = states.some(base => base === 'low') && states.some(base => base === 'high');
+        }
       }
       const observing = values.enabled !== false && values['module.feedbackEnabled'] === true && feedbackCommands.includes(command);
       const colors = String(values['module.feedbackColor'] || '#3A3A40 | #37A65B').split('|').map(color => color.trim()).filter(color => /^#[0-9a-f]{6}$/i.test(color));
@@ -568,6 +594,8 @@ export class CameraControl {
       };
       for (const action of ['roll-enabled-cameras', 'stop-enabled-cameras', 'roll-toggle-enabled-cameras']) own[action] = [all && 'all-rolling', some && 'some-rolling'];
       for (const action of ndCommands) own[action] = [all && 'nd-in', some && 'some-nd-in'];
+      own['base-gain-up-enabled-cameras'] = [all && 'base-high', some && 'base-mixed'];
+      own['base-gain-down-enabled-cameras'] = [all && 'base-low', some && 'base-mixed'];
       const path = cameraCommands.includes(command) && connection !== null ? [connectionTrigger[connection]] : [];
       const triggers = !observing ? null : [...(own[command] ?? []), ...path].filter((id): id is string => typeof id === 'string');
       // Hubble with feedback triggers draws the key from `triggers`; the colour is for older hosts.
