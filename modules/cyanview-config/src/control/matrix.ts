@@ -10,7 +10,8 @@ export const matrix = ModuleMatrixSchema.parse({
     { id: 'actionType', label: 'Action', type: 'choice', default: '', required: false, fill: 'copy', width: 255,
       choices: commands.map(([value, label]) => ({ value, label })), choiceProvider: 'control-actions' },
     // The shared Matrix stores dynamic references as text and presents the provider's labels.
-    { id: 'module.controllerId', label: 'Cyanview Controller', type: 'text', default: '', required: true, fill: 'copy', width: 240,
+    // = works here as it does in any cell, so one cell such as =$Q$2 can pick the controller for many rows.
+    { id: 'module.controllerId', label: 'Cyanview Controller', type: 'text', default: '', required: true, formula: true, fill: 'copy', width: 240,
       choiceProvider: 'control-controllers', emptyMessage: 'Add a controller on Cyanview’s Devices page.',
       enabledWhen: [{ field: 'actionType', values: commands.map(([value]) => value) }],
       // These only change the saved ticks, so nothing needs a controller. Left blank, they cover every controller.

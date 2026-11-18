@@ -81,6 +81,9 @@ test('new Matrix descriptor requires a named controller and declares camera seri
   assert.equal(matrix.fields.find(field => field.id === 'module.cameraNumber')!.fill, 'series');
   assert.equal(matrix.fields.find(field => field.id === 'module.controllerId')!.fill, 'copy');
   assert.equal(parseModuleMatrixValue(matrix.fields.find(field => field.id === 'module.controllerId')!, 'CY-RCP-1-10'), 'CY-RCP-1-10');
+  // Typing = in Cyanview Controller makes a formula, as it does in Camera, so many rows can follow one cell.
+  assert.equal(matrix.fields.find(field => field.id === 'module.controllerId')!.formula, true);
+  assert.equal(matrix.fields.find(field => field.id === 'module.cameraNumber')!.formula, true);
   assert.ok(manifest.documents?.some(document => document.id === 'camera-control'));
   assert.equal(manifest.actions.some(action => 'legacy' in action && action.legacy), false);
 });
