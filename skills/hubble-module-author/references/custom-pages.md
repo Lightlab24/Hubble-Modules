@@ -77,7 +77,7 @@ for a normal sidebar page.
 
 Declare `service.page.<pageId>` as usual. Use this when a control's value lives in
 a module document, so a settings field would create a second saved copy. A
-frontend saves on its own schedule rather than with **Save Changes**; say so in
+frontend saves on its own schedule rather than with **Save changes**; say so in
 its text. It uses the same sandbox and scoped bridge as any other custom page.
 `height` can be as low as 48 for a single settings row.
 

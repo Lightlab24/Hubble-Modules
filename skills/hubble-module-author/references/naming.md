@@ -65,6 +65,42 @@ sheet. Counts, busy labels and field errors follow the same rule: keep a count v
 at zero, keep a button's label while it works, and reserve the line under a field.
 Check it by measuring positions before and after each state, not by eye.
 
+## Dropdowns
+
+Only Hubble's dropdown, never the system's. A plain `<select>` on a page that links
+Hubble's stylesheet already opens Hubble's list ([Hubble's look](theme.md)); in a sheet
+cell, declare `choices`. Every list follows the same rules:
+
+- the chosen row carries a tick at the right;
+- rows are 30 px tall;
+- a list of more than ten choices shows a search box, and a shorter one narrows as you
+  type;
+- groups carry a small label above them.
+
+Rows where several can be on at once are tick boxes, with the tick at the left.
+
+## Buttons that work for a while
+
+A button keeps its label and its width while it works. Do not swap `Save changes` for
+`Saving…`: the shorter label makes the button narrower and moves its neighbours. Mark it
+busy, give assistive technology the working text, and show progress in a place that is
+already there, such as a line along the button's bottom edge or the page's status line.
+
+Buttons, menu items and dialog titles take a capital on the first word only: `Save
+changes`, `Add action column`. Names of things keep theirs: `Button Matrix`, `Status Log`.
+
+## Empty lists
+
+`No <things> yet` when nothing exists, and `No <things> match your search` when a search
+finds nothing. No full stop on a one-line message.
+
+## Sizes and hints
+
+Controls come in three heights and one corner; take them from [Hubble's look](theme.md)
+and add no fourth. A hint on hover is Hubble's own, not the system's: in Hubble a plain
+`title` becomes one. A module page is a separate document, so keep a hint short enough to
+read at a glance and never put something the operator needs only in a hint.
+
 ## A page a module draws itself
 
 Keep the toolbar in this order, leaving out what the page does not have:

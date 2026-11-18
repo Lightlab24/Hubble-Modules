@@ -73,6 +73,9 @@ For what to call settings, Matrix columns, action choices and device states, and
 where an error may appear, read [names and wording](references/naming.md). An error
 must never push the page down or move a column.
 
+A page a module draws takes its colours, sizes and dropdowns from Hubble by name. Read
+[Hubble's look](references/theme.md) before writing a line of its styles.
+
 Read the developer kit’s `README.md` and `kit.json` first. SDK/tool release versions
 are independent of module versions and API 1. Choose a supported API, minimum full
 Hubble version and required host features; do not equate an SDK update with an app requirement. Use `service-client.mjs --url <operator-designated-origin> describe` to discover

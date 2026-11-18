@@ -278,10 +278,10 @@ body:has(#cyanview-design .hc-veil:not([hidden])) .hubble-column-resize-handles 
 #cyanview-design .hc-dropdown .hc-dropdown-value { overflow: hidden; text-overflow: ellipsis; }
 #cyanview-design .hc-dropdown.hc-dropdown-placeholder .hc-dropdown-value { color: var(--hc-secondary); }
 #cyanview-design .hc-dropdown.hc-dropdown-cell { width: 100%; min-width: 0; height: 100%; border-color: transparent; border-radius: 0; background: transparent; font-size: inherit; }
-#cyanview-design .hc-dropdown-menu { position: fixed; z-index: 1300; box-sizing: border-box; overflow: auto; padding: 6px; border: 1px solid light-dark(#c9c9c9, #555); border-radius: 7px; background: light-dark(#fff, #222); box-shadow: 0 8px 24px rgb(0 0 0 / 32%); color: var(--hc-strong); font-size: 13px; }
+#cyanview-design .hc-dropdown-menu { position: fixed; z-index: 1300; box-sizing: border-box; overflow: auto; padding: 6px; border: 1px solid light-dark(#c9c9c9, var(--hubble-line-strong, #555)); border-radius: 7px; background: light-dark(#fff, var(--hubble-raised, #222)); box-shadow: 0 8px 24px rgb(0 0 0 / 32%); color: var(--hc-strong); font-size: 13px; }
 #cyanview-design .hc-dropdown-group { padding: 6px 9px 4px; color: var(--hc-secondary); font-size: 11px; }
 #cyanview-design .hc-dropdown-option { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 30px; padding: 0 9px; border-radius: 4px; white-space: nowrap; }
-#cyanview-design .hc-dropdown-option.hc-dropdown-active { background: light-dark(#e8e8e8, #373737); }
+#cyanview-design .hc-dropdown-option.hc-dropdown-active { background: light-dark(#e8e8e8, var(--hubble-selected, #373737)); }
 #cyanview-design .hc-dropdown-option[aria-disabled="true"] { opacity: .45; }
 #cyanview-design .hc-dropdown-option.hc-dropdown-placeholder { color: var(--hc-secondary); }
 
@@ -342,3 +342,21 @@ body:has(#cyanview-design .hc-veil:not([hidden])) .hubble-column-resize-handles 
 #cyanview-design .hc-list-popover > footer .hc-button { font-size: 12px; }
 #cyanview-design .hc-device-saved td:first-child .hc-icon { width: 13px; height: 13px; vertical-align: -2px; }
 #cyanview-design .hc-list-table .hc-dropdown-cell { padding-left: 0; }
+
+/* Hubble's look. approved-ui.css is the approved design and is kept byte for byte, so the
+   dark values are pointed at Hubble's names here, after it. Each reads the value Hubble
+   hands the page (/api/module-controls/theme-v1.css) and falls back to the approved one
+   on a Hubble that does not serve the stylesheet. */
+#cyanview-design {
+  --hc-window: light-dark(#f7f7f7, var(--hubble-sheet, #111111));
+  --hc-chrome: light-dark(#ededed, var(--hubble-bar, #181818));
+  --hc-surface: light-dark(#ffffff, var(--hubble-raised, #202020));
+  --hc-hover: light-dark(#e5e5e5, var(--hubble-hover, #303030));
+  --hc-selected: light-dark(#dedede, var(--hubble-selected, #373737));
+  --hc-line: light-dark(#d5d5d5, var(--hubble-line-strong, #3b3b3b));
+  --hc-grid: light-dark(#e6e6e6, var(--hubble-line, #292929));
+  --hc-text: light-dark(#252525, var(--hubble-text, #dedede));
+  --hc-strong: light-dark(#111111, var(--hubble-text-strong, #f4f4f4));
+  --hc-secondary: light-dark(#626262, var(--hubble-text-secondary, #aaaaaa));
+}
+#cyanview-design :is(button, input, select):focus-visible { outline-color: var(--hubble-focus, var(--hc-focus)); }

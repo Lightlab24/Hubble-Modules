@@ -153,6 +153,7 @@ try {
     "skills/hubble-module-author/references/controls.md",
     "skills/hubble-module-author/references/spreadsheet-styling.md",
     "skills/hubble-module-author/references/naming.md",
+    "skills/hubble-module-author/references/theme.md",
     "examples/custom-canvas/src/manifest.ts",
     "examples/custom-canvas/src/index.ts",
     "examples/custom-canvas/src/frontend.ts",
