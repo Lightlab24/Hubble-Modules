@@ -477,6 +477,8 @@ export class CameraControl {
       // A named controller with no camera under the number in the setup has nothing to reach, unless the controller has one.
       if (reach && !reach.target && !matches.length) connection = 'not-configured';
       if (reach) connection = this.withoutRio(connection, matches);
+      // A key naming a controller the setup doesn't have, or with no controller to ask, has no camera set up behind it.
+      if (cameraCommands.includes(command) && !device && !devices.length) connection = 'not-configured';
       if (session?.snapshot().phase === 'ready') {
         if (command === 'select-camera') {
           const current = this.selectedCamera(device!.id, session);

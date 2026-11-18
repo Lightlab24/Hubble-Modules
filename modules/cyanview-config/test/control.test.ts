@@ -1282,7 +1282,9 @@ test('a camera row for a camera no controller has reads Not configured, never On
     // Both controllers list cameras 1 and 2 only. Camera 6 is named on the first, camera 7 on none.
     const row = (id: string, actionType: string, controllerId: string, cameraNumber: number) => ({ id: 'camera-control', fields: { actionId: id, actionColumnId: 'column-one',
       values: { enabled: true, actionType, 'module.controllerId': controllerId, 'module.cameraNumber': cameraNumber, 'module.feedbackEnabled': true, 'module.feedbackColor': '#333333 | #00FF00' } } });
-    const rows = [row('named-6', 'toggle-camera-enabled', s.ids[0]!, 6), row('record-6', 'record-camera', s.ids[0]!, 6), row('any-7', 'toggle-camera-enabled', '', 7), row('named-1', 'toggle-camera-enabled', s.ids[0]!, 1)];
+    const rows = [row('named-6', 'toggle-camera-enabled', s.ids[0]!, 6), row('record-6', 'record-camera', s.ids[0]!, 6), row('any-7', 'toggle-camera-enabled', '', 7), row('named-1', 'toggle-camera-enabled', s.ids[0]!, 1),
+      // A controller the setup doesn't have (Nov 18 2026: CY-RCP-76-108), and a Select camera key with none named.
+      row('ghost-1', 'select-camera', 'CY-RCP-76-108', 1), row('loose-1', 'select-camera', '', 1)];
     const triggers = (id: string) => JSON.stringify(object(object([...s.f.feedback].reverse().find(item => object(object(item).fields).actionId === id)).appearance).triggers);
     await s.f.instance.subscribeFeedback!(rows, { signal: s.f.signal });
     await eventually(() => s.sessions.length === 2 && s.sessions.every(session => session.snapshot().phase === 'ready'));
@@ -1290,6 +1292,8 @@ test('a camera row for a camera no controller has reads Not configured, never On
     assert.equal(triggers('named-6'), '["not-configured"]');
     assert.equal(triggers('record-6'), '["not-configured"]');
     assert.equal(triggers('any-7'), '["not-configured"]');
+    assert.equal(triggers('ghost-1'), '["not-configured"]');
+    assert.equal(triggers('loose-1'), '["not-configured"]');
     // A camera that turns up on the controller follows its own report from then on.
     s.networks[0]!.send('unit/f/camhead/status/persist/number', '6');
     s.networks[0]!.send('unit/f/camhead/status/volatile/control', 'online');
