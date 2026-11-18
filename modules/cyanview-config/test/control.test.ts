@@ -1072,7 +1072,7 @@ test('a controller reads Offline only once a connection has failed, and a reconn
   } finally { await s.close(); }
 });
 
-test('a camera reads online only from its own report, and a listed camera with no report reads offline', async () => {
+test('a camera reads online only from its own report, and a listed camera with no report reads RIO offline', async () => {
   const s = await fleet();
   try {
     const base = s.plan.cameras[0]!, live = () => object(cameraControl(s.f).cameras);
@@ -1081,8 +1081,8 @@ test('a camera reads online only from its own report, and a listed camera with n
     await s.save();
     await eventually(() => live()[base.id]?.online === true);
     s.networks[0]!.send('unit/c/camhead/status/persist/number', '3');
-    await eventually(() => live().quiet?.message === 'Camera offline');
-    assert.deepEqual(live().quiet, { recording: 'unknown', available: false, message: 'Camera offline', online: false });
+    await eventually(() => live().quiet?.message === 'RIO offline');
+    assert.deepEqual(live().quiet, { recording: 'unknown', available: false, message: 'RIO offline', online: false });
     assert.equal(live().absent.online, null);
     assert.equal(live().absent.message, 'Camera number was not found on this RCP');
     assert.equal(live().staged.online, null);
@@ -1275,7 +1275,7 @@ test('a camera row with no controller named rolls with its camera and stays onli
   } finally { await s.close(); }
 });
 
-test('a camera row for a camera no controller has reads Offline, never Online from its controller being up', async () => {
+test('a camera row for a camera no controller has reads RIO offline, never Online from its controller being up', async () => {
   const s = await fleet();
   try {
     // Both controllers list cameras 1 and 2 only. Camera 6 is named on the first, camera 7 on none.
@@ -1286,19 +1286,19 @@ test('a camera row for a camera no controller has reads Offline, never Online fr
     await s.f.instance.subscribeFeedback!(rows, { signal: s.f.signal });
     await eventually(() => s.sessions.length === 2 && s.sessions.every(session => session.snapshot().phase === 'ready'));
     await eventually(() => triggers('named-1') === '["online"]');
-    assert.equal(triggers('named-6'), '["offline"]');
-    assert.equal(triggers('record-6'), '["offline"]');
-    assert.equal(triggers('any-7'), '["offline"]');
+    assert.equal(triggers('named-6'), '["rio-offline"]');
+    assert.equal(triggers('record-6'), '["rio-offline"]');
+    assert.equal(triggers('any-7'), '["rio-offline"]');
     // A camera that turns up on the controller follows its own report from then on.
     s.networks[0]!.send('unit/f/camhead/status/persist/number', '6');
     s.networks[0]!.send('unit/f/camhead/status/volatile/control', 'online');
     await eventually(() => triggers('named-6') === '["online"]');
-    assert.equal(triggers('any-7'), '["offline"]');
+    assert.equal(triggers('any-7'), '["rio-offline"]');
     assert.equal(s.networks[0]!.commands.length + s.networks[1]!.commands.length, 0, 'Watching sends nothing');
   } finally { await s.close(); }
 });
 
-test('a camera the controller lists with no connection report reads Offline, as when its RIO is off the network', async () => {
+test('a camera key shows its path: RIO offline with no report, Camera offline with the RIO and no camera, then Online', async () => {
   const s = await fleet();
   try {
     // RCP 1, Nov 18 2026: cameras 1-5 listed by number and name, their RIOs off the network, no connection report at all.
@@ -1314,21 +1314,38 @@ test('a camera the controller lists with no connection report reads Offline, as 
     for (const network of s.networks) { network.controls.unreported = ['b']; network.disconnect(); }
     await eventually(() => s.sessions.length >= 2 && s.sessions.every(session => session.snapshot().phase !== 'ready'));
     await eventually(() => s.sessions.every(session => session.snapshot().phase === 'ready'), 2000);
-    await eventually(() => triggers('named-2') === '["offline"]');
-    assert.equal(triggers('select-2'), '["offline"]');
-    assert.equal(triggers('any-2'), '["offline"]', 'No controller reaches it, so a row with none named is offline too');
+    await eventually(() => triggers('named-2') === '["rio-offline"]');
+    assert.equal(triggers('select-2'), '["rio-offline"]');
+    assert.equal(triggers('any-2'), '["rio-offline"]', 'No controller reaches its RIO, so a row with none named reads RIO offline too');
     await eventually(() => triggers('named-1') === '["online"]');
-    if (tight) assert.deepEqual(live()[tight.id], { recording: 'unknown', available: false, message: 'Camera offline', online: false });
-    // The RIO comes back and the camera reports itself.
+    if (tight) assert.deepEqual(live()[tight.id], { recording: 'unknown', available: false, message: 'RIO offline', online: false });
+    // The RIO comes back with no camera on it.
+    s.networks[0]!.send('unit/b/camhead/status/volatile/control', 'offline', true);
+    await eventually(() => triggers('named-2') === '["offline"]');
+    if (tight) assert.equal(live()[tight.id]?.message, 'Camera offline');
+    // A row with none named takes the furthest any controller gets: the second still has no report.
+    await eventually(() => triggers('any-2') === '["offline"]');
+    // The camera is plugged in.
     s.networks[0]!.send('unit/b/camhead/status/volatile/control', 'online', true);
     await eventually(() => triggers('named-2') === '["online"]');
     await eventually(() => triggers('any-2') === '["online"]');
     // The RIO goes again and the RCP drops its report.
     s.networks[0]!.send('unit/b/camhead/status/volatile/control', '', true);
-    await eventually(() => triggers('named-2') === '["offline"]');
-    await eventually(() => triggers('any-2') === '["offline"]');
+    await eventually(() => triggers('named-2') === '["rio-offline"]');
+    await eventually(() => triggers('any-2') === '["rio-offline"]');
     assert.equal(s.networks[0]!.commands.length + s.networks[1]!.commands.length, 0, 'Watching sends nothing');
   } finally { await s.close(); }
+});
+
+test('the connection path lights the bar by default, one state at a time, and Recording rings the outline beside it', () => {
+  const path = matrix.triggers!.filter(trigger => ['online', 'offline', 'rio-offline'].includes(trigger.id));
+  assert.deepEqual(path.map(trigger => [trigger.id, trigger.label, trigger.part, trigger.color, trigger.effect ?? null]), [
+    ['online', 'Online', 'bar', '#2563EB', null], ['offline', 'Camera offline', 'bar', '#E0C829', null], ['rio-offline', 'RIO offline', 'bar', '#F97316', null]]);
+  for (const trigger of path) assert.deepEqual(trigger.when, [{ field: 'actionType', values: ['select-camera', 'record-camera', 'toggle-camera-enabled'] }]);
+  const recording = matrix.triggers!.find(trigger => trigger.id === 'recording');
+  assert.deepEqual(recording && [recording.part, recording.effect], ['outline', { kind: 'fade', cycleMs: 2000 }]);
+  assert.ok(!matrix.triggers!.some(trigger => trigger.part === 'bar' && trigger.when?.some(condition => condition.values.includes('toggle-camera-enabled')) && !path.includes(trigger)),
+    'Nothing else on an Enable/Disable camera key competes with the path for the bar');
 });
 
 test('group rows report all or some of their cameras, and only their own triggers', async () => {

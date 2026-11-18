@@ -47,9 +47,12 @@ export const feedbackTriggers = [
   { id: 'stopping', label: 'Stopping', part: 'background', color: '#37A65B', effect: { kind: 'blink', cycleMs: 400 }, when: forActions('record-camera') },
   { id: 'rolling', label: 'Recording', part: 'background', color: '#E3242B', when: forActions('record-camera') },
   { id: 'enabled', label: 'Enabled', part: 'background', color: '#37A65B', when: forActions('toggle-camera-enabled') },
-  { id: 'recording', label: 'Recording', part: 'bar', color: '#E3242B', effect: { kind: 'blink', cycleMs: 800 }, when: forActions('select-camera', 'toggle-camera-enabled') },
-  { id: 'online', label: 'Online', part: 'outline', color: '#2563EB', when: forActions(...cameraActions) },
-  { id: 'offline', label: 'Offline', part: 'outline', color: '#8A8F98', effect: { kind: 'fade', cycleMs: 2000 }, when: forActions(...cameraActions) },
+  // The bar is the camera's connection path, so Recording rings the outline beside it.
+  { id: 'recording', label: 'Recording', part: 'outline', color: '#E3242B', effect: { kind: 'fade', cycleMs: 2000 }, when: forActions('select-camera', 'toggle-camera-enabled') },
+  // The connection path, one at a time: online, its RIO reached with no camera there, or its RIO not reached.
+  { id: 'online', label: 'Online', part: 'bar', color: '#2563EB', when: forActions(...cameraActions) },
+  { id: 'offline', label: 'Camera offline', part: 'bar', color: '#E0C829', when: forActions(...cameraActions) },
+  { id: 'rio-offline', label: 'RIO offline', part: 'bar', color: '#F97316', when: forActions(...cameraActions) },
   { id: 'all-enabled', label: 'All enabled', part: 'background', color: '#37A65B', when: forActions('enable-all-cameras') },
   { id: 'some-enabled', label: 'Some enabled', part: 'background', color: '#F59E0B', when: forActions('enable-all-cameras') },
   { id: 'single-switch', label: 'Single switch on', part: 'background', color: '#37A65B', when: forActions('single-switch') },

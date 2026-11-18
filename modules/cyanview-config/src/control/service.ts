@@ -40,11 +40,17 @@ const controllerQueue = (id: unknown) => `controller/${String(id)}`;
 // address it was added by is only the way back while the base won't connect.
 const mqttHost = (device: RecordValue) => String(device.base || device.address || '');
 /**
- * Whether a camera a ready controller lists is connected. The RCP keeps a connection report for every camera whose RIO
- * is up, and a new listener has it before the controller reads as ready. A camera it lists with no report has no RIO
- * reaching it (RCP 1, Nov 18 2026: cameras 1-5 listed, their RIOs off the network, no report), so it is offline.
+ * A camera's path as the controller sees it: online, its RIO reached with no camera there, or its RIO not reached.
+ * The RCP keeps a connection report for every camera whose RIO is up, "online" or "offline", and a new listener has it
+ * before the controller reads as ready. A camera it lists with no report has no RIO reaching it (RCP 1, Nov 18 2026:
+ * cameras 1-5 listed, their RIOs off the network, no report). The RIO is the camera's only way in, and a Gateway or
+ * controller that drops reaches no RIO either, so those read as RIO offline too.
  */
-const reportedOnline = (observation: { readonly online: boolean | null }) => observation.online === true;
+type Connection = 'online' | 'camera-offline' | 'rio-offline';
+const reportedConnection = (observation: { readonly online: boolean | null }): Connection =>
+  observation.online === true ? 'online' : observation.online === false ? 'camera-offline' : 'rio-offline';
+/** The key trigger for each connection state. */
+const connectionTrigger: Record<Connection, string> = { online: 'online', 'camera-offline': 'offline', 'rio-offline': 'rio-offline' };
 const mqttFallback = (device: RecordValue) => {
   const saved = String(device.address || '');
   return saved && saved !== mqttHost(device) ? saved : undefined;
@@ -118,17 +124,17 @@ export class CameraControl {
     try { return session.captureCamera(number, key).observation.online; } catch { return null; }
   }
   /**
-   * A camera as one controller can reach it, for a key's Online and Offline: online only when the camera reports it,
-   * offline when the controller is down, doesn't list that number, or lists it with no connection report, and null while
-   * that isn't known. The controller being up is not enough.
+   * A camera as one controller can reach it, for a key's connection: its own report, RIO offline when the controller is
+   * down, doesn't list that number, or lists it with no report, and null while that isn't known (a number listed twice).
+   * The controller being up is not enough.
    */
-  private cameraReach(session: RcpSession | undefined, number: number): { online: boolean | null; target: CyanViewCameraTarget | null } {
-    if (!session) return { online: null, target: null };
-    if (session.snapshot().phase !== 'ready') return { online: false, target: null };
+  private cameraReach(session: RcpSession | undefined, number: number): { connection: Connection | null; target: CyanViewCameraTarget | null } {
+    if (!session) return { connection: null, target: null };
+    if (session.snapshot().phase !== 'ready') return { connection: 'rio-offline', target: null };
     try {
       const target = session.captureCamera(number);
-      return { online: reportedOnline(target.observation), target };
-    } catch { return { online: session.listsCamera(number) === false ? false : null, target: null }; }
+      return { connection: reportedConnection(target.observation), target };
+    } catch { return { connection: session.listsCamera(number) === false ? 'rio-offline' : null, target: null }; }
   }
   async refreshPlan(signal: AbortSignal) { this.setPlan((await this.repository.read(signal)).plan); }
   state() {
@@ -157,7 +163,8 @@ export class CameraControl {
     let target: CyanViewCameraTarget;
     try { target = session.captureCamera(Number(row.number), String(row.elementKey ?? '')); } catch (error) { return unavailable(message(error)); }
     const { observation } = target;
-    if (!reportedOnline(observation)) return unavailable('Camera offline', false);
+    const connected = reportedConnection(observation);
+    if (connected !== 'online') return unavailable(connected === 'rio-offline' ? 'RIO offline' : 'Camera offline', false);
     const trustworthy = this.recording.usableObservation(`${row.device}/${target.address}`, target, observation);
     const known = trustworthy && observation.recording !== null;
     const last = this.results.get(row.id);
@@ -415,7 +422,7 @@ export class CameraControl {
       if (resolved) cells['module.cameraNumber'] = { label: `${matches[0]!.number} · ${matches[0]!.name || 'Camera'}`, color: null };
       let active: boolean | null = null;
       // Recording and connection, reported as triggers beside the row's own state. Null is not known yet.
-      let recording: boolean | null = null, online: boolean | null = null, stopping = false;
+      let recording: boolean | null = null, connection: Connection | null = null, stopping = false;
       // Group rows: every one, or only some, of their cameras enabled or rolling.
       let all = false, some = false;
       if (command === 'toggle-camera-enabled' && resolved) active = matches.every(row => selected.enabled[row.id] === true);
@@ -425,26 +432,29 @@ export class CameraControl {
         some = !all && rows.some(row => selected.enabled[row.id]);
       }
       if (devices.length && command === 'single-switch') active = devices.every(item => selected.singleSwitch[item.id] === true);
-      // Online and Offline on a camera row are the camera's own. A controller being up says nothing about a camera it doesn't have.
-      // With no controller named, a camera row follows that camera on every controller that has it:
-      // online when any of them sees it online, offline only when none can, and recording when any of them sees it roll.
+      // A camera row's connection is the camera's own path. A controller being up says nothing about a camera it doesn't have.
+      // With no controller named, a camera row follows that camera on every controller that has it: online when any of
+      // them sees it online, Camera offline when any reaches its RIO, RIO offline when none does, and recording when any sees it roll.
       if (!device && cameraCommands.includes(command) && devices.length) {
         const seen = matches.flatMap(row => {
           const own = this.plan.devices.find(item => item.id === row.device), owner = own && this.sessions.get(own.id);
           if (!owner) return [];
-          const { online: reached, target } = this.cameraReach(owner, Number(row.number)), observation = target?.observation;
+          const { connection: reached, target } = this.cameraReach(owner, Number(row.number)), observation = target?.observation;
           const usable = !!target && observation!.online === true && observation!.recording !== null && this.recording.usableObservation(`${own.id}/${target.address}`, target, observation!);
-          return [{ online: reached, recording: usable ? observation!.recording : null }];
+          return [{ connection: reached, recording: usable ? observation!.recording : null }];
         });
         // A number no controller has is a camera Hubble can't reach.
-        if (!matches.length) online = devices.every(item => this.sessions.has(item.id)) ? false : null;
-        else if (seen.length) online = seen.some(item => item.online === true) ? true : seen.every(item => item.online === false) ? false : null;
+        // Online through any controller; otherwise the RIO is reached if any controller reaches it.
+        if (!matches.length) connection = devices.every(item => this.sessions.has(item.id)) ? 'rio-offline' : null;
+        else if (seen.length) connection = seen.some(item => item.connection === 'online') ? 'online'
+          : seen.some(item => item.connection === 'camera-offline') ? 'camera-offline'
+          : seen.every(item => item.connection === 'rio-offline') ? 'rio-offline' : null;
         if (seen.some(item => item.recording === true)) recording = true;
         else if (seen.length && seen.every(item => item.recording === false)) recording = false;
       }
       // A camera row with a controller named follows its camera there, found by number the same way its press finds it, as reported over MQTT.
       const reach = device && cameraCommands.includes(command) ? this.cameraReach(session, Number(values['module.cameraNumber'])) : null;
-      if (reach) online = reach.online;
+      if (reach) connection = reach.connection;
       if (session?.snapshot().phase === 'ready') {
         if (command === 'select-camera') {
           const current = this.selectedCamera(device!.id, session);
@@ -484,8 +494,8 @@ export class CameraControl {
         'single-switch': [active === true && 'single-switch'],
       };
       for (const action of ['roll-enabled-cameras', 'stop-enabled-cameras', 'roll-toggle-enabled-cameras']) own[action] = [all && 'all-rolling', some && 'some-rolling'];
-      const connection = cameraCommands.includes(command) ? [online === true && 'online', online === false && 'offline'] : [];
-      const triggers = !observing ? null : [...(own[command] ?? []), ...connection].filter((id): id is string => typeof id === 'string');
+      const path = cameraCommands.includes(command) && connection !== null ? [connectionTrigger[connection]] : [];
+      const triggers = !observing ? null : [...(own[command] ?? []), ...path].filter((id): id is string => typeof id === 'string');
       // Hubble with feedback triggers draws the key from `triggers`; the colour is for older hosts.
       const appearance = { cells, backgroundColor: !observing || active === null ? null : active ? colors.at(-1) ?? null : colors.length === 2 ? colors[0]! : null, triggers };
       // observedAt marks a change of state, not a heartbeat, so repeated camera traffic stays off the host.

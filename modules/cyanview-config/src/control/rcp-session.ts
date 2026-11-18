@@ -674,9 +674,10 @@ export class RcpSession {
       else if (scope === "persist" && field === "gain_mode")
         next = { ...prior, baseGain: payload.trim() || null };
       else if (scope === "volatile" && field === "control")
+        // An empty report is the RCP clearing the one it kept, as when the camera's RIO goes: nothing reaches it now.
         next = {
           ...prior,
-          online: payload === "online",
+          online: payload === "online" ? true : payload === "" ? null : false,
           ...(payload === "online" ? {} : { recording: null }),
         };
       else if (scope === "volatile" && field === "recording")
