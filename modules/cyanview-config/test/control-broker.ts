@@ -42,6 +42,8 @@ export async function broker(port = 0, options: { onlyHubble?: boolean } = {}) {
     capabilities: true,
     silent: false,
     root: "unit",
+    // Cameras listed with no connection report, as the RCP holds them while their RIO is off the network.
+    unreported: [] as string[],
   };
   let connections = 0;
   let inFlight = 0;
@@ -118,13 +120,14 @@ export async function broker(port = 0, options: { onlyHubble?: boolean } = {}) {
                 true,
               ),
             );
-            socket.write(
-              publish(
-                `${controls.root}/${id}/camhead/status/volatile/control`,
-                "online",
-                true,
-              ),
-            );
+            if (!controls.unreported.includes(id))
+              socket.write(
+                publish(
+                  `${controls.root}/${id}/camhead/status/volatile/control`,
+                  "online",
+                  true,
+                ),
+              );
             if (controls.capabilities)
               socket.write(
                 publish(

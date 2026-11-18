@@ -39,6 +39,12 @@ const controllerQueue = (id: unknown) => `controller/${String(id)}`;
 // MQTT goes to a controller's own base address (10.192…), which no other controller can share. The
 // address it was added by is only the way back while the base won't connect.
 const mqttHost = (device: RecordValue) => String(device.base || device.address || '');
+/**
+ * Whether a camera a ready controller lists is connected. The RCP keeps a connection report for every camera whose RIO
+ * is up, and a new listener has it before the controller reads as ready. A camera it lists with no report has no RIO
+ * reaching it (RCP 1, Nov 18 2026: cameras 1-5 listed, their RIOs off the network, no report), so it is offline.
+ */
+const reportedOnline = (observation: { readonly online: boolean | null }) => observation.online === true;
 const mqttFallback = (device: RecordValue) => {
   const saved = String(device.address || '');
   return saved && saved !== mqttHost(device) ? saved : undefined;
@@ -112,15 +118,16 @@ export class CameraControl {
     try { return session.captureCamera(number, key).observation.online; } catch { return null; }
   }
   /**
-   * A camera as one controller can reach it, for a key's Online and Offline: the camera's own report, offline when the
-   * controller is down or doesn't list that number, and null while that isn't known. The controller being up is not enough.
+   * A camera as one controller can reach it, for a key's Online and Offline: online only when the camera reports it,
+   * offline when the controller is down, doesn't list that number, or lists it with no connection report, and null while
+   * that isn't known. The controller being up is not enough.
    */
   private cameraReach(session: RcpSession | undefined, number: number): { online: boolean | null; target: CyanViewCameraTarget | null } {
     if (!session) return { online: null, target: null };
     if (session.snapshot().phase !== 'ready') return { online: false, target: null };
     try {
       const target = session.captureCamera(number);
-      return { online: target.observation.online, target };
+      return { online: reportedOnline(target.observation), target };
     } catch { return { online: session.listsCamera(number) === false ? false : null, target: null }; }
   }
   async refreshPlan(signal: AbortSignal) { this.setPlan((await this.repository.read(signal)).plan); }
@@ -150,8 +157,7 @@ export class CameraControl {
     let target: CyanViewCameraTarget;
     try { target = session.captureCamera(Number(row.number), String(row.elementKey ?? '')); } catch (error) { return unavailable(message(error)); }
     const { observation } = target;
-    if (observation.online === null) return unavailable('Waiting for camera status');
-    if (!observation.online) return unavailable('Camera offline', false);
+    if (!reportedOnline(observation)) return unavailable('Camera offline', false);
     const trustworthy = this.recording.usableObservation(`${row.device}/${target.address}`, target, observation);
     const known = trustworthy && observation.recording !== null;
     const last = this.results.get(row.id);

@@ -678,7 +678,7 @@ test('a camera that isn\u2019t connected is sent nothing, on any command, and th
     network.send('unit/c/camhead/status/persist/number', '3');
     s.plan.cameras.push({ ...wide!, id: 'quiet', elementKey: 'c', number: '3' }); await s.save();
     s.a.config.Camera.c = { Number: '3', Name: 'Quiet', Model: 'Sony - Venice-IP' };
-    await eventually(() => live().quiet?.online === null);
+    await eventually(() => live().quiet?.online === false);
     assert.equal((await s.run('record-camera', 0, 3)).status, 'failure');
     assert.deepEqual(sent(), []);
     // The panel works the same way.
@@ -1072,7 +1072,7 @@ test('a controller reads Offline only once a connection has failed, and a reconn
   } finally { await s.close(); }
 });
 
-test('a camera reads online or offline only from what it has reported', async () => {
+test('a camera reads online only from its own report, and a listed camera with no report reads offline', async () => {
   const s = await fleet();
   try {
     const base = s.plan.cameras[0]!, live = () => object(cameraControl(s.f).cameras);
@@ -1081,8 +1081,8 @@ test('a camera reads online or offline only from what it has reported', async ()
     await s.save();
     await eventually(() => live()[base.id]?.online === true);
     s.networks[0]!.send('unit/c/camhead/status/persist/number', '3');
-    await eventually(() => live().quiet?.message === 'Waiting for camera status');
-    assert.deepEqual(live().quiet, { recording: 'unknown', available: false, message: 'Waiting for camera status', online: null });
+    await eventually(() => live().quiet?.message === 'Camera offline');
+    assert.deepEqual(live().quiet, { recording: 'unknown', available: false, message: 'Camera offline', online: false });
     assert.equal(live().absent.online, null);
     assert.equal(live().absent.message, 'Camera number was not found on this RCP');
     assert.equal(live().staged.online, null);
@@ -1294,6 +1294,39 @@ test('a camera row for a camera no controller has reads Offline, never Online fr
     s.networks[0]!.send('unit/f/camhead/status/volatile/control', 'online');
     await eventually(() => triggers('named-6') === '["online"]');
     assert.equal(triggers('any-7'), '["offline"]');
+    assert.equal(s.networks[0]!.commands.length + s.networks[1]!.commands.length, 0, 'Watching sends nothing');
+  } finally { await s.close(); }
+});
+
+test('a camera the controller lists with no connection report reads Offline, as when its RIO is off the network', async () => {
+  const s = await fleet();
+  try {
+    // RCP 1, Nov 18 2026: cameras 1-5 listed by number and name, their RIOs off the network, no connection report at all.
+    const row = (id: string, actionType: string, controllerId: string, cameraNumber: number) => ({ id: 'camera-control', fields: { actionId: id, actionColumnId: 'column-one',
+      values: { enabled: true, actionType, 'module.controllerId': controllerId, 'module.cameraNumber': cameraNumber, 'module.feedbackEnabled': true, 'module.feedbackColor': '#333333 | #00FF00' } } });
+    const rows = [row('named-2', 'toggle-camera-enabled', s.ids[0]!, 2), row('select-2', 'select-camera', s.ids[0]!, 2), row('any-2', 'toggle-camera-enabled', '', 2),
+      row('named-1', 'toggle-camera-enabled', s.ids[0]!, 1)];
+    const triggers = (id: string) => JSON.stringify(object(object([...s.f.feedback].reverse().find(item => object(object(item).fields).actionId === id)).appearance).triggers);
+    const live = () => object(cameraControl(s.f).cameras), tight = s.plan.cameras.find(camera => camera.number === '2' && camera.device === s.ids[0]);
+    await s.f.instance.subscribeFeedback!(rows, { signal: s.f.signal });
+    await eventually(() => triggers('named-2') === '["online"]');
+    // Both controllers reconnect and hand over what they keep: camera 2 is listed, with no report.
+    for (const network of s.networks) { network.controls.unreported = ['b']; network.disconnect(); }
+    await eventually(() => s.sessions.length >= 2 && s.sessions.every(session => session.snapshot().phase !== 'ready'));
+    await eventually(() => s.sessions.every(session => session.snapshot().phase === 'ready'), 2000);
+    await eventually(() => triggers('named-2') === '["offline"]');
+    assert.equal(triggers('select-2'), '["offline"]');
+    assert.equal(triggers('any-2'), '["offline"]', 'No controller reaches it, so a row with none named is offline too');
+    await eventually(() => triggers('named-1') === '["online"]');
+    if (tight) assert.deepEqual(live()[tight.id], { recording: 'unknown', available: false, message: 'Camera offline', online: false });
+    // The RIO comes back and the camera reports itself.
+    s.networks[0]!.send('unit/b/camhead/status/volatile/control', 'online', true);
+    await eventually(() => triggers('named-2') === '["online"]');
+    await eventually(() => triggers('any-2') === '["online"]');
+    // The RIO goes again and the RCP drops its report.
+    s.networks[0]!.send('unit/b/camhead/status/volatile/control', '', true);
+    await eventually(() => triggers('named-2') === '["offline"]');
+    await eventually(() => triggers('any-2') === '["offline"]');
     assert.equal(s.networks[0]!.commands.length + s.networks[1]!.commands.length, 0, 'Watching sends nothing');
   } finally { await s.close(); }
 });
