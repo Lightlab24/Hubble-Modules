@@ -295,7 +295,8 @@ highest priority first, each with the part it lights by default:
 ```
 
 `part` is `background`, `outline` or `bar`; `effect` is optional and steady when
-absent. Up to 16 triggers, with unique IDs.
+absent. Up to 64 triggers, with unique IDs. A matrix with more than 16 needs
+`module-feedback-triggers-64-v1` in `host.requiredFeatures`, since older hosts refuse it.
 
 When different rows mean different things, give a trigger `when`, the same conditions
 fields use for `enabledWhen`, so it belongs only to those rows. With

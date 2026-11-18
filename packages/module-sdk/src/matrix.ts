@@ -416,9 +416,10 @@ const MatrixDefinitionSchema = z
     /**
      * Feedback states, highest priority first. A row's feedback reports which are on; each
      * lights its part, and when two want the same part the higher one wins. Operators can
-     * change any trigger's look per row. Requires module-feedback-triggers-v1.
+     * change any trigger's look per row. Requires module-feedback-triggers-v1. Up to 64; a matrix
+     * with more than 16 requires module-feedback-triggers-64-v1, which older hosts refuse.
      */
-    triggers: z.array(ModuleFeedbackTriggerSchema).max(16).optional(),
+    triggers: z.array(ModuleFeedbackTriggerSchema).max(64).optional(),
     /** The colour field whose cell edits the triggers' looks; the first colour field if absent. */
     triggerField: Id.optional(),
     /**
@@ -782,7 +783,7 @@ export const ModuleFeedbackAppearanceSchema = z.strictObject({
    * the triggers' looks and ignores the colours and effects above. Requires
    * module-feedback-triggers-v1.
    */
-  triggers: z.array(Id).max(16).nullable().optional(),
+  triggers: z.array(Id).max(64).nullable().optional(),
   glow: z
     .strictObject({ color: Color, cycleMs: z.int().min(500).max(10000) })
     .nullable()
