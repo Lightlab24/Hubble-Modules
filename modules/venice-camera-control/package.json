@@ -1,6 +1,6 @@
 {
   "name": "@hubble-module/venice-camera-control",
-  "version": "0.1.28",
+  "version": "0.1.29",
   "private": true,
   "type": "module",
   "description": "Sony VENICE 2 camera control using Hubble spreadsheet controls",
@@ -19,7 +19,7 @@
     "build": "hubble-module build .",
     "test": "hubble-module test .",
     "typecheck": "tsc --noEmit",
-    "package": "hubble-module build . && hubble-module test . && hubble-module pack . ../../artifacts/venice-camera-control-0.1.28.hubble-module"
+    "package": "hubble-module build . && hubble-module test . && hubble-module pack . ../../artifacts/venice-camera-control-0.1.29.hubble-module"
   },
   "dependencies": {
     "@hubble/module-sdk": "workspace:1.8.0",

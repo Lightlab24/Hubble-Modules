@@ -1,6 +1,6 @@
 # Flanders
 
-Module ID `flanders-monitor`, version 0.2.0. Presses keys on Flanders Scientific (FSI) monitors from
+Module ID `flanders-monitor`, version 0.2.1. Presses keys on Flanders Scientific (FSI) monitors from
 Hubble buttons, the same keys FSI's "Flanders Controls" Stream Deck scripts press. It is a workspace
 module: add it once, and its **Flanders** page lists every monitor. It needs Hubble 2.2.0 or later.
 

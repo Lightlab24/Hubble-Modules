@@ -139,7 +139,7 @@ function backend(monitors: MonitorDocument["monitors"], options: BackendOptions 
 
 describe("Flanders module", () => {
   it("declares one workspace module with a full Flanders page, its monitor document and a Monitor + Key column", () => {
-    const parsed = ModuleManifestSchema.parse({ ...source, id: "flanders-monitor", name: "Flanders", version: "0.2.0", entry: "module.mjs", files: ["module.mjs", "ui/index.html", "ui/monitor.svg"] });
+    const parsed = ModuleManifestSchema.parse({ ...source, id: "flanders-monitor", name: "Flanders", version: "0.2.1", entry: "module.mjs", files: ["module.mjs", "ui/index.html", "ui/monitor.svg"] });
     expect(parsed.instanceScope).toBe("workspace");
     expect(parsed.documents?.map((document) => document.id)).toEqual([DOCUMENT_ID]);
     expect(parsed.pages?.[0]).toMatchObject({ id: "flanders", label: "Flanders", layout: "full-page", sections: [{ type: "custom", id: "frontend" }] });
