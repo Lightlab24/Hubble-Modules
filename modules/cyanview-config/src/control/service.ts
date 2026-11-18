@@ -156,6 +156,22 @@ export class CameraControl {
     }
     return statuses;
   }
+  /**
+   * Whether a camera comes in through a RIO: the device it is plugged into, its own or the one its REMI copy comes
+   * from, is a RIO. A camera on a Gateway or RCP has no RIO to be offline (Nov 18 2026: cameras 6 and 10 on the
+   * Gateway). Where a copy's origin isn't known, it may come through one.
+   */
+  private throughRio(row: RecordValue): boolean {
+    const remi = row.remi as { origin?: { serial?: unknown } } | undefined;
+    const serial = String(remi ? remi.origin?.serial ?? '' : this.plan.devices.find(device => device.id === row.device)?.serial ?? '').toLowerCase();
+    if (!serial) return true;
+    const device = this.plan.devices.find(item => String(item.serial).toLowerCase() === serial);
+    return device ? device.kind === 'RIO' : serial.startsWith('cy-rio-');
+  }
+  /** A camera with no RIO can't have its RIO offline, so it reads Camera offline instead. */
+  private withoutRio(connection: Connection | null, rows: readonly RecordValue[]): Connection | null {
+    return connection === 'rio-offline' && rows.length > 0 && rows.every(row => !this.throughRio(row)) ? 'camera-offline' : connection;
+  }
   private cameraStatus(row: RecordValue, session: RcpSession): CameraStatus {
     const unavailable = (text: string, online: boolean | null = null): CameraStatus => ({ recording: 'unknown', available: false, message: text.slice(0, 256), online });
     if (!this.appliedRow(row)) return unavailable('Send this camera’s number before using Cyanview controls');
@@ -164,7 +180,7 @@ export class CameraControl {
     let target: CyanViewCameraTarget;
     try { target = session.captureCamera(Number(row.number), String(row.elementKey ?? '')); } catch (error) { return unavailable(message(error)); }
     const { observation } = target;
-    const connected = reportedConnection(observation);
+    const connected = this.withoutRio(reportedConnection(observation), [row]);
     if (connected !== 'online') return unavailable(connected === 'rio-offline' ? 'RIO offline' : 'Camera offline', false);
     const trustworthy = this.recording.usableObservation(`${row.device}/${target.address}`, target, observation);
     const known = trustworthy && observation.recording !== null;
@@ -440,7 +456,8 @@ export class CameraControl {
         const seen = matches.flatMap(row => {
           const own = this.plan.devices.find(item => item.id === row.device), owner = own && this.sessions.get(own.id);
           if (!owner) return [];
-          const { connection: reached, target } = this.cameraReach(owner, Number(row.number)), observation = target?.observation;
+          const { connection: found, target } = this.cameraReach(owner, Number(row.number)), observation = target?.observation;
+          const reached = this.withoutRio(found, [row]);
           const usable = !!target && observation!.online === true && observation!.recording !== null && this.recording.usableObservation(`${own.id}/${target.address}`, target, observation!);
           return [{ connection: reached, recording: usable ? observation!.recording : null }];
         });
@@ -459,6 +476,7 @@ export class CameraControl {
       if (reach) connection = reach.connection;
       // A named controller with no camera under the number in the setup has nothing to reach, unless the controller has one.
       if (reach && !reach.target && !matches.length) connection = 'not-configured';
+      if (reach) connection = this.withoutRio(connection, matches);
       if (session?.snapshot().phase === 'ready') {
         if (command === 'select-camera') {
           const current = this.selectedCamera(device!.id, session);

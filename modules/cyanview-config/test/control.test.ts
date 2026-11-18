@@ -1072,7 +1072,7 @@ test('a controller reads Offline only once a connection has failed, and a reconn
   } finally { await s.close(); }
 });
 
-test('a camera reads online only from its own report, and a listed camera with no report reads RIO offline', async () => {
+test('a camera reads online only from its own report, and a listed camera with no report reads offline', async () => {
   const s = await fleet();
   try {
     const base = s.plan.cameras[0]!, live = () => object(cameraControl(s.f).cameras);
@@ -1081,8 +1081,9 @@ test('a camera reads online only from its own report, and a listed camera with n
     await s.save();
     await eventually(() => live()[base.id]?.online === true);
     s.networks[0]!.send('unit/c/camhead/status/persist/number', '3');
-    await eventually(() => live().quiet?.message === 'RIO offline');
-    assert.deepEqual(live().quiet, { recording: 'unknown', available: false, message: 'RIO offline', online: false });
+    // Plugged into the RCP itself, it has no RIO to be offline.
+    await eventually(() => live().quiet?.message === 'Camera offline');
+    assert.deepEqual(live().quiet, { recording: 'unknown', available: false, message: 'Camera offline', online: false });
     assert.equal(live().absent.online, null);
     assert.equal(live().absent.message, 'Camera number was not found on this RCP');
     assert.equal(live().staged.online, null);
@@ -1294,9 +1295,9 @@ test('a camera row for a camera no controller has reads Not configured, never On
     s.networks[0]!.send('unit/f/camhead/status/volatile/control', 'online');
     await eventually(() => triggers('named-6') === '["online"]');
     assert.equal(triggers('any-7'), '["not-configured"]');
-    // A controller that drops reaches no RIO: its listed cameras read RIO offline, a number it never had stays Not configured.
+    // A controller that drops: camera 1, plugged into it with no RIO, reads Camera offline; a number it never had stays Not configured.
     s.networks[0]!.controls.silent = true; s.networks[0]!.disconnect();
-    await eventually(() => triggers('named-1') === '["rio-offline"]');
+    await eventually(() => triggers('named-1') === '["offline"]');
     await eventually(() => triggers('named-6') === '["not-configured"]');
     assert.equal(s.networks[0]!.commands.length + s.networks[1]!.commands.length, 0, 'Watching sends nothing');
   } finally { await s.close(); }
@@ -1312,6 +1313,9 @@ test('a camera key shows its path: RIO offline with no report, Camera offline wi
       row('named-1', 'toggle-camera-enabled', s.ids[0]!, 1)];
     const triggers = (id: string) => JSON.stringify(object(object([...s.f.feedback].reverse().find(item => object(object(item).fields).actionId === id)).appearance).triggers);
     const live = () => object(cameraControl(s.f).cameras), tight = s.plan.cameras.find(camera => camera.number === '2' && camera.device === s.ids[0]);
+    // Camera 2 on the RCP is a REMI copy of camera 2 on the RIO, so it comes in through the RIO.
+    Object.assign(tight!, { remi: { peer: 'cy-rio-1-20', selector: 'sel', connection: 'con', sourceKey: 'b', origin: { serial: 'CY-RIO-1-20', model: 'Venice-IP' } } });
+    await s.save();
     await s.f.instance.subscribeFeedback!(rows, { signal: s.f.signal });
     await eventually(() => triggers('named-2') === '["online"]');
     // Both controllers reconnect and hand over what they keep: camera 2 is listed, with no report.
@@ -1338,6 +1342,29 @@ test('a camera key shows its path: RIO offline with no report, Camera offline wi
     await eventually(() => triggers('named-2') === '["rio-offline"]');
     await eventually(() => triggers('any-2') === '["rio-offline"]');
     assert.equal(s.networks[0]!.commands.length + s.networks[1]!.commands.length, 0, 'Watching sends nothing');
+  } finally { await s.close(); }
+});
+
+test('a camera with no RIO in its path never reads RIO offline', async () => {
+  const s = await fleet();
+  try {
+    // Camera 1 is plugged into the RCP itself, as cameras 6 and 10 are into the Gateway (Nov 18 2026).
+    const row = (id: string, controllerId: string) => ({ id: 'camera-control', fields: { actionId: id, actionColumnId: 'column-one',
+      values: { enabled: true, actionType: 'toggle-camera-enabled', 'module.controllerId': controllerId, 'module.cameraNumber': 1, 'module.feedbackEnabled': true, 'module.feedbackColor': '#333333 | #00FF00' } } });
+    const triggers = (id: string) => JSON.stringify(object(object([...s.f.feedback].reverse().find(item => object(object(item).fields).actionId === id)).appearance).triggers);
+    const wide = s.plan.cameras.find(camera => camera.number === '1' && camera.device === s.ids[0])!;
+    const live = () => object(cameraControl(s.f).cameras);
+    await s.f.instance.subscribeFeedback!([row('named', s.ids[0]!)], { signal: s.f.signal });
+    await eventually(() => triggers('named') === '["online"]');
+    // The RCP lists it with no report: no RIO to blame, so the camera is offline.
+    s.networks[0]!.controls.unreported = ['a']; s.networks[0]!.disconnect();
+    await eventually(() => live()[wide.id]?.message === 'Camera offline', 2000);
+    assert.equal(triggers('named'), '["offline"]');
+    // The controller drops too: still Camera offline, never RIO offline.
+    s.networks[0]!.controls.silent = true; s.networks[0]!.disconnect();
+    await delay(400);
+    assert.equal(triggers('named'), '["offline"]');
+    assert.ok(!s.f.feedback.some(item => JSON.stringify(object(object(item).appearance).triggers ?? []).includes('rio-offline')), 'Never orange');
   } finally { await s.close(); }
 });
 
