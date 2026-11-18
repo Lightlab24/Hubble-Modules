@@ -1,38 +1,40 @@
-/* Shared interface appearance. Workbook cell colors, type sizes, and zoom are
-   owned by the workbook renderer and deliberately do not use these tokens. */
+/* The router pages' names for Hubble's look. Each reads the value Hubble hands the
+   page in /api/module-controls/theme-v1.css and falls back to the value this file used
+   to copy, for a Hubble that does not serve the stylesheet. Never add a value here that
+   Hubble already names. */
 :root {
   --font-ui:
     -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial,
     sans-serif;
-  --font-size-ui: 13px;
-  --font-size-small: 12px;
-  --font-size-heading: 15px;
-  --ui-base: #111;
+  --font-size-ui: var(--hubble-text-size, 13px);
+  --font-size-small: var(--hubble-text-size-small, 12px);
+  --font-size-heading: var(--hubble-text-size-heading, 15px);
+  --ui-base: var(--hubble-sheet, #111);
   --ui-window: var(--ui-base);
-  --ui-chrome: var(--ui-base);
+  --ui-chrome: var(--hubble-bar, var(--ui-base));
   --ui-sidebar: var(--ui-base);
-  --control-height: 26px;
-  --control-font-size: 11px;
+  --control-height: var(--hubble-control-height, 26px);
+  --control-font-size: var(--hubble-control-text-size, 11px);
   --control-font-weight: 400;
   --ui-control: transparent;
-  --ui-surface: #222;
-  --ui-hover: #303030;
-  --ui-selected: #373737;
-  --ui-selected-hover: #404040;
-  --ui-line-soft: #292929;
-  --ui-line: #3b3b3b;
-  --ui-line-strong: #555;
-  --ui-text: #dedede;
-  --ui-text-strong: #f4f4f4;
-  --ui-text-secondary: #b2b2b2;
-  --ui-text-disabled: #7a7a7a;
-  --ui-focus: #cecece;
+  --ui-surface: var(--hubble-raised, #222);
+  --ui-hover: var(--hubble-hover, #303030);
+  --ui-selected: var(--hubble-selected, #373737);
+  --ui-selected-hover: var(--hubble-selected-hover, #404040);
+  --ui-line-soft: var(--hubble-line-soft, #292929);
+  --ui-line: var(--hubble-line, #3b3b3b);
+  --ui-line-strong: var(--hubble-line-strong, #555);
+  --ui-text: var(--hubble-text, #dedede);
+  --ui-text-strong: var(--hubble-text-strong, #f4f4f4);
+  --ui-text-secondary: var(--hubble-text-secondary, #b2b2b2);
+  --ui-text-disabled: var(--hubble-text-disabled, #7a7a7a);
+  --ui-focus: var(--hubble-focus, #cecece);
   --ui-control-transition:
     background-color 120ms ease, color 120ms ease, border-color 120ms ease;
-  --radius-control: 7px;
-  --radius-surface: 8px;
-  --radius-menu-item: 4px;
-  --shadow-floating: 0 8px 24px rgb(0 0 0 / 32%);
+  --radius-control: var(--hubble-radius-control, 7px);
+  --radius-surface: var(--hubble-radius-surface, 8px);
+  --radius-menu-item: var(--hubble-radius-menu-item, 4px);
+  --shadow-floating: var(--hubble-shadow-floating, 0 8px 24px rgb(0 0 0 / 32%));
 }
 
 @media (prefers-reduced-motion: reduce) {
