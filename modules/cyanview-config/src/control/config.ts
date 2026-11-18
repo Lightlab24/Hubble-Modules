@@ -58,6 +58,8 @@ export const feedbackTriggers = [
   { id: 'online', label: 'Online', part: 'bar', color: '#2563EB', group: connection, marks: path('on', 'on'), when: forActions(...cameraActions) },
   { id: 'offline', label: 'Camera offline', part: 'bar', color: '#E0C829', group: connection, marks: path('on', 'off'), when: forActions(...cameraActions) },
   { id: 'rio-offline', label: 'RIO offline', part: 'bar', color: '#F97316', group: connection, marks: path('off', 'unknown'), when: forActions(...cameraActions) },
+  // No camera under the number on any controller: nothing to reach, so a quiet grey rather than a fault.
+  { id: 'not-configured', label: 'Not configured', part: 'bar', color: '#8A8F98', group: connection, marks: [{ label: 'No camera set up', state: 'unknown' }] as const, when: forActions(...cameraActions) },
   { id: 'all-enabled', label: 'All enabled', part: 'background', color: '#37A65B', when: forActions('enable-all-cameras') },
   { id: 'some-enabled', label: 'Some enabled', part: 'background', color: '#F59E0B', when: forActions('enable-all-cameras') },
   { id: 'single-switch', label: 'Single switch on', part: 'background', color: '#37A65B', when: forActions('single-switch') },

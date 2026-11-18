@@ -1275,7 +1275,7 @@ test('a camera row with no controller named rolls with its camera and stays onli
   } finally { await s.close(); }
 });
 
-test('a camera row for a camera no controller has reads RIO offline, never Online from its controller being up', async () => {
+test('a camera row for a camera no controller has reads Not configured, never Online from its controller being up', async () => {
   const s = await fleet();
   try {
     // Both controllers list cameras 1 and 2 only. Camera 6 is named on the first, camera 7 on none.
@@ -1286,14 +1286,18 @@ test('a camera row for a camera no controller has reads RIO offline, never Onlin
     await s.f.instance.subscribeFeedback!(rows, { signal: s.f.signal });
     await eventually(() => s.sessions.length === 2 && s.sessions.every(session => session.snapshot().phase === 'ready'));
     await eventually(() => triggers('named-1') === '["online"]');
-    assert.equal(triggers('named-6'), '["rio-offline"]');
-    assert.equal(triggers('record-6'), '["rio-offline"]');
-    assert.equal(triggers('any-7'), '["rio-offline"]');
+    assert.equal(triggers('named-6'), '["not-configured"]');
+    assert.equal(triggers('record-6'), '["not-configured"]');
+    assert.equal(triggers('any-7'), '["not-configured"]');
     // A camera that turns up on the controller follows its own report from then on.
     s.networks[0]!.send('unit/f/camhead/status/persist/number', '6');
     s.networks[0]!.send('unit/f/camhead/status/volatile/control', 'online');
     await eventually(() => triggers('named-6') === '["online"]');
-    assert.equal(triggers('any-7'), '["rio-offline"]');
+    assert.equal(triggers('any-7'), '["not-configured"]');
+    // A controller that drops reaches no RIO: its listed cameras read RIO offline, a number it never had stays Not configured.
+    s.networks[0]!.controls.silent = true; s.networks[0]!.disconnect();
+    await eventually(() => triggers('named-1') === '["rio-offline"]');
+    await eventually(() => triggers('named-6') === '["not-configured"]');
     assert.equal(s.networks[0]!.commands.length + s.networks[1]!.commands.length, 0, 'Watching sends nothing');
   } finally { await s.close(); }
 });
@@ -1338,15 +1342,17 @@ test('a camera key shows its path: RIO offline with no report, Camera offline wi
 });
 
 test('the connection path lights the bar by default, one state at a time, and Recording rings the outline beside it', () => {
-  const path = matrix.triggers!.filter(trigger => ['online', 'offline', 'rio-offline'].includes(trigger.id));
+  const path = matrix.triggers!.filter(trigger => ['online', 'offline', 'rio-offline', 'not-configured'].includes(trigger.id));
   assert.deepEqual(path.map(trigger => [trigger.id, trigger.label, trigger.part, trigger.color, trigger.effect ?? null]), [
-    ['online', 'Online', 'bar', '#2563EB', null], ['offline', 'Camera offline', 'bar', '#E0C829', null], ['rio-offline', 'RIO offline', 'bar', '#F97316', null]]);
+    ['online', 'Online', 'bar', '#2563EB', null], ['offline', 'Camera offline', 'bar', '#E0C829', null], ['rio-offline', 'RIO offline', 'bar', '#F97316', null],
+    ['not-configured', 'Not configured', 'bar', '#8A8F98', null]]);
   for (const trigger of path) assert.deepEqual(trigger.when, [{ field: 'actionType', values: ['select-camera', 'record-camera', 'toggle-camera-enabled'] }]);
   // One Connection setting in Hubble's popup, each state saying where the path stops.
   assert.deepEqual(path.map(trigger => [trigger.group, trigger.marks?.map(mark => `${mark.label} ${mark.state}`)]), [
     [{ id: 'connection', label: 'Connection' }, ['RIO on', 'Camera on']],
     [{ id: 'connection', label: 'Connection' }, ['RIO on', 'Camera off']],
-    [{ id: 'connection', label: 'Connection' }, ['RIO off', 'Camera unknown']]]);
+    [{ id: 'connection', label: 'Connection' }, ['RIO off', 'Camera unknown']],
+    [{ id: 'connection', label: 'Connection' }, ['No camera set up unknown']]]);
   assert.ok(manifest.host && 'requiredFeatures' in manifest.host && manifest.host.requiredFeatures?.includes('module-feedback-trigger-groups-v1'));
   assert.ok(!matrix.triggers!.some(trigger => trigger.group && !path.includes(trigger)), 'Only the path is grouped');
   const recording = matrix.triggers!.find(trigger => trigger.id === 'recording');

@@ -46,11 +46,12 @@ const mqttHost = (device: RecordValue) => String(device.base || device.address |
  * cameras 1-5 listed, their RIOs off the network, no report). The RIO is the camera's only way in, and a Gateway or
  * controller that drops reaches no RIO either, so those read as RIO offline too.
  */
-type Connection = 'online' | 'camera-offline' | 'rio-offline';
+// Not configured: no controller has a camera under that number, so there is nothing to reach (Nov 18 2026: CC9 and CC11).
+type Connection = 'online' | 'camera-offline' | 'rio-offline' | 'not-configured';
 const reportedConnection = (observation: { readonly online: boolean | null }): Connection =>
   observation.online === true ? 'online' : observation.online === false ? 'camera-offline' : 'rio-offline';
 /** The key trigger for each connection state. */
-const connectionTrigger: Record<Connection, string> = { online: 'online', 'camera-offline': 'offline', 'rio-offline': 'rio-offline' };
+const connectionTrigger: Record<Connection, string> = { online: 'online', 'camera-offline': 'offline', 'rio-offline': 'rio-offline', 'not-configured': 'not-configured' };
 const mqttFallback = (device: RecordValue) => {
   const saved = String(device.address || '');
   return saved && saved !== mqttHost(device) ? saved : undefined;
@@ -134,7 +135,7 @@ export class CameraControl {
     try {
       const target = session.captureCamera(number);
       return { connection: reportedConnection(target.observation), target };
-    } catch { return { connection: session.listsCamera(number) === false ? 'rio-offline' : null, target: null }; }
+    } catch { return { connection: session.listsCamera(number) === false ? 'not-configured' : null, target: null }; }
   }
   async refreshPlan(signal: AbortSignal) { this.setPlan((await this.repository.read(signal)).plan); }
   state() {
@@ -443,18 +444,21 @@ export class CameraControl {
           const usable = !!target && observation!.online === true && observation!.recording !== null && this.recording.usableObservation(`${own.id}/${target.address}`, target, observation!);
           return [{ connection: reached, recording: usable ? observation!.recording : null }];
         });
-        // A number no controller has is a camera Hubble can't reach.
-        // Online through any controller; otherwise the RIO is reached if any controller reaches it.
-        if (!matches.length) connection = devices.every(item => this.sessions.has(item.id)) ? 'rio-offline' : null;
+        // A number no controller has is not configured. Otherwise: online through any controller, Camera offline when
+        // any reaches its RIO, RIO offline when none does, and not configured when no controller lists it.
+        if (!matches.length) connection = devices.every(item => this.sessions.has(item.id)) ? 'not-configured' : null;
         else if (seen.length) connection = seen.some(item => item.connection === 'online') ? 'online'
           : seen.some(item => item.connection === 'camera-offline') ? 'camera-offline'
-          : seen.every(item => item.connection === 'rio-offline') ? 'rio-offline' : null;
+          : seen.some(item => item.connection === 'rio-offline') && seen.every(item => item.connection === 'rio-offline' || item.connection === 'not-configured') ? 'rio-offline'
+          : seen.every(item => item.connection === 'not-configured') ? 'not-configured' : null;
         if (seen.some(item => item.recording === true)) recording = true;
         else if (seen.length && seen.every(item => item.recording === false)) recording = false;
       }
       // A camera row with a controller named follows its camera there, found by number the same way its press finds it, as reported over MQTT.
       const reach = device && cameraCommands.includes(command) ? this.cameraReach(session, Number(values['module.cameraNumber'])) : null;
       if (reach) connection = reach.connection;
+      // A named controller with no camera under the number in the setup has nothing to reach, unless the controller has one.
+      if (reach && !reach.target && !matches.length) connection = 'not-configured';
       if (session?.snapshot().phase === 'ready') {
         if (command === 'select-camera') {
           const current = this.selectedCamera(device!.id, session);
