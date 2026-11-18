@@ -21,12 +21,13 @@ export function createModuleHarness(
   settings: ModuleValues = {},
   services: Pick<
     Partial<ModuleContext>,
-    "modules" | "requestHost" | "services" | "scope" | "connectionEnabled"
+    "modules" | "requestHost" | "services" | "scope" | "connectionEnabled" | "publishEvent"
   > = {},
 ) {
   const traces: unknown[] = [],
     feedback: unknown[] = [],
-    states: unknown[] = [];
+    states: unknown[] = [],
+    events: { readonly channel: string; readonly value: unknown }[] = [];
   const controls: unknown[] = [];
   const context: ModuleContext = {
     connectionEnabled: true,
@@ -48,6 +49,9 @@ export function createModuleHarness(
     },
     publishState: (value) => {
       states.push(ModuleStateSchema.parse(value));
+    },
+    publishEvent: (channel, value) => {
+      events.push({ channel, value });
     },
     requestHost: async (method, value) => {
       if (method === "describe-host-services")
@@ -85,7 +89,7 @@ export function createModuleHarness(
       traces.push(value);
     },
   });
-  return { instance, context, execution, traces, feedback, states, controls };
+  return { instance, context, execution, traces, feedback, states, controls, events };
 }
 
 /** Transport observations are supplied by the module's simulator, never real hardware. */

@@ -24,6 +24,8 @@ export const commands = [
   ['nd-in-enabled-cameras', 'ND In'],
   ['nd-out-enabled-cameras', 'ND Out (Clear)'],
   ['nd-toggle-enabled-cameras', 'ND In / Out (Toggle)'],
+  // Opens a dialog in HubDash to type a colour temperature and tint for the enabled cameras (module-prompt-v1).
+  ['wb-dialog-enabled-cameras', 'Color Temp…'],
   ['iso-up-enabled-cameras', 'ISO Up'],
   ['iso-down-enabled-cameras', 'ISO Down'],
   ['base-gain-up-enabled-cameras', 'Base Gain Up'],

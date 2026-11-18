@@ -27,6 +27,8 @@ export default defineModuleManifest({
     'module-feedback-trigger-groups-v1',
     // ND In/Out and Base Gain have their own key states, which takes Cyanview past 16 triggers.
     'module-feedback-triggers-64-v1',
+    // Color Temp… asks for a temperature and tint in a HubDash dialog.
+    'module-prompt-v1',
   ] },
   capabilities: ['host.documents', 'host.helpers', 'service.page.studio', 'state-feedback'],
   settings: [{ id: 'sampleData', label: 'Use sample devices', type: 'boolean', required: true, default: false }],

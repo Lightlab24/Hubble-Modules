@@ -14,6 +14,10 @@ export interface CyanViewCameraObservation {
   readonly variableNd: boolean;
   /** The camera's ND in/out: true when clear (ND out), false when ND is in, null when it has never reported one. */
   readonly ndClear: boolean | null;
+  /** The colour temperature the camera is set to, in kelvin, or null when it has never reported one. */
+  readonly wbTemp: number | null;
+  /** The camera's tint as Cyanview reports it (0.99 is +99), or null when it has never reported one. */
+  readonly wbTint: number | null;
   readonly baseGain: string | null;
   readonly model: string;
   readonly recordMode: "rec-stop" | "toggle" | null;
@@ -252,6 +256,24 @@ export class RcpSession {
       clear ? "1" : "0",
       signal,
     );
+  }
+
+  /**
+   * Moves the colour temperature or tint by an amount, the way RCP 1's own panel does for camera 1,
+   * a Burano (Nov 18 2026): `action/add/wb_temp` with signed kelvin, `action/add/wb_tint` with a
+   * signed amount such as -0.010000. The camera reports the new `wb_temp` or `wb_tint` about
+   * 150 ms later. Only a camera that reports it is sent one.
+   */
+  async addWhiteBalance(
+    target: CyanViewCameraTarget,
+    field: "wb_temp" | "wb_tint",
+    amount: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const current = this.requireCameraTarget(target);
+    if ((field === "wb_temp" ? current.wbTemp : current.wbTint) === null)
+      throw unavailable(field === "wb_temp" ? "Camera has not reported a colour temperature" : "Camera has not reported a tint");
+    await this.publishCommand(`${target.address}/camhead/action/add/${field}`, amount, signal);
   }
 
   async saveWhiteBalancePreset(
@@ -653,6 +675,8 @@ export class RcpSession {
         recordingSequence: 0,
         variableNd: false,
         ndClear: null,
+        wbTemp: null,
+        wbTint: null,
         baseGain: null,
         model: "",
         recordMode: null,
@@ -703,6 +727,11 @@ export class RcpSession {
           ndClear,
           ...(scope === "persist" ? { variableNd: ndClear !== null } : {}),
         };
+      }
+      // The set temperature, not wb_temp_k, which follows the camera's own reading and lags behind a change.
+      else if ((scope === "persist" || scope === "volatile") && (field === "wb_temp" || field === "wb_tint")) {
+        const value = payload.trim() === "" ? Number.NaN : Number(payload);
+        next = { ...prior, [field === "wb_temp" ? "wbTemp" : "wbTint"]: Number.isFinite(value) ? value : null };
       }
       // A camera's own broker keeps its base gain under persist, an RCP or Gateway under volatile: RCP 1
       // reported camera 1, a Burano, as volatile "Low" and "High" when its panel stepped it (Nov 18 2026).

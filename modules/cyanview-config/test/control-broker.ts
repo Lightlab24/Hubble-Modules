@@ -41,6 +41,9 @@ export async function broker(port = 0, options: { onlyHubble?: boolean } = {}) {
     variableNd: false,
     // A camera answers an ND in/out command with its new state, as camera 1 did on RCP 1.
     ndFeedback: true,
+    // Each camera's colour temperature and tint, moved by `action/add/wb_*` and reported back, as camera 1 did on RCP 1.
+    wb: {} as Record<string, { temp: number; tint: number | null }>,
+    wbFeedback: true,
     capabilities: true,
     silent: false,
     root: "unit",
@@ -172,6 +175,17 @@ export async function broker(port = 0, options: { onlyHubble?: boolean } = {}) {
             if (controls.ackDelay)
               timers.push(setTimeout(acknowledge, controls.ackDelay));
             else acknowledge();
+          }
+          const wb = /\/([^/]+)\/camhead\/action\/add\/(wb_temp|wb_tint)$/u.exec(topic);
+          if (wb) {
+            const camera = controls.wb[wb[1]!];
+            if (camera && controls.wbFeedback) {
+              if (wb[2] === "wb_temp") camera.temp += Number(value);
+              else if (camera.tint !== null) camera.tint = Math.max(-0.99, Math.min(0.99, Math.round((camera.tint + Number(value)) * 100) / 100));
+              const reported = wb[2] === "wb_temp" ? String(camera.temp) : String(camera.tint);
+              send(topic.replace(/action\/add\/wb_(temp|tint)$/u, `status/volatile/${wb[2]}`), reported);
+            }
+            continue;
           }
           if (topic.endsWith("/action/set/nd_filter_clear")) {
             if (controls.ndFeedback && ["0", "1"].includes(value)) {

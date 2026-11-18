@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
-import type { ModuleContext, ModuleExecutionContext, ModuleFeedbackSubscription, ModuleValues } from '@hubble/module-sdk';
+import { MODULE_PROMPT_CHANNEL, type ModuleContext, type ModuleExecutionContext, type ModuleFeedbackSubscription, type ModulePromptInput, type ModuleValues } from '@hubble/module-sdk';
 import { controlDevice, controllerLabel, emptyPlan, object, selectsCamera, type Plan, type RecordValue } from '../model.js';
 import type { PlanRepository } from '../repository.js';
 import { commands, commandGroup, cameraCommands, localCommands, feedbackCommands, ndCommands, baseGainCommands, type Command, type CyanViewRcpConnectionDefinition } from './config.js';
@@ -17,10 +17,18 @@ export type ControlOptions = {
   selectHoldMs?: number;
   /** How long an ND In or ND Out press waits for the camera to report the ND state it asked for. */
   ndConfirmMs?: number;
+  /** How long a Color Temp… answer waits for each camera to report the temperature and tint it asked for. */
+  whiteBalanceConfirmMs?: number;
 };
 const SELECT_HOLD_MS = 2000;
 // Camera 1 on RCP 1 reported each ND change about 65 ms after the command (Nov 18 2026). This leaves room for a slow path.
 const ND_CONFIRM_MS = 5000;
+const WB_CONFIRM_MS = 5000;
+const WB_DIALOG = 'wb-dialog-enabled-cameras';
+// What the dialog takes. Cyanview reports tint as -0.99 to 0.99; the dialog shows it as -99 to +99.
+const WB_TEMP = { min: 2000, max: 15000 }, WB_TINT = { min: -99, max: 99 };
+const signedTint = (tint: number) => { const value = Math.round(tint * 100); return value > 0 ? `+${value}` : String(value); };
+const cameraList = (numbers: readonly string[]) => numbers.length === 1 ? `Camera ${numbers[0]}` : `Cameras ${numbers.slice(0, -1).join(', ')} and ${numbers.at(-1)}`;
 /** What the page shows for one camera on a controller. `online` is null until the camera has reported. */
 export type CameraStatus = { recording: 'recording' | 'stopped' | 'unknown'; available: boolean; message: string; online: boolean | null };
 const steps: Partial<Record<Command, CyanViewCameraParameterStep>> = {
@@ -299,9 +307,10 @@ export class CameraControl {
         return { device, targets, saved };
       });
       // It then acts in press order per controller, so a slow configuration read can't let a later press overtake it.
-      const { completion } = await this.accept(controllerQueue(controllerId), async () => {
+      const { completion, asked } = await this.accept(controllerQueue(controllerId), async () => {
         const { device, targets, saved } = await accepted;
-        this.note(targets, 'Sending…');
+        // The press that only opens the Color Temp… dialog sends nothing yet.
+        if (!(command === WB_DIALOG && fields.prompt === undefined)) this.note(targets, 'Sending…');
         const assertCurrent = (row?: RecordValue) => {
           const current = this.plan.devices.find(item => item.id === device.id);
           if (!current || current.serial !== device.serial || mqttHost(current) !== mqttHost(device))
@@ -328,6 +337,15 @@ export class CameraControl {
         if (nd) captured = nd.captured;
         if (baseGainCommands.includes(command))
           captured = this.leaveOut(captured, observation => observation.baseGain === null, 'No base gain on this camera', 'No checked camera on this controller reports a base gain');
+        // Color Temp…: a press asks HubDash for the values; the dialog's Send comes back with them under `prompt`.
+        const typed = command === WB_DIALOG ? this.typedWhiteBalance(fields.prompt) : null;
+        if (command === WB_DIALOG && typed === null) {
+          if (!this.context.publishEvent) throw new Error('This Hubble can’t show the Color Temp dialog; update Hubble');
+          const { prompt, asked } = this.colorTempPrompt(device, captured, id, fields);
+          this.context.publishEvent(MODULE_PROMPT_CHANNEL, prompt as never);
+          return { completion: Promise.resolve([]), asked };
+        }
+        if (typed) captured = this.leaveOut(captured, observation => observation.wbTemp === null, 'No colour temperature on this camera', 'No enabled camera on this controller reports a colour temperature');
         const completion = Promise.all(captured.map(async ({ row, target, error }): Promise<RecordingTargetResult> => {
           const send = async (): Promise<RecordingTargetResult> => {
             const key = `${device.id}/${target?.address ?? row.id}`;
@@ -345,6 +363,8 @@ export class CameraControl {
                 return tap && result.evidence === 'noop' ? { ...result, message: 'Recording. Hold for 2 seconds to stop' } : result;
               } else if (command.startsWith('roll-') || command === 'stop-enabled-cameras') {
                 return await this.recording.record({ key, session: connected, target }, command === 'roll-enabled-cameras' ? 'start' : command === 'stop-enabled-cameras' ? 'stop' : 'toggle', execution.signal, feedbackTimeout(targets.length, this.options.feedbackWait));
+              } else if (typed) {
+                return await this.sendWhiteBalance(row, connected, target, typed, execution.signal);
               } else if (nd) {
                 await this.recording.deliver(() => connected.setNdClear(target, nd.clear, execution.signal), execution.signal);
                 const wanted = nd.clear ? 'ND out' : 'ND in';
@@ -363,8 +383,9 @@ export class CameraControl {
           this.note([row], result.message);
           return result;
         }));
-        return { completion };
+        return { completion, asked: undefined as string | undefined };
       });
+      if (asked !== undefined) return { status: 'success' as const, evidence: { kind: 'local' as const, summary: asked } };
       const results = await completion;
       return actionResult({ outcome: results.every(result => result.outcome === 'success') ? 'success' : 'failure', targets: results }, execution);
     } catch (error) {
@@ -393,6 +414,87 @@ export class CameraControl {
     const left = captured.filter(item => !without.includes(item));
     if (!left.length) throw new Error(none);
     return left;
+  }
+  /** The temperature and tint typed in the Color Temp… dialog, or null on the press that opens it. */
+  private typedWhiteBalance(prompt: unknown): { temperature: number; tint: number | null } | null {
+    if (prompt === undefined) return null;
+    const values = object(prompt), temperature = values.temperature, tint = values.tint;
+    const whole = (value: unknown, range: { min: number; max: number }): value is number =>
+      typeof value === 'number' && Number.isInteger(value) && value >= range.min && value <= range.max;
+    if (!whole(temperature, WB_TEMP)) throw new Error(`Temperature must be from ${WB_TEMP.min} to ${WB_TEMP.max} K`);
+    if (tint !== undefined && !whole(tint, WB_TINT)) throw new Error(`Tint must be from ${WB_TINT.min} to +${WB_TINT.max}`);
+    return { temperature, tint: tint === undefined ? null : tint };
+  }
+  /**
+   * The Color Temp… dialog for a controller's enabled cameras: each one's temperature and tint now, and what each will
+   * get. A camera with no tint gets the temperature only; an offline one, or one with no temperature, gets nothing.
+   */
+  private colorTempPrompt<T extends { row: RecordValue; target?: CyanViewCameraTarget }>(device: RecordValue, captured: readonly T[], actionId: string, fields: ModuleValues) {
+    const cameras = captured.map(({ row, target }) => ({
+      number: String(row.number), name: String(row.name || target?.observation.name || 'Camera'),
+      online: target?.observation.online === true, temp: target?.observation.wbTemp ?? null, tint: target?.observation.wbTint ?? null,
+    }));
+    const receivers = cameras.filter(camera => camera.online && camera.temp !== null);
+    if (!receivers.length) throw new Error('No enabled camera on this controller reports a colour temperature');
+    const offline = cameras.filter(camera => !camera.online).map(camera => camera.number);
+    const noTemp = cameras.filter(camera => camera.online && camera.temp === null).map(camera => camera.number);
+    const noTint = receivers.filter(camera => camera.tint === null).map(camera => camera.number);
+    const withTint = receivers.find(camera => camera.tint !== null);
+    const clamp = (value: number, range: { min: number; max: number }) => Math.min(range.max, Math.max(range.min, Math.round(value)));
+    const count = (n: number) => `${n} enabled camera${n === 1 ? '' : 's'}`;
+    const prompt: ModulePromptInput = {
+      key: `color-temp.${String(device.id)}`,
+      title: 'Color Temp',
+      description: `Cyanview · ${String(device.name || device.serial || 'Controller')} · ${count(cameras.length)}`.slice(0, 200),
+      icon: 'thermometer',
+      fields: [
+        { id: 'temperature', label: 'Temperature', type: 'number', default: clamp(receivers[0]!.temp!, WB_TEMP), ...WB_TEMP, integer: true, unit: 'K', hint: `${WB_TEMP.min} to ${WB_TEMP.max}` },
+        ...(withTint ? [{ id: 'tint', label: 'Tint', type: 'number' as const, default: clamp(withTint.tint! * 100, WB_TINT), ...WB_TINT, integer: true, hint: '−99 green to +99 magenta', optional: true }] : []),
+      ],
+      table: {
+        label: 'Enabled cameras',
+        columns: [{ id: 'number', label: '#' }, { id: 'camera', label: 'Camera' }, { id: 'now', label: 'Now' }, { id: 'tint', label: 'Tint' }],
+        rows: cameras.slice(0, 64).map(camera => ({
+          number: camera.number, camera: camera.name.slice(0, 80),
+          now: !camera.online ? 'Offline' : camera.temp === null ? '—' : `${Math.round(camera.temp)} K`,
+          tint: !camera.online || camera.temp === null ? '—' : camera.tint === null ? 'none' : signedTint(camera.tint),
+        })),
+      },
+      notes: [
+        ...(withTint && noTint.length ? [`${cameraList(noTint)} ${noTint.length === 1 ? 'has' : 'have'} no tint, so ${noTint.length === 1 ? 'it gets' : 'they get'} the temperature only.`] : []),
+        ...(noTemp.length ? [`${cameraList(noTemp)} ${noTemp.length === 1 ? 'reports' : 'report'} no colour temperature, so ${noTemp.length === 1 ? 'it gets' : 'they get'} nothing.`] : []),
+        ...(offline.length ? [`${cameraList(offline)} ${offline.length === 1 ? 'is' : 'are'} offline, so ${offline.length === 1 ? 'it gets' : 'they get'} nothing.`] : []),
+      ].map(note => note.slice(0, 200)).slice(0, 4),
+      submitLabel: `Send to ${receivers.length} camera${receivers.length === 1 ? '' : 's'}`,
+      answer: { actionId, fields: fields as never },
+      expiresInMs: 120_000,
+    };
+    return { prompt, asked: `Asked for a Color Temp for ${count(receivers.length)} in HubDash` };
+  }
+  /**
+   * Moves one camera to the typed temperature and tint with the RCP's own `add` commands, by the difference from
+   * where the camera reports it is, then waits for it to report the result.
+   */
+  private async sendWhiteBalance(row: RecordValue, session: RcpSession, target: CyanViewCameraTarget, typed: { temperature: number; tint: number | null }, signal: AbortSignal): Promise<RecordingTargetResult> {
+    const before = session.observeTarget(target);
+    const tempStep = Math.round(typed.temperature - before.wbTemp!);
+    const tintNow = before.wbTint === null ? null : Math.round(before.wbTint * 100);
+    const tintStep = typed.tint === null || tintNow === null ? 0 : typed.tint - tintNow;
+    const describe = (temp: number | null, tint: number | null) => `${temp === null ? '—' : Math.round(temp)} K${tint === null || typed.tint === null ? '' : `, tint ${signedTint(tint)}`}`;
+    if (tempStep === 0 && tintStep === 0) return { target: row.id, outcome: 'success', evidence: 'noop', message: `Already at ${describe(before.wbTemp, before.wbTint)}` };
+    if (tempStep !== 0) await this.recording.deliver(() => session.addWhiteBalance(target, 'wb_temp', String(tempStep), signal), signal);
+    if (tintStep !== 0) await this.recording.deliver(() => session.addWhiteBalance(target, 'wb_tint', (tintStep / 100).toFixed(6), signal), signal);
+    // A camera may settle on its own nearest step, so within 10 K and half a tint step counts as there.
+    const there = (now: CyanViewCameraTarget['observation']) =>
+      now.wbTemp !== null && Math.abs(now.wbTemp - typed.temperature) <= 10 &&
+      (tintStep === 0 || (now.wbTint !== null && Math.abs(now.wbTint * 100 - typed.tint!) < 0.5));
+    const deadline = Date.now() + (this.options.whiteBalanceConfirmMs ?? WB_CONFIRM_MS);
+    let now = session.observeTarget(target);
+    while (!there(now) && Date.now() < deadline) { await delay(20, undefined, { signal }); now = session.observeTarget(target); }
+    if (there(now)) return { target: row.id, outcome: 'success', evidence: 'confirmed', message: describe(now.wbTemp, now.wbTint) };
+    if (now.wbTemp !== before.wbTemp || now.wbTint !== before.wbTint)
+      return { target: row.id, outcome: 'success', evidence: 'delivered', message: `Camera settled at ${describe(now.wbTemp, now.wbTint)}` };
+    return { target: row.id, outcome: 'failure', evidence: 'unconfirmed', message: 'The camera hasn’t reported the new colour temperature' };
   }
   /** Waits for the camera's own report of the ND state a press asked for. A camera already there has reported it. */
   private async ndReported(session: RcpSession, target: CyanViewCameraTarget, clear: boolean, signal: AbortSignal) {

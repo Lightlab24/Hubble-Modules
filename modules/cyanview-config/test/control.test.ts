@@ -10,7 +10,7 @@ import { feedbackTimeout } from '../src/control/service.js';
 import { matrix } from '../src/control/matrix.js';
 import { commands, localCommands } from '../src/control/config.js';
 import manifest from '../src/manifest.js';
-import { createModuleDocumentClient, moduleMatrixMatches, parseModuleMatrixValue, resolveModuleMatrixField } from '@hubble/module-sdk';
+import { createModuleDocumentClient, moduleMatrixMatches, ModulePromptSchema, parseModuleMatrixValue, resolveModuleMatrixField } from '@hubble/module-sdk';
 import { object, type Plan } from '../src/model.js';
 
 afterEach(closeBrokers);
@@ -19,7 +19,7 @@ const eventually = async (predicate: () => boolean, attempts = 200) => {
   assert.ok(predicate(), 'Expected control observation');
 };
 /** An RCP and a second controller, a RIO with no panel unless a test asks for another kind. */
-async function fleet({ second = { Serial: 'CY-RIO-1-20', Name: 'RIO' }, secondPanel = false, cameraSettleMs = undefined as number | undefined, selectHoldMs = undefined as number | undefined, ndConfirmMs = undefined as number | undefined } = {}) {
+async function fleet({ second = { Serial: 'CY-RIO-1-20', Name: 'RIO' }, secondPanel = false, cameraSettleMs = undefined as number | undefined, selectHoldMs = undefined as number | undefined, ndConfirmMs = undefined as number | undefined, whiteBalanceConfirmMs = undefined as number | undefined } = {}) {
   const a = new FakeController(), b = new FakeController();
   a.config.Product = { Serial: 'CY-RCP-1-10', Name: 'RCP' };
   b.config.Product = { ...second };
@@ -51,7 +51,7 @@ async function fleet({ second = { Serial: 'CY-RIO-1-20', Name: 'RIO' }, secondPa
       if (wait) { const connect = client.connect.bind(client); client.connect = async signal => { await delay(wait); return connect(signal); }; }
       return client;
     },
-    control: { cameraSettleMs, ...(selectHoldMs === undefined ? {} : { selectHoldMs }), ...(ndConfirmMs === undefined ? {} : { ndConfirmMs }), session: (definition, changed) => {
+    control: { cameraSettleMs, ...(selectHoldMs === undefined ? {} : { selectHoldMs }), ...(ndConfirmMs === undefined ? {} : { ndConfirmMs }), ...(whiteBalanceConfirmMs === undefined ? {} : { whiteBalanceConfirmMs }), session: (definition, changed) => {
       const network = networks[definition.serial === a.config.Product.Serial ? 0 : 1]!;
       const session = new RcpSession({ ...definition, requestTimeoutMs: 350 }, changed, true,
         () => createConnection({ host: '127.0.0.1', port: network.port }));
@@ -316,7 +316,7 @@ test('Action choices separate RCP camera selection from Cyanview and retain exis
     const page=await query();
     assert.deepEqual([...new Set(page.choices.map(choice=>choice.group))],['RCP set active camera','Cyanview']);
     assert.deepEqual(page.choices.filter(choice=>choice.group==='RCP set active camera').map(choice=>choice.id),['select-camera']);
-    assert.equal(page.choices.filter(choice=>choice.group==='Cyanview').length,17);
+    assert.equal(page.choices.filter(choice=>choice.group==='Cyanview').length,18);
     const actionField=matrix.fields.find(field=>field.id==='actionType')!;
     for(const choice of page.choices)assert.equal(parseModuleMatrixValue(actionField,choice.id),choice.id);
     assert.equal((await query('rcp')).choices[0]?.id,'select-camera');
@@ -1563,6 +1563,101 @@ test('Base Gain keys light High base, Low base, or Mixed base when the checked c
   } finally { await s.close(); }
 });
 
+test('Color Temp… asks HubDash for a temperature and tint for the enabled cameras, and sends nothing on the press', async () => {
+  const s = await fleet();
+  try {
+    const network = s.networks[0]!;
+    await s.run('toggle-camera-enabled', 0, 1);
+    await s.run('toggle-camera-enabled', 0, 2);
+    await eventually(() => s.sessions[0]?.snapshot().phase === 'ready');
+    // How RCP 1 reports a Burano (camera 1) and a camera with no tint.
+    network.send('unit/a/camhead/status/volatile/wb_temp', '4560', true);
+    network.send('unit/a/camhead/status/volatile/wb_tint', '0.99', true);
+    network.send('unit/b/camhead/status/volatile/wb_temp', '3200', true);
+    await eventually(() => s.sessions[0]!.cameraObservations().filter(camera => camera.wbTemp !== null).length === 2);
+    const pressed = await s.run('wb-dialog-enabled-cameras');
+    assert.equal(pressed.status, 'success', JSON.stringify(pressed));
+    assert.equal(object(object(pressed).evidence).summary, 'Asked for a Color Temp for 2 enabled cameras in HubDash');
+    assert.equal(network.commands.length, 0, 'The press only asks');
+    assert.equal(s.f.events.length, 1);
+    const { channel, value } = s.f.events[0]!;
+    assert.equal(channel, 'host.prompt.v1');
+    const prompt = ModulePromptSchema.parse(value);
+    assert.equal(prompt.title, 'Color Temp');
+    assert.match(prompt.description!, /^Cyanview · .+ · 2 enabled cameras$/u);
+    assert.deepEqual(prompt.fields.map(field => [field.id, field.default, field.min, field.max, field.optional]), [
+      ['temperature', 4560, 2000, 15000, false], ['tint', 99, -99, 99, true]]);
+    assert.deepEqual(prompt.table!.rows.map(row => [row.number, row.now, row.tint]), [['1', '4560 K', '+99'], ['2', '3200 K', 'none']]);
+    assert.deepEqual(prompt.notes, ['Camera 2 has no tint, so it gets the temperature only.']);
+    assert.equal(prompt.submitLabel, 'Send to 2 cameras');
+    assert.equal(prompt.answer.actionId, 'wb-dialog-enabled-cameras');
+    // Pressed again, the dialog replaces the one already open.
+    await s.run('wb-dialog-enabled-cameras');
+    assert.equal(object(s.f.events[1]!.value).key, prompt.key);
+  } finally { await s.close(); }
+});
+
+test('the Color Temp… answer moves each camera by the difference with the RCP panel\'s own commands, and waits for its report', async () => {
+  const s = await fleet();
+  try {
+    const network = s.networks[0]!;
+    network.controls.wb = { a: { temp: 4560, tint: 0.99 }, b: { temp: 3200, tint: null } };
+    await s.run('toggle-camera-enabled', 0, 1);
+    await s.run('toggle-camera-enabled', 0, 2);
+    await eventually(() => s.sessions[0]?.snapshot().phase === 'ready');
+    network.send('unit/a/camhead/status/volatile/wb_temp', '4560', true);
+    network.send('unit/a/camhead/status/volatile/wb_tint', '0.99', true);
+    network.send('unit/b/camhead/status/volatile/wb_temp', '3200', true);
+    await eventually(() => s.sessions[0]!.cameraObservations().filter(camera => camera.wbTemp !== null).length === 2);
+    await s.run('wb-dialog-enabled-cameras');
+    const prompt = ModulePromptSchema.parse(s.f.events.at(-1)!.value);
+    const answer = (values: Record<string, number>) => s.f.instance.execute(prompt.answer.actionId,
+      { ...(prompt.answer.fields as Record<string, never>), prompt: values }, s.f.execution());
+    const result = await answer({ temperature: 4300, tint: -12 });
+    assert.equal(result.status, 'success', JSON.stringify(result));
+    assert.equal(object(object(result).evidence).kind, 'state-confirmed');
+    assert.deepEqual(network.commands.map(command => [command.topic, command.value]).sort(), [
+      ['unit/a/camhead/action/add/wb_temp', '-260'],
+      ['unit/a/camhead/action/add/wb_tint', '-1.110000'],
+      ['unit/b/camhead/action/add/wb_temp', '1100'],
+    ]);
+    const { cameras } = await s.state();
+    const [wide, tight] = s.plan.cameras.filter(row => row.device === s.ids[0]);
+    assert.equal(cameras[wide!.id]!.message, '4300 K, tint -12');
+    assert.equal(cameras[tight!.id]!.message, '4300 K');
+    // Already there: nothing more is sent.
+    const before = network.commands.length;
+    assert.equal(object(object(await answer({ temperature: 4300, tint: -12 })).evidence).kind, 'state-confirmed');
+    assert.equal(network.commands.length, before);
+    // Tint left empty leaves it alone.
+    await answer({ temperature: 5600 });
+    assert.deepEqual(network.commands.slice(before).map(command => [command.topic, command.value]).sort(), [
+      ['unit/a/camhead/action/add/wb_temp', '1300'], ['unit/b/camhead/action/add/wb_temp', '1300']]);
+    const outOfRange = await answer({ temperature: 90000 });
+    assert.equal(outOfRange.status, 'failure');
+    assert.match(String(object(outOfRange).message), /Temperature must be from 2000 to 15000 K/u);
+  } finally { await s.close(); }
+});
+
+test('Color Temp… says so when the camera never reports back, and on a Hubble that can\'t show its dialog', async () => {
+  const s = await fleet({ whiteBalanceConfirmMs: 150 });
+  try {
+    const network = s.networks[0]!;
+    network.controls.wbFeedback = false;
+    await s.run('toggle-camera-enabled', 0, 1);
+    await eventually(() => s.sessions[0]?.snapshot().phase === 'ready');
+    network.send('unit/a/camhead/status/volatile/wb_temp', '4560', true);
+    await eventually(() => s.sessions[0]!.cameraObservations().some(camera => camera.wbTemp === 4560));
+    const silent = await s.f.instance.execute('wb-dialog-enabled-cameras', { controllerId: s.ids[0]!, prompt: { temperature: 5600 } }, s.f.execution());
+    assert.equal(silent.status, 'failure');
+    assert.match(String(object(silent).message), /hasn’t reported the new colour temperature/u);
+    delete (s.f.context as { publishEvent?: unknown }).publishEvent;
+    const old = await s.run('wb-dialog-enabled-cameras');
+    assert.equal(old.status, 'failure');
+    assert.match(String(object(old).message), /update Hubble/u);
+  } finally { await s.close(); }
+});
+
 test('Select camera lights as soon as the controller acknowledges, and the RCP report confirms or corrects it', async () => {
   const s = await fleet({ selectHoldMs: 300 });
   try {
@@ -1605,7 +1700,7 @@ test('cancelled recording is not replayed and controller removal invalidates nam
 
 test('a command sent without a known state means the old state is not trusted until the camera reports again', async () => {
   const observation = { address: 'unit/a', number: 1, name: 'Wide', online: true, recording: null as boolean | null, recordingLocked: false,
-    recordingSequence: 5, variableNd: false, ndClear: null, baseGain: null, model: 'Sony Venice', recordMode: 'rec-stop' as const, persistentLock: false, volatileLock: false };
+    recordingSequence: 5, variableNd: false, ndClear: null, wbTemp: null, wbTint: null, baseGain: null, model: 'Sony Venice', recordMode: 'rec-stop' as const, persistentLock: false, volatileLock: false };
   const target = { address: 'unit/a', generation: 1, observation };
   const sent: string[] = [];
   const coordinator = new RecordingCoordinator({ feedbackTimeoutMs: 100 });
@@ -1624,7 +1719,7 @@ test('a command sent without a known state means the old state is not trusted un
 test('after an unclean stop, old state is not trusted: explicit commands still go out, and a toggle waits for a fresh report', async () => {
   const camera = (recordMode: 'rec-stop' | 'toggle') => {
     const observation = { address: 'unit/a', number: 1, name: 'Wide', online: true, recording: false, recordingLocked: false,
-      recordingSequence: 0, variableNd: false, ndClear: null, baseGain: null, model: 'Sony Venice', recordMode, persistentLock: false, volatileLock: false };
+      recordingSequence: 0, variableNd: false, ndClear: null, wbTemp: null, wbTint: null, baseGain: null, model: 'Sony Venice', recordMode, persistentLock: false, volatileLock: false };
     const sent: string[] = [];
     return { observation, sent, target: { key: 'camera', target: { address: 'unit/a', generation: 1, observation }, session: {
       observeTarget: () => observation,

@@ -19,6 +19,7 @@ export * from "./native-menus.js";
 export * from "./collections.js";
 export * from "./document-client.js";
 export * from "./frontend.js";
+export * from "./prompt.js";
 export { parseModuleMatrixValue } from "./matrix.js";
 import {
   ModuleMatrixSchema,
@@ -1639,7 +1640,12 @@ export interface ModuleContext {
   log(trace: ModuleTrace): void;
   publishFeedback(feedback: ModuleFeedback): void;
   publishState(state: ModuleState): void;
-  /** Versioned service observations for host-owned views. Never a device command. */
+  /**
+   * Versioned service observations for host-owned views. Never a device command.
+   * Channel `host.prompt.v1` (MODULE_PROMPT_CHANNEL) with a ModulePrompt asks the operator for
+   * values: Hubble brings HubDash to the front with a dialog and, on Send, runs the prompt's
+   * `answer` action with the values under `prompt`. Requires module-prompt-v1.
+   */
   publishEvent?(channel: string, value: ModuleJsonValue): void;
   /** Declared host capabilities only; unavailable during prepare/migration. */
   requestHost?(
