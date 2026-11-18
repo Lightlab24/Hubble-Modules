@@ -39,6 +39,8 @@ export async function broker(port = 0, options: { onlyHubble?: boolean } = {}) {
     ackDelay: 0,
     initialRecording: "0" as string | null,
     variableNd: false,
+    // A camera answers an ND in/out command with its new state, as camera 1 did on RCP 1.
+    ndFeedback: true,
     capabilities: true,
     silent: false,
     root: "unit",
@@ -170,6 +172,14 @@ export async function broker(port = 0, options: { onlyHubble?: boolean } = {}) {
             if (controls.ackDelay)
               timers.push(setTimeout(acknowledge, controls.ackDelay));
             else acknowledge();
+          }
+          if (topic.endsWith("/action/set/nd_filter_clear")) {
+            if (controls.ndFeedback && ["0", "1"].includes(value)) {
+              const report = () => send(topic.replace("/action/set/", "/status/volatile/"), value);
+              if (controls.feedbackDelay) timers.push(setTimeout(report, controls.feedbackDelay));
+              else report();
+            }
+            continue;
           }
           if (
             !topic.endsWith("/action/set/keyboard") ||

@@ -12,6 +12,8 @@ export interface CyanViewCameraObservation {
   readonly recordingLocked: boolean;
   readonly recordingSequence: number;
   readonly variableNd: boolean;
+  /** The camera's ND in/out: true when clear (ND out), false when ND is in, null when it has never reported one. */
+  readonly ndClear: boolean | null;
   readonly baseGain: string | null;
   readonly model: string;
   readonly recordMode: "rec-stop" | "toggle" | null;
@@ -228,6 +230,26 @@ export class RcpSession {
     await this.publishCommand(
       `${target.address}/camhead/action/${variableNd ? "mult" : step.direction}/${step.parameter}`,
       variableNd ? (step.direction === "next" ? "2" : "0.5") : "",
+      signal,
+    );
+  }
+
+  /**
+   * Puts the ND in (clear false) or takes it out (clear true). The topic and payloads are what RCP 1's own panel sent
+   * for camera 1, a Sony Burano, on Nov 18 2026: "0" put the ND in, "1" took it out, and the camera reported each about
+   * 65 ms later. Only a camera that reports ND in/out is sent one.
+   */
+  async setNdClear(
+    target: CyanViewCameraTarget,
+    clear: boolean,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const current = this.requireCameraTarget(target);
+    if (current.ndClear === null)
+      throw unavailable("Camera has not reported ND in/out");
+    await this.publishCommand(
+      `${target.address}/camhead/action/set/nd_filter_clear`,
+      clear ? "1" : "0",
       signal,
     );
   }
@@ -630,6 +652,7 @@ export class RcpSession {
         recordingLocked: false,
         recordingSequence: 0,
         variableNd: false,
+        ndClear: null,
         baseGain: null,
         model: "",
         recordMode: null,
@@ -669,8 +692,18 @@ export class RcpSession {
           recordMode: parseRecordMode(payload),
           variableNd: cameraCapability(payload, 7, 0x20) ?? prior.variableNd,
         };
-      else if (scope === "persist" && field === "nd_filter_clear")
-        next = { ...prior, variableNd: payload === "0" || payload === "1" };
+      else if (
+        (scope === "persist" || scope === "volatile") &&
+        field === "nd_filter_clear"
+      ) {
+        // A camera's own broker keeps it under persist, an RCP or Gateway under volatile. "0" is ND in, "1" is clear.
+        const ndClear = payload === "1" ? true : payload === "0" ? false : null;
+        next = {
+          ...prior,
+          ndClear,
+          ...(scope === "persist" ? { variableNd: ndClear !== null } : {}),
+        };
+      }
       else if (scope === "persist" && field === "gain_mode")
         next = { ...prior, baseGain: payload.trim() || null };
       else if (scope === "volatile" && field === "control")

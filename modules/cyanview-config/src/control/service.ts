@@ -3,7 +3,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import type { ModuleContext, ModuleExecutionContext, ModuleFeedbackSubscription, ModuleValues } from '@hubble/module-sdk';
 import { controlDevice, controllerLabel, emptyPlan, object, selectsCamera, type Plan, type RecordValue } from '../model.js';
 import type { PlanRepository } from '../repository.js';
-import { commands, commandGroup, cameraCommands, localCommands, feedbackCommands, type Command, type CyanViewRcpConnectionDefinition } from './config.js';
+import { commands, commandGroup, cameraCommands, localCommands, feedbackCommands, ndCommands, type Command, type CyanViewRcpConnectionDefinition } from './config.js';
 import { ControlSelection, everyControllerMutations, type SelectionMutation } from './selection.js';
 import { RcpSession, type CyanViewCameraTarget, type CyanViewCameraParameterStep } from './rcp-session.js';
 import { RecordingCoordinator } from './recording-coordinator.js';
@@ -15,8 +15,12 @@ export type ControlOptions = {
   cameraSettleMs?: number; session?: (definition: CyanViewRcpConnectionDefinition, changed: () => void) => RcpSession; feedbackWait?: FeedbackWait;
   /** How long a Select camera press shows its camera before the RCP's own report must confirm it. */
   selectHoldMs?: number;
+  /** How long an ND In or ND Out press waits for the camera to report the ND state it asked for. */
+  ndConfirmMs?: number;
 };
 const SELECT_HOLD_MS = 2000;
+// Camera 1 on RCP 1 reported each ND change about 65 ms after the command (Nov 18 2026). This leaves room for a slow path.
+const ND_CONFIRM_MS = 5000;
 /** What the page shows for one camera on a controller. `online` is null until the camera has reported. */
 export type CameraStatus = { recording: 'recording' | 'stopped' | 'unknown'; available: boolean; message: string; online: boolean | null };
 const steps: Partial<Record<Command, CyanViewCameraParameterStep>> = {
@@ -320,6 +324,8 @@ export class CameraControl {
           });
         } catch (error) { this.note(targets, message(error)); throw error; }
         const connected = session;
+        const nd = ndCommands.includes(command) ? this.ndPlan(command, captured) : null;
+        if (nd) captured = nd.captured;
         const completion = Promise.all(captured.map(async ({ row, target, error }): Promise<RecordingTargetResult> => {
           const send = async (): Promise<RecordingTargetResult> => {
             const key = `${device.id}/${target?.address ?? row.id}`;
@@ -337,6 +343,12 @@ export class CameraControl {
                 return tap && result.evidence === 'noop' ? { ...result, message: 'Recording. Hold for 2 seconds to stop' } : result;
               } else if (command.startsWith('roll-') || command === 'stop-enabled-cameras') {
                 return await this.recording.record({ key, session: connected, target }, command === 'roll-enabled-cameras' ? 'start' : command === 'stop-enabled-cameras' ? 'stop' : 'toggle', execution.signal, feedbackTimeout(targets.length, this.options.feedbackWait));
+              } else if (nd) {
+                await this.recording.deliver(() => connected.setNdClear(target, nd.clear, execution.signal), execution.signal);
+                const wanted = nd.clear ? 'ND out' : 'ND in';
+                return await this.ndReported(connected, target, nd.clear, execution.signal)
+                  ? { target: row.id, outcome: 'success', evidence: 'confirmed', message: wanted }
+                  : { target: row.id, outcome: 'failure', evidence: 'unconfirmed', message: `The camera hasn’t reported ${wanted}` };
               } else {
                 await this.recording.deliver(() => steps[command]
                   ? connected.stepCameraParameter(target, steps[command]!, execution.signal)
@@ -355,6 +367,29 @@ export class CameraControl {
       return actionResult({ outcome: results.every(result => result.outcome === 'success') ? 'success' : 'failure', targets: results }, execution);
     } catch (error) {
       return { status: 'failure' as const, category: execution.signal.aborted ? 'cancelled' as const : 'unavailable' as const, message: message(error).slice(0, 1000) };
+    }
+  }
+  /**
+   * Which cameras an ND press goes to, and which way. A connected camera that has never reported ND in/out has none,
+   * so it is left out. ND In puts it in, ND Out takes it out, and the toggle takes it out of every camera when all of
+   * them have it in, and otherwise puts it in, so one press brings them all the same way.
+   */
+  private ndPlan<T extends { row: RecordValue; target?: CyanViewCameraTarget }>(command: Command, captured: readonly T[]) {
+    const without = captured.filter(item => item.target?.observation.online === true && item.target.observation.ndClear === null);
+    if (without.length) this.note(without.map(item => item.row), 'No ND in/out on this camera');
+    const left = captured.filter(item => !without.includes(item));
+    if (!left.length) throw new Error('No checked camera on this controller has ND in/out');
+    const known = left.flatMap(item => item.target?.observation.online === true && item.target.observation.ndClear !== null ? [item.target.observation.ndClear] : []);
+    const clear = command === 'nd-out-enabled-cameras' || (command === 'nd-toggle-enabled-cameras' && known.length > 0 && known.every(value => !value));
+    return { captured: left, clear };
+  }
+  /** Waits for the camera's own report of the ND state a press asked for. A camera already there has reported it. */
+  private async ndReported(session: RcpSession, target: CyanViewCameraTarget, clear: boolean, signal: AbortSignal) {
+    const deadline = Date.now() + (this.options.ndConfirmMs ?? ND_CONFIRM_MS);
+    for (;;) {
+      if (session.observeTarget(target).ndClear === clear) return true;
+      if (Date.now() >= deadline) return false;
+      await delay(20, undefined, { signal });
     }
   }
   private controller(controllerId: unknown) {
@@ -505,6 +540,20 @@ export class CameraControl {
           all = observations.length > 0 && observations.every(value => value === true);
           some = !all && observations.some(value => value === true);
         }
+        if (ndCommands.includes(command)) {
+          // Only checked cameras with ND in/out count. One that is offline, or not reported yet, leaves the key unknown.
+          const states = rows.filter(row => selected.enabled[row.id]).flatMap(row => {
+            try {
+              const observation = session.captureCamera(Number(row.number)).observation;
+              if (observation.online === true && observation.ndClear === null) return [];
+              return [this.appliedRow(row) && observation.online === true ? observation.ndClear : null];
+            } catch { return [null]; }
+          });
+          if (states.length && states.every(value => value !== null))
+            active = states.every(clear => clear === (command === 'nd-out-enabled-cameras'));
+          all = states.length > 0 && states.every(clear => clear === false);
+          some = !all && states.some(clear => clear === false);
+        }
       }
       const observing = values.enabled !== false && values['module.feedbackEnabled'] === true && feedbackCommands.includes(command);
       const colors = String(values['module.feedbackColor'] || '#3A3A40 | #37A65B').split('|').map(color => color.trim()).filter(color => /^#[0-9a-f]{6}$/i.test(color));
@@ -518,6 +567,7 @@ export class CameraControl {
         'single-switch': [active === true && 'single-switch'],
       };
       for (const action of ['roll-enabled-cameras', 'stop-enabled-cameras', 'roll-toggle-enabled-cameras']) own[action] = [all && 'all-rolling', some && 'some-rolling'];
+      for (const action of ndCommands) own[action] = [all && 'nd-in', some && 'some-nd-in'];
       const path = cameraCommands.includes(command) && connection !== null ? [connectionTrigger[connection]] : [];
       const triggers = !observing ? null : [...(own[command] ?? []), ...path].filter((id): id is string => typeof id === 'string');
       // Hubble with feedback triggers draws the key from `triggers`; the colour is for older hosts.

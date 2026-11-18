@@ -19,7 +19,7 @@ const eventually = async (predicate: () => boolean, attempts = 200) => {
   assert.ok(predicate(), 'Expected control observation');
 };
 /** An RCP and a second controller, a RIO with no panel unless a test asks for another kind. */
-async function fleet({ second = { Serial: 'CY-RIO-1-20', Name: 'RIO' }, secondPanel = false, cameraSettleMs = undefined as number | undefined, selectHoldMs = undefined as number | undefined } = {}) {
+async function fleet({ second = { Serial: 'CY-RIO-1-20', Name: 'RIO' }, secondPanel = false, cameraSettleMs = undefined as number | undefined, selectHoldMs = undefined as number | undefined, ndConfirmMs = undefined as number | undefined } = {}) {
   const a = new FakeController(), b = new FakeController();
   a.config.Product = { Serial: 'CY-RCP-1-10', Name: 'RCP' };
   b.config.Product = { ...second };
@@ -51,7 +51,7 @@ async function fleet({ second = { Serial: 'CY-RIO-1-20', Name: 'RIO' }, secondPa
       if (wait) { const connect = client.connect.bind(client); client.connect = async signal => { await delay(wait); return connect(signal); }; }
       return client;
     },
-    control: { cameraSettleMs, ...(selectHoldMs === undefined ? {} : { selectHoldMs }), session: (definition, changed) => {
+    control: { cameraSettleMs, ...(selectHoldMs === undefined ? {} : { selectHoldMs }), ...(ndConfirmMs === undefined ? {} : { ndConfirmMs }), session: (definition, changed) => {
       const network = networks[definition.serial === a.config.Product.Serial ? 0 : 1]!;
       const session = new RcpSession({ ...definition, requestTimeoutMs: 350 }, changed, true,
         () => createConnection({ host: '127.0.0.1', port: network.port }));
@@ -316,7 +316,7 @@ test('Action choices separate RCP camera selection from Cyanview and retain exis
     const page=await query();
     assert.deepEqual([...new Set(page.choices.map(choice=>choice.group))],['RCP set active camera','Cyanview']);
     assert.deepEqual(page.choices.filter(choice=>choice.group==='RCP set active camera').map(choice=>choice.id),['select-camera']);
-    assert.equal(page.choices.filter(choice=>choice.group==='Cyanview').length,14);
+    assert.equal(page.choices.filter(choice=>choice.group==='Cyanview').length,17);
     const actionField=matrix.fields.find(field=>field.id==='actionType')!;
     for(const choice of page.choices)assert.equal(parseModuleMatrixValue(actionField,choice.id),choice.id);
     assert.equal((await query('rcp')).choices[0]?.id,'select-camera');
@@ -1414,6 +1414,99 @@ test('group rows report all or some of their cameras, and only their own trigger
   } finally { await s.close(); }
 });
 
+test('ND In, ND Out and the toggle send what RCP 1’s panel sent, only to checked cameras with ND in/out, and wait for the camera’s report', async () => {
+  const s = await fleet();
+  try {
+    const network = s.networks[0]!;
+    await s.run('toggle-camera-enabled', 0, 1);
+    await s.run('toggle-camera-enabled', 0, 2);
+    const none = await s.run('nd-in-enabled-cameras');
+    assert.equal(none.status, 'failure');
+    assert.match(String(object(none).message), /No checked camera on this controller has ND in\/out/);
+    assert.equal(network.commands.length, 0, 'A camera that never reported ND in/out is sent none');
+    // How an RCP holds camera 1's ND, under volatile, clear: Nov 18 2026.
+    network.send('unit/a/camhead/status/volatile/nd_filter_clear', '1', true);
+    await eventually(() => s.sessions[0]!.cameraObservations().some(camera => camera.address === 'unit/a' && camera.ndClear === true));
+    const sent = () => network.commands.map(command => [command.topic, command.value]);
+    const press = async (command: string, value: string) => {
+      const before = network.commands.length, result = await s.run(command);
+      assert.equal(result.status, 'success', JSON.stringify(result));
+      assert.equal(object(object(result).evidence).kind, 'state-confirmed', 'The camera reported the state the press asked for');
+      assert.deepEqual(sent().slice(before), [['unit/a/camhead/action/set/nd_filter_clear', value]], `${command} sends ${value} to camera 1 only`);
+    };
+    await press('nd-in-enabled-cameras', '0');
+    await press('nd-toggle-enabled-cameras', '1');
+    await press('nd-toggle-enabled-cameras', '0');
+    await press('nd-out-enabled-cameras', '1');
+    await press('nd-out-enabled-cameras', '1');
+    assert.ok(network.commands.every(command => command.header === 0x32), 'QoS 1, never retained');
+    const { cameras } = await s.state();
+    const [wide, tight] = s.plan.cameras.filter(row => row.device === s.ids[0]);
+    assert.equal(cameras[wide!.id]!.message, 'ND out');
+    assert.equal(cameras[tight!.id]!.message, 'No ND in/out on this camera');
+    // A toggle brings mixed cameras the same way: in, unless every one is already in.
+    network.send('unit/b/camhead/status/volatile/nd_filter_clear', '0', true);
+    await eventually(() => s.sessions[0]!.cameraObservations().some(camera => camera.address === 'unit/b' && camera.ndClear === false));
+    const before = network.commands.length;
+    assert.equal((await s.run('nd-toggle-enabled-cameras')).status, 'success');
+    assert.deepEqual(sent().slice(before).sort(), [['unit/a/camhead/action/set/nd_filter_clear', '0'], ['unit/b/camhead/action/set/nd_filter_clear', '0']]);
+  } finally { await s.close(); }
+});
+
+test('an ND press the camera never reports back fails as unconfirmed, and an offline camera is sent nothing', async () => {
+  const s = await fleet({ ndConfirmMs: 150 });
+  try {
+    const network = s.networks[0]!;
+    network.controls.ndFeedback = false;
+    await s.run('toggle-camera-enabled', 0, 1);
+    await eventually(() => s.sessions[0]?.snapshot().phase === 'ready');
+    network.send('unit/a/camhead/status/persist/nd_filter_clear', '1', true);
+    await eventually(() => s.sessions[0]?.cameraObservations().some(camera => camera.address === 'unit/a' && camera.ndClear === true) === true);
+    const silent = await s.run('nd-in-enabled-cameras');
+    assert.equal(silent.status, 'failure');
+    assert.equal(object(silent).category, 'timeout');
+    assert.match(String(object(silent).message), /hasn’t reported ND in/);
+    assert.deepEqual(network.commands.map(command => [command.topic, command.value]), [['unit/a/camhead/action/set/nd_filter_clear', '0']]);
+    network.send('unit/a/camhead/status/volatile/control', 'offline', true);
+    await eventually(() => s.sessions[0]!.cameraObservations().some(camera => camera.address === 'unit/a' && camera.online === false));
+    const offline = await s.run('nd-out-enabled-cameras');
+    assert.equal(offline.status, 'failure');
+    assert.match(String(object(offline).message), /isn't connected/);
+    assert.equal(network.commands.length, 1, 'Nothing more was sent');
+  } finally { await s.close(); }
+});
+
+test('ND rows light ND in when every checked camera with ND has it in, Some ND in when only some do', async () => {
+  const nd = matrix.triggers!.filter(trigger => ['nd-in', 'some-nd-in'].includes(trigger.id));
+  assert.deepEqual(nd.map(trigger => [trigger.id, trigger.label, trigger.part, trigger.color]), [['nd-in', 'ND in', 'background', '#37A65B'], ['some-nd-in', 'Some ND in', 'bar', '#F59E0B']]);
+  for (const trigger of nd) assert.deepEqual(trigger.when, [{ field: 'actionType', values: ['nd-in-enabled-cameras', 'nd-out-enabled-cameras', 'nd-toggle-enabled-cameras'] }]);
+  const s = await fleet();
+  try {
+    const network = s.networks[0]!;
+    const row = (actionType: string) => ({ actionId: `row-${actionType}`, actionColumnId: 'column-one', values: { enabled: true, actionType,
+      'module.controllerId': s.ids[0]!, 'module.feedbackEnabled': true, 'module.feedbackColor': '#333333 | #00FF00' } });
+    const last = () => object(object(s.f.feedback.at(-1)).appearance);
+    await s.run('toggle-camera-enabled', 0, 1);
+    await s.run('toggle-camera-enabled', 0, 2);
+    await s.f.instance.subscribeFeedback!([{ id: 'camera-control', fields: row('nd-toggle-enabled-cameras') }], { signal: s.f.signal });
+    await eventually(() => s.sessions[0]?.snapshot().phase === 'ready');
+    // Camera 2 has no ND in/out, so camera 1 alone decides.
+    network.send('unit/a/camhead/status/volatile/nd_filter_clear', '0');
+    await eventually(() => JSON.stringify(last().triggers) === '["nd-in"]');
+    network.send('unit/b/camhead/status/volatile/nd_filter_clear', '1');
+    await eventually(() => JSON.stringify(last().triggers) === '["some-nd-in"]');
+    network.send('unit/b/camhead/status/volatile/nd_filter_clear', '0');
+    await eventually(() => JSON.stringify(last().triggers) === '["nd-in"]');
+    network.send('unit/a/camhead/status/volatile/nd_filter_clear', '1');
+    network.send('unit/b/camhead/status/volatile/nd_filter_clear', '1');
+    await eventually(() => JSON.stringify(last().triggers) === '[]');
+    // An ND Out key is on when every camera is clear, for hosts that colour by state.
+    await s.f.instance.subscribeFeedback!([{ id: 'camera-control', fields: row('nd-out-enabled-cameras') }], { signal: s.f.signal });
+    await eventually(() => last().backgroundColor === '#00FF00');
+    assert.equal(network.commands.length, 0, 'Watching sends nothing');
+  } finally { await s.close(); }
+});
+
 test('Select camera lights as soon as the controller acknowledges, and the RCP report confirms or corrects it', async () => {
   const s = await fleet({ selectHoldMs: 300 });
   try {
@@ -1456,7 +1549,7 @@ test('cancelled recording is not replayed and controller removal invalidates nam
 
 test('a command sent without a known state means the old state is not trusted until the camera reports again', async () => {
   const observation = { address: 'unit/a', number: 1, name: 'Wide', online: true, recording: null as boolean | null, recordingLocked: false,
-    recordingSequence: 5, variableNd: false, baseGain: null, model: 'Sony Venice', recordMode: 'rec-stop' as const, persistentLock: false, volatileLock: false };
+    recordingSequence: 5, variableNd: false, ndClear: null, baseGain: null, model: 'Sony Venice', recordMode: 'rec-stop' as const, persistentLock: false, volatileLock: false };
   const target = { address: 'unit/a', generation: 1, observation };
   const sent: string[] = [];
   const coordinator = new RecordingCoordinator({ feedbackTimeoutMs: 100 });
@@ -1475,7 +1568,7 @@ test('a command sent without a known state means the old state is not trusted un
 test('after an unclean stop, old state is not trusted: explicit commands still go out, and a toggle waits for a fresh report', async () => {
   const camera = (recordMode: 'rec-stop' | 'toggle') => {
     const observation = { address: 'unit/a', number: 1, name: 'Wide', online: true, recording: false, recordingLocked: false,
-      recordingSequence: 0, variableNd: false, baseGain: null, model: 'Sony Venice', recordMode, persistentLock: false, volatileLock: false };
+      recordingSequence: 0, variableNd: false, ndClear: null, baseGain: null, model: 'Sony Venice', recordMode, persistentLock: false, volatileLock: false };
     const sent: string[] = [];
     return { observation, sent, target: { key: 'camera', target: { address: 'unit/a', generation: 1, observation }, session: {
       observeTarget: () => observation,
