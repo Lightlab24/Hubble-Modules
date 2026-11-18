@@ -47,7 +47,10 @@ export const ModulePromptTableSchema = z.strictObject({
 
 export const ModulePromptSchema = z
   .strictObject({
-    /** One open dialog per key and module: a new one with the same key replaces it. */
+    /**
+     * One open dialog per key and module. A new request with the same key asks again: the same
+     * dialog, brought to the front, with what the operator typed kept.
+     */
     key: Id,
     title: Text(80),
     description: z.string().trim().max(200).optional(),
@@ -63,6 +66,12 @@ export const ModulePromptSchema = z
     }),
     /** How long the dialog stays open unanswered. */
     expiresInMs: z.int().min(5_000).max(600_000).default(120_000),
+    /**
+     * Only refreshes the open dialog with this key, such as when the cameras it lists change,
+     * keeping what the operator typed; never opens one that has closed. Requires
+     * module-prompt-update-v1.
+     */
+    update: z.boolean().default(false),
   })
   .refine(
     (prompt) => new Set(prompt.fields.map((field) => field.id)).size === prompt.fields.length,

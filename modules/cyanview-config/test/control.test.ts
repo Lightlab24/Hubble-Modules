@@ -1563,7 +1563,7 @@ test('Base Gain keys light High base, Low base, or Mixed base when the checked c
   } finally { await s.close(); }
 });
 
-test('Color Temp… asks HubDash for a temperature and tint for the enabled cameras, and sends nothing on the press', async () => {
+test('White Balance asks HubDash for a temperature and tint for the enabled cameras, and sends nothing on the press', async () => {
   const s = await fleet();
   try {
     const network = s.networks[0]!;
@@ -1577,13 +1577,14 @@ test('Color Temp… asks HubDash for a temperature and tint for the enabled came
     await eventually(() => s.sessions[0]!.cameraObservations().filter(camera => camera.wbTemp !== null).length === 2);
     const pressed = await s.run('wb-dialog-enabled-cameras');
     assert.equal(pressed.status, 'success', JSON.stringify(pressed));
-    assert.equal(object(object(pressed).evidence).summary, 'Asked for a Color Temp for 2 enabled cameras in HubDash');
+    assert.equal(object(object(pressed).evidence).summary, 'Asked HubDash for a white balance for 2 enabled cameras');
     assert.equal(network.commands.length, 0, 'The press only asks');
     assert.equal(s.f.events.length, 1);
     const { channel, value } = s.f.events[0]!;
     assert.equal(channel, 'host.prompt.v1');
     const prompt = ModulePromptSchema.parse(value);
-    assert.equal(prompt.title, 'Color Temp');
+    assert.equal(prompt.title, 'White Balance');
+    assert.equal(prompt.update, false);
     assert.match(prompt.description!, /^Cyanview · .+ · 2 enabled cameras$/u);
     assert.deepEqual(prompt.fields.map(field => [field.id, field.default, field.min, field.max, field.optional]), [
       ['temperature', 4560, 2000, 15000, false], ['tint', 99, -99, 99, true]]);
@@ -1591,13 +1592,14 @@ test('Color Temp… asks HubDash for a temperature and tint for the enabled came
     assert.deepEqual(prompt.notes, ['Camera 2 has no tint, so it gets the temperature only.']);
     assert.equal(prompt.submitLabel, 'Send to 2 cameras');
     assert.equal(prompt.answer.actionId, 'wb-dialog-enabled-cameras');
-    // Pressed again, the dialog replaces the one already open.
+    // Pressed again, it asks for the same dialog again, which Hubble brings to the front.
     await s.run('wb-dialog-enabled-cameras');
     assert.equal(object(s.f.events[1]!.value).key, prompt.key);
+    assert.notEqual(object(s.f.events[1]!.value).update, true);
   } finally { await s.close(); }
 });
 
-test('the Color Temp… answer moves each camera by the difference with the RCP panel\'s own commands, and waits for its report', async () => {
+test('the White Balance answer moves each camera by the difference with the RCP panel\'s own commands, and waits for its report', async () => {
   const s = await fleet();
   try {
     const network = s.networks[0]!;
@@ -1639,7 +1641,7 @@ test('the Color Temp… answer moves each camera by the difference with the RCP 
   } finally { await s.close(); }
 });
 
-test('Color Temp… says so when the camera never reports back, and on a Hubble that can\'t show its dialog', async () => {
+test('White Balance says so when the camera never reports back, and on a Hubble that can\'t show its dialog', async () => {
   const s = await fleet({ whiteBalanceConfirmMs: 150 });
   try {
     const network = s.networks[0]!;
@@ -1655,6 +1657,53 @@ test('Color Temp… says so when the camera never reports back, and on a Hubble 
     const old = await s.run('wb-dialog-enabled-cameras');
     assert.equal(old.status, 'failure');
     assert.match(String(object(old).message), /update Hubble/u);
+  } finally { await s.close(); }
+});
+
+test('an open White Balance dialog follows the cameras checked and what they report, and stops after Send', async () => {
+  const s = await fleet();
+  try {
+    const network = s.networks[0]!;
+    network.controls.wb = { a: { temp: 4560, tint: 0.99 }, b: { temp: 3200, tint: null } };
+    await s.run('toggle-camera-enabled', 0, 1);
+    await eventually(() => s.sessions[0]?.snapshot().phase === 'ready');
+    network.send('unit/a/camhead/status/volatile/wb_temp', '4560', true);
+    network.send('unit/a/camhead/status/volatile/wb_tint', '0.99', true);
+    network.send('unit/b/camhead/status/volatile/wb_temp', '3200', true);
+    await eventually(() => s.sessions[0]!.cameraObservations().filter(camera => camera.wbTemp !== null).length === 2);
+    await s.run('wb-dialog-enabled-cameras');
+    const opened = ModulePromptSchema.parse(s.f.events.at(-1)!.value);
+    assert.equal(opened.submitLabel, 'Send to 1 camera');
+    const refreshes = () => s.f.events.slice(1).map(event => ModulePromptSchema.parse(event.value));
+    // Camera 2 is checked while the dialog is open: the dialog refreshes in place to send to both.
+    await s.run('toggle-camera-enabled', 0, 2);
+    await eventually(() => refreshes().at(-1)?.submitLabel === 'Send to 2 cameras');
+    const both = refreshes().at(-1)!;
+    assert.equal(both.update, true);
+    assert.equal(both.key, opened.key);
+    assert.match(both.description!, / · 2 enabled cameras$/u);
+    assert.deepEqual(both.table!.rows.map(row => [row.number, row.now]), [['1', '4560 K'], ['2', '3200 K']]);
+    assert.deepEqual(both.notes, ['Camera 2 has no tint, so it gets the temperature only.']);
+    // A camera reporting a new value refreshes it too, and nothing changed sends nothing.
+    network.send('unit/b/camhead/status/volatile/wb_temp', '3300', true);
+    await eventually(() => refreshes().at(-1)?.table?.rows[1]?.now === '3300 K');
+    const settled = s.f.events.length;
+    await delay(60);
+    assert.equal(s.f.events.length, settled);
+    // Every camera cleared: the dialog stays, keeping its last fields, with nothing to send to.
+    await s.run('toggle-camera-enabled', 0, 2);
+    await s.run('toggle-camera-enabled', 0, 1);
+    await eventually(() => refreshes().at(-1)?.submitLabel === 'Send to 0 cameras');
+    assert.deepEqual(refreshes().at(-1)!.fields.map(field => field.id), ['temperature', 'tint']);
+    await s.run('toggle-camera-enabled', 0, 1);
+    await eventually(() => refreshes().at(-1)?.submitLabel === 'Send to 1 camera');
+    // After Send, checking cameras refreshes nothing.
+    const sent = await s.f.instance.execute(opened.answer.actionId, { ...(opened.answer.fields as Record<string, never>), prompt: { temperature: 4560 } }, s.f.execution());
+    assert.equal(sent.status, 'success', JSON.stringify(sent));
+    const afterSend = s.f.events.length;
+    await s.run('toggle-camera-enabled', 0, 2);
+    await delay(60);
+    assert.equal(s.f.events.length, afterSend);
   } finally { await s.close(); }
 });
 

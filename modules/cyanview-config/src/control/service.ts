@@ -17,7 +17,7 @@ export type ControlOptions = {
   selectHoldMs?: number;
   /** How long an ND In or ND Out press waits for the camera to report the ND state it asked for. */
   ndConfirmMs?: number;
-  /** How long a Color Temp… answer waits for each camera to report the temperature and tint it asked for. */
+  /** How long a White Balance answer waits for each camera to report the temperature and tint it asked for. */
   whiteBalanceConfirmMs?: number;
 };
 const SELECT_HOLD_MS = 2000;
@@ -25,6 +25,8 @@ const SELECT_HOLD_MS = 2000;
 const ND_CONFIRM_MS = 5000;
 const WB_CONFIRM_MS = 5000;
 const WB_DIALOG = 'wb-dialog-enabled-cameras';
+// How long a White Balance dialog waits for Send.
+const WB_DIALOG_MS = 120_000;
 // What the dialog takes. Cyanview reports tint as -0.99 to 0.99; the dialog shows it as -99 to +99.
 const WB_TEMP = { min: 2000, max: 15000 }, WB_TINT = { min: -99, max: 99 };
 const signedTint = (tint: number) => { const value = Math.round(tint * 100); return value > 0 ? `+${value}` : String(value); };
@@ -88,6 +90,11 @@ export class CameraControl {
   private cameraWatches = new Map<string, { text: string; settled: boolean; timer?: ReturnType<typeof setTimeout> }>();
   private cameraChanges: Record<string, number> = {};
   private feedbackSent = new Map<ModuleFeedbackSubscription, string>();
+  /**
+   * White Balance dialogs this module has open in HubDash, by controller, until Send or their expiry. A camera checked,
+   * cleared or reporting a new value refreshes the dialog in place.
+   */
+  private openWhiteBalance = new Map<string, { until: number; actionId: string; fields: ModuleValues; prompt: ModulePromptInput; text: string }>();
   /**
    * Select camera presses the controller acknowledged, shown at once until the RCP reports a camera change
    * over MQTT or the hold runs out, whichever comes first. Keyed by controller.
@@ -309,7 +316,7 @@ export class CameraControl {
       // It then acts in press order per controller, so a slow configuration read can't let a later press overtake it.
       const { completion, asked } = await this.accept(controllerQueue(controllerId), async () => {
         const { device, targets, saved } = await accepted;
-        // The press that only opens the Color Temp… dialog sends nothing yet.
+        // The press that only opens the White Balance dialog sends nothing yet.
         if (!(command === WB_DIALOG && fields.prompt === undefined)) this.note(targets, 'Sending…');
         const assertCurrent = (row?: RecordValue) => {
           const current = this.plan.devices.find(item => item.id === device.id);
@@ -337,14 +344,17 @@ export class CameraControl {
         if (nd) captured = nd.captured;
         if (baseGainCommands.includes(command))
           captured = this.leaveOut(captured, observation => observation.baseGain === null, 'No base gain on this camera', 'No checked camera on this controller reports a base gain');
-        // Color Temp…: a press asks HubDash for the values; the dialog's Send comes back with them under `prompt`.
+        // White Balance: a press asks HubDash for the values; the dialog's Send comes back with them under `prompt`.
         const typed = command === WB_DIALOG ? this.typedWhiteBalance(fields.prompt) : null;
         if (command === WB_DIALOG && typed === null) {
-          if (!this.context.publishEvent) throw new Error('This Hubble can’t show the Color Temp dialog; update Hubble');
-          const { prompt, asked } = this.colorTempPrompt(device, captured, id, fields);
+          if (!this.context.publishEvent) throw new Error('This Hubble can’t show the White Balance dialog; update Hubble');
+          const { prompt, asked } = this.whiteBalancePrompt(device, captured, id, fields);
           this.context.publishEvent(MODULE_PROMPT_CHANNEL, prompt as never);
+          this.openWhiteBalance.set(String(device.id), { until: Date.now() + WB_DIALOG_MS, actionId: id, fields, prompt, text: JSON.stringify(prompt) });
           return { completion: Promise.resolve([]), asked };
         }
+        // Send closed the dialog, so nothing refreshes it any more.
+        if (typed) this.openWhiteBalance.delete(String(device.id));
         if (typed) captured = this.leaveOut(captured, observation => observation.wbTemp === null, 'No colour temperature on this camera', 'No enabled camera on this controller reports a colour temperature');
         const completion = Promise.all(captured.map(async ({ row, target, error }): Promise<RecordingTargetResult> => {
           const send = async (): Promise<RecordingTargetResult> => {
@@ -415,7 +425,7 @@ export class CameraControl {
     if (!left.length) throw new Error(none);
     return left;
   }
-  /** The temperature and tint typed in the Color Temp… dialog, or null on the press that opens it. */
+  /** The temperature and tint typed in the White Balance dialog, or null on the press that opens it. */
   private typedWhiteBalance(prompt: unknown): { temperature: number; tint: number | null } | null {
     if (prompt === undefined) return null;
     const values = object(prompt), temperature = values.temperature, tint = values.tint;
@@ -426,16 +436,17 @@ export class CameraControl {
     return { temperature, tint: tint === undefined ? null : tint };
   }
   /**
-   * The Color Temp… dialog for a controller's enabled cameras: each one's temperature and tint now, and what each will
+   * The White Balance dialog for a controller's enabled cameras: each one's temperature and tint now, and what each will
    * get. A camera with no tint gets the temperature only; an offline one, or one with no temperature, gets nothing.
+   * A press needs at least one camera to send to; a refresh (`previous`) keeps the last fields when none is left.
    */
-  private colorTempPrompt<T extends { row: RecordValue; target?: CyanViewCameraTarget }>(device: RecordValue, captured: readonly T[], actionId: string, fields: ModuleValues) {
+  private whiteBalancePrompt<T extends { row: RecordValue; target?: CyanViewCameraTarget }>(device: RecordValue, captured: readonly T[], actionId: string, fields: ModuleValues, previous?: ModulePromptInput) {
     const cameras = captured.map(({ row, target }) => ({
       number: String(row.number), name: String(row.name || target?.observation.name || 'Camera'),
       online: target?.observation.online === true, temp: target?.observation.wbTemp ?? null, tint: target?.observation.wbTint ?? null,
     }));
     const receivers = cameras.filter(camera => camera.online && camera.temp !== null);
-    if (!receivers.length) throw new Error('No enabled camera on this controller reports a colour temperature');
+    if (!receivers.length && !previous) throw new Error('No enabled camera on this controller reports a colour temperature');
     const offline = cameras.filter(camera => !camera.online).map(camera => camera.number);
     const noTemp = cameras.filter(camera => camera.online && camera.temp === null).map(camera => camera.number);
     const noTint = receivers.filter(camera => camera.tint === null).map(camera => camera.number);
@@ -443,14 +454,14 @@ export class CameraControl {
     const clamp = (value: number, range: { min: number; max: number }) => Math.min(range.max, Math.max(range.min, Math.round(value)));
     const count = (n: number) => `${n} enabled camera${n === 1 ? '' : 's'}`;
     const prompt: ModulePromptInput = {
-      key: `color-temp.${String(device.id)}`,
-      title: 'Color Temp',
+      key: `white-balance.${String(device.id)}`,
+      title: 'White Balance',
       description: `Cyanview · ${String(device.name || device.serial || 'Controller')} · ${count(cameras.length)}`.slice(0, 200),
       icon: 'thermometer',
-      fields: [
+      fields: receivers.length ? [
         { id: 'temperature', label: 'Temperature', type: 'number', default: clamp(receivers[0]!.temp!, WB_TEMP), ...WB_TEMP, integer: true, unit: 'K', hint: `${WB_TEMP.min} to ${WB_TEMP.max}` },
         ...(withTint ? [{ id: 'tint', label: 'Tint', type: 'number' as const, default: clamp(withTint.tint! * 100, WB_TINT), ...WB_TINT, integer: true, hint: '−99 green to +99 magenta', optional: true }] : []),
-      ],
+      ] : previous!.fields,
       table: {
         label: 'Enabled cameras',
         columns: [{ id: 'number', label: '#' }, { id: 'camera', label: 'Camera' }, { id: 'now', label: 'Now' }, { id: 'tint', label: 'Tint' }],
@@ -461,15 +472,35 @@ export class CameraControl {
         })),
       },
       notes: [
+        ...(!receivers.length ? ['No checked camera reports a colour temperature, so Send has nothing to send to.'] : []),
         ...(withTint && noTint.length ? [`${cameraList(noTint)} ${noTint.length === 1 ? 'has' : 'have'} no tint, so ${noTint.length === 1 ? 'it gets' : 'they get'} the temperature only.`] : []),
         ...(noTemp.length ? [`${cameraList(noTemp)} ${noTemp.length === 1 ? 'reports' : 'report'} no colour temperature, so ${noTemp.length === 1 ? 'it gets' : 'they get'} nothing.`] : []),
         ...(offline.length ? [`${cameraList(offline)} ${offline.length === 1 ? 'is' : 'are'} offline, so ${offline.length === 1 ? 'it gets' : 'they get'} nothing.`] : []),
       ].map(note => note.slice(0, 200)).slice(0, 4),
       submitLabel: `Send to ${receivers.length} camera${receivers.length === 1 ? '' : 's'}`,
       answer: { actionId, fields: fields as never },
-      expiresInMs: 120_000,
+      expiresInMs: WB_DIALOG_MS,
     };
-    return { prompt, asked: `Asked for a Color Temp for ${count(receivers.length)} in HubDash` };
+    return { prompt, asked: `Asked HubDash for a white balance for ${count(receivers.length)}` };
+  }
+  /** Keeps each open White Balance dialog on the cameras checked now and what they report, without touching what was typed. */
+  private refreshWhiteBalance() {
+    if (!this.openWhiteBalance.size || !this.context.publishEvent) return;
+    const now = Date.now(), { enabled } = this.selection.snapshot();
+    for (const [deviceId, open] of this.openWhiteBalance) {
+      if (now >= open.until) { this.openWhiteBalance.delete(deviceId); continue; }
+      const device = this.plan.devices.find(row => row.id === deviceId), session = this.sessions.get(deviceId);
+      if (!device || !session || session.snapshot().phase !== 'ready') continue;
+      const captured = this.plan.cameras.filter(row => row.device === deviceId && enabled[row.id]).map(row => {
+        try { return { row, target: this.capture(row, session) }; } catch { return { row }; }
+      });
+      const { prompt } = this.whiteBalancePrompt(device, captured, open.actionId, open.fields, open.prompt);
+      const text = JSON.stringify(prompt);
+      if (text === open.text) continue;
+      open.prompt = prompt; open.text = text;
+      // Only refreshes the dialog: Hubble ignores it once the dialog has closed.
+      this.context.publishEvent(MODULE_PROMPT_CHANNEL, { ...prompt, update: true } as never);
+    }
   }
   /**
    * Moves one camera to the typed temperature and tint with the RCP's own `add` commands, by the difference from
@@ -728,6 +759,7 @@ export class CameraControl {
     if (this.stopped) return;
     this.observe();
     this.feedback();
+    this.refreshWhiteBalance();
     const { sequence } = this.state();
     if (sequence !== this.publishedSequence) { this.publishedSequence = sequence; this.changed(); }
     this.saveCheckpoint();
