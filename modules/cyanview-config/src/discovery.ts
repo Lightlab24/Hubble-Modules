@@ -52,8 +52,22 @@ export async function tcpReachable(address: string, signal: AbortSignal): Promis
   });
 }
 export type DiscoveryMethod = 'ping' | 'broadcast';
-export type DiscoveryProgress = { id: string; method: DiscoveryMethod; range: string; state: 'scanning' | 'complete' | 'stopped'; checked: number; total: number; results: RecordValue[]; error?: string };
-export type DiscoveryOptions = { ping?: PingSweep; announcements?: AnnouncementListener; durationMs?: number; seeds?: (receive: (addresses: string[]) => void, signal: AbortSignal) => Promise<void>; neighbors?: NeighborReader; neighborIntervalMs?: number };
+export type SavedDevice = { serial: string; addresses: string[] };
+/** Checking until a saved device answers as itself at one of its addresses (found) or none does (missing). */
+export type SavedCheck = { serial: string; state: 'checking' | 'found' | 'missing' };
+export type DiscoveryProgress = { id: string; method: DiscoveryMethod; range: string; state: 'scanning' | 'complete' | 'stopped'; checked: number; total: number; results: RecordValue[]; saved: SavedCheck[]; error?: string };
+export type DiscoveryOptions = { ping?: PingSweep; announcements?: AnnouncementListener; durationMs?: number; seeds?: (receive: (addresses: string[]) => void, signal: AbortSignal) => Promise<void>; neighbors?: NeighborReader; neighborIntervalMs?: number; saved?: (signal: AbortSignal) => Promise<SavedDevice[]> };
+/** How many saved devices, and addresses of each, a search checks first. */
+export const savedPolicy = { devices: 256, addresses: 4, concurrent: 32 } as const;
+/** Runs tasks with at most `limit` going at once. */
+function limiter(limit: number) {
+  let active = 0; const waiting: (() => void)[] = [];
+  return async <T>(task: () => Promise<T>): Promise<T> => {
+    if (active >= limit) await new Promise<void>(resolve => waiting.push(resolve));
+    active++;
+    try { return await task(); } finally { active--; waiting.shift()?.(); }
+  };
+}
 export class Discovery {
   private controller: AbortController | undefined;
   private completion: Promise<void> = Promise.resolve();
@@ -64,9 +78,9 @@ export class Discovery {
     if (!['ping', 'broadcast'].includes(method)) throw new Error('Choose a discovery method');
     this.stop();
     const controller = new AbortController(); this.controller = controller;
-    const state: DiscoveryProgress = { id: randomUUID(), method, range: cidr, state: 'scanning', checked: 0, total: method === 'broadcast' ? 0 : range.count, results: [] }; this.progress = state;
+    const state: DiscoveryProgress = { id: randomUUID(), method, range: cidr, state: 'scanning', checked: 0, total: method === 'broadcast' ? 0 : range.count, results: [], saved: [] }; this.progress = state;
     const found = new Map<string, RecordValue>(); let last = 0;
-    const emit = (force = false) => { if (this.progress !== state) return; if (force || Date.now() - last > 250) { last = Date.now(); state.results = [...found.values()]; this.publish({ ...state }); } };
+    const emit = (force = false) => { if (this.progress !== state) return; if (force || Date.now() - last > 250) { last = Date.now(); state.results = [...found.values()]; this.publish({ ...state, saved: state.saved.map(item => ({ ...item })) }); } };
     const remember = (device: RecordValue, address: string) => {
       const previous = found.get(device.serial);
       if (previous) found.set(device.serial, { ...previous, ...device, addresses: [...new Set([...(previous.addresses ?? [previous.address]), address])].slice(0,16) });
@@ -74,6 +88,31 @@ export class Discovery {
       emit(true);
     };
     emit(true);
+    // Saved devices go first, at every address each was known by, whichever range was chosen. Their
+    // connection attempts all settle (gate) before the sweep starts filling the Mac's ARP queue.
+    const savedPhase = (async () => {
+      const list = (await this.options.saved?.(controller.signal).catch(() => []) ?? []).slice(0, savedPolicy.devices)
+        .map(item => ({ serial: item.serial, addresses: [...new Set(item.addresses.filter(validIp))].slice(0, savedPolicy.addresses) }))
+        .filter(item => item.addresses.length);
+      if (controller.signal.aborted || this.progress !== state) return { addresses: new Set<string>(), gate: Promise.resolve(), done: Promise.resolve() };
+      state.saved = list.map(item => ({ serial: item.serial, state: 'checking' as const })); emit(true);
+      const run = limiter(savedPolicy.concurrent);
+      const reachability = list.map(item => Promise.all(item.addresses.map(address => run(() => this.reachable(address, controller.signal)).catch(() => false))));
+      const done = Promise.allSettled(list.map(async (item, index) => {
+        const entry = state.saved[index]!, answered = await reachability[index]!;
+        for (const [at, address] of item.addresses.entries()) {
+          if (!answered[at] || controller.signal.aborted) continue;
+          try {
+            const device = await run(() => this.probe(address, controller.signal));
+            if (controller.signal.aborted) return;
+            remember(device, address);
+            if (String(device.serial).toUpperCase() === item.serial.toUpperCase()) { entry.state = 'found'; emit(true); return; }
+          } catch { /* Another device, or none, at this address. */ }
+        }
+        if (!controller.signal.aborted) { entry.state = 'missing'; emit(true); }
+      })).then(() => undefined);
+      return { addresses: new Set(list.flatMap(item => item.addresses)), gate: Promise.allSettled(reachability).then(() => undefined), done };
+    })();
     if (method === 'ping') {
       const seen = new Set<string>(), unreached = new Set<string>(), retried = new Set<string>(), queue: string[] = [], pending = new Set<Promise<void>>();
       const pump = () => {
@@ -100,13 +139,18 @@ export class Discovery {
         for (const address of addresses) if (unreached.delete(address) && !retried.has(address)) { retried.add(address); queue.push(address); }
         receive(addresses);
       };
-      // Previously verified/cached addresses are checked even when ICMP replies are blocked.
-      const seeds = this.options.seeds?.(receive, controller.signal).catch(() => {}) ?? Promise.resolve();
-      const neighbors = this.options.neighbors && harvestNeighbors(this.options.neighbors, range.contains, resolved, controller.signal, this.options.neighborIntervalMs);
+      let seeds: Promise<void> = Promise.resolve(), neighbors: ReturnType<typeof harvestNeighbors> | undefined;
       this.completion = (async () => {
+        const saved = await savedPhase;
         try {
+          // A saved device's addresses are checked once, by the saved check.
+          for (const address of saved.addresses) seen.add(address);
+          // Previously verified/cached addresses are checked even when ICMP replies are blocked.
+          seeds = this.options.seeds?.(receive, controller.signal).catch(() => {}) ?? Promise.resolve();
+          neighbors = this.options.neighbors && harvestNeighbors(this.options.neighbors, range.contains, resolved, controller.signal, this.options.neighborIntervalMs);
+          await saved.gate;
           if (!this.options.ping) throw new Error('Fast IP discovery is unavailable. Use Find by IP.');
-          await this.options.ping(range, receive, checked => { if (!controller.signal.aborted) { state.checked = checked; emit(); } }, controller.signal);
+          if (!controller.signal.aborted) await this.options.ping(range, receive, checked => { if (!controller.signal.aborted) { state.checked = checked; emit(); } }, controller.signal);
         } catch (error) { if (!controller.signal.aborted) state.error = error instanceof Error ? error.message : 'IP discovery failed'; }
         finally {
           await seeds;
@@ -117,6 +161,7 @@ export class Discovery {
           if (neighbors) resolved(neighbors.latest());
           while (!controller.signal.aborted && pending.size) await Promise.allSettled([...pending]);
           await Promise.allSettled([...pending]);
+          await saved.done;
           state.state = controller.signal.aborted ? 'stopped' : 'complete'; emit(true);
         }
       })();
@@ -142,7 +187,7 @@ export class Discovery {
         pump();
       };
       const timer = this.options.durationMs===undefined ? undefined : setTimeout(() => { expired = true; controller.abort(); }, this.options.durationMs);
-      const seedTask=this.options.seeds?.(receive,controller.signal).catch(()=>{})??Promise.resolve();
+      const seedTask=savedPhase.then(saved=>{for(const address of saved.addresses)attempted.set(address,Date.now());return this.options.seeds?.(receive,controller.signal);}).catch(()=>{})??Promise.resolve();
       void (async () => {
         try {
           await (this.options.announcements ?? listenAnnouncements)(hint => receive(hint.addresses), controller.signal);
@@ -150,6 +195,7 @@ export class Discovery {
         finally {
           await seedTask;
           while(!controller.signal.aborted&&pending.size)await Promise.allSettled([...pending]);
+          await (await savedPhase).done;
           clearTimeout(timer); controller.abort(); await Promise.allSettled([...pending]);
           state.state = expired || state.error ? 'complete' : 'stopped'; emit(true);
         }

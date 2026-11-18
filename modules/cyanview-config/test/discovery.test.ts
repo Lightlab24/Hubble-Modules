@@ -162,3 +162,66 @@ test('Full IP scan is gone, and a page asking for it gets a clear refusal',async
   const discovery=new Discovery(async()=>assert.fail('No checks'),()=>{},async()=>assert.fail('No checks'));
   assert.throws(()=>discovery.start('10.192.10.0/24','ip' as any),/Choose a discovery method/);discovery.dispose();
 });
+
+test('saved devices are checked before the sweep at every address they had, whatever the range',async()=>{
+  const steps:string[]=[],states:any[]=[];let final:any;
+  const known:Record<string,string>={'10.20.5.5':'CY-RIO-9-1','10.192.9.2':'CY-RCP-9-2'};
+  const discovery=new Discovery(async address=>{steps.push('probe '+address);const serial=known[address];if(!serial)throw new Error('Nothing there');return {id:serial,serial,address};},
+    state=>{states.push(structuredClone(state));if(state.state!=='scanning')final=state;},
+    async address=>{steps.push('reach '+address);return address in known;},{
+    saved:async()=>[
+      // Its first address no longer answers, and its second is outside the range being searched.
+      {serial:'CY-RIO-9-1',addresses:['10.192.9.1','10.20.5.5']},
+      {serial:'CY-RCP-9-2',addresses:['10.192.9.2']},
+      {serial:'CY-RCP-9-3',addresses:['10.192.9.3']},
+    ],
+    ping:async(range,receive,progress)=>{steps.push('sweep');receive(['10.192.9.2','10.192.9.4']);progress(range.count);},
+  });
+  discovery.start('10.192.0.0/16');await waitUntil(()=>final);
+  const sweep=steps.indexOf('sweep');
+  for(const address of ['10.192.9.1','10.20.5.5','10.192.9.2','10.192.9.3'])assert.ok(steps.indexOf('reach '+address)<sweep,address+' is checked before the sweep');
+  // The sweep hears a saved address too, which isn't checked twice.
+  assert.equal(steps.filter(step=>step==='reach 10.192.9.2').length,1);
+  assert.ok(states.some(state=>state.saved.length===3&&state.saved.every((item:any)=>item.state==='checking')),'listed as checking straight away');
+  assert.equal(final.state,'complete');
+  assert.deepEqual(final.saved,[{serial:'CY-RIO-9-1',state:'found'},{serial:'CY-RCP-9-2',state:'found'},{serial:'CY-RCP-9-3',state:'missing'}]);
+  assert.deepEqual(final.results.map((row:any)=>row.serial).sort(),['CY-RCP-9-2','CY-RIO-9-1']);
+  discovery.dispose();
+});
+
+test('a saved device answering with another serial is still missing, and broadcast discovery checks saved devices too',async()=>{
+  let final:any;
+  const discovery=new Discovery(async address=>({id:'CY-RIO-7-7',serial:'CY-RIO-7-7',address}),state=>{if(state.state!=='scanning')final=state;},async()=>true,{
+    saved:async()=>[{serial:'CY-RCP-7-1',addresses:['10.192.7.1']}],
+    announcements:async(_receive,signal)=>{await new Promise<void>(resolve=>signal.aborted?resolve():signal.addEventListener('abort',()=>resolve(),{once:true}));},
+    durationMs:50,
+  });
+  discovery.start('10.192.0.0/16','broadcast');await waitUntil(()=>final);
+  assert.deepEqual(final.saved,[{serial:'CY-RCP-7-1',state:'missing'}]);
+  assert.deepEqual(final.results.map((row:any)=>row.serial),['CY-RIO-7-7']);
+  discovery.dispose();
+});
+
+test('camera logins and saved devices are kept with the workspace, and Discover only checks saved devices not in the list',async()=>{
+  const reached:string[]=[];
+  const f=fixture({}, {reachable:async address=>{reached.push(address);return false;},discovery:{ping:async(range,_receive,progress)=>progress(range.count)}});
+  try{
+    await f.instance.start();
+    const plan={formatVersion:1,devices:[{id:'CY-RCP-1-20',serial:'CY-RCP-1-20',name:'Master RCP',kind:'RCP',base:'10.192.1.20',address:'10.192.1.20'}],cameras:[],lans:[],uiState:null,
+      cameraLogins:[{model:'Burano',login:'admin',password:'Burano2026'},{model:'Panasonic - AW-UE150',login:'admin',password:'12345'}],
+      savedDevices:[{serial:'CY-RCP-1-20',name:'Master RCP',kind:'RCP',base:'10.192.1.20',address:'10.192.1.20'},{serial:'CY-RIO-1-60',name:'Spare RIO',kind:'RIO',base:'10.192.1.60',address:''}]};
+    const saved:any=await f.call('save-plan',{revision:null,plan});
+    const read:any=await f.call('read-plan');
+    assert.deepEqual(read.plan.cameraLogins,plan.cameraLogins);
+    assert.deepEqual(read.plan.savedDevices,plan.savedDevices);
+    // A list that doesn't check out is refused rather than saved in part.
+    await assert.rejects(f.call('save-plan',{revision:saved.revision,plan:{...plan,savedDevices:[{serial:'not a serial',base:'10.192.1.1'}]}}),/Invalid saved devices/);
+    await assert.rejects(f.call('save-plan',{revision:saved.revision,plan:{...plan,cameraLogins:[{model:'Burano',login:'admin',password:'x'.repeat(161)}]}}),/Invalid camera logins/);
+    await f.call('scan',{range:'127.0.0.1/32',method:'ping'});
+    const scan=(f.states.at(-1) as any).values.discovery;
+    assert.deepEqual(scan.saved,[{serial:'CY-RIO-1-60',state:'missing'}]);
+    assert.ok(reached.includes('10.192.1.60'));
+    // Logins never leave the worker in its published state.
+    assert.doesNotMatch(JSON.stringify(f.states),/Burano2026/);
+  }finally{await f.instance.dispose();}
+});

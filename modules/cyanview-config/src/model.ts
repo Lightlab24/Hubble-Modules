@@ -1,6 +1,37 @@
 import type { ModuleJsonValue } from '@hubble/module-sdk';
 export type RecordValue = Record<string, any>;
-export type Plan = { formatVersion: 1; devices: RecordValue[]; cameras: RecordValue[]; lans: RecordValue[]; uiState: RecordValue | null };
+/**
+ * cameraLogins: a Username and Password per camera model, filled into a camera when it is added or its model changes.
+ * savedDevices: every controller ever added, kept after it leaves the list, which Discover checks first.
+ * Both are optional so a workspace saved before they existed still reads.
+ */
+export type Plan = { formatVersion: 1; devices: RecordValue[]; cameras: RecordValue[]; lans: RecordValue[]; uiState: RecordValue | null; cameraLogins?: RecordValue[]; savedDevices?: RecordValue[] };
+export const savedDeviceCapacity = 256, cameraLoginCapacity = 128;
+const shortText = (value: unknown, limit = 160) => typeof value === 'string' && value.length <= limit;
+function validateCameraLogins(value: unknown) {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > cameraLoginCapacity) throw new Error('Invalid camera logins');
+  return value.map(item => {
+    const row = object(item);
+    if (!shortText(row.model) || !shortText(row.login) || !shortText(row.password)) throw new Error('Invalid camera logins');
+    return { model: row.model, login: row.login, password: row.password };
+  });
+}
+function validateSavedDevices(value: unknown) {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > savedDeviceCapacity) throw new Error('Invalid saved devices');
+  const rows = value.map(item => {
+    const row = object(item);
+    if (!shortText(row.serial, 64) || !/^CY-[A-Z0-9-]+$/i.test(row.serial) || !shortText(row.name ?? '') || !shortText(row.kind ?? '', 32)) throw new Error('Invalid saved devices');
+    const addresses = [row.address, row.base].map(address => String(address ?? ''));
+    if (addresses.some(address => address && !validIp(address)) || !addresses.some(Boolean)) throw new Error('Invalid saved devices');
+    return { serial: row.serial, name: String(row.name ?? row.serial), kind: String(row.kind ?? ''), base: addresses[1], address: addresses[0] };
+  });
+  if (new Set(rows.map(row => row.serial.toUpperCase())).size !== rows.length) throw new Error('Invalid saved devices');
+  return rows;
+}
+/** The addresses a saved device was last known by, its connection address first. */
+export const savedDeviceAddresses = (row: RecordValue) => [...new Set([row.address, row.base].map(address => String(address ?? '')).filter(validIp))];
 export const emptyPlan = (): Plan => ({ formatVersion: 1, devices: [], cameras: [], lans: [], uiState: null });
 export const object = (value: unknown): RecordValue => value && typeof value === 'object' && !Array.isArray(value) ? value as RecordValue : {};
 export const json = (value: unknown): ModuleJsonValue => JSON.parse(JSON.stringify(value));
@@ -31,7 +62,8 @@ export function validatePlan(value: unknown): Plan {
   if ([...data.cameras, ...data.lans].some(row => !ids.has(row.device))) throw new Error('A row refers to an unknown controller');
   for (const device of data.devices) if (!validIp(device.address || device.base || '')) throw new Error('A controller has an invalid address');
   if (JSON.stringify(data).length > 2_000_000) throw new Error('Configuration exceeds the module storage budget');
-  return json({ ...data, uiState: data.uiState ?? null }) as unknown as Plan;
+  const cameraLogins = validateCameraLogins(data.cameraLogins), savedDevices = validateSavedDevices(data.savedDevices);
+  return json({ ...data, uiState: data.uiState ?? null, ...(cameraLogins ? { cameraLogins } : {}), ...(savedDevices ? { savedDevices } : {}) }) as unknown as Plan;
 }
 export function stripEphemeral(row: RecordValue): RecordValue {
   const { jobs, ...saved } = row;

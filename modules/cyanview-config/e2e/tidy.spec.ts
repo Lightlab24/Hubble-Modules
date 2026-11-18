@@ -137,7 +137,8 @@ test('found devices list as rows with their own Add, and Add all takes every one
   await deviceRow(f, RIO).getByRole('button', { name: /Remove/ }).click();
   await f.locator('[data-role="scan-bar"] [data-action="scan"]').click();
   await expect(found).toHaveCount(1);
-  await found.getByRole('button', { name: 'Add ' + RIO }).click();
+  // Taken off once, it is a saved device now, so it lists under the name it had.
+  await found.getByRole('button', { name: 'Add Stage RIO' }).click();
   await expect(f.locator('[data-role="device-sheet"] tr[data-device-row]')).toHaveCount(3);
 });
 

@@ -42,7 +42,7 @@ export class PlanRepository {
       const cameras = await Promise.all(Array.from({ length: Math.ceil(Number(value.cameraCount ?? 0) / 128) }, (_, part) => this.documents.read(`${this.root}-c${bank}-${part}`, signal)));
       const lans = await Promise.all(Array.from({ length: Math.ceil(Number(value.lanCount ?? 0) / 128) }, (_, part) => this.documents.read(`${this.root}-l${bank}-${part}`, signal)));
       if ((await this.documents.read(this.root, signal)).revision !== current.revision) continue;
-      const plan = validatePlan({ formatVersion: 1, devices: value.devices ?? [], cameras: cameras.flatMap(chunk => chunk.value as unknown as RecordValue[]), lans: lans.flatMap(chunk => chunk.value as unknown as RecordValue[]), uiState: value.uiState ?? null });
+      const plan = validatePlan({ formatVersion: 1, devices: value.devices ?? [], cameras: cameras.flatMap(chunk => chunk.value as unknown as RecordValue[]), lans: lans.flatMap(chunk => chunk.value as unknown as RecordValue[]), uiState: value.uiState ?? null, cameraLogins: value.cameraLogins ?? undefined, savedDevices: value.savedDevices ?? undefined });
       return { revision: current.revision, plan, fresh: current.revision === null };
     }
     throw new Error('Configuration changed while reading; refresh and try again');
@@ -72,7 +72,7 @@ export class PlanRepository {
       const { modelCatalog, models, lensOptions, snapshot, ...saved } = device;
       return saved;
     });
-    const saved = await this.documents.write(current, ModuleDocumentValueSchema.parse(json({ formatVersion: 1, devices, uiState: plan.uiState, cameraBank: bank, cameraCount: plan.cameras.length, lanCount: plan.lans.length })), signal);
+    const saved = await this.documents.write(current, ModuleDocumentValueSchema.parse(json({ formatVersion: 1, devices, uiState: plan.uiState, ...(plan.cameraLogins ? { cameraLogins: plan.cameraLogins } : {}), ...(plan.savedDevices ? { savedDevices: plan.savedDevices } : {}), cameraBank: bank, cameraCount: plan.cameras.length, lanCount: plan.lans.length })), signal);
     if (preserveReceipts) this.receiptRevisions.clear();
     else {
       if (before.revision !== this.receiptHead) this.receiptRevisions.clear();

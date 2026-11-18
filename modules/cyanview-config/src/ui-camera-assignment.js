@@ -603,7 +603,7 @@
   }
   function settingText(field, value) {
     if (value === null || value === undefined || value === '') return 'Blank';
-    return field === 'password' ? '••••••••' : String(value);
+    return String(value);
   }
   function routeLines(camera) {
     if (!routeHasChanges(camera)) return [];

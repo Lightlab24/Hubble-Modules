@@ -3,7 +3,7 @@ import { ConfigurationOperations, type ClientFactory } from './operations.js';
 import { PlanRepository } from './repository.js';
 import { Discovery, type DiscoveryMethod, type DiscoveryOptions } from './discovery.js';
 import { normalizeSnapshot, optionEntries } from './normalize.js';
-import { object, validIp, type Plan, type RecordValue } from './model.js';
+import { object, savedDeviceAddresses, validIp, type Plan, type RecordValue } from './model.js';
 import { readNeighbors } from './neighbors.js';
 import { RemiOperations } from './remi.js';
 import type { ChoiceCatalogs } from './choice-catalogs.js';
@@ -50,6 +50,11 @@ export class CyanviewService {
     }, () => this.emit(), options.reachable, {
       neighbors: options.neighbors ?? readNeighbors,
       ...options.discovery,
+      // Saved devices that aren't in the list, which Discover checks before anything else.
+      saved: options.discovery?.saved ?? (async signal => {
+        const { plan } = await this.repository.read(signal), managed = new Set(plan.devices.map(device => String(device.serial).toUpperCase()));
+        return (plan.savedDevices ?? []).filter(row => !managed.has(String(row.serial).toUpperCase())).map(row => ({ serial: String(row.serial), addresses: savedDeviceAddresses(row) }));
+      }),
       seeds: options.discovery?.seeds ?? (async(receive,signal)=>{
         const addresses=(devices:RecordValue[])=>devices.flatMap(device=>[device.address,device.base,device.alias,...(device.addresses??[])]).filter(validIp);
         receive(addresses([...this.candidates.values()]));

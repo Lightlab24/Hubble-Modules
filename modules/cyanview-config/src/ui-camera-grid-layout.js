@@ -211,10 +211,9 @@
     const axisSetup=column.endsWith('Summary');
     const label=isAssignmentField(column)?assignmentLabel(column):choice?choiceLabel(input.dataset.field):axisSetup?'Use '+axisName(column.replace(/Summary$/,'')):cameraSortLabels[column]||column;
     location.textContent='Camera '+(row?.number||'—')+' · '+label;
-    if(column==='password')value.textContent=input?.value?'••••••••':'';
-    else if(axisSetup&&cell.classList.contains('hc-axis-inactive'))value.textContent='Unavailable for this camera';
+    if(axisSetup&&cell.classList.contains('hc-axis-inactive'))value.textContent='Unavailable for this camera';
     else if(cell.querySelector('[role="checkbox"]'))value.textContent=cell.querySelector('[role="checkbox"]').getAttribute('aria-checked')==='true'?'On':'Off';
     else value.textContent=input?.disabled?'':choice?input.textContent:input?.value??cell.textContent.trim();
-    if(value.textContent&&column!=='password')value.title=value.textContent;
+    if(value.textContent)value.title=value.textContent;
     search.hidden=!choice||input.disabled;
   }

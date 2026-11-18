@@ -16,7 +16,7 @@ let releasePlanWrites: (() => void) | undefined;
 let planSaves = 0, planSavePending = 0;
 let sampleSetting = true, sessionOptions: Parameters<typeof fixture>[1], statePaused = false;
 const rendererState = () => session.states.at(-1) as Parameters<typeof session.context.publishState>[0];
-async function reset(sample: boolean, remi = false, gateway = false, direct = false, extra = false, live = false, wan = false) {
+async function reset(sample: boolean, remi = false, gateway = false, direct = false, extra = false, live = false, wan = false, reachAll = false) {
   statePaused = false;
   pingDelayMs = 0;
   releaseControlWrites?.(); releaseControlWrites = undefined;
@@ -62,7 +62,8 @@ async function reset(sample: boolean, remi = false, gateway = false, direct = fa
     // Short enough for specs. Hubble itself holds a camera off for a second and waits up to six for it to come back online.
     cameraEnabled: { holdMs: 300, onlineWaitMs: 400 },
     control: { cameraSettleMs: 400, session: (definition, changed) => new RcpSession(definition, changed, true, () => createConnection({ host: '127.0.0.1', port: mqtt.port })) },
-    reachable: async address => ['10.192.1.10', '10.20.101.200'].includes(address),
+    // Only the RIO answers a connection unless a spec asks for every simulated controller, as saved devices do.
+    reachable: async address => ['10.192.1.10', '10.20.101.200'].includes(address) || reachAll && Boolean(fleet?.deviceAt(address)),
     discovery: { durationMs: 100,
       ping: async (range, receive, progress, signal) => {
         receive(['10.192.1.10','10.20.101.200'].filter(range.contains));
@@ -111,7 +112,7 @@ const server = createServer(async (request, response) => {
     if (request.method === 'POST') {
       const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk));
       const input = JSON.parse(Buffer.concat(chunks).toString() || '{}');
-      if (url.pathname === '/__reset') { await reset(input.sample !== false, input.remi === true, input.gateway === true, input.direct === true, input.extra === true, input.live === true, input.wan === true); send({ reset: true }); return; }
+      if (url.pathname === '/__reset') { await reset(input.sample !== false, input.remi === true, input.gateway === true, input.direct === true, input.extra === true, input.live === true, input.wan === true, input.reachAll === true); send({ reset: true }); return; }
       if (url.pathname === '/__restart') {
         // The equipment and saved documents stay, as they do when Hubble restarts a module's worker.
         const { records } = session;
