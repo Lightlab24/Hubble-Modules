@@ -23,6 +23,8 @@ export default defineModuleManifest({
     'module-choices-v2', 'module-fields-v2', 'module-runtime-directory-v1', 'module-feedback-triggers-v1', 'module-feedback-trigger-conditions-v1',
     // Record camera starts on a tap and stops on a 2-second hold, so it needs the hold lane.
     'module-matrix-hold-v1',
+    // The connection path's three states are one Connection setting in the trigger popup.
+    'module-feedback-trigger-groups-v1',
   ] },
   capabilities: ['host.documents', 'host.helpers', 'service.page.studio', 'state-feedback'],
   settings: [{ id: 'sampleData', label: 'Use sample devices', type: 'boolean', required: true, default: false }],

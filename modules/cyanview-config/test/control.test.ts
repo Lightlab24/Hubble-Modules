@@ -1342,6 +1342,13 @@ test('the connection path lights the bar by default, one state at a time, and Re
   assert.deepEqual(path.map(trigger => [trigger.id, trigger.label, trigger.part, trigger.color, trigger.effect ?? null]), [
     ['online', 'Online', 'bar', '#2563EB', null], ['offline', 'Camera offline', 'bar', '#E0C829', null], ['rio-offline', 'RIO offline', 'bar', '#F97316', null]]);
   for (const trigger of path) assert.deepEqual(trigger.when, [{ field: 'actionType', values: ['select-camera', 'record-camera', 'toggle-camera-enabled'] }]);
+  // One Connection setting in Hubble's popup, each state saying where the path stops.
+  assert.deepEqual(path.map(trigger => [trigger.group, trigger.marks?.map(mark => `${mark.label} ${mark.state}`)]), [
+    [{ id: 'connection', label: 'Connection' }, ['RIO on', 'Camera on']],
+    [{ id: 'connection', label: 'Connection' }, ['RIO on', 'Camera off']],
+    [{ id: 'connection', label: 'Connection' }, ['RIO off', 'Camera unknown']]]);
+  assert.ok(manifest.host && 'requiredFeatures' in manifest.host && manifest.host.requiredFeatures?.includes('module-feedback-trigger-groups-v1'));
+  assert.ok(!matrix.triggers!.some(trigger => trigger.group && !path.includes(trigger)), 'Only the path is grouped');
   const recording = matrix.triggers!.find(trigger => trigger.id === 'recording');
   assert.deepEqual(recording && [recording.part, recording.effect], ['outline', { kind: 'fade', cycleMs: 2000 }]);
   assert.ok(!matrix.triggers!.some(trigger => trigger.part === 'bar' && trigger.when?.some(condition => condition.values.includes('toggle-camera-enabled')) && !path.includes(trigger)),

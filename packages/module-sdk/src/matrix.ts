@@ -342,6 +342,27 @@ export const ModuleFeedbackTriggerSchema = z.strictObject({
    * only list, edit and light their own triggers. Requires module-feedback-trigger-conditions-v1.
    */
   when: z.array(ModuleMatrixConditionSchema).min(1).max(16).optional(),
+  /**
+   * Triggers that are one setting to an operator, such as the states of a connection, share a
+   * group: Hubble lists them together, lights them on one part, and can give every key that has
+   * them the same looks. Members sit next to each other and share a default part. Requires
+   * module-feedback-trigger-groups-v1.
+   */
+  group: z.strictObject({ id: Id, label: Label }).optional(),
+  /**
+   * What this state means, as up to four short marks the editor shows beside it, such as
+   * RIO on and Camera off. Requires module-feedback-trigger-groups-v1.
+   */
+  marks: z
+    .array(
+      z.strictObject({
+        label: z.string().trim().min(1).max(24),
+        state: z.enum(["on", "off", "unknown"]),
+      }),
+    )
+    .min(1)
+    .max(4)
+    .optional(),
 });
 export type ModuleFeedbackTrigger = z.infer<typeof ModuleFeedbackTriggerSchema>;
 
@@ -502,6 +523,34 @@ const MatrixDefinitionSchema = z
         code: "custom",
         message: "Trigger conditions must name declared fields",
       });
+    const groups = new Map<
+      string,
+      { label: string; part: string; last: number }
+    >();
+    for (const [index, trigger] of (matrix.triggers ?? []).entries()) {
+      if (trigger.group === undefined) continue;
+      const seen = groups.get(trigger.group.id);
+      if (seen === undefined) {
+        groups.set(trigger.group.id, {
+          label: trigger.group.label,
+          part: trigger.part,
+          last: index,
+        });
+        continue;
+      }
+      if (seen.last !== index - 1)
+        ctx.addIssue({
+          code: "custom",
+          message: "Grouped triggers must sit next to each other",
+        });
+      if (seen.label !== trigger.group.label || seen.part !== trigger.part)
+        ctx.addIssue({
+          code: "custom",
+          message:
+            "Grouped triggers must share their group label and default part",
+        });
+      seen.last = index;
+    }
     if (matrix.hold?.when?.some(({ field }) => !fieldIds.has(field)))
       ctx.addIssue({
         code: "custom",

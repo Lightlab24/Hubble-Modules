@@ -336,6 +336,27 @@ row that kept it. The changes travel with workspace exports. Hubble keeps the
 trigger cell's own value but no longer draws it; don't rely on it for anything a
 new host shows.
 
+When several triggers are one setting to an operator, such as the states of a
+connection that are on one at a time, give them the same `group`. With
+`module-feedback-trigger-groups-v1` Hubble lists them together in one box, lights them
+on one part ("Connection lights · all three"), and after their looks change on one key
+offers to put the same looks on every key of the module that has the group, in one save
+and one Undo. Members sit next to each other in the list and share their default part
+and the group's label. `marks` (up to four, each a short label and `on`, `off` or
+`unknown`) say what a state means, and show in place of the part summary:
+
+```json
+{ "id": "online", "label": "Online", "part": "bar", "color": "#2563EB",
+  "group": { "id": "connection", "label": "Connection" },
+  "marks": [{ "label": "RIO", "state": "on" }, { "label": "Camera", "state": "on" }] },
+{ "id": "rio-offline", "label": "RIO offline", "part": "bar", "color": "#F97316",
+  "group": { "id": "connection", "label": "Connection" },
+  "marks": [{ "label": "RIO", "state": "off" }, { "label": "Camera", "state": "unknown" }] }
+```
+
+A host without the feature refuses a matrix that uses `group` or `marks`, so require
+it. Grouping changes nothing a row saves: each key still keeps its own looks.
+
 ### Hold to confirm
 
 A matrix can ask for some press rows to answer a hold too, such as a record button
