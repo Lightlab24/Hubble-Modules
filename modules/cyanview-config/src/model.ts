@@ -3,6 +3,8 @@ export type RecordValue = Record<string, any>;
 /**
  * cameraLogins: a Username and Password per camera model, filled into a camera when it is added or its model changes.
  * savedDevices: every controller ever added, kept after it leaves the list, which Discover checks first.
+ * They are kept by serial with their addresses. A name saved by 0.1.74 is read and dropped, because a
+ * device is named for the job it is on.
  * Both are optional so a workspace saved before they existed still reads.
  */
 export type Plan = { formatVersion: 1; devices: RecordValue[]; cameras: RecordValue[]; lans: RecordValue[]; uiState: RecordValue | null; cameraLogins?: RecordValue[]; savedDevices?: RecordValue[] };
@@ -22,10 +24,10 @@ function validateSavedDevices(value: unknown) {
   if (!Array.isArray(value) || value.length > savedDeviceCapacity) throw new Error('Invalid saved devices');
   const rows = value.map(item => {
     const row = object(item);
-    if (!shortText(row.serial, 64) || !/^CY-[A-Z0-9-]+$/i.test(row.serial) || !shortText(row.name ?? '') || !shortText(row.kind ?? '', 32)) throw new Error('Invalid saved devices');
+    if (!shortText(row.serial, 64) || !/^CY-[A-Z0-9-]+$/i.test(row.serial) || !shortText(row.kind ?? '', 32)) throw new Error('Invalid saved devices');
     const addresses = [row.address, row.base].map(address => String(address ?? ''));
     if (addresses.some(address => address && !validIp(address)) || !addresses.some(Boolean)) throw new Error('Invalid saved devices');
-    return { serial: row.serial, name: String(row.name ?? row.serial), kind: String(row.kind ?? ''), base: addresses[1], address: addresses[0] };
+    return { serial: row.serial, kind: String(row.kind ?? ''), base: addresses[1], address: addresses[0] };
   });
   if (new Set(rows.map(row => row.serial.toUpperCase())).size !== rows.length) throw new Error('Invalid saved devices');
   return rows;

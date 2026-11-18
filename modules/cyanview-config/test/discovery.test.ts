@@ -213,7 +213,8 @@ test('camera logins and saved devices are kept with the workspace, and Discover 
     const saved:any=await f.call('save-plan',{revision:null,plan});
     const read:any=await f.call('read-plan');
     assert.deepEqual(read.plan.cameraLogins,plan.cameraLogins);
-    assert.deepEqual(read.plan.savedDevices,plan.savedDevices);
+    // The name 0.1.74 saved with a device is read and dropped: a device is named for the job it is on.
+    assert.deepEqual(read.plan.savedDevices,plan.savedDevices.map(({name,...row})=>row));
     // A list that doesn't check out is refused rather than saved in part.
     await assert.rejects(f.call('save-plan',{revision:saved.revision,plan:{...plan,savedDevices:[{serial:'not a serial',base:'10.192.1.1'}]}}),/Invalid saved devices/);
     await assert.rejects(f.call('save-plan',{revision:saved.revision,plan:{...plan,cameraLogins:[{model:'Burano',login:'admin',password:'x'.repeat(161)}]}}),/Invalid camera logins/);

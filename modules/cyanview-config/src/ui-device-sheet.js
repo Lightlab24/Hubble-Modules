@@ -5,6 +5,11 @@
   // The remove button sits beside the name, where it is on the camera sheets.
   const deviceSheet = { lanOpen: false, wanOpen: false, sort: null, details: false };
   let selectedDeviceId = '', deviceAddNote = '', deviceAddBusy = false, committingDeviceCell = '';
+  // The cell that has been typed in since the keyboard came to it. Only that cell has something to
+  // commit when it is left, and only that cell keeps its own text through a redraw.
+  let typedDeviceCell = '';
+  // Text committed while its device was mid-send waits here, and goes in when the send finishes.
+  const heldDeviceEdits = new Map();
   const deviceGroups = {
     lan: { label: 'LAN IP settings', open: [['lan1', 'LAN IP', 158], ['lan2', 'LAN IP 2', 158]], closed: [['lan1', 'LAN IP', 190]] },
     wan: { label: 'WAN settings', open: [['wanMode', 'Mode', 96], ['wanIp', 'WAN IP', 158], ['gateway', 'Gateway', 130], ['dns1', 'DNS 1', 122], ['dns2', 'DNS 2', 122]], closed: [['wan', 'WAN', 150]] },
@@ -74,13 +79,14 @@
   }
   function deviceCell(d, column, index) {
     const net = deviceNetwork(d), id = esc(d.id), busy = deviceBusy(d.id);
-    const input = (field, value, label, disabled = false) => '<input class="hc-cell-input hc-mono" data-device-cell="' + id + ':' + field + '" value="' + esc(value ?? '') + '" aria-label="' + esc(label + ' for ' + d.name) + '"' + (disabled ? ' disabled' : '') + ' spellcheck="false" autocomplete="off">';
-    const cell = (content, changed = false, extra = '') => '<td data-device-column="' + column.id + '"' + (changed ? ' class="hc-changed"' : '') + extra + '>' + content + '</td>';
+    const held = field => heldDeviceEdits.get(d.id + ':' + field);
+    const input = (field, value, label, disabled = false) => '<input class="hc-cell-input hc-mono" data-device-cell="' + id + ':' + field + '" value="' + esc(held(field) ?? value ?? '') + '" aria-label="' + esc(label + ' for ' + d.name) + '"' + (disabled ? ' disabled' : '') + ' spellcheck="false" autocomplete="off">';
+    const cell = (content, changed = false, extra = '') => '<td data-device-column="' + column.id + '"' + (changed || held(column.id) !== undefined ? ' class="hc-changed"' : '') + extra + '>' + content + '</td>';
     const waiting = rows => { const count = rows.filter(row => row?.pending).length; return count ? '<span class="hc-device-waiting">+' + count + ' pending</span>' : ''; };
     const quiet = text => '<span class="hc-muted">' + esc(text) + '</span>';
     switch (column.id) {
       case 'row': return cell(quiet(String(index + 1)));
-      case 'name': return cell('<input class="hc-cell-input hc-device-name" data-device-cell="' + id + ':name" data-device-setting="name" data-device-id="' + id + '" value="' + esc(d.name) + '" aria-label="Device name for ' + esc(d.serial) + '" maxlength="160">');
+      case 'name': return cell('<input class="hc-cell-input hc-device-name" data-device-cell="' + id + ':name" value="' + esc(d.name) + '" aria-label="Device name for ' + esc(d.serial) + '" maxlength="160">');
       case 'type': return cell(quiet(d.kind));
       case 'serial': return cell('<span class="hc-mono hc-muted">' + esc(d.serial) + '</span>');
       case 'status': return cell(status(d.online), false, ' data-device-status="' + id + '"');
@@ -89,7 +95,7 @@
       case 'lan2': return cell(input('lan2', net.lan[1]?.planned, 'LAN IP 2', busy) + waiting(net.lan.slice(2)), !!net.lan[1]?.pending);
       // Folded away, the WAN shows what it will be once sent.
       case 'wan': return cell(net.wan ? (net.wan.dhcp || net.wan.planned ? esc(net.wan.dhcp ? 'DHCP' : net.wan.planned) : quiet('Not set')) + waiting([net.wan]) : quiet('—'), !!net.wan?.pending);
-      case 'wanMode': return cell(net.wan ? '<select class="hc-cell-input" data-device-cell="' + id + ':wanMode" aria-label="' + esc('WAN mode for ' + d.name) + '"' + (busy ? ' disabled' : '') + '>' + options(['DHCP', 'Static'], net.wan.dhcp ? 'DHCP' : 'Static') + '</select>' : quiet('—'), !!net.wan?.dirty.has('dhcp'));
+      case 'wanMode': return cell(net.wan ? '<select class="hc-cell-input" data-device-cell="' + id + ':wanMode" aria-label="' + esc('WAN mode for ' + d.name) + '"' + (busy ? ' disabled' : '') + '>' + options(['DHCP', 'Static'], held('wanMode') ?? (net.wan.dhcp ? 'DHCP' : 'Static')) + '</select>' : quiet('—'), !!net.wan?.dirty.has('dhcp'));
       case 'wanIp': return cell(net.wan ? input('wanIp', net.wan.dhcp ? '' : net.wan.planned, 'WAN IP', busy || net.wan.dhcp) : '', !!net.wan && !net.wan.dhcp && net.wan.dirty.has('planned'));
       case 'gateway': case 'dns1': case 'dns2': return cell(net.wan ? input(column.id, net.wan[column.id], column.label, busy || net.wan.dhcp) : '', !!net.wan?.dirty.has(column.id));
       case 'connected': return cell(quiet(deviceConnectedOn(d)), false, ' data-device-connected="' + id + '"');
@@ -111,6 +117,17 @@
     const key = element.dataset.deviceCell ?? (element.hasAttribute('data-device-add') ? 'add' : '');
     return key ? { key, value: element.value, start: element.selectionStart, end: element.selectionEnd } : null;
   }
+  // What a redraw leaves in place: the box in use, or the cell around a list or button that is in use.
+  function deviceSheetKept(host) {
+    const active = document.activeElement;
+    if (!active || !host.contains(active)) return null;
+    if (active.dataset.deviceCell) return { kept: active, find: next => next.querySelector('[data-device-cell="' + CSS.escape(active.dataset.deviceCell) + '"]') };
+    // The New device box is put away while a lookup runs, as it always has been.
+    if (active.hasAttribute('data-device-add')) return { kept: active, find: next => next.querySelector('[data-device-add]:not([disabled])') };
+    const cell = active.closest('td[data-device-column]'), row = cell?.closest('tr[data-device-row]');
+    if (!row) return null;
+    return { kept: cell, find: next => next.querySelector('tr[data-device-row="' + CSS.escape(row.dataset.deviceRow) + '"] td[data-device-column="' + CSS.escape(cell.dataset.deviceColumn) + '"]') };
+  }
   function renderDeviceSheet() {
     const host = $('device-sheet');
     if (!host) return;
@@ -122,19 +139,39 @@
     const saved = savedSearchRows(), savedSerials = new Set(saved.map(row => savedKey(row.item.serial)));
     const foundRows = saved.map(row => savedSearchRowMarkup(row, span)).join('') + found.filter(candidate => !savedSerials.has(savedKey(candidate.serial))).map(candidate => '<tr class="hc-device-found" data-device-found="' + esc(candidate.id) + '"><td><span class="hc-muted">+</span></td><td>' + esc(candidate.name || candidate.serial) + '</td><td></td><td><span class="hc-muted">' + esc(candidate.kind || '') + '</span></td><td><span class="hc-mono hc-muted">' + esc(candidate.serial) + '</span></td><td><span class="hc-found-tag">Found</span></td><td><span class="hc-mono hc-muted">' + esc(candidate.base || candidate.address || '') + '</span></td><td colspan="' + span + '"><button type="button" class="hc-primary hc-add-found" data-action="add-found-device" data-id="' + esc(candidate.id) + '" aria-label="Add ' + esc(candidate.name || candidate.serial) + '"' + (deviceAddBusy ? ' disabled' : '') + '>' + icon('plus') + 'Add</button></td></tr>').join('');
     const addRow = '<tr class="hc-device-add"><td><span class="hc-muted">+</span></td><td colspan="5"><span class="hc-muted">New device</span></td><td><input class="hc-cell-input hc-mono" data-device-add placeholder="Type an IP" aria-label="IP address of a device to add" spellcheck="false" autocomplete="off"' + (deviceAddBusy ? ' disabled' : '') + '></td><td colspan="' + span + '"><span class="hc-muted" data-role="device-add-note">' + esc(deviceAddNote || 'Type or paste an IP and press Enter. Hubble finds the device and fills in the row.') + '</span></td></tr>';
-    host.innerHTML = '<div class="hc-sheet"><div class="hc-scroll"><table class="hc-grid" data-device-sheet aria-label="Devices" style="width:' + columns.reduce((total, column) => total + column.width, 0) + 'px">' + deviceSheetHeader(columns) + '<tbody>' + rows + foundRows + addRow + '</tbody></table></div></div>';
+    const markup = '<div class="hc-sheet"><div class="hc-scroll"><table class="hc-grid" data-device-sheet aria-label="Devices" style="width:' + columns.reduce((total, column) => total + column.width, 0) + 'px">' + deviceSheetHeader(columns) + '<tbody>' + rows + foundRows + addRow + '</tbody></table></div></div>';
+    const keeping = deviceSheetKept(host), twin = redrawAround(host, markup, keeping?.kept, keeping?.find ?? (() => null));
     const scroll = host.querySelector('.hc-scroll');
-    if (scroll) scroll.scrollLeft = left;
+    if (scroll && scroll.scrollLeft !== left) scroll.scrollLeft = left;
     icons();
-    if (focus) {
+    if (twin) {
+      const kept = keeping.kept, key = kept.dataset.deviceCell ?? '';
+      if (kept.tagName === 'TD') {
+        // A list or button in this cell has the keyboard. The cell stays and shows what the device has.
+        copyAttributes(kept, twin, ['data-painted']);
+        const select = kept.querySelector('select'), other = twin.querySelector('select');
+        if (select && other && select.value !== other.value) select.value = other.value;
+        for (const button of kept.querySelectorAll('button[data-action]')) {
+          const match = twin.querySelector('button[data-action="' + button.dataset.action + '"]');
+          if (match && button.disabled !== match.disabled) button.disabled = match.disabled;
+        }
+      } else {
+        // A cell being worked in is never greyed out under the keyboard. What is typed in it during a send waits for the send.
+        copyAttributes(kept, twin, ['disabled']);
+        const committed = key && key === committingDeviceCell;
+        // Text typed here stays exactly as typed. A cell nobody has typed in follows what the device has.
+        if (key && (committed || typedDeviceCell !== key) && kept.value !== twin.value) kept.value = twin.value;
+        if (committed) kept.select?.();
+      }
+    } else if (focus) {
+      // The sheet changed shape under the keyboard (a column group folded, a device left the list).
       const element = focus.key === 'add' ? host.querySelector('[data-device-add]') : host.querySelector('[data-device-cell="' + CSS.escape(focus.key) + '"]');
       if (element && !element.disabled) {
-        // Typing in another cell carries over a redraw. The cell just committed shows what it now holds.
         const committed = focus.key === committingDeviceCell;
-        if (element.tagName === 'INPUT' && !committed) element.value = focus.value;
+        if (element.tagName === 'INPUT' && !committed && (focus.key === 'add' || typedDeviceCell === focus.key)) element.value = focus.value;
         element.focus({ preventScroll: true });
         try { if (committed) element.select?.(); else element.setSelectionRange?.(focus.start, focus.end); } catch { /* A select has no caret. */ }
-      }
+      } else if (focus.key === typedDeviceCell) typedDeviceCell = '';
     }
     paintDeviceView();
     paintDeviceSheet();
@@ -162,6 +199,15 @@
     addAll.querySelector('[data-add-all-label]').textContent = 'Add all ' + found;
     $('device-summary').textContent = devices.length + (devices.length === 1 ? ' device' : ' devices') + ' · ' + devices.filter(d => d.online).length + ' online';
     if (!deviceSheet.details) $('lan-foot').textContent = 'Click a heading to sort. Address changes wait in Pending sends until you press Send.';
+    releaseHeldDeviceEdits();
+  }
+  function releaseHeldDeviceEdits() {
+    for (const [key, value] of heldDeviceEdits) {
+      const id = key.slice(0, key.lastIndexOf(':'));
+      if (device(id) && deviceBusy(id)) continue;
+      heldDeviceEdits.delete(key);
+      setTimeout(() => runDeviceCommit(key, value), 0);
+    }
   }
   function paintDeviceView() {
     for (const button of root.querySelectorAll('[data-device-view]')) button.setAttribute('aria-pressed', String((button.dataset.deviceView === 'details') === deviceSheet.details));
@@ -203,9 +249,17 @@
   const cidr = value => { const parts = String(value).split('/'); return parts.length === 2 && ipv4(parts[0]) && /^\d{1,2}$/.test(parts[1]) && Number(parts[1]) <= 32; };
   function commitDeviceCell(id, field, raw) {
     const d = device(id);
-    if (!d || deviceBusy(id)) return;
-    const net = deviceNetwork(d), value = String(raw).trim(), mask = maskOf(net.lan[0]?.current, '16');
-    const refuse = message => { toast(message); renderLans(); };
+    if (!d) return;
+    const value = String(raw).trim(), refuse = message => { toast(message); renderLans(); };
+    if (field === 'name') {
+      if (!value || value.length > 160) { refuse('Enter a device name'); return; }
+      if (value !== d.name) { d.name = value; syncFilter(); renderLans(); renderCameras(); remember(); }
+      else renderLans();
+      return;
+    }
+    // An address typed while this device is mid-send is kept, and goes in when the send finishes.
+    if (deviceBusy(id)) { heldDeviceEdits.set(id + ':' + field, String(raw)); renderLans(); return; }
+    const net = deviceNetwork(d), mask = maskOf(net.lan[0]?.current, '16');
     if (field === 'lan1' || field === 'lan2') {
       // The second column only means something once there is a first address.
       const row = field === 'lan1' || !net.lan.length ? net.lan[0] : net.lan[1];
@@ -432,18 +486,33 @@
     const row = event.target.closest?.('tr[data-device-row]');
     if (row && row.dataset.deviceRow !== selectedDeviceId) { selectedDeviceId = row.dataset.deviceRow; paintDeviceSheet(); }
   });
-  // A change fires while the focus is moving to the next cell (Tab, a click), and committing it redraws
-  // the sheet. Committing once the focus has landed lets the redraw put it back where it went;
-  // committing at once left nothing focused, so typing after Tab went nowhere (Nov 17, 2026).
+  // A cell is committed once the focus has landed on the next one (Tab, a click, Enter), so the
+  // redraw that follows finds the new cell in use and leaves it alone. Committing while the focus was
+  // still moving left nothing focused, and typing after Tab went nowhere (Nov 17, 2026).
+  function runDeviceCommit(key, value) {
+    const id = key.slice(0, key.lastIndexOf(':')), field = key.slice(key.lastIndexOf(':') + 1);
+    committingDeviceCell = key;
+    try { commitDeviceCell(id, field, value); } finally { committingDeviceCell = ''; }
+  }
+  function scheduleDeviceCommit(element) {
+    const key = element.dataset.deviceCell, value = element.value;
+    if (typedDeviceCell === key) typedDeviceCell = '';
+    setTimeout(() => runDeviceCommit(key, value), 0);
+  }
+  root.addEventListener('input', event => {
+    const element = event.target;
+    if (element.dataset?.deviceCell && element.tagName === 'INPUT') typedDeviceCell = element.dataset.deviceCell;
+  });
+  // Only leaving a cell that was typed in commits it. A redraw never does.
+  root.addEventListener('focusout', event => {
+    const element = event.target;
+    if (redrawing || element.tagName !== 'INPUT' || !element.dataset?.deviceCell || typedDeviceCell !== element.dataset.deviceCell) return;
+    scheduleDeviceCommit(element);
+  });
   root.addEventListener('change', event => {
     const element = event.target;
-    if (!element.dataset?.deviceCell || element.dataset.deviceSetting) return;
-    const [id, field] = [element.dataset.deviceCell.slice(0, element.dataset.deviceCell.lastIndexOf(':')), element.dataset.deviceCell.slice(element.dataset.deviceCell.lastIndexOf(':') + 1)];
-    const value = element.value;
-    setTimeout(() => {
-      committingDeviceCell = element.dataset.deviceCell;
-      try { commitDeviceCell(id, field, value); } finally { committingDeviceCell = ''; }
-    }, 0);
+    if (redrawing || element.tagName !== 'SELECT' || !element.dataset?.deviceCell) return;
+    scheduleDeviceCommit(element);
   });
   // Enter commits and moves down to the same column on the next device, as in the Button Matrix.
   function deviceCellBelow(element) {
@@ -462,9 +531,16 @@
       event.preventDefault();
       const below = deviceCellBelow(element);
       if (below) { below.focus({ preventScroll: false }); below.select?.(); }
-      else { element.dispatchEvent(new Event('change', { bubbles: true })); element.select(); }
+      else if (typedDeviceCell === element.dataset.deviceCell) scheduleDeviceCommit(element);
+      else element.select();
     }
-    else if (event.key === 'Escape' && element.dataset?.deviceCell && element.tagName === 'INPUT') { event.stopPropagation(); renderDeviceSheet(); }
+    // Escape puts back what the cell held.
+    else if (event.key === 'Escape' && element.dataset?.deviceCell && element.tagName === 'INPUT') {
+      event.stopPropagation();
+      if (typedDeviceCell === element.dataset.deviceCell) typedDeviceCell = '';
+      element.value = element.defaultValue;
+      element.select();
+    }
     else if (event.key === 'Enter' && element.hasAttribute?.('data-device-add')) { event.preventDefault(); void addDevicesByIp(element.value); }
   });
   root.addEventListener('paste', event => {

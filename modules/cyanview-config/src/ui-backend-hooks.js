@@ -192,7 +192,6 @@
     try{for(const candidate of results.filter(item=>selectedResults.has(item.id)&&!devices.some(d=>d.serial===item.serial))){
       if(devices.length>=128)throw new Error('Controller capacity reached');
       const snapshot=await moduleBridge.importDevice(candidate);if(cameras.length+snapshot.cameras.length>512)throw new Error('Camera capacity reached');
-      const savedName=savedNameFor(snapshot.device.serial);if(savedName)snapshot.device.name=savedName;
       devices.push(snapshot.device);openNetworkDevices.add(snapshot.device.id);cameras.push(...snapshot.cameras.map(restoredRow));lans.push(...snapshot.lans.map(restoredRow));selectedResults.delete(candidate.id);count++;
     }}catch(error){toast(error.message);}
     if(count)await restoreCameraChoiceCatalogs();

@@ -129,7 +129,7 @@ test('Camera logins fill a new camera and a model change, in plain text, and the
   expect(Object.values((await fleet(request))[0]!.config.Camera).find(camera => camera.Name === name)?.Login).toBe('override');
 });
 
-test('every added device is saved, and Discover lists saved devices first, found outside the range, with their names', async ({ page, request }) => {
+test('every added device is saved by serial with no name, and Discover lists saved devices first, found outside the range', async ({ page, request }) => {
   const call = rpc(request);
   const f = await open(page, request, { reachAll: true }, async () => {
     // A saved device that is gone: its address answers nothing.
@@ -141,6 +141,10 @@ test('every added device is saved, and Discover lists saved devices first, found
   await expect(open_).toContainText('4');
   await open_.click();
   await expect(saved(f).locator('tbody tr')).toHaveCount(4);
+  // A device is named for the job it is on, so the saved list goes by serial and keeps no name.
+  expect(await saved(f).locator('thead th').allInnerTexts()).toEqual(['Serial', 'Type', 'Address', '', '']);
+  await expect(saved(f)).not.toContainText('Spare RIO');
+  await expect(saved(f)).not.toContainText('Downstream RCP');
   for (const serial of [RIO, MASTER, LEAF]) {
     await expect(saved(f).locator('tr[data-saved-device="' + serial + '"]')).toContainText('In this sheet');
     await expect(saved(f).locator('tr[data-saved-device="' + serial + '"] [data-action="forget-saved-device"]')).toBeDisabled();
@@ -153,6 +157,8 @@ test('every added device is saved, and Discover lists saved devices first, found
   await expect(sheet(f).locator('tr[data-device-row]')).toHaveCount(1);
   await settled(request);
   expect((await call('read-plan')).plan.savedDevices.map((row: any) => row.serial).sort()).toEqual(['CY-RCP-1-20', 'CY-RCP-1-30', 'CY-RIO-1-10', 'CY-RIO-1-99']);
+  // The name 0.1.74 saved is dropped, and none is written.
+  expect((await call('read-plan')).plan.savedDevices.every((row: any) => !('name' in row))).toBe(true);
 
   // 10.20.0.0/16 holds none of the saved devices' factory addresses.
   const range = f.locator('[data-role="scan-bar"] button.hc-dropdown').first();
@@ -163,18 +169,19 @@ test('every added device is saved, and Discover lists saved devices first, found
   const order = await sheet(f).locator('tr.hc-device-found').evaluateAll(list => list.map(row => (row as HTMLElement).dataset.deviceSaved ?? 'sweep'));
   // In the order they were saved: Spare RIO was on the list before this page added the others.
   expect(order.slice(0, 3)).toEqual(['CY-RIO-1-99', RIO, LEAF]);
-  await expect(savedRow(f, LEAF)).toContainText('Downstream RCP');
   await expect(savedRow(f, LEAF).locator('.hc-found-tag')).toHaveText('Found');
   await expect(savedRow(f, 'CY-RIO-1-99')).toContainText('Not found');
   await expect(savedRow(f, 'CY-RIO-1-99')).toContainText('stays on the saved list');
-  // Added from its saved row, it keeps its saved name.
-  await savedRow(f, LEAF).getByRole('button', { name: 'Add Downstream RCP' }).click();
-  await expect(deviceRow(f, LEAF).locator('[data-device-setting="name"]')).toHaveValue('Downstream RCP');
+  await expect(savedRow(f, 'CY-RIO-1-99')).not.toContainText('Spare RIO');
+  // Added from its saved row, it takes the name the device has now, not one from the saved list.
+  const reported = (await savedRow(f, LEAF).locator('td').nth(1).innerText()).trim();
+  await savedRow(f, LEAF).getByRole('button', { name: 'Add ' + reported }).click();
+  await expect(deviceRow(f, LEAF).locator('[data-device-cell="' + LEAF + ':name"]')).toHaveValue(reported);
   await expect(savedRow(f, LEAF)).toHaveCount(0);
 
   // Forget takes a device off the saved list only.
   await open_.click();
-  await saved(f).getByRole('button', { name: 'Forget Spare RIO' }).click();
+  await saved(f).getByRole('button', { name: 'Forget CY-RIO-1-99' }).click();
   await expect(saved(f).locator('tr[data-saved-device="CY-RIO-1-99"]')).toHaveCount(0);
   await expect(savedRow(f, 'CY-RIO-1-99')).toHaveCount(0);
   await saved(f).press('Escape');
@@ -194,7 +201,7 @@ test('saved devices show as Checking the moment Discover is pressed', async ({ p
   await f.locator('.hc-dropdown-menu').getByRole('option', { name: '10.192.0.0/16' }).click();
   await f.locator('[data-role="scan-bar"] [data-action="scan"]').click();
   await expect(savedRow(f, LEAF)).toContainText('Checking…');
-  await expect(savedRow(f, LEAF)).toContainText('Downstream RCP');
+  await expect(savedRow(f, LEAF)).toContainText(LEAF);
   await request.post('/__simulate', { data: { pauseState: false } });
   await expect(savedRow(f, LEAF).locator('.hc-found-tag')).toHaveText('Found');
 });

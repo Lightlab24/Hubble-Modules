@@ -10,17 +10,18 @@
   function restoreSavedLists(plan) {
     cameraLogins = Array.isArray(plan?.cameraLogins) ? plan.cameraLogins.map(item => ({ model: shortText(item.model), login: shortText(item.login), password: shortText(item.password) })) : [];
     // A workspace saved before Saved devices existed starts from the devices in it.
-    savedDevices = Array.isArray(plan?.savedDevices) ? plan.savedDevices.filter(item => savedSerial(item.serial)).map(item => ({ ...item })) : null;
+    savedDevices = Array.isArray(plan?.savedDevices) ? plan.savedDevices.filter(item => savedSerial(item.serial)).map(item => ({ serial: item.serial, kind: item.kind, base: item.base, address: item.address })) : null;
     // The buttons are drawn before the workspace is read; Saved devices repaints once its devices are in.
     paintCameraLoginsButton();
   }
   function savedCameraLogins() { return cameraLogins.slice(0, 128).map(item => ({ model: item.model, login: item.login, password: item.password })); }
-  // Every device in the list is on the saved list, with its current name and addresses.
+  // Every device in the list is on the saved list, by serial, with its addresses. Its name isn't
+  // kept: a device is named for the job it is on, and that changes from one job to the next.
   function savedDeviceList() {
     const list = (savedDevices ?? []).filter(item => savedSerial(item.serial)).map(item => ({ ...item }));
     for (const d of devices) {
       if (!savedSerial(d.serial)) continue;
-      const entry = { serial: String(d.serial), name: shortText(d.name || d.serial), kind: String(d.kind || '').slice(0, 32), base: ipv4(d.base || '') ? d.base : '', address: ipv4(d.address || '') ? d.address : '' };
+      const entry = { serial: String(d.serial), kind: String(d.kind || '').slice(0, 32), base: ipv4(d.base || '') ? d.base : '', address: ipv4(d.address || '') ? d.address : '' };
       if (!entry.base && !entry.address) continue;
       const at = list.findIndex(item => savedKey(item.serial) === savedKey(d.serial));
       if (at >= 0) list[at] = entry; else list.push(entry);
@@ -28,7 +29,7 @@
     const managed = new Set(devices.map(d => savedKey(d.serial)));
     while (list.length > 256) { const oldest = list.findIndex(item => !managed.has(savedKey(item.serial))); if (oldest < 0) break; list.splice(oldest, 1); }
     savedDevices = list;
-    return list.map(item => ({ serial: item.serial, name: item.name, kind: item.kind, base: item.base, address: item.address }));
+    return list.map(item => ({ serial: item.serial, kind: item.kind, base: item.base, address: item.address }));
   }
   const savedNotInList = () => savedDeviceList().filter(item => !devices.some(d => savedKey(d.serial) === savedKey(item.serial)));
 
@@ -103,14 +104,14 @@
   function savedDevicesMarkup() {
     const managed = new Set(devices.map(d => savedKey(d.serial)));
     const rows = savedDeviceList().map(item => {
-      const inList = managed.has(savedKey(item.serial)), name = item.name || item.serial;
-      return '<tr data-saved-device="' + esc(item.serial) + '"><td>' + esc(name) + '</td><td class="hc-muted">' + esc(item.kind) + '</td><td class="hc-mono hc-muted">' + esc(item.serial) + '</td><td class="hc-mono hc-muted">' + esc(item.address || item.base) + '</td>' +
+      const inList = managed.has(savedKey(item.serial)), name = item.serial;
+      return '<tr data-saved-device="' + esc(item.serial) + '"><td class="hc-mono">' + esc(item.serial) + '</td><td class="hc-muted">' + esc(item.kind) + '</td><td class="hc-mono hc-muted">' + esc(item.address || item.base) + '</td>' +
         '<td class="hc-muted">' + (inList ? 'In this sheet' : '') + '</td>' +
         '<td class="hc-list-remove"><button type="button" class="hc-row-remove-button" data-action="forget-saved-device" data-serial="' + esc(item.serial) + '" aria-label="Forget ' + esc(name) + '" title="' + (inList ? 'Remove ' + esc(name) + ' from the sheet first' : 'Forget ' + esc(name) + '. Nothing changes on the device.') + '"' + (inList ? ' disabled' : '') + '>' + icon('trash-2') + '</button></td></tr>';
     }).join('');
     return '<header><h3 id="hc-saved-devices-title">Saved devices</h3><button type="button" class="hc-list-close" data-action="close-list-popover" aria-label="Close">' + icon('x') + '</button></header>' +
-      '<p>Every device you add is saved here. Discover checks these first, whichever network you pick, and lists the ones that aren’t in the sheet straight away.</p>' +
-      (rows ? '<table class="hc-list-table"><thead><tr><th>Name</th><th>Type</th><th>Serial</th><th>Address</th><th></th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' : '<div class="hc-list-empty">No saved devices yet. Every device you add is saved here.</div>') +
+      '<p>Every device you add is saved here by its serial. Discover checks these first, whichever network you pick, and lists the ones that aren’t in the sheet straight away.</p>' +
+      (rows ? '<table class="hc-list-table"><thead><tr><th>Serial</th><th>Type</th><th>Address</th><th></th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' : '<div class="hc-list-empty">No saved devices yet. Every device you add is saved here.</div>') +
       '<footer class="hc-caption">Forget removes a device from this list only. Nothing changes on the device.</footer>';
   }
   function forgetSavedDevice(serial) {
@@ -132,16 +133,12 @@
     });
   }
   function savedSearchRowMarkup({ item, candidate, state }, span) {
-    const name = item.name || item.serial, address = candidate ? candidate.base || candidate.address : item.address || item.base;
+    // A saved device that answers shows the name it has now.
+    const name = candidate?.name || item.serial, address = candidate ? candidate.base || candidate.address : item.address || item.base;
     const status = state === 'found' ? '<span class="hc-found-tag">Found</span>' : '<span class="hc-muted">' + (state === 'checking' ? 'Checking…' : state === 'missing' ? 'Not found' : 'Not checked') + '</span>';
     const last = state === 'found' && candidate ? '<button type="button" class="hc-primary hc-add-found" data-action="add-found-device" data-id="' + esc(candidate.id) + '" aria-label="Add ' + esc(name) + '"' + (deviceAddBusy ? ' disabled' : '') + '>' + icon('plus') + 'Add</button>'
       : state === 'missing' ? '<span class="hc-muted">Didn’t answer · stays on the saved list</span>' : '';
-    return '<tr class="hc-device-found hc-device-saved" data-device-found="' + esc(candidate?.id ?? item.serial) + '" data-device-saved="' + esc(item.serial) + '" data-saved-state="' + state + '"><td><span class="hc-muted" title="Saved device">' + icon('bookmark') + '</span></td><td>' + esc(name) + '</td><td></td><td><span class="hc-muted">' + esc(item.kind) + '</span></td><td><span class="hc-mono hc-muted">' + esc(item.serial) + '</span></td><td>' + status + '</td><td><span class="hc-mono hc-muted">' + esc(address) + '</span></td><td colspan="' + span + '">' + last + '</td></tr>';
-  }
-  // A saved device that's added keeps the name it was saved with.
-  function savedNameFor(serial) {
-    const item = (savedDevices ?? []).find(entry => savedKey(entry.serial) === savedKey(serial));
-    return item?.name && item.name !== item.serial ? item.name : '';
+    return '<tr class="hc-device-found hc-device-saved" data-device-found="' + esc(candidate?.id ?? item.serial) + '" data-device-saved="' + esc(item.serial) + '" data-saved-state="' + state + '"><td><span class="hc-muted" title="Saved device">' + icon('bookmark') + '</span></td><td>' + (candidate ? esc(name) : '<span class="hc-muted">Saved device</span>') + '</td><td></td><td><span class="hc-muted">' + esc(item.kind) + '</span></td><td><span class="hc-mono hc-muted">' + esc(item.serial) + '</span></td><td>' + status + '</td><td><span class="hc-mono hc-muted">' + esc(address) + '</span></td><td colspan="' + span + '">' + last + '</td></tr>';
   }
   const startLiveScanBeforeSaved = startLiveScan;
   startLiveScan = function() {
