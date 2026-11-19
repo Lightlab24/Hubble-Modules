@@ -73,28 +73,59 @@ export class ModuleDataAssembler {
   }
 }
 
-/** Coalesce replaceable observations in one event-loop turn; command receipts stay immediate. */
-export function createModuleDataPublisher(publish: Parameters<typeof publishModuleData>[0]) {
+/** How long a burst of changes may run before a settling publisher sends what it holds. */
+export interface ModuleDataSettle {
+  /** Send once no change has arrived for this long. */
+  readonly quietMs: number
+  /** Send this long after the first unsent change at the latest. */
+  readonly maxWaitMs: number
+}
+
+/**
+ * Coalesce replaceable observations in one event-loop turn; command receipts stay immediate.
+ * With `settle`, a burst that spans several turns is sent once when it goes quiet rather than
+ * once per turn: a router reports each level of one take separately, and the host spends
+ * milliseconds on every whole snapshot it is sent.
+ */
+export function createModuleDataPublisher(
+  publish: Parameters<typeof publishModuleData>[0],
+  settle?: ModuleDataSettle,
+) {
   const pending = new Map<string, unknown>()
   let queued = false,
     closed = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let burstStartedAt = 0
+  const send = () => {
+    queued = false
+    timer = undefined
+    if (closed) return
+    const batch = [...pending]
+    pending.clear()
+    for (const [name, snapshot] of batch) publishModuleData(publish, name, snapshot)
+  }
   return {
     publish(channel: string, value: unknown) {
       if (closed) return
       pending.set(channel, value)
-      if (queued) return
-      queued = true
-      queueMicrotask(() => {
-        queued = false
-        if (closed) return
-        const batch = [...pending]
-        pending.clear()
-        for (const [name, snapshot] of batch) publishModuleData(publish, name, snapshot)
-      })
+      if (!settle) {
+        if (queued) return
+        queued = true
+        queueMicrotask(send)
+        return
+      }
+      const now = performance.now()
+      if (timer === undefined) burstStartedAt = now
+      else clearTimeout(timer)
+      const untilLimit = burstStartedAt + settle.maxWaitMs - now
+      timer = setTimeout(send, Math.max(0, Math.min(settle.quietMs, untilLimit)))
+      timer.unref()
     },
     close() {
       closed = true
       pending.clear()
+      if (timer !== undefined) clearTimeout(timer)
+      timer = undefined
     },
   }
 }

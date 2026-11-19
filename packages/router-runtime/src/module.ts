@@ -1,6 +1,7 @@
 import {
   createModuleDataPublisher,
   publishModuleData,
+  type ModuleDataSettle,
 } from "@hubble/module-contracts/observations";
 import type { ModuleSchemas } from "@hubble/module-runtime-helpers/managed";
 import {
@@ -217,7 +218,7 @@ export function routerModule(
             if (!context.publishEvent)
               throw new Error("Host lacks router observations");
             context.publishEvent(channel, value);
-          });
+          }, routerSnapshotSettle(definition));
           return {
             start() {
               manager.reconcile([definition]);
@@ -430,6 +431,7 @@ export function routerModule(
             "Router adapter completed at its existing command submission boundary",
         },
         schemas,
+        { snapshotSettle: routerSnapshotSettle },
       ).createInstance({
         ...context,
         settings: driverSettings,
@@ -712,4 +714,24 @@ export function routerViewPreferences(value: unknown): {
     automaticTake: view.automaticTake,
     view: view.view,
   };
+}
+
+/**
+ * A router with several levels reports each level of one take on its own, often a few
+ * milliseconds apart, and every report used to send the whole router again: its snapshot and its
+ * primary routes, twice or more for a single take. Those are sent once the reports go quiet.
+ * Key feedback and route events are not held: they go out as each report arrives.
+ */
+export const ROUTER_SNAPSHOT_SETTLE: ModuleDataSettle = Object.freeze({
+  quietMs: 5,
+  maxWaitMs: 20,
+});
+
+function routerSnapshotSettle(
+  definition: object,
+): ModuleDataSettle | undefined {
+  const levels = "levels" in definition ? definition.levels : 1;
+  return typeof levels === "number" && levels > 1
+    ? ROUTER_SNAPSHOT_SETTLE
+    : undefined;
 }

@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { ActionAbortedError, type AdapterActionResult } from '@hubble/module-contracts/execution'
-import { createModuleDataPublisher } from '@hubble/module-contracts/observations'
+import {
+  createModuleDataPublisher,
+  type ModuleDataSettle,
+} from '@hubble/module-contracts/observations'
 import type {
   HubbleModule,
   ModuleContext,
@@ -32,6 +35,10 @@ export function managedModule<TDefinition extends ModuleConnection, TAction>(
   create: (definition: TDefinition, context: ModuleContext) => ManagedDriver<TAction>,
   evidence: { kind: 'response' | 'state-confirmed' | 'submitted' | 'local'; summary: string },
   schemas: ModuleSchemas<TDefinition, TAction>,
+  options: {
+    /** For a driver whose one change arrives as a burst of snapshots: send the last one once it settles. */
+    readonly snapshotSettle?: (definition: TDefinition) => ModuleDataSettle | undefined
+  } = {},
 ): HubbleModule {
   return {
     createInstance(context) {
@@ -53,7 +60,7 @@ export function managedModule<TDefinition extends ModuleConnection, TAction>(
       const publisher = createModuleDataPublisher((channel, value) => {
         if (!context.publishEvent) throw new Error('Host does not support module observations')
         context.publishEvent(channel, value)
-      })
+      }, options.snapshotSettle?.(definition))
       return {
         async start() {
           started = true

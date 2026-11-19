@@ -196,7 +196,7 @@ async function startedRouter(
   cleanups.push(async () => instance.dispose());
   await instance.start();
   await nextTurn();
-  return { instance, log, publish, scope };
+  return { instance, log, publish, scope, publishEvent: context.publishEvent };
 }
 
 it.each(routers)(
@@ -322,3 +322,81 @@ it.each(routers)(
     });
   },
 );
+
+/** A manager whose reports the test sends itself, as a router does after each level of a take. */
+function reportingManager() {
+  type Listener = Parameters<RouterConnectionManagerContract["subscribe"]>[0];
+  const listeners = new Set<Listener>();
+  let snapshots: ReturnType<RouterConnectionManagerContract["snapshots"]> = [];
+  return {
+    report() {
+      for (const listener of [...listeners]) listener(snapshots);
+    },
+    create: (): RouterConnectionManagerContract => {
+      const local = localRouterManager();
+      const listen = (listener: Listener) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      };
+      return {
+        ...local,
+        reconcile(definitions) {
+          local.reconcile(definitions);
+          snapshots = local.snapshots();
+        },
+        subscribe: listen,
+        subscribePrimaryRouteFeedback: listen,
+      };
+    },
+  };
+}
+const published = (publishEvent: unknown, channel: string) =>
+  vi
+    .mocked(publishEvent as (channel: string, value: unknown) => void)
+    .mock.calls.filter(([name]) => name === channel).length;
+
+it("ross-ultrix-ogp sends its whole snapshot and primary routes once for a take reported level by level", async () => {
+  const [type, source, schemas] = routers[3];
+  const manager = reportingManager();
+  const { publishEvent } = await startedRouter(type, source, schemas, {
+    createManager: manager.create,
+  });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+  try {
+    const before = {
+      snapshots: published(publishEvent, "driver.snapshots"),
+      primary: published(publishEvent, "router.primary"),
+    };
+    // One take on a 17-level router: the first level's report, then the rest a moment later.
+    manager.report();
+    await Promise.resolve();
+    vi.advanceTimersByTime(2);
+    manager.report();
+    await Promise.resolve();
+    vi.advanceTimersByTime(4);
+    expect(published(publishEvent, "driver.snapshots")).toBe(before.snapshots);
+    expect(published(publishEvent, "router.primary")).toBe(before.primary);
+    vi.advanceTimersByTime(1);
+    expect(published(publishEvent, "driver.snapshots")).toBe(
+      before.snapshots + 1,
+    );
+    expect(published(publishEvent, "router.primary")).toBe(before.primary + 1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("blackmagic-videohub, with one level, still sends each report at once", async () => {
+  const [type, source, schemas] = routers[1];
+  const manager = reportingManager();
+  const { publishEvent } = await startedRouter(type, source, schemas, {
+    createManager: manager.create,
+  });
+  const before = published(publishEvent, "driver.snapshots");
+  manager.report();
+  await nextTurn();
+  expect(published(publishEvent, "driver.snapshots")).toBe(before + 1);
+  manager.report();
+  await nextTurn();
+  expect(published(publishEvent, "driver.snapshots")).toBe(before + 2);
+});
