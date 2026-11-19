@@ -19,6 +19,8 @@ export type ControlOptions = {
   ndConfirmMs?: number;
   /** How long a White Balance answer waits for each camera to report the temperature and tint it asked for. */
   whiteBalanceConfirmMs?: number;
+  /** How old the plan in memory may be before a press that uses it also has it read again in the background. */
+  planRecheckMs?: number;
 };
 const SELECT_HOLD_MS = 2000;
 // Camera 1 on RCP 1 reported each ND change about 65 ms after the command (Nov 18 2026). This leaves room for a slow path.
@@ -49,6 +51,12 @@ export const RECORDING_FEEDBACK_TIMEOUT_MS = 15_000;
 export const FEEDBACK_WAIT: FeedbackWait = { baseMs: RECORDING_FEEDBACK_TIMEOUT_MS, perCameraMs: 500, maxMs: 60_000 };
 export const feedbackTimeout = (cameras: number, wait = FEEDBACK_WAIT) => Math.min(wait.maxMs, wait.baseMs + wait.perCameraMs * Math.max(0, cameras - 1));
 const SELECTION_QUEUE = 'selection';
+/**
+ * A press acts on the plan in memory while the watch on the saved plan says it is the saved one. A watch that went
+ * quiet without failing would never say otherwise, so a press on a plan last read longer ago than this also has it
+ * read again, behind the press.
+ */
+const PLAN_RECHECK_MS = 30_000;
 const controllerQueue = (id: unknown) => `controller/${String(id)}`;
 // MQTT goes to a controller's own base address (10.192…), which no other controller can share. The
 // address it was added by is only the way back while the base won't connect.
@@ -105,6 +113,14 @@ export class CameraControl {
   private stateText = '';
   private stateSequence = 0;
   private publishedSequence = -1;
+  /** The saved revision `plan` was read at, or undefined when it came from anywhere else and a press must read first. */
+  private planRevision: string | null | undefined;
+  /** The newest saved revision the plan's watch has reported, or undefined while no watch is running. */
+  private watchedRevision: string | null | undefined;
+  private planReadAt = 0;
+  private planRefresh?: Promise<void>;
+  private planRefreshAgain = false;
+  private lifetime?: AbortSignal;
   constructor(private repository: PlanRepository, private context: ModuleContext, private sample: boolean,
     private changed: () => void, private options: ControlOptions = {}) {
     this.selection = new ControlSelection(context.services!, sample, this.plan, () => this.emit(), error => {
@@ -121,12 +137,17 @@ export class CameraControl {
       this.checkpoint.write(this.recording.checkpoint());
       this.savedCheckpoint = JSON.stringify(this.recording.checkpoint());
     }
-    this.plan = (await this.repository.read(signal)).plan;
+    const saved = await this.repository.read(signal);
+    this.plan = saved.plan; this.planRevision = saved.revision; this.planReadAt = Date.now();
     this.selection.setPlan(this.plan);
     await this.selection.start(signal);
+    this.lifetime = signal;
+    void this.followPlan(signal);
   }
-  setPlan(plan: Plan) {
-    this.plan = plan;
+  /** `revision` is the saved revision this plan was read at. A plan from anywhere else has none, and the next press reads the saved one. */
+  setPlan(plan: Plan, revision?: string | null) {
+    this.plan = plan; this.planRevision = revision;
+    if (revision !== undefined) this.planReadAt = Date.now();
     for (const [id, session] of this.sessions) {
       const device = plan.devices.find(row => row.id === id && controlDevice(row));
       if (!device || mqttHost(device) !== session.definition.host || device.serial !== session.definition.serial) {
@@ -156,7 +177,68 @@ export class CameraControl {
       return { connection: reportedConnection(target.observation), target };
     } catch { return { connection: session.listsCamera(number) === false ? 'not-configured' : null, target: null }; }
   }
-  async refreshPlan(signal: AbortSignal) { this.setPlan((await this.repository.read(signal)).plan); }
+  async refreshPlan(signal: AbortSignal) {
+    const saved = await this.repository.read(signal);
+    if (!this.stopped) this.setPlan(saved.plan, saved.revision);
+  }
+  /** The plan in memory is the saved one: read at the revision the watch last reported, with no newer save of this module's own. */
+  private planIsCurrent() {
+    return this.watchedRevision !== undefined && this.planRevision === this.watchedRevision && this.planRevision === this.repository.revision;
+  }
+  /**
+   * The plan a press acts on. Reading the saved plan takes four requests to Hubble, so a press only waits for that
+   * when the plan in memory may be behind: a save was reported, this module saved one itself, or nothing is watching.
+   */
+  private async currentPlan(signal: AbortSignal) {
+    if (this.planIsCurrent()) {
+      if (Date.now() - this.planReadAt > (this.options.planRecheckMs ?? PLAN_RECHECK_MS)) this.refreshPlanBehind();
+      return;
+    }
+    // A read the watch started serves every press waiting on it. If it failed, the press reads for itself and reports why.
+    if (this.planRefresh) await this.planRefresh.catch(() => undefined);
+    signal.throwIfAborted();
+    if (!this.planIsCurrent()) await this.refreshPlan(signal);
+  }
+  /** Reads the saved plan without holding anything up, and again if another save is reported meanwhile. */
+  private refreshPlanBehind() {
+    const signal = this.lifetime;
+    if (this.stopped || !signal) return;
+    if (this.planRefresh) { this.planRefreshAgain = true; return; }
+    const refresh = (async () => {
+      do { this.planRefreshAgain = false; await this.refreshPlan(signal); }
+      while (this.planRefreshAgain && !this.planIsCurrent() && !this.stopped && !signal.aborted);
+    })();
+    this.planRefresh = refresh;
+    void refresh.catch(error => {
+      // The plan in memory stays marked as behind, so the next press reads the saved one itself.
+      if (!this.stopped && !signal.aborted) this.context.log({ level: 'info', stage: 'control-plan', message: ('Reading the saved configuration failed: ' + message(error)).slice(0, 1000) });
+    }).then(() => { if (this.planRefresh === refresh) this.planRefresh = undefined; });
+  }
+  /**
+   * Follows the saved plan, so a press need not read it. While no watch is running nothing vouches for the plan in
+   * memory, and each press reads the saved plan first, as every press did before.
+   */
+  private async followPlan(signal: AbortSignal) {
+    for (let failures = 0; !signal.aborted && !this.stopped;) {
+      try {
+        // Each new watch starts by reading the document, so it catches up on anything missed. Only a later change shows the watch works.
+        let changes = 0;
+        for await (const document of this.repository.watch(signal)) {
+          if (this.stopped) return;
+          if (++changes > 1) failures = 0;
+          this.watchedRevision = document.revision;
+          if (!this.planIsCurrent()) this.refreshPlanBehind();
+        }
+      } catch (error) {
+        this.watchedRevision = undefined;
+        if (signal.aborted || this.stopped) return;
+        failures += 1;
+        if (failures === 3) this.context.log({ level: 'error', stage: 'control-plan', message: message(error).slice(0, 1000) });
+        await delay(Math.min(250 * failures, 5000), undefined, { signal }).catch(() => undefined);
+      }
+    }
+    this.watchedRevision = undefined;
+  }
   state() {
     const { enabled, singleSwitch } = this.selection.value();
     const value = { enabled, singleSwitch, controllers: this.controllerStatuses(), cameras: this.cameraStatuses(), cameraChanges: { ...this.cameraChanges } };
@@ -235,7 +317,7 @@ export class CameraControl {
   /** Edits apply in the order they were made. Only the wait for the save is left outside the queue, so edits stay immediate. */
   private async acceptSelection(id: string, mutations: () => SelectionMutation[] | Promise<SelectionMutation[]>, signal: AbortSignal) {
     const { saved } = await this.accept(SELECTION_QUEUE, async () => {
-      await this.refreshPlan(signal);
+      await this.currentPlan(signal);
       return { saved: this.selection.mutate(id, await mutations(), signal) };
     });
     return saved;
@@ -294,12 +376,13 @@ export class CameraControl {
       }
       // A press settles which cameras it covers in order with ticks, so a tick just before it counts and one just after doesn't.
       const accepted = this.accept(SELECTION_QUEUE, async () => {
-        await this.refreshPlan(execution.signal);
+        await this.currentPlan(execution.signal);
         const device = this.controller(controllerId);
         if (command === 'select-camera' && !selectsCamera(device)) throw new Error('Select camera needs an RCP or Gateway');
-        const { enabled } = await this.selection.current(execution.signal);
         const rows = this.plan.cameras.filter(row => row.device === device.id);
         const specific = command === 'select-camera' || command === 'record-camera';
+        // Only a press on the ticked cameras goes by the ticks. One that names its camera has nothing to read.
+        const enabled = specific ? {} : (await this.selection.current(execution.signal)).enabled;
         // A press that names a camera number goes by what the controller reports over MQTT and nothing
         // else. The saved list is only kept current by reading the controller's web side, so it never
         // decides whether such a press goes. A row there only lends its identity, to settle a tie.

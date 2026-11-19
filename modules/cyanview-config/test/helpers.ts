@@ -22,6 +22,12 @@ export function fixture(settings: RecordValue = {}, options: ServiceOptions = {}
   let heldPart: string | undefined, writeHold: Promise<void> | undefined;
   let slowRead: { part: string; ms: number } | undefined;
   let refusedWatches = 0;
+  // Every document request the module makes of Hubble, in order, so a test can count what a press reads.
+  const requests: { method: string; id: string }[] = [];
+  let heldRead: string | undefined, readHold: Promise<void> | undefined;
+  let failedReads: { part: string; count: number } | undefined;
+  let refusedPlanWatches = 0, quietWatch: string | undefined;
+  const pendingWatches = new Map<string, unknown>();
   const watchers = new Map<string, Set<() => void>>();
   const definitions = documentDefinitions();
   const scope = { kind: 'host' as const, workspaceId: randomUUID(), capabilityId: 'lightlab-cyanview-config' };
@@ -33,18 +39,23 @@ export function fixture(settings: RecordValue = {}, options: ServiceOptions = {}
       if (method !== 'service') throw new Error('Unexpected host operation');
       const outer = object(raw), input = object(outer.input), id = String(input.id);
       if (outer.service !== 'documents') throw new Error('Unexpected service');
+      requests.push({ method: String(input.method), id });
       if (input.method === 'read' && slowRead && id.includes(slowRead.part)) { const { ms } = slowRead; slowRead = undefined; await delay(ms); }
+      if (input.method === 'read' && heldRead && id.includes(heldRead)) await readHold;
+      if (input.method === 'read' && failedReads && failedReads.count > 0 && id.includes(failedReads.part)) { failedReads.count--; throw new Error('Simulated storage failure'); }
       if (input.method === 'watch' && refusedWatches > 0 && id.includes('camera-control')) { refusedWatches--; throw new Error('Host service is not granted or available for this scope'); }
+      if (input.method === 'watch' && refusedPlanWatches > 0 && (id === 'plan' || id === 'sample-plan')) { refusedPlanWatches--; throw new Error('Host service is not granted or available for this scope'); }
       const definition = definitions.find(item => item.id === id); if (!definition) throw new Error('Unknown document');
       let document: ModuleDocumentSnapshot = records.get(id) ?? { workspaceId: scope.workspaceId, owner: { kind: 'host' as const, capabilityId: scope.capabilityId, moduleId: 'lightlab-cyanview-config' }, id, version: 1, revision: null, value: structuredClone(definition.defaultValue) as ModuleDocumentSnapshot['value'], canUndo: false, canRedo: false };
       if (input.method === 'watch' && input.afterRevision === document.revision) {
+        pendingWatches.set(id, input.afterRevision);
         await new Promise<void>((resolve, reject) => {
           const entries = watchers.get(id) ?? new Set(); watchers.set(id, entries);
           const done = () => { entries.delete(done); signal?.removeEventListener('abort', abort); resolve(); };
           const abort = () => { entries.delete(done); reject(new Error('Document watch cancelled')); };
           entries.add(done); signal?.addEventListener('abort', abort, { once: true });
           if (signal?.aborted) abort();
-        });
+        }).finally(() => pendingWatches.delete(id));
         document = records.get(id) ?? document;
       }
       if (input.method === 'write') {
@@ -53,7 +64,7 @@ export function fixture(settings: RecordValue = {}, options: ServiceOptions = {}
         if (input.expectedRevision !== document.revision) return { status: 'conflict', document } as unknown as ModuleJsonValue;
         document = { ...document, revision: randomUUID(), value: structuredClone(input.value) };
         records.set(id, document);
-        for (const done of [...(watchers.get(id) ?? [])]) done();
+        if (!(quietWatch && id.includes(quietWatch))) for (const done of [...(watchers.get(id) ?? [])]) done();
       }
       return { status: 'document', document } as unknown as ModuleJsonValue;
     },
@@ -64,6 +75,25 @@ export function fixture(settings: RecordValue = {}, options: ServiceOptions = {}
     failNextWrite(part: string) { failWrite = part; },
     slowNextRead(part: string, ms: number) { slowRead = { part, ms }; },
     refuseSelectionWatches(count: number) { refusedWatches = count; },
+    requests,
+    /** The saved plan's documents read since request number `from`: its main document and its camera and network rows. */
+    planReads(from = 0) {
+      const root = repository.root;
+      return requests.slice(from).filter(request => request.method === 'read' && (request.id === root || request.id.startsWith(root + '-c') || request.id.startsWith(root + '-l'))).map(request => request.id);
+    },
+    /** True once the module is waiting for the next change to this document after `revision`, so it has taken in that revision. */
+    watchingAfter(id: string, revision: string | null) { return pendingWatches.has(id) && pendingWatches.get(id) === revision; },
+    refusePlanWatches(count: number) { refusedPlanWatches = count; },
+    /** Saves to documents whose id includes `part` reach no watcher, as if a watch had gone quiet without failing. */
+    quietWatches(part: string | undefined) { quietWatch = part; },
+    failNextReads(part: string, count: number) { failedReads = { part, count }; },
+    failedReadsLeft() { return failedReads?.count ?? 0; },
+    holdReads(part: string) {
+      heldRead = part;
+      let release!: () => void;
+      readHold = new Promise<void>(resolve => { release = resolve; });
+      return () => { heldRead = undefined; release(); };
+    },
     holdWrites(part: string) {
       heldPart = part;
       let release!: () => void;
