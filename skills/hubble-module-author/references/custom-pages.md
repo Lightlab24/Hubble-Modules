@@ -107,11 +107,15 @@ await page.saveSettings({ protocol: "5.0", port: 9821 });
 - The save is Hubble's ordinary settings save: shown at once in Module Connections, saved in
   order behind any save still on its way, and rolled back with Hubble's fading toast when
   the workspace refuses it.
-- **A saved setting restarts the module, and Hubble then reloads the page.** Show the new
-  value the moment the operator makes the change and never wait on `saveSettings` to draw
-  it. Save several values in one call rather than one call each, and hold a typed value
-  until Enter or leaving the box. Keep anything the page must still show after the reload,
-  such as the open tab, in the backend's `runtimeDirectory` or a module document.
+- **A saved setting restarts the module.** Show the new value the moment the operator makes
+  the change and never wait on `saveSettings` to draw it. Save several values in one call
+  rather than one call each, and hold a typed value until Enter or leaving the box.
+- **Hubble then reloads the page, unless the section stays open.** A reload two or three
+  seconds after a change blinks the page, loses text being typed, and shows a second change
+  as put back until its own reload. Declare `restart: 'keep-open'` as described under
+  [Stay open while the module restarts](#stay-open-while-the-module-restarts) for any page
+  an operator edits. A page that reloads keeps what it must still show afterwards, such as
+  the open tab, in the backend's `runtimeDirectory` or a module document.
 - The backend reads the saved values from `context.settings` when it starts, as always.
   Hand them to the page in the reply to its first command.
 - A `module-settings` page cannot save settings this way: its settings already sit beside it
@@ -121,6 +125,54 @@ await page.saveSettings({ protocol: "5.0", port: 9821 });
 Use this only for settings that already belong to the module. A value an operator changes
 while a device runs belongs in a page command or a module document, which do not restart
 the module.
+
+## Stay open while the module restarts
+
+Hubble ties an open page to one run of its module. When the module restarts, Hubble closes
+the page and loads it again. A section can ask to stay open instead, with
+`restart: 'keep-open'` and `module-frontend-restart-v1` (Hubble 2.3.1):
+
+```ts
+{
+  type: 'custom', id: 'app', label: 'Setup', entry: 'ui/index.html',
+  commands: [{ id: 'snapshot', label: 'Read the page' }],
+  settings: ['protocol', 'transport', 'port'],
+  restart: 'keep-open',
+}
+```
+
+```ts
+import {
+  connectModuleFrontend,
+  MODULE_RESTARTING_MESSAGE,
+} from "@hubble/module-sdk/frontend";
+
+const page = await connectModuleFrontend(window);
+page.onRestart(() => void readEverythingAgain());
+```
+
+- The frame, its scroll position, focus and typed text are untouched. The page's own files
+  keep loading from the same address.
+- While the module is between two runs, every `call` fails with `MODULE_RESTARTING_MESSAGE`
+  ("Module is restarting"), and calls the stopped run had not answered fail the same way.
+  Ask again shortly, or after `onRestart`. Do not repeat a command that changes a device
+  without the operator: let it fail and say so.
+- `onRestart` fires once the module answers again. Read everything from the backend again,
+  because what the page holds came from the run that stopped. Redraw in place and leave the
+  box in use alone.
+- After `saveSettings` resolves, do not wait for `onRestart` to carry on. Hubble's window can
+  hear of the new run a little late. Ask the backend for its settings until they are the
+  ones you saved, then draw from that answer.
+- A place the page keeps in the backend's data, such as the cursor of a long poll, belongs to
+  one run. Hand it back with something that names the run, and treat another run's place as
+  no place at all. Two runs count from zero and their numbers can agree by accident.
+- Keep a settings save and any command that talks to a device apart: the restart cuts short
+  a command still running. Hold the save until the command ends, and hold commands while the
+  module restarts.
+- The page stays only for a restart of the same package with the module coming back. A
+  version change, a disabled connection or a module that failed to start closes it, as
+  before. If Hubble no longer has the page's session it loads the page again.
+- A page without `restart: 'keep-open'` is reloaded for every restart, as before.
 
 ## Declare and build
 

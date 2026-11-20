@@ -33,8 +33,10 @@ value or a module that isn't running shows no badge. `tone` is `alert` (red, the
 or `info`. The count follows the module's published state, so publish when it changes.
 For a page that shows and saves the module's own settings, list them on the custom section as
 `settings: [...]`, call `saveSettings` from the page and require `module-frontend-settings-v1`
-(Hubble 2.3.1). A saved setting restarts the module and reloads the page, so read
-[custom pages](references/custom-pages.md) before relying on it.
+(Hubble 2.3.1). A saved setting restarts the module, and Hubble reloads the page for each
+restart unless the section declares `restart: 'keep-open'` (`module-frontend-restart-v1`)
+and listens with `onRestart`. Read [custom pages](references/custom-pages.md) before relying
+on either.
 A page can also set `pages[].wideIcon`, a wide logo such as a wordmark, with the same file
 rules, requiring `module-page-wide-icons-v1`. Hubble shows it beside the label in the expanded
 sidebar, fitted into 44 by 16 pixels, and `icon` when the sidebar is collapsed.

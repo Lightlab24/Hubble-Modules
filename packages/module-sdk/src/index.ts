@@ -1133,6 +1133,16 @@ export const ModuleManifestSchema = z
                 message:
                   "Custom page entry must be a declared portable package file",
               });
+            if (
+              section.restart &&
+              !features.includes("module-frontend-restart-v1")
+            )
+              ctx.addIssue({
+                code: "custom",
+                path: [...path, "restart"],
+                message:
+                  "A page that stays open through a restart requires module-frontend-restart-v1",
+              });
             if (section.settings) {
               const declared = manifest.settings.filter((field) =>
                 section.settings?.includes(field.id),
