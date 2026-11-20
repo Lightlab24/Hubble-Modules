@@ -1,6 +1,6 @@
 # Ping
 
-Module ID `network-ping`, version 0.1.6. Pings network devices, keeps a timeline of each one, and
+Module ID `network-ping`, version 0.1.7. Pings network devices, keeps a timeline of each one, and
 alerts when a device stops answering or answers slowly. It is a workspace module: add it once, and
 its **Ping** page lists every device. It needs a Hubble with `module-page-badges-v1` and
 `module-controls-inline-v1` (2.3.1).
@@ -40,11 +40,20 @@ pixels apart, one per ping where the history allows, and zooming in stops where 
 wider than that. A bar with any lost ping is red from top to bottom. **Clear history** under the
 timeline forgets every device's past pings after asking; devices and alert settings stay.
 
-**Scale** under the timeline sets the answer time at its top. **Auto** fits the tallest bar on
-show; a fixed scale from 1 ms to 1000 ms keeps a fast device readable when a few large pings come
-in. A bar taller than the scale stops at the top with a white tip, and hovering it still gives its
-real time. Pinching over the ms numbers moves the scale a step, and double-clicking them returns to
-Auto. The scale is one setting for every device, saved with the page like Show last.
+**Scale** sets the answer time at the top of the timeline, to any value from 0.1 ms to 10000 ms,
+so a fast device stays readable when a few large pings come in. Drag the ms numbers on the left of
+the timeline (the number you grab stays under the pointer), pinch over them, type a value in the
+Scale box, or use its − and +. **Auto** fits the tallest bar on show; while it is on, the box shows
+Auto's value, dimmed. A bar taller than the scale stops at the top with a white tip, and hovering
+it still gives its real time. Double-clicking the ms numbers returns to Auto.
+
+**Colors** under the timeline colours bars by answer time: type the time green goes up to, then
+yellow, then orange; anything over the last time is red. Leave a time empty to skip that colour.
+Each time has to be above the one before it. No answer stays red, as a full-height bar. The legend
+lists the ranges, and the colours apply to the timeline and the strips in the sheet; keys keep
+their Online, Slow and Offline colours. Until a time is typed, and after **Follow alert limit**,
+bars are green under the Answer over alert and amber over it. The scale and the colour times are
+each one setting for every device, saved with the page like Show last, and Undo covers them.
 
 ## Alerts
 
@@ -91,7 +100,7 @@ pings, in the same kind of sandboxed frame Hubble uses. `PING_RENDERER_ASSETS` p
 folder of Hubble's control bundles; it defaults to the installed Hubble. `/__inspect` shows the
 saved document, log lines, alerts and feedback, and `/__simulate` holds, releases or fails saves.
 
-`tools/scale-check.mjs` drives the timeline's Scale with real input against a preview started with
+`tools/scale-check.mjs` drives the timeline's Scale and Colors with real input against a preview started with
 `PING_PREVIEW_FAKE=1`, including a held and a failed save, and checks that nothing on the right of
 the row under the timeline moves.
 

@@ -22,8 +22,59 @@ export const spanOf = (id: string) => SPANS.find((span) => span.id === id) ?? SP
 /** The choices for the two alerts every device shares unless its own cell says otherwise. */
 export const ALERT_OVER_MS = [10, 20, 50, 80, 100, 150, 200, 300, 500, 1000] as const;
 export const ALERT_LOST_MS = [1000, 2000, 3000, 5000, 10_000, 30_000, 60_000, 300_000] as const;
-/** The answer times the top of the timeline can be set to. Without one (Auto) it fits the tallest bar on show. */
-export const SCALES_MS = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000] as const;
+/** The range the top of the timeline can be set to, in ms. Without a value (Auto) it fits the tallest bar on show. */
+export const SCALE_MIN_MS = 0.1;
+export const SCALE_MAX_MS = 10_000;
+/** A scale rounded to three significant figures and kept in range. */
+export const roundScale = (ms: number) => Math.min(SCALE_MAX_MS, Math.max(SCALE_MIN_MS, Number(ms.toPrecision(3))));
+/** The − and + step for a scale: about a tenth of it, on a 1, 2, 5 sequence. */
+export function scaleStep(ms: number) {
+  const power = 10 ** Math.floor(Math.log10(Math.max(ms, SCALE_MIN_MS)));
+  const tenth = ms / 10;
+  for (const step of [0.1, 0.2, 0.5, 1, 2, 5, 10]) if (tenth <= step * power) return Number((step * power).toPrecision(1));
+  return power * 10;
+}
+/** The next round scale up or down from any scale: 2.37 goes to 2.5 or 2, 2.5 to 3 or 2. */
+export function stepScale(ms: number, direction: 1 | -1) {
+  const step = scaleStep(ms);
+  const at = ms / step;
+  const next = direction > 0 ? (Math.floor(at + 1e-9) + 1) * step : (Math.ceil(at - 1e-9) - 1) * step;
+  return roundScale(Number(next.toPrecision(6)));
+}
+
+/** The bar colours: the status colours, plus yellow and orange for the steps between. */
+export const PING_COLORS = { ok: "#63BC9C", warn: "#DFBC72", bad: "#E5766A", green: "#63BC9C", yellow: "#E6D35C", orange: "#F08A4B", red: "#E5766A" } as const;
+/** The three steps, in order: each colour covers answers up to its time. Over the last one is red. */
+export const BAND_STEPS = ["green", "yellow", "orange"] as const;
+export type BandStep = (typeof BAND_STEPS)[number];
+/** The user's times for the colours, in ms. An empty one is left out, so fewer colours are used. */
+export type Bands = Record<BandStep, number | null>;
+/** A colour for every answer up to `upToMs`. */
+export interface ColorBand {
+  upToMs: number;
+  color: string;
+}
+/** Bar colours by answer time, as drawn: the bands in order, then the colour over the last band and for no answer. */
+export interface Colors {
+  bands: ColorBand[];
+  over: string;
+  lost: string;
+}
+/**
+ * The colours bars are drawn in. With the user's times: green, yellow and orange up to each, red
+ * over the last. Without them, they follow the alert limit as before: green under it, amber over it.
+ * No answer is always red.
+ */
+export function colorsOf(bands: Bands | undefined, limit: number | null): Colors {
+  if (bands) {
+    const steps = BAND_STEPS.filter((step) => bands[step] !== null).map((step) => ({ upToMs: bands[step]!, color: PING_COLORS[step] }));
+    if (steps.length) return { bands: steps, over: PING_COLORS.red, lost: PING_COLORS.red };
+  }
+  return limit === null ? { bands: [], over: PING_COLORS.ok, lost: PING_COLORS.bad } : { bands: [{ upToMs: limit, color: PING_COLORS.ok }], over: PING_COLORS.warn, lost: PING_COLORS.bad };
+}
+export function colorFor(colors: Colors, ms: number) {
+  return colors.bands.find((band) => ms <= band.upToMs)?.color ?? colors.over;
+}
 
 export type ColumnId =
   | "name" | "enabled" | "host" | "over" | "lost"
@@ -81,6 +132,8 @@ export interface View {
   span: SpanId;
   /** The answer time at the top of the timeline, in ms. Absent is Auto: it fits the tallest bar on show. */
   scaleMs?: number;
+  /** The times for green, yellow and orange bars on the timeline and the strips. Absent follows the alert limit. */
+  bands?: Bands;
 }
 export interface PingDocument {
   version: 1;
@@ -220,7 +273,22 @@ function validateView(view: View) {
   if (!Array.isArray(view.order) || view.order.length !== columns.length || new Set(view.order).size !== columns.length || view.order.some((id) => !columnOf(id)))
     throw Error("Invalid column order.");
   if (!SPANS.some((span) => span.id === view.span)) throw Error("Invalid time span.");
-  if (view.scaleMs !== undefined && !SCALES_MS.includes(view.scaleMs as (typeof SCALES_MS)[number])) throw Error("Choose a timeline scale from the list.");
+  if (view.scaleMs !== undefined && (!Number.isFinite(view.scaleMs) || view.scaleMs < SCALE_MIN_MS || view.scaleMs > SCALE_MAX_MS))
+    throw Error(`Use a timeline scale from ${SCALE_MIN_MS} to ${SCALE_MAX_MS} ms.`);
+  if (view.bands !== undefined) validateBands(view.bands);
+}
+
+function validateBands(bands: Bands) {
+  if (!bands || typeof bands !== "object") throw Error("Invalid bar colours.");
+  let last = 0;
+  for (const step of BAND_STEPS) {
+    const value = bands[step];
+    if (value === null) continue;
+    if (!Number.isFinite(value) || value < 0.1 || value > 60_000) throw Error("Use a time from 0.1 to 60000 ms.");
+    if (value <= last) throw Error("Each colour's time has to be above the one before it.");
+    last = value;
+  }
+  if (last === 0) throw Error("Give at least one colour a time.");
 }
 
 function validateSettings(settings: Settings) {

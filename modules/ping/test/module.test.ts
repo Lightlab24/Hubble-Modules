@@ -5,7 +5,7 @@ import { createBackend, type BackendOptions, type LiveReply } from "../src/backe
 import { findFping, parsePingLine, pingArguments, Pinger, type PingProcess, type PingSample } from "../src/engine.js";
 import { History } from "../src/history.js";
 import source from "../src/manifest.js";
-import { applyMutation, bytesPerSecond, defaultDocument, DOCUMENT_ID, deviceHasData, formatRate, insertRows, inverse, newDevice, normalizeValue, rulesOf, ruleText, setDeviceCount, validateDocument, validateValue, type DeviceRow, type Mutation, type PingDocument } from "../src/model.js";
+import { applyMutation, bytesPerSecond, colorFor, colorsOf, defaultDocument, PING_COLORS, roundScale, scaleStep, stepScale, DOCUMENT_ID, deviceHasData, formatRate, insertRows, inverse, newDevice, normalizeValue, rulesOf, ruleText, setDeviceCount, validateDocument, validateValue, type DeviceRow, type Mutation, type PingDocument } from "../src/model.js";
 import { DeviceWatch } from "../src/watch.js";
 
 const cleanup: (() => unknown)[] = [];
@@ -104,7 +104,7 @@ function backend(devices: DeviceRow[], options: BackendOptions & { connectionEna
 
 describe("the manifest", () => {
   it("is a valid workspace module with one full page", () => {
-    const manifest = ModuleManifestSchema.parse({ ...source, id: "network-ping", name: "Ping", version: "0.1.6", entry: "module.mjs", files: ["module.mjs", "ui/index.html", "ui/app.js", "ui/ping.svg"] });
+    const manifest = ModuleManifestSchema.parse({ ...source, id: "network-ping", name: "Ping", version: "0.1.7", entry: "module.mjs", files: ["module.mjs", "ui/index.html", "ui/app.js", "ui/ping.svg"] });
     expect(manifest.instanceScope).toBe("workspace");
     expect(manifest.pages?.[0]?.layout).toBe("full-page");
     expect(manifest.matrix?.triggers?.map((trigger) => trigger.id)).toEqual(["offline", "slow", "online"]);
@@ -199,8 +199,56 @@ describe("the saved device list", () => {
     expect(() => validateDocument(scaled)).not.toThrow();
     // Undo takes it back to Auto, which a document without the field reads as.
     expect(applyMutation(scaled, inverse(doc, set)).view.scaleMs).toBeUndefined();
-    expect(() => validateDocument({ ...doc, view: { ...doc.view, scaleMs: 3 } })).toThrow(/timeline scale/u);
+    // Any scale in range is allowed, not only round ones.
+    expect(() => validateDocument({ ...doc, view: { ...doc.view, scaleMs: 2.5 } })).not.toThrow();
     expect(() => validateDocument({ ...doc, view: { ...doc.view, scaleMs: 0 } })).toThrow(/timeline scale/u);
+    expect(() => validateDocument({ ...doc, view: { ...doc.view, scaleMs: 20_000 } })).toThrow(/timeline scale/u);
+    expect(() => validateDocument({ ...doc, view: { ...doc.view, scaleMs: Number.NaN } })).toThrow(/timeline scale/u);
+  });
+
+  it("rounds a dragged scale and steps − and + by about a tenth of it", () => {
+    expect(roundScale(2.4637)).toBe(2.46);
+    expect(roundScale(37.21)).toBe(37.2);
+    expect(roundScale(0.01)).toBe(0.1);
+    expect(roundScale(99_999)).toBe(10_000);
+    expect(scaleStep(2.5)).toBe(0.5);
+    expect(scaleStep(40)).toBe(5);
+    expect(scaleStep(1)).toBe(0.1);
+    expect(scaleStep(300)).toBe(50);
+    // − and + land on round numbers from wherever the scale is.
+    expect(stepScale(2.37, 1)).toBe(2.5);
+    expect(stepScale(2.37, -1)).toBe(2);
+    expect(stepScale(2.5, -1)).toBe(2);
+    expect(stepScale(40, 1)).toBe(45);
+    expect(stepScale(0.1, -1)).toBe(0.1);
+  });
+
+  it("colours bars green, yellow, orange and red by the user's times, or by the alert limit until there are any", () => {
+    // Without the user's times, colours follow the alert limit as before.
+    expect(colorsOf(undefined, 20)).toEqual({ bands: [{ upToMs: 20, color: PING_COLORS.ok }], over: PING_COLORS.warn, lost: PING_COLORS.bad });
+    expect(colorFor(colorsOf(undefined, null), 900)).toBe(PING_COLORS.ok);
+    const mine = { green: 1, yellow: 1.5, orange: 5 };
+    const colors = colorsOf(mine, 20);
+    expect(colorFor(colors, 0.4)).toBe(PING_COLORS.green);
+    expect(colorFor(colors, 1)).toBe(PING_COLORS.green);
+    expect(colorFor(colors, 1.2)).toBe(PING_COLORS.yellow);
+    expect(colorFor(colors, 4)).toBe(PING_COLORS.orange);
+    expect(colorFor(colors, 25)).toBe(PING_COLORS.red);
+    expect(colors.lost).toBe(PING_COLORS.red);
+    // An empty time leaves its colour out.
+    expect(colorFor(colorsOf({ green: 1, yellow: null, orange: 5 }, null), 3)).toBe(PING_COLORS.orange);
+    expect(colorFor(colorsOf({ green: 2, yellow: null, orange: null }, null), 3)).toBe(PING_COLORS.red);
+
+    const doc = defaultDocument();
+    const set: Mutation = { kind: "view", view: { ...structuredClone(doc.view), bands: mine }, expected: structuredClone(doc.view) };
+    const coloured = applyMutation(doc, set);
+    expect(() => validateDocument(coloured)).not.toThrow();
+    expect(applyMutation(coloured, inverse(doc, set)).view.bands).toBeUndefined();
+    const bad = (bands: unknown) => () => validateDocument({ ...doc, view: { ...doc.view, bands: bands as typeof mine } });
+    expect(bad({ green: 2, yellow: 1, orange: 5 })).toThrow(/above the one before/u);
+    expect(bad({ green: 0, yellow: null, orange: null })).toThrow(/0\.1 to 60000/u);
+    expect(bad({ green: null, yellow: null, orange: null })).toThrow(/at least one/u);
+    expect(() => validateDocument({ ...doc, view: { ...doc.view, bands: { green: null, yellow: 3, orange: null } } })).not.toThrow();
   });
 
   it("works out the data Ping sends", () => {

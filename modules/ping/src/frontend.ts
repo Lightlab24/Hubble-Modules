@@ -1,7 +1,8 @@
 import { connectModuleFrontend, ModuleFrontendValueSchema } from "@hubble/module-sdk/frontend";
-import { confirm, mountSegmented, mountSwitch, showToast } from "@hubble/module-sdk/controls";
+import { confirm, mountSegmented, mountStepper, mountSwitch, showToast } from "@hubble/module-sdk/controls";
 import { mountSpreadsheetColumnEditor, mountSpreadsheetToolbar } from "@hubble/module-sdk/spreadsheet-controls";
 import type { LiveReply, LiveRequest } from "./backend.js";
+import { createColorsEditor } from "./colors-editor.js";
 import { DraftStore, type SaveReceipt } from "./draft-store.js";
 import {
   bytesPerSecond,
@@ -15,7 +16,12 @@ import {
   MAX_DEVICES,
   newDevice,
   rulesOf,
-  SCALES_MS,
+  colorsOf,
+  roundScale,
+  stepScale,
+  SCALE_MAX_MS,
+  type Bands,
+  type Colors,
   ALERT_LOST_MS,
   ALERT_OVER_MS,
   formatDuration,
@@ -70,6 +76,15 @@ try {
     else next.scaleMs = ms;
     store.submit({ kind: "view", view: next, expected: clone(view()) });
   }
+  /** Saves the times for the bar colours; null goes back to the colours that follow the alert limit. */
+  function setBands(bands: Bands | null) {
+    const next = clone(view());
+    if (bands === null) delete next.bands;
+    else next.bands = bands;
+    store.submit({ kind: "view", view: next, expected: clone(view()) });
+  }
+  /** The scale a drag or pinch on the ms numbers is showing before it is saved. */
+  let gestureScale: number | null | undefined;
 
   // The two dropdowns are plain <select>s: Hubble's stylesheet gives them its own list.
   const every = el<HTMLSelectElement>("every");
@@ -89,11 +104,6 @@ try {
   for (const ms of ALERT_LOST_MS) alertLost.add(new Option(formatDuration(ms), String(ms)));
   alertLost.addEventListener("change", () => setSettings({ alertLostMs: alertLost.value ? Number(alertLost.value) : null }));
 
-  // The timeline's height: Auto fits the tallest bar on show, a number holds the top there.
-  const scale = el<HTMLSelectElement>("scale");
-  scale.add(new Option("Auto", ""));
-  for (const ms of SCALES_MS) scale.add(new Option(`${ms} ms`, String(ms)));
-  scale.addEventListener("change", () => setScale(scale.value ? Number(scale.value) : null));
 
   const pinging = await mountSwitch({
     root: el("pinging"),
@@ -125,8 +135,96 @@ try {
     onFollow: (following) => {
       el("tl-live").hidden = following;
     },
-    onScale: setScale,
+    onScale: (ms, done) => {
+      gestureScale = done ? undefined : ms;
+      if (done) setScale(ms);
+      refreshScale();
+    },
+    // On Auto the box shows the scale Auto chose, so − and + start from what is on screen.
+    onTop: () => {
+      if ((view().scaleMs ?? null) === null) refreshScale();
+    },
   });
+
+  // The timeline's height: Auto fits the tallest bar on show; any number from the box, − and +,
+  // or a drag on the ms numbers holds the top there.
+  const shownScale = () => (gestureScale !== undefined ? gestureScale : (view().scaleMs ?? null));
+  /** The stepper rounds a typed number to its step, so this is as fine as a typed scale gets. */
+  const TYPED_STEP = 0.1;
+  /** Set as − or + (or an arrow key) is pressed, so the change it makes is taken as a round step. */
+  let stepping: 1 | -1 | 0 = 0;
+  el("scale").addEventListener(
+    "pointerdown",
+    (event) => {
+      const label = (event.target as Element).closest("button")?.getAttribute("aria-label") ?? "";
+      stepping = label.startsWith("Increase") ? 1 : label.startsWith("Decrease") ? -1 : 0;
+    },
+    { capture: true },
+  );
+  el("scale").addEventListener("keydown", (event) => (stepping = event.key === "ArrowUp" ? 1 : event.key === "ArrowDown" ? -1 : 0), { capture: true });
+  const scaleAuto = el<HTMLButtonElement>("scale-auto");
+  scaleAuto.addEventListener("click", () => setScale(shownScale() === null ? roundScale(timeline.top()) : null));
+  const scaleBox = await mountStepper({
+    root: el("scale"),
+    label: "Scale",
+    getState: () => {
+      const value = shownScale() ?? timeline.top();
+      // min is 0 because the stepper counts its steps from min.
+      return { value, min: 0, max: SCALE_MAX_MS, step: TYPED_STEP, unit: "ms" };
+    },
+    onValueChange: (value) => {
+      // − and + (and the arrow keys) go to the next round scale, about a tenth away; a typed number is kept.
+      const direction = stepping;
+      stepping = 0;
+      setScale(direction ? stepScale(shownScale() ?? timeline.top(), direction) : roundScale(value));
+    },
+  });
+  function refreshScale() {
+    scaleBox.refresh();
+    const auto = shownScale() === null;
+    scaleAuto.setAttribute("aria-pressed", String(auto));
+    el("scale").dataset.auto = String(auto);
+  }
+
+  /** The bar colours for the device on show: from the user's times, or following its alert limit. */
+  function shownColors(): Colors {
+    const row = store.document.devices.find((item) => item.id === selectedId) ?? store.document.devices[0];
+    return colorsOf(view().bands, row ? rulesOf(row, settings()).overMs : settings().alertOverMs);
+  }
+  const colorsEditor = createColorsEditor({
+    button: el<HTMLButtonElement>("colors"),
+    panel: el("colors-panel"),
+    get: () => view().bands,
+    set: setBands,
+    onError: report,
+  });
+  /** The legend: one chip per band, then over the last band and no answer. */
+  let legendKey = "";
+  function renderLegend() {
+    const colors = shownColors();
+    const key = JSON.stringify(colors);
+    if (key === legendKey) return;
+    legendKey = key;
+    const ms = (value: number) => `${Number(value.toPrecision(4))} ms`;
+    const chips: [string, string][] = [];
+    let from = 0;
+    for (const band of colors.bands) {
+      chips.push([band.color, from ? `${ms(from).replace(" ms", "")}–${ms(band.upToMs)}` : `Up to ${ms(band.upToMs)}`]);
+      from = band.upToMs;
+    }
+    chips.push([colors.over, colors.bands.length ? `Over ${ms(from)}` : "Answered"]);
+    chips.push([colors.lost, "No answer"]);
+    el("legend-chips").replaceChildren(
+      ...chips.map(([color, text]) => {
+        const chip = document.createElement("span");
+        const dot = document.createElement("i");
+        dot.style.background = color;
+        chip.append(dot, text);
+        return chip;
+      }),
+    );
+    grid.refreshLive();
+  }
   timeline.setPingTime(settings().intervalMs);
   timeline.showLast(spanOf(view().span).ms, true);
   el("tl-live").addEventListener("click", () => timeline.backToNow());
@@ -246,6 +344,9 @@ try {
     el("tl-stats").innerHTML = summary && summary.state !== "not-checked"
       ? stat("Now", summary.now) + stat("Average", summary.average) + stat("Best", summary.best) + stat("Worst", summary.worst) + stat("Lost", summary.lostPct, true)
       : "";
+    timeline.setBands(view().bands);
+    renderLegend();
+    colorsEditor.refresh();
     timeline.setData(row && live.timeline?.deviceId === row.id ? live.timeline : undefined, limit, timelineFresh);
     timelineFresh = false;
   }
@@ -263,9 +364,8 @@ try {
     if (alertOver.value !== over) alertOver.value = over;
     const lost = settings().alertLostMs === null ? "" : String(settings().alertLostMs);
     if (alertLost.value !== lost) alertLost.value = lost;
-    const scaleMs = view().scaleMs ?? null;
-    timeline.setScale(scaleMs);
-    if (scale.value !== String(scaleMs ?? "")) scale.value = String(scaleMs ?? "");
+    timeline.setScale(view().scaleMs ?? null);
+    refreshScale();
     if (store.error !== lastSaveError) {
       lastSaveError = store.error;
       if (lastSaveError) report(lastSaveError);

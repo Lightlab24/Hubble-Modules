@@ -1,12 +1,14 @@
 import type { Series } from "./history.js";
-import { formatMs, SCALES_MS } from "./model.js";
+import { colorFor, colorsOf, formatMs, roundScale, type Bands, type Colors } from "./model.js";
 
 /**
  * The ping timeline for one device, drawn on a canvas. Pinch (or Ctrl and the
  * wheel) zooms the time scale around the pointer, two fingers or a drag move
  * through time, and it follows the present until it is moved away from it.
- * Pinching over the ms numbers changes the height scale instead; a bar taller
- * than a set scale is cut off at the top with a light cap.
+ * Dragging the ms numbers sets the height scale to any value, the number under
+ * the pointer staying under it; pinching there changes it smoothly. A bar taller
+ * than a set scale is cut off at the top with a light cap. Bars take the colour
+ * of their answer time's band.
  */
 export const MIN_SPAN_MS = 10_000;
 export const MAX_SPAN_MS = 24 * 60 * 60 * 1000;
@@ -33,17 +35,29 @@ export interface TimelineOptions {
   onHover(text: string | null): void;
   /** Whether the timeline follows the present changed. */
   onFollow(following: boolean): void;
-  /** A pinch over the ms numbers asked for this scale; null is Auto. */
-  onScale(ms: number | null): void;
+  /**
+   * Dragging or pinching the ms numbers asked for this scale; null is Auto. `done` is false while
+   * the gesture goes on, so only its end is saved.
+   */
+  onScale(ms: number | null, done: boolean): void;
+  /** The top of the scale on screen changed, Auto or not. */
+  onTop?(ms: number): void;
   readonly now?: () => number;
 }
 
 const clamp = (value: number, low: number, high: number) => Math.min(high, Math.max(low, value));
-/** How far a pinch over the ms numbers has to go to move the scale one step. */
-const SCALE_PINCH = 20;
+/** How long a pinch over the ms numbers has to rest before its scale is saved. */
+const PINCH_SETTLE_MS = 350;
 /** The height of the cap on a bar that goes past the top of the scale. */
 const CAP = 3;
-const HINT = "Pinch here to change the scale · double-click for Auto";
+const HINT = "Drag the numbers to set the scale · double-click for Auto";
+/** The gap between the ms gridlines: a round number that gives about five of them. */
+function tickStep(top: number) {
+  const raw = top / 5;
+  const power = 10 ** Math.floor(Math.log10(Math.max(raw, 1e-9)));
+  for (const step of [1, 2, 2.5, 5]) if (raw <= step * power) return step * power;
+  return 10 * power;
+}
 function niceCeiling(value: number) {
   const power = 10 ** Math.floor(Math.log10(Math.max(value, 1e-9)));
   for (const step of [1, 2, 4, 5, 8, 10]) if (value <= step * power) return step * power;
@@ -55,16 +69,18 @@ function niceCeiling(value: number) {
  * A bin with any lost ping is a full-height red bar, so every loss looks the same
  * whether the bar holds one ping or several.
  */
-export function barOf(series: Series, index: number, limit: number | null): { tone: "ok" | "warn" | "bad"; value: number | null; partLost: boolean } | null {
+export function barOf(series: Series, index: number): { value: number | null; partLost: boolean } | null {
   const sent = series.sent[index] ?? 0;
   if (!sent) return null;
   const lost = series.lost[index] ?? 0;
   const worst = series.max[index] ?? null;
-  if (lost > 0 || worst === null) return { tone: "bad", value: null, partLost: lost < sent };
-  return { tone: limit !== null && worst > limit ? "warn" : "ok", value: worst, partLost: false };
+  if (lost > 0 || worst === null) return { value: null, partLost: lost < sent };
+  return { value: worst, partLost: false };
 }
+/** A bar's colour: its band's, or the no-answer colour when a ping was lost. */
+const paintOf = (colors: Colors, value: number | null) => (value === null ? colors.lost : colorFor(colors, value));
 
-export function drawStrip(canvas: HTMLCanvasElement, series: Series | undefined, limit: number | null) {
+export function drawStrip(canvas: HTMLCanvasElement, series: Series | undefined, limit: number | null, bands?: Bands) {
   const ratio = window.devicePixelRatio || 1;
   const width = Math.max(1, Math.round(canvas.clientWidth * ratio));
   const height = Math.max(1, Math.round(canvas.clientHeight * ratio));
@@ -74,19 +90,17 @@ export function drawStrip(canvas: HTMLCanvasElement, series: Series | undefined,
   if (!context) return;
   context.clearRect(0, 0, width, height);
   if (!series) return;
-  const style = getComputedStyle(canvas);
-  // A custom property keeps its leading space, which a canvas refuses as a colour.
-  const colors = { ok: style.getPropertyValue("--ping-ok").trim(), warn: style.getPropertyValue("--ping-warn").trim(), bad: style.getPropertyValue("--ping-bad").trim() };
+  const paints = colorsOf(bands, limit);
   const count = series.sent.length;
   let top = limit !== null ? limit * 1.6 : 0;
   for (const value of series.max) if (value !== null && value > top) top = value;
   top = Math.max(top, 1);
   const step = width / count;
   for (let index = 0; index < count; index++) {
-    const bar = barOf(series, index, limit);
+    const bar = barOf(series, index);
     if (!bar) continue;
     const barHeight = bar.value === null ? height : clamp((bar.value / top) * height, 2 * ratio, height);
-    context.fillStyle = colors[bar.tone];
+    context.fillStyle = paintOf(paints, bar.value);
     context.fillRect(index * step, height - barHeight, Math.max(1, step * 0.8), barHeight);
   }
 }
@@ -104,8 +118,11 @@ export function createTimeline(options: TimelineOptions) {
   let scaleMs: number | null = null;
   /** The top of the scale as last drawn, Auto or not. */
   let drawnTop = 1;
-  let scalePinch = 0;
-  let scalePinchAt = 0;
+  /** The user's times for the bar colours, or undefined to follow the alert limit. */
+  let userBands: Bands | undefined;
+  let pinchTimer: ReturnType<typeof setTimeout> | undefined;
+  /** A drag on the ms numbers: the answer time that was under the pointer when it began. */
+  let scaleDrag: { value: number; pointerId: number } | undefined;
   let dragging: { x: number; end: number } | undefined;
   /**
    * A Show last choice that is waiting for its own results. The view keeps the old stretch and its
@@ -156,7 +173,8 @@ export function createTimeline(options: TimelineOptions) {
     context.clearRect(0, 0, cssWidth, cssHeight);
     const style = getComputedStyle(canvas);
     const color = (name: string, fallback: string) => style.getPropertyValue(name).trim() || fallback;
-    const tones = { ok: color("--ping-ok", "#63bc9c"), warn: color("--ping-warn", "#dfbc72"), bad: color("--ping-bad", "#e5766a") };
+    const tones = { warn: color("--ping-warn", "#dfbc72") };
+    const paints = colorsOf(userBands, limit);
     const quiet = color("--hubble-text-secondary", "#b2b2b2");
     const line = color("--hubble-line", "#262626");
     const font = color("--hubble-font", "system-ui");
@@ -177,23 +195,31 @@ export function createTimeline(options: TimelineOptions) {
         }
       top = niceCeiling(Math.max(top, 1));
     }
-    drawnTop = top;
+    if (top !== drawnTop) {
+      drawnTop = top;
+      options.onTop?.(top);
+    }
     const yOf = (value: number) => TOP + plotHeight - (Math.min(value, top) / top) * plotHeight;
 
     context.font = `11px ${font}`;
     context.textBaseline = "middle";
     context.lineWidth = 1;
-    for (let step = 0; step <= 4; step++) {
-      const value = (top / 4) * step;
-      const y = Math.round(yOf(value)) + 0.5;
+    // Gridlines at round numbers; a set scale's own top, if it isn't one, gets a line without a number.
+    const gap = tickStep(top);
+    const ticks: (number | null)[] = [];
+    for (let step = 0; step * gap <= top * 1.0001; step++) ticks.push(Number((step * gap).toPrecision(6)));
+    if (top - (ticks.at(-1) as number) > gap * 0.25) ticks.push(null);
+    for (const value of ticks) {
+      const y = Math.round(yOf(value ?? top)) + 0.5;
       context.strokeStyle = line;
       context.beginPath();
       context.moveTo(LEFT, y);
       context.lineTo(LEFT + width_, y);
       context.stroke();
+      if (value === null) continue;
       context.fillStyle = quiet;
       context.textAlign = "right";
-      context.fillText(top >= 8 ? String(Math.round(value)) : String(Number(value.toFixed(2))), LEFT - 8, y);
+      context.fillText(String(value), LEFT - 8, y);
     }
     context.font = `10px ${font}`;
     context.fillText("ms", LEFT - 8, cssHeight - 8);
@@ -206,13 +232,13 @@ export function createTimeline(options: TimelineOptions) {
       const barWidth = (series.stepMs / spanMs) * width_;
       const capped: number[] = [];
       for (let index = 0; index < series.sent.length; index++) {
-        const bar = barOf(series, index, limit);
+        const bar = barOf(series, index);
         if (!bar) continue;
         const x = xOf(series.from + index * series.stepMs);
         if (x + barWidth < LEFT || x > LEFT + width_) continue;
         // Dense thin bars with a hairline between them, as in the approved mockup.
         const drawn = Math.max(1, barWidth * BAR_FILL);
-        context.fillStyle = tones[bar.tone];
+        context.fillStyle = paintOf(paints, bar.value);
         if (bar.value === null) {
           context.globalAlpha = 0.8;
           context.fillRect(x, TOP, Math.max(1, barWidth), plotHeight);
@@ -302,26 +328,30 @@ export function createTimeline(options: TimelineOptions) {
   }
   /** Whether a point is over the ms numbers left of the bars. */
   const overNumbers = (clientX: number) => clientX - canvas.getBoundingClientRect().left < LEFT;
-  /**
-   * Moves the scale one step for each stretch of a pinch: apart makes the bars taller (a smaller
-   * scale), together makes them shorter. From Auto it starts at the scale on screen.
-   */
-  function pinchScale(deltaY: number) {
-    // A pause starts a new pinch, so what was left of the last one doesn't carry over.
-    const at = performance.now();
-    if (at - scalePinchAt > 300) scalePinch = 0;
-    scalePinchAt = at;
-    scalePinch += deltaY;
-    if (Math.abs(scalePinch) < SCALE_PINCH) return;
-    const taller = scalePinch < 0;
-    scalePinch = 0;
-    const from = scaleMs ?? drawnTop;
-    const next = taller ? [...SCALES_MS].reverse().find((ms) => ms < from) : SCALES_MS.find((ms) => ms > from);
-    if (next === undefined || next === scaleMs) return;
-    scaleMs = next;
-    schedule();
-    options.onScale(next);
+  /** Sets the scale from a gesture; the gesture's end saves it. */
+  function scaleTo(ms: number | null, done: boolean) {
+    const next = ms === null ? null : roundScale(ms);
+    if (next !== scaleMs) {
+      scaleMs = next;
+      schedule();
+    }
+    options.onScale(next, done);
   }
+  /** A pinch over the ms numbers: apart makes the bars taller (a smaller scale), together shorter. */
+  function pinchScale(deltaY: number) {
+    scaleTo((scaleMs ?? drawnTop) * Math.exp(deltaY * 0.01), false);
+    clearTimeout(pinchTimer);
+    pinchTimer = setTimeout(() => {
+      pinchTimer = undefined;
+      options.onScale(scaleMs, true);
+    }, PINCH_SETTLE_MS);
+  }
+  /** The answer time at a height on the chart, at the scale on screen. */
+  const valueAt = (clientY: number) => {
+    const plotHeight = canvas.clientHeight - TOP - BOTTOM;
+    const fromBottom = TOP + plotHeight - (clientY - canvas.getBoundingClientRect().top);
+    return (clamp(fromBottom, 0, plotHeight) / plotHeight) * drawnTop;
+  };
   const fractionAt = (clientX: number) => clamp((clientX - canvas.getBoundingClientRect().left - LEFT) / plotWidth(), 0, 1);
 
   const controller = new AbortController();
@@ -344,6 +374,14 @@ export function createTimeline(options: TimelineOptions) {
     "pointerdown",
     (event) => {
       if (event.button !== 0) return;
+      if (overNumbers(event.clientX)) {
+        // Grab the number under the pointer; the scale follows so that number stays under it.
+        const value = valueAt(event.clientY);
+        if (value <= drawnTop * 0.02) return;
+        scaleDrag = { value, pointerId: event.pointerId };
+        canvas.setPointerCapture(event.pointerId);
+        return;
+      }
       dragging = { x: event.clientX, end: right() };
       canvas.setPointerCapture(event.pointerId);
     },
@@ -352,6 +390,13 @@ export function createTimeline(options: TimelineOptions) {
   canvas.addEventListener(
     "pointermove",
     (event) => {
+      if (scaleDrag) {
+        const plotHeight = canvas.clientHeight - TOP - BOTTOM;
+        const fromBottom = TOP + plotHeight - (event.clientY - canvas.getBoundingClientRect().top);
+        // Near the bottom the scale would race off; stop at a twentieth of the height.
+        scaleTo((scaleDrag.value * plotHeight) / Math.max(fromBottom, plotHeight / 20), false);
+        return;
+      }
       if (dragging) {
         setEnd(dragging.end - (event.clientX - dragging.x) * (spanMs / plotWidth()));
         changed();
@@ -366,7 +411,7 @@ export function createTimeline(options: TimelineOptions) {
       if (!series) return;
       const time = right() - spanMs + fractionAt(event.clientX) * spanMs;
       const index = Math.floor((time - series.from) / series.stepMs);
-      const bar = index >= 0 && index < series.sent.length ? barOf(series, index, limit) : null;
+      const bar = index >= 0 && index < series.sent.length ? barOf(series, index) : null;
       const when = new Date(series.from + Math.max(0, index) * series.stepMs).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
       if (!bar) options.onHover(`${when} · no pings`);
       else if (bar.value === null) options.onHover(`${when} · ${bar.partLost ? `${series.lost[index]} of ${series.sent[index]} pings lost` : "no answer"}`);
@@ -375,6 +420,12 @@ export function createTimeline(options: TimelineOptions) {
     listen,
   );
   const release = (event: PointerEvent) => {
+    if (scaleDrag && scaleDrag.pointerId === event.pointerId) {
+      scaleDrag = undefined;
+      if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+      options.onScale(scaleMs, true);
+      return;
+    }
     if (!dragging) return;
     dragging = undefined;
     if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
@@ -386,9 +437,7 @@ export function createTimeline(options: TimelineOptions) {
     "dblclick",
     (event) => {
       if (!overNumbers(event.clientX) || scaleMs === null) return;
-      scaleMs = null;
-      schedule();
-      options.onScale(null);
+      scaleTo(null, true);
     },
     listen,
   );
@@ -429,8 +478,16 @@ export function createTimeline(options: TimelineOptions) {
     following: () => end === null,
     /** The saved scale: the answer time at the top, or null for Auto. */
     setScale(ms: number | null) {
-      if (ms === scaleMs) return;
+      // A gesture in progress owns the scale until it ends.
+      if (ms === scaleMs || scaleDrag || pinchTimer) return;
       scaleMs = ms;
+      schedule();
+    },
+    /** The top of the scale on screen, which is Auto's choice while no scale is set. */
+    top: () => drawnTop,
+    setBands(bands: Bands | undefined) {
+      if (JSON.stringify(bands) === JSON.stringify(userBands)) return;
+      userBands = bands;
       schedule();
     },
     spanMs: () => spanMs,
@@ -464,6 +521,7 @@ export function createTimeline(options: TimelineOptions) {
     },
     dispose() {
       if (pending) clearTimeout(pending.timer);
+      clearTimeout(pinchTimer);
       controller.abort();
       resized.disconnect();
       cancelAnimationFrame(frame);

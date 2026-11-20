@@ -451,7 +451,7 @@ export async function createDeviceGrid(options: GridOptions) {
         const cell = cells.get(`${row.id}/${column.id}`);
         if (!cell) continue;
         if (column.id === "strip") {
-          drawStrip(cell.firstElementChild as HTMLCanvasElement, on ? summary?.strip : undefined, limit);
+          drawStrip(cell.firstElementChild as HTMLCanvasElement, on ? summary?.strip : undefined, limit, store.document.view.bands);
           continue;
         }
         const text = liveText(row, column.id);
