@@ -1,6 +1,6 @@
 # Ping
 
-Module ID `network-ping`, version 0.1.4. Pings network devices, keeps a timeline of each one, and
+Module ID `network-ping`, version 0.1.5. Pings network devices, keeps a timeline of each one, and
 alerts when a device stops answering or answers slowly. It is a workspace module: add it once, and
 its **Ping** page lists every device. It needs a Hubble with `module-page-badges-v1` and
 `module-controls-inline-v1` (2.3.1).
@@ -37,7 +37,8 @@ and **No answer for**, and whether an alert also raises a macOS **notification**
 Click a row to see its **timeline**. Pinch (or Ctrl and the wheel) zooms around the pointer, two
 fingers or a drag move through time, and **Back to now** returns to the present. Bars are about two
 pixels apart, one per ping where the history allows, and zooming in stops where one ping would be
-wider than that. A bar with any lost ping is red from top to bottom.
+wider than that. A bar with any lost ping is red from top to bottom. **Clear history** under the
+timeline forgets every device's past pings after asking; devices and alert settings stay.
 
 ## Alerts
 

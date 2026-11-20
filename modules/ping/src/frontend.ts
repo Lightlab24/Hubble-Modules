@@ -114,6 +114,25 @@ try {
   timeline.setPingTime(settings().intervalMs);
   timeline.showLast(spanOf(view().span).ms, true);
   el("tl-live").addEventListener("click", () => timeline.backToNow());
+  el("clear-history").addEventListener("click", async () => {
+    const sure = await confirm({
+      title: "Clear the ping history?",
+      message: "This forgets every device's past pings, so the timeline, the strips and the Average, Best, Worst and Lost numbers start again. Devices and alert settings stay. This can't be undone.",
+      confirmLabel: "Clear history",
+      danger: true,
+    });
+    if (!sure) return;
+    try {
+      await client.call("clear-history");
+      // What is on screen is the history that was just forgotten.
+      live = { ...live, devices: {}, timeline: null };
+      grid.refreshLive();
+      update();
+      void fetchNow();
+    } catch (error) {
+      report(error instanceof Error ? error.message : String(error));
+    }
+  });
   const span = await mountSegmented({
     root: el("span"),
     label: "Show last",

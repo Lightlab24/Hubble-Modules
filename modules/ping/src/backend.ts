@@ -271,6 +271,12 @@ export function createBackend(context: ModuleContext, options: BackendOptions = 
       signal.throwIfAborted();
       if (command.commandId === "snapshot") return (await snapshot(signal)) as unknown as ModuleJsonValue;
       if (command.commandId === "save") return (await save(command.value!.operation!, signal)) as unknown as ModuleJsonValue;
+      if (command.commandId === "clear-history") {
+        // Past results only. States, alerts and the saved device list are untouched.
+        for (const watch of watches.values()) watch.clearHistory();
+        bump();
+        return { sequence, cleared: watches.size } as unknown as ModuleJsonValue;
+      }
       if (command.commandId === "live") return (await live(command.value ?? {}, signal)) as unknown as ModuleJsonValue;
       throw Error("Unknown Ping page command.");
     },

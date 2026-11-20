@@ -64,6 +64,7 @@ export default defineModuleManifest({
             { id: "snapshot", label: "Read the device list" },
             { id: "save", label: "Save the device list" },
             { id: "live", label: "Read the latest ping results" },
+            { id: "clear-history", label: "Clear the ping history" },
           ],
         },
       ],

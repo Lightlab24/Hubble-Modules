@@ -104,7 +104,7 @@ function backend(devices: DeviceRow[], options: BackendOptions & { connectionEna
 
 describe("the manifest", () => {
   it("is a valid workspace module with one full page", () => {
-    const manifest = ModuleManifestSchema.parse({ ...source, id: "network-ping", name: "Ping", version: "0.1.4", entry: "module.mjs", files: ["module.mjs", "ui/index.html", "ui/app.js", "ui/ping.svg"] });
+    const manifest = ModuleManifestSchema.parse({ ...source, id: "network-ping", name: "Ping", version: "0.1.5", entry: "module.mjs", files: ["module.mjs", "ui/index.html", "ui/app.js", "ui/ping.svg"] });
     expect(manifest.instanceScope).toBe("workspace");
     expect(manifest.pages?.[0]?.layout).toBe("full-page");
     expect(manifest.matrix?.triggers?.map((trigger) => trigger.id)).toEqual(["offline", "slow", "online"]);
@@ -519,6 +519,38 @@ describe("the module", () => {
     for (const second of [104, 105, 106, 107]) fake.current().say(timeout("10.0.0.6", second));
     expect(logs.map((item) => item.message)).toEqual(["Up (10.0.0.6) stopped answering: no answer for 4 s"]);
     expect(alerts).toHaveLength(1);
+  });
+
+  it("clears the ping history on request, keeping each device's state and raising no alert", async () => {
+    const fake = fakePing();
+    const { instance, call, live, logs, alerts, documents } = backend([row("a", "Router", "10.0.0.1"), row("b", "Down", "10.0.0.2", { lost: "2" })], { start: fake.start, now: () => 110_000 });
+    await instance.start!();
+    for (const second of [100, 101, 102, 103]) {
+      fake.current().say(answer("10.0.0.1", second, 7));
+      fake.current().say(timeout("10.0.0.2", second));
+    }
+    const before = await live({ span: "1m", timeline: { deviceId: "a", from: 50_000, to: 110_000, points: 60 } });
+    expect(before.devices.a).toMatchObject({ state: "online", average: 7, lostPct: 0 });
+    expect(before.devices.b).toMatchObject({ state: "offline", lostPct: 100 });
+    expect(before.timeline!.sent.reduce((sum, count) => sum + count, 0)).toBe(4);
+    const saved = structuredClone(documents.saved());
+    const said = logs.length + alerts.length;
+
+    expect(await call("clear-history")).toMatchObject({ cleared: 2 });
+    const after = await live({ span: "1m", timeline: { deviceId: "a", from: 50_000, to: 110_000, points: 60 } });
+    // Nothing is left to average, but each device is still what it was.
+    expect(after.devices.a).toMatchObject({ state: "online", now: null, average: null, lostPct: null });
+    expect(after.devices.b).toMatchObject({ state: "offline", lostPct: null });
+    expect(after.timeline!.sent.reduce((sum, count) => sum + count, 0)).toBe(0);
+    expect(after.sequence).toBeGreaterThan(before.sequence);
+    expect(documents.saved(), "the saved list is untouched").toEqual(saved);
+    // The next results build up again, and a device that is still down is not announced a second time.
+    fake.current().say(answer("10.0.0.1", 104, 9));
+    fake.current().say(timeout("10.0.0.2", 104));
+    const next = await live({ span: "1m" });
+    expect(next.devices.a).toMatchObject({ state: "online", now: 9, average: 9 });
+    expect(next.devices.b).toMatchObject({ state: "offline", lostPct: 100 });
+    expect(logs.length + alerts.length).toBe(said);
   });
 
   it("answers a waiting page as soon as a result arrives, with the timeline it asked for", async () => {

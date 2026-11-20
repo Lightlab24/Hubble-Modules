@@ -58,7 +58,7 @@ function alert(level: Alert["level"], stage: string, name: string, address: stri
 }
 
 export class DeviceWatch {
-  readonly history = new History();
+  history = new History();
   state: DeviceState = "not-checked";
   since: number | null = null;
   private lostRun = 0;
@@ -132,6 +132,11 @@ export class DeviceWatch {
     }
     if (this.state !== "online") this.enter("online", at);
     return null;
+  }
+
+  /** Forgets every past result. The device's state stays, so nothing is announced again. */
+  clearHistory() {
+    this.history = new History();
   }
 
   summary(spanMs: number, now: number): DeviceSummary {
