@@ -24,7 +24,7 @@ test('Camera Control Enabled is immediate through held saves and retains configu
   await request.post('/__reset', { data: { sample: true } });
   await page.goto('/');
   const ui=page.frameLocator('iframe');
-  await expect(ui.locator('[data-role="saved-label"]')).toContainText('Sample data');
+  await expect(ui.locator('[data-role="saved-label"]')).toContainText('Simulated');
   await ui.locator('[data-tab="assignment"]').click().then(() => ui.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   const rows=ui.locator('[data-controller="rcp1"] tr[data-id]');
   const flags=rows.locator('[data-field="controlEnabled"] [role="checkbox"]');
@@ -53,7 +53,7 @@ test('Camera Control Enabled is immediate through held saves and retains configu
 
 test('control checkmarks use shared clipboard and fill without staging camera writes', async ({page,request})=>{
   await request.post('/__reset',{data:{sample:true}});await page.goto('/');
-  const ui=page.frameLocator('iframe');await expect(ui.locator('[data-role="saved-label"]')).toContainText('Sample data');
+  const ui=page.frameLocator('iframe');await expect(ui.locator('[data-role="saved-label"]')).toContainText('Simulated');
   await ui.locator('[data-tab="assignment"]').click().then(() => ui.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   const group=ui.locator('[data-controller="rcp1"]'),rows=group.locator('tr[data-id]'),table=group.getByRole('grid');
   const cells=rows.locator('[data-column="controlEnabled"]'),flags=cells.locator('[role="checkbox"]');
@@ -76,7 +76,7 @@ test('control checkmarks use shared clipboard and fill without staging camera wr
 test('Enable all and Single switch show at once through held saves, take further edits and roll back on failure', async ({page,request})=>{
   const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
   await request.post('/__reset',{data:{sample:true}});await page.goto('/');
-  const ui=page.frameLocator('iframe');await expect(ui.locator('[data-role="saved-label"]')).toContainText('Sample data');
+  const ui=page.frameLocator('iframe');await expect(ui.locator('[data-role="saved-label"]')).toContainText('Simulated');
   await ui.locator('[data-tab="assignment"]').click().then(() => ui.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   const group=ui.locator('[data-controller="rcp1"]'),rows=group.locator('tr[data-id]'),flags=rows.locator('[data-field="controlEnabled"] [role="checkbox"]');
   const single=group.locator('input[data-control-single]'),all=group.locator('button[data-action="control-enable-all"]'),count=group.locator('[data-control-count]');
@@ -159,7 +159,7 @@ test('Recording and Status follow the camera live and stay read-only', async ({p
 
 test('Recording and Status can be hidden, and stay hidden after a reload', async ({page,request})=>{
   await request.post('/__reset',{data:{sample:true}});await page.goto('/');
-  const ui=page.frameLocator('iframe');await expect(ui.locator('[data-role="saved-label"]')).toContainText('Sample data');
+  const ui=page.frameLocator('iframe');await expect(ui.locator('[data-role="saved-label"]')).toContainText('Simulated');
   await ui.locator('[data-tab="assignment"]').click().then(() => ui.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   const group=ui.locator('[data-controller="rcp1"]');
   await expect(group.locator('td[data-column="recording"]')).toHaveCount(4);await expect(group.locator('td[data-column="cameraStatus"]')).toHaveCount(4);
@@ -176,7 +176,7 @@ test('Recording and Status can be hidden, and stay hidden after a reload', async
 
 test('an open page follows a restarted worker instead of ignoring its lower sequence', async ({page,request})=>{
   await request.post('/__reset',{data:{sample:true}});await page.goto('/');
-  const ui=page.frameLocator('iframe');await expect(ui.locator('[data-role="saved-label"]')).toContainText('Sample data');
+  const ui=page.frameLocator('iframe');await expect(ui.locator('[data-role="saved-label"]')).toContainText('Simulated');
   await ui.locator('[data-tab="assignment"]').click().then(() => ui.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   const group=ui.locator('[data-controller="rcp1"]'),all=group.locator('button[data-action="control-enable-all"]'),count=group.locator('[data-control-count]');
   // Several real changes, so the page has counted well past where a new worker starts.
@@ -336,7 +336,7 @@ test('a Gateway is watched over MQTT like an RCP, and its cameras can be ticked'
 test('sample data keeps its own status', async ({page,request})=>{
   await request.post('/__reset',{data:{sample:true}});await page.goto('/');
   const ui=page.frameLocator('iframe');
-  await expect(ui.locator('[data-role="saved-label"]')).toContainText('Sample data');
+  await expect(ui.locator('[data-role="saved-label"]')).toContainText('Simulated');
   await ui.locator('[data-tab="assignment"]').click().then(() => ui.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   await expect(mark(ui.locator('[data-controller="rcp1"]'))).toHaveText('Online');
   await expect(mark(ui.locator('[data-controller="rio3"]'))).toHaveText('Offline');

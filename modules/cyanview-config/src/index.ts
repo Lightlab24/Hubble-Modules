@@ -10,6 +10,7 @@ import { CameraControl } from './control/service.js';
 import { CameraEnabledOperations } from './camera-enabled.js';
 import { CyanviewClient } from './transport.js';
 import { createHostOpenPage } from './open-page.js';
+import { setupGuideStore } from './setup-guide-store.js';
 
 export function createInstance(context: ModuleContext, options: ServiceOptions = {}): ModuleInstance {
   if (!context.services) throw new Error('Module storage is unavailable');
@@ -30,6 +31,7 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
     message => context.log({ level: 'info', stage: 'camera-enabled', message: message.slice(0, 500) }), lifetime.signal, options.cameraEnabled, service.held);
   service.followMqtt(id => control!.controllerDown(id));
   if (!sample) service.observeConfig((device, before, after) => cameraEnabled.observe(device, before, after));
+  const guide = setupGuideStore(() => context.runtimeDirectory);
   const transfers = new Map<string, { kind: 'save' | 'send'; revision: string | null; parts: string[]; size: number; expires: number }>();
   const imports = new Map<string, { cameras: RecordValue[]; expires: number }>();
   const reads = new Map<string, { text: string; expires: number }>();
@@ -220,6 +222,8 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
           return { opened: address };
         }
         case 'send': return send(input, signal);
+        // The setup guide's progress on this Mac. Simulated is walked through apart from the real setup.
+        case 'setup-guide': return request.value == null ? guide.read(sample ? 'simulated' : 'real') : guide.write(sample ? 'simulated' : 'real', request.value);
         default: throw new Error('Unknown Cyanview command');
       }
     },

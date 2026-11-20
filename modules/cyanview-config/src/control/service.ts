@@ -85,6 +85,8 @@ export class CameraControl {
   readonly selection: ControlSelection;
   private sessions = new Map<string, RcpSession>();
   private subscriptions: readonly ModuleFeedbackSubscription[] = [];
+  /** A Cyanview key has been pressed since this worker started. The page's setup guide ticks Press a key from it. */
+  private pressed = false;
   private feedbackSignal?: AbortSignal;
   private stopped = false;
   private recording: RecordingCoordinator;
@@ -245,7 +247,8 @@ export class CameraControl {
   }
   state() {
     const { enabled, singleSwitch } = this.selection.value();
-    const value = { enabled, singleSwitch, controllers: this.controllerStatuses(), cameras: this.cameraStatuses(), cameraChanges: { ...this.cameraChanges } };
+    // keys and pressed tell the page's setup guide that a key uses Cyanview and that one has been pressed.
+    const value = { enabled, singleSwitch, controllers: this.controllerStatuses(), cameras: this.cameraStatuses(), cameraChanges: { ...this.cameraChanges }, keys: this.subscriptions.length, pressed: this.pressed };
     const text = JSON.stringify(value);
     if (text !== this.stateText) { this.stateText = text; this.stateSequence += 1; }
     return { ...value, epoch: this.epoch, sequence: this.stateSequence };
@@ -363,6 +366,7 @@ export class CameraControl {
       if (values.enabled === false) throw new Error('This action is disabled');
       const command = (id === 'camera-control' ? values.actionType : id) as Command;
       if (!commands.some(([supported]) => command === supported)) throw new Error('Unknown Cyanview action');
+      if (!this.pressed) { this.pressed = true; this.emit(); }
       const controllerId = values['module.controllerId'] ?? values.controllerId;
       const cameraNumber = values['module.cameraNumber'] ?? values.cameraNumber;
       if (cameraCommands.includes(command) && !number(cameraNumber)) throw new Error('Enter a camera number from 1 to 999999');

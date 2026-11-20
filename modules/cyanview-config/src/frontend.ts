@@ -6,6 +6,7 @@ import { isStaleDraft } from './save-conflict.js';
 import './approved-ui.css';
 import './frame.css';
 import './workbook-controls.css';
+import './setup-guide.css';
 
 // The approved UI keeps its original DOM, CSS and rendering functions.
 Reflect.set(globalThis, 'lucide', {
@@ -146,6 +147,8 @@ if (window.parent !== window) {
     /** A controller's own web page, opened in the browser on the computer Hubble runs on. */
     async openDevicePage(address: string) { return client.call('open-device-page', payload({ address })); },
     async controlState() { return client.call('camera-control-state'); },
+    /** The setup guide's progress on this Mac: null reads it, a value saves it. */
+    async setupGuide(progress: unknown) { return client.call('setup-guide', progress === null ? null : payload(progress)); },
     async controlMutate(value: unknown) {
       await tail.catch(() => undefined);
       return client.call('camera-control-mutate', payload(value));

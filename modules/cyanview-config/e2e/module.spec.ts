@@ -25,7 +25,7 @@ async function addCamera(frame: ReturnType<typeof ui>, group: Locator, model: st
 async function open(page: Page, request: APIRequestContext, sample = true) {
   await request.post('/__reset', { data: { sample } });
   await page.goto('/'); await expect(ui(page).locator('#cyanview-design')).toBeVisible();
-  await expect(ui(page).locator('[data-role="saved-label"]')).toContainText(sample ? 'Sample data' : 'Workspace saved');
+  await expect(ui(page).locator('[data-role="saved-label"]')).toContainText(sample ? 'Simulated' : 'Workspace saved');
   // These cover each device's own network card, which is now the Details view of the Devices tab.
   await ui(page).locator('[data-device-view="details"]').click();
   if (sample) await ui(page).locator('[data-tab="assignment"]').click().then(() => ui(page).locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());

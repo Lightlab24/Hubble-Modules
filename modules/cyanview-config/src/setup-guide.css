@@ -1,0 +1,298 @@
+/*
+ * The setup guide side panel. These are HubDash's Guided setup rules (guided-setup.css in Hubble),
+ * kept as they are and scoped to this page, so the two read as one checklist. The dark values are
+ * HubDash's own tokens.
+ */
+#cyanview-design .cv-setup-guide {
+  --guide-healthy: #10a37f;
+  --guide-primary: light-dark(#262626, #e5e5e5);
+  --guide-primary-ink: light-dark(#ffffff, #111111);
+  --guide-primary-hover: light-dark(#000000, #ffffff);
+  --guide-line: light-dark(#e2e2e2, #212223);
+  --guide-line-soft: light-dark(#e9e9e9, #171819);
+  --guide-line-strong: light-dark(#d0d0d0, #2e2f30);
+  --guide-secondary: light-dark(#626262, #b2b2b2);
+  --guide-text: light-dark(#252525, #dedede);
+  --guide-text-strong: light-dark(#111111, #f4f4f4);
+  --guide-surface: light-dark(#f3f3f3, #191a1b);
+  --guide-surface-hover: light-dark(#e9e9e9, #232425);
+  --guide-sidebar: light-dark(#f4f4f4, #0a0b0c);
+}
+
+/* The panel takes its own column so it never sits on top of a control it asks you to use. */
+#cyanview-design > .hc-window {
+  display: flex;
+}
+#cyanview-design > .hc-window > .hc-main {
+  flex: 1 1 auto;
+}
+
+#cyanview-design .cv-setup-guide {
+  display: flex;
+  width: 312px;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  flex: 0 0 312px;
+  flex-direction: column;
+  border-left: 1px solid var(--guide-line-soft);
+  background: var(--guide-sidebar);
+  color: var(--guide-text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+#cyanview-design .cv-setup-guide[hidden] {
+  display: none;
+}
+#cyanview-design .cv-setup-guide .guided-setup-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 10px 8px 14px;
+}
+#cyanview-design .cv-setup-guide .guided-setup-header h2 {
+  margin: 0;
+  color: var(--guide-text-strong);
+  font-size: 13px;
+  font-weight: 600;
+}
+#cyanview-design .cv-setup-guide .guided-setup-header p {
+  margin: 1px 0 0;
+  color: var(--guide-secondary);
+  font-size: 11px;
+}
+#cyanview-design .cv-setup-guide .guided-setup-close {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--guide-secondary);
+}
+#cyanview-design .cv-setup-guide .guided-setup-close:hover {
+  background: var(--guide-surface-hover);
+  color: var(--guide-text-strong);
+}
+#cyanview-design .cv-setup-guide .guided-setup-progress {
+  height: 3px;
+  margin: 0 14px 6px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--guide-line);
+}
+#cyanview-design .cv-setup-guide .guided-setup-progress span {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--guide-healthy);
+}
+/* Simulated is said once, at the top, in the box HubDash uses for its own notes. */
+#cyanview-design .cv-setup-guide .guided-setup-note {
+  margin: 2px 14px 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--guide-surface);
+  color: var(--guide-secondary);
+  font-size: 11px;
+}
+#cyanview-design .cv-setup-guide .guided-setup-note b {
+  color: var(--guide-text-strong);
+  font-weight: 600;
+}
+#cyanview-design .cv-setup-guide .guided-setup-scroll {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 8px 12px;
+  scrollbar-width: thin;
+}
+#cyanview-design .cv-setup-guide .guided-setup-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+#cyanview-design .cv-setup-guide .guided-setup-step-heading {
+  display: flex;
+  width: 100%;
+  min-height: 34px;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--guide-text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+#cyanview-design .cv-setup-guide .guided-setup-step-heading:hover {
+  background: var(--guide-surface-hover);
+}
+#cyanview-design .cv-setup-guide .guided-setup-step-title {
+  min-width: 0;
+  flex: 1;
+}
+#cyanview-design .cv-setup-guide .guided-setup-step-heading small {
+  color: var(--guide-secondary);
+  font-size: 10.5px;
+}
+#cyanview-design .cv-setup-guide li[data-status='current'] .guided-setup-step-title {
+  color: var(--guide-text-strong);
+  font-weight: 600;
+}
+#cyanview-design .cv-setup-guide li[data-status='upcoming'] .guided-setup-step-title,
+#cyanview-design .cv-setup-guide li[data-status='skipped'] .guided-setup-step-title {
+  color: var(--guide-secondary);
+}
+#cyanview-design .cv-setup-guide .guided-setup-marker {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  place-items: center;
+  border: 1px solid var(--guide-line-strong);
+  border-radius: 50%;
+  color: var(--guide-secondary);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+#cyanview-design .cv-setup-guide li[data-status='current'] .guided-setup-marker {
+  border-color: var(--guide-primary);
+  background: var(--guide-primary);
+  color: var(--guide-primary-ink);
+  font-weight: 600;
+}
+#cyanview-design .cv-setup-guide li[data-status='done'] .guided-setup-marker {
+  border-color: var(--guide-healthy);
+  background: var(--guide-healthy);
+  color: #fff;
+}
+#cyanview-design .cv-setup-guide .guided-setup-chevron {
+  flex: 0 0 13px;
+  color: var(--guide-secondary);
+  transition: transform 120ms ease;
+}
+#cyanview-design .cv-setup-guide .guided-setup-chevron[data-expanded='true'] {
+  transform: rotate(90deg);
+}
+#cyanview-design .cv-setup-guide .guided-setup-step-body {
+  padding: 2px 8px 12px 35px;
+}
+#cyanview-design .cv-setup-guide .guided-setup-step-body > p,
+#cyanview-design .cv-setup-guide .guided-setup-finished p {
+  margin: 0 0 8px;
+}
+#cyanview-design .cv-setup-guide .guided-setup-hint {
+  color: var(--guide-secondary);
+  font-size: 11px;
+}
+#cyanview-design .cv-setup-guide .guided-setup-step-body > p.guided-setup-hint {
+  margin-top: 6px;
+}
+#cyanview-design .cv-setup-guide .guided-setup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+#cyanview-design .cv-setup-guide .guided-setup-primary,
+#cyanview-design .cv-setup-guide .guided-setup-secondary {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  text-decoration: none;
+}
+#cyanview-design .cv-setup-guide .guided-setup-primary {
+  background: var(--guide-primary);
+  color: var(--guide-primary-ink);
+}
+#cyanview-design .cv-setup-guide .guided-setup-primary:hover:not(:disabled) {
+  background: var(--guide-primary-hover);
+}
+#cyanview-design .cv-setup-guide .guided-setup-primary:disabled {
+  opacity: 0.5;
+}
+#cyanview-design .cv-setup-guide .guided-setup-secondary {
+  border: 1px solid var(--guide-line-strong);
+  background: transparent;
+  color: var(--guide-text);
+}
+#cyanview-design .cv-setup-guide .guided-setup-secondary:hover {
+  background: var(--guide-surface-hover);
+}
+#cyanview-design .cv-setup-guide .guided-setup-text-action {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--guide-secondary);
+  font: inherit;
+  font-size: 11px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+#cyanview-design .cv-setup-guide .guided-setup-text-action:hover {
+  color: var(--guide-text-strong);
+}
+#cyanview-design .cv-setup-guide .guided-setup-finished {
+  margin: 4px 0 8px;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--guide-surface);
+}
+#cyanview-design .cv-setup-guide .guided-setup-finished h3 {
+  margin: 0 0 6px;
+  color: var(--guide-text-strong);
+  font-size: 13px;
+  font-weight: 600;
+}
+#cyanview-design .cv-setup-guide .guided-setup-footer {
+  padding: 8px 14px 10px;
+  border-top: 1px solid var(--guide-line-soft);
+}
+#cyanview-design .cv-setup-guide .guided-setup-footer p {
+  margin: 0;
+}
+
+/* The header button that opens and closes the panel looks pressed while it is open. */
+#cyanview-design .cv-setup-guide-toggle[aria-pressed='true'] {
+  background: var(--hc-selected);
+  color: var(--hc-strong);
+}
+
+/* Simulated, beside Live, in the shape of HubDash's status pills. */
+#cyanview-design .cv-simulated-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: light-dark(#ececec, #191a1b);
+  color: var(--hc-text);
+  font-size: 11px;
+  white-space: nowrap;
+}
+#cyanview-design .cv-simulated-pill[hidden] {
+  display: none;
+}
+#cyanview-design .cv-simulated-pill > span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: light-dark(#6b4fa3, #b9a3e3);
+}

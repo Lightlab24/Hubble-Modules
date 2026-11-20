@@ -151,6 +151,9 @@ const server = createServer(async (request, response) => {
         if (typeof input.liveReadDelayMs === 'number') liveReadDelayMs = Math.min(3000, Math.max(0, input.liveReadDelayMs));
         if (typeof input.optionDelayMs === 'number') controller.optionDelayMs = Math.min(3000, Math.max(0, input.optionDelayMs));
         if (typeof input.pingDelayMs === 'number') pingDelayMs = Math.min(5000,Math.max(0,input.pingDelayMs));
+        // Keys in the Button Matrix that use Cyanview, and a press of one, as Hubble passes them to the worker.
+        if (Array.isArray(input.keys)) session.instance.subscribeFeedback!(input.keys, session.execution());
+        if (input.press && typeof input.press === 'object') await session.instance.execute('camera-control', { values: { enabled: true, ...input.press } }, session.execution()).catch(() => undefined);
         send({ updated: true }); return;
       }
       if (url.pathname !== '/__rpc') { send({ error: 'Unknown fixture route' }, 404); return; }
