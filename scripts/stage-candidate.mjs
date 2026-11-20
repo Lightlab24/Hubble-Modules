@@ -1,4 +1,4 @@
-import { catalogReadArgs } from "./publication-targets.mjs";
+import { readCatalogFile } from "./publication-targets.mjs";
 // Run after qualification and review. Creates a draft and local catalog input only.
 import { readFile, writeFile, mkdtemp, cp, rm } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
@@ -51,10 +51,10 @@ const keys = JSON.parse(
 );
 let current;
 try {
-  current = JSON.parse(gh(catalogReadArgs(repository, "catalog-v2.json")));
+  current = readCatalogFile(gh, repository, "catalog-v2.json");
 } catch (error) {
   if (!/404|Not Found/.test(String(error.stderr))) throw error;
-  current = JSON.parse(gh(catalogReadArgs(repository, "catalog.json")));
+  current = readCatalogFile(gh, repository, "catalog.json");
 }
 const envelope = JSON.parse(
   Buffer.from(current.content, "base64").toString("utf8"),
