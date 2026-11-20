@@ -172,6 +172,9 @@ page.onRestart(() => void readEverythingAgain());
 - The page stays only for a restart of the same package with the module coming back. A
   version change, a disabled connection or a module that failed to start closes it, as
   before. If Hubble no longer has the page's session it loads the page again.
+- Hubble's window hears of a new run a moment late. A page that stays open is opened on
+  whichever run is up, so leaving it and coming straight back after a save works. A page
+  that reloads is refused until the window has caught up, as before.
 - A page without `restart: 'keep-open'` is reloaded for every restart, as before.
 
 ## Declare and build
