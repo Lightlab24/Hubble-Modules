@@ -352,6 +352,25 @@ importers:
         specifier: 6.0.3
         version: 6.0.3
 
+  modules/ping:
+    dependencies:
+      '@hubble/module-sdk':
+        specifier: workspace:1.8.0
+        version: link:../../packages/module-sdk
+    devDependencies:
+      '@hubble/module-tools':
+        specifier: workspace:1.5.0
+        version: link:../../packages/module-tools
+      '@types/node':
+        specifier: 22.19.17
+        version: 22.19.17
+      tsx:
+        specifier: 4.23.1
+        version: 4.23.1
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+
   modules/ross-ultrix-ogp:
     dependencies:
       '@hubble/module-contracts':

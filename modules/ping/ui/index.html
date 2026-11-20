@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Ping</title><link rel="stylesheet" href="/api/module-controls/theme-v1.css"><link rel="stylesheet" href="./app.css"></head>
+<body>
+<div class="ping-app" id="app">
+  <header class="app-header">
+    <div class="app-title"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12h4l2.5-6 4 12 2.5-6h6"/></svg><div><h1>Ping</h1><p>Network devices</p></div></div>
+    <div class="header-status" id="fleet" data-tone="idle"><span class="status-dot"></span><span id="fleet-status">Loading workspace…</span></div>
+  </header>
+  <div class="toolbar" role="toolbar" aria-label="Ping controls">
+    <button id="add-device" class="primary"><span aria-hidden="true">+</span> Add device</button>
+    <span class="toolbar-divider"></span>
+    <div id="pinging"></div>
+    <label class="field">Ping every <select id="every" aria-label="Ping every"></select></label>
+    <label class="field">Size <select id="size" aria-label="Ping size"></select></label>
+    <span class="toolbar-spacer"></span>
+    <div id="span"></div>
+    <div id="text-size" aria-label="Text size"></div>
+    <div id="columns"></div>
+  </div>
+  <div class="toolbar alerts" role="toolbar" aria-label="Alerts for every device">
+    <span class="group-label">Alerts</span>
+    <label class="field">Answer over <select id="alert-over" aria-label="Alert when an answer is over"></select></label>
+    <label class="field">No answer for <select id="alert-lost" aria-label="Alert when there is no answer for"></select></label>
+    <span class="toolbar-divider"></span>
+    <div id="notify"></div>
+    <span class="toolbar-spacer"></span>
+    <span class="note">For every device. A device's own Alert cells override these.</span>
+  </div>
+  <main class="work-area">
+    <div class="sheet-scroll" id="viewport"><table id="device-grid" role="grid" aria-label="Ping devices" tabindex="0"><colgroup></colgroup></table></div>
+    <div id="loading" class="loading" role="status">Connecting to workspace…</div>
+    <div id="empty" class="empty" hidden><h2>No devices yet</h2><p>One row per device: a name for it and its IP address. Ping starts as soon as the address is in.</p><button id="empty-add" class="primary">Add device</button></div>
+  </main>
+  <section class="timeline" aria-label="Ping timeline">
+    <div class="tl-head"><h2 id="tl-name">No device selected</h2><span class="sub" id="tl-sub"></span><div class="stats" id="tl-stats"></div></div>
+    <canvas id="chart" role="img" aria-label="Answer time over time" tabindex="0"></canvas>
+    <div class="legend"><span><i class="ok"></i>Under the limit</span><span><i class="warn"></i>Over the limit</span><span><i class="bad"></i>No answer</span><button id="tl-live" class="quiet" hidden>Back to now</button><span class="hint" id="tl-hint">Pinch to zoom · two fingers to move through time</span></div>
+  </section>
+  <footer class="app-footer"><output id="save-status" aria-live="polite">Loading…</output><span id="data-use"></span></footer>
+</div>
+<script type="module" src="./app.js"></script>
+</body></html>
