@@ -186,6 +186,8 @@ export class TslPage {
   private loaded: Promise<void> | undefined;
   private writes: Promise<unknown> = Promise.resolve();
   private busy = false;
+  /** The switcher conversation in progress. Closing waits for it, so its form is left tidy. */
+  private talking: Promise<void> | undefined;
   private closed = false;
   private readonly file: string | undefined;
   private readonly switcher: PageDependencies;
@@ -370,10 +372,16 @@ export class TslPage {
   private async withSwitcher<T>(work: () => Promise<T>): Promise<T> {
     if (this.busy) throw new Error("Still working on the last switcher request");
     this.busy = true;
+    const talk = work();
+    this.talking = talk.then(
+      () => undefined,
+      () => undefined,
+    );
     try {
-      return await work();
+      return await talk;
     } finally {
       this.busy = false;
+      this.talking = undefined;
     }
   }
   private async took(host: string, reading: SwitcherReading | null, error: string | null) {
@@ -497,6 +505,8 @@ export class TslPage {
     this.closed = true;
     clearTimeout(this.coalesce);
     for (const wake of [...this.waiters]) wake();
+    // A request cut short by a restart still cancels its edit and lets go of the switcher's form.
+    await this.talking;
     await this.writes;
   }
 }

@@ -280,6 +280,37 @@ describe("the switcher", () => {
     expect(fake.writes).toEqual([]);
   });
 
+  it("lets go of the switcher's form when the module stops in the middle of a request", async () => {
+    const fake = await fakeSwitcher();
+    const { call, page } = await world({ fake });
+    const stop = new AbortController();
+    let closed: Promise<void> | undefined;
+    // Hubble restarts the module once the new device's form is open and being filled in, and the
+    // switcher is slow to answer what comes next.
+    fake.onWrite = (write) => {
+      if (write.oid !== FAKE_OID.slot) return;
+      fake.onWrite = undefined;
+      fake.hold();
+      stop.abort();
+      closed = page.close();
+    };
+    const sending = call("send-switcher", {}, stop.signal).catch((error: unknown) => error);
+    await vi.waitFor(() => expect(closed).toBeDefined());
+    let stopped = false;
+    void closed!.then(() => (stopped = true));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    // The module has not finished stopping: the edit is still open on the switcher.
+    expect(stopped).toBe(false);
+    expect(fake.formIsIdle).toBe(false);
+    fake.release();
+    await closed;
+    // By the time it has stopped, the edit is cancelled and no row is chosen.
+    expect(fake.formIsIdle).toBe(true);
+    expect(fake.devices.map((device) => device.name)).toEqual(["CP", "ADAM", "RTR TALL"]);
+    expect(await sending).toBeInstanceOf(Error);
+    await vi.waitFor(() => expect(fake.openConnections).toBe(0));
+  });
+
   it("takes one request at a time", async () => {
     const fake = await fakeSwitcher();
     const { call } = await world({ fake });
