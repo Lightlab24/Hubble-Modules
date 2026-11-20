@@ -6,6 +6,10 @@ import type { Rules } from "./model.js";
  * A device goes Offline once it hasn't answered for its lost time and Slow as
  * soon as an answer is over its limit; it is Online again on the next answer,
  * or after three answers in a row under the limit.
+ *
+ * The first state a device settles into is where it starts, not a change, so it
+ * raises no alert: a restart, a newly added device or a new address never
+ * announces something that was already so. Every change after that does.
  */
 export type DeviceState = "not-checked" | "online" | "slow" | "offline";
 export interface Alert {
@@ -72,6 +76,12 @@ export class DeviceWatch {
 
   /** Takes one ping result and returns an alert when the device's state changed in a way worth logging. */
   add(deviceName: string, rules: Rules, at: number, rtt: number | null): Alert | null {
+    const starting = this.state === "not-checked";
+    const alert = this.take(deviceName, rules, at, rtt);
+    return starting ? null : alert;
+  }
+
+  private take(deviceName: string, rules: Rules, at: number, rtt: number | null): Alert | null {
     this.history.add(at, rtt);
     const name = deviceName.trim() || this.address;
     const limit = rules.overMs;

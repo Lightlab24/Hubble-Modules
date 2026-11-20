@@ -1,6 +1,6 @@
 # Ping
 
-Module ID `network-ping`, version 0.1.2. Pings network devices, keeps a timeline of each one, and
+Module ID `network-ping`, version 0.1.3. Pings network devices, keeps a timeline of each one, and
 alerts when a device stops answering or answers slowly. It is a workspace module: add it once, and
 its **Ping** page lists every device. It needs a Hubble with `module-page-badges-v1` and
 `module-controls-inline-v1` (2.3.1).
@@ -38,7 +38,8 @@ wider than that. A bar with any lost ping is red from top to bottom.
 
 A device goes **Offline** once it hasn't answered for its lost time and **Slow** as soon as an
 answer is over its limit. It is Online again on the next answer, or after three answers in a row
-under the limit. Each change:
+under the limit. The first state a device settles into raises no alert, so a restart or a newly
+added device never announces one that was already down; every change after that does. Each change:
 
 - writes a line to the Status Log, such as *RIO Truck B (10.192.4.31) stopped answering: no answer for 3 s*;
 - raises a macOS notification when Notifications is on (no Dock bounce);

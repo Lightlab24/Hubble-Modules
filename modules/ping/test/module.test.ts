@@ -104,7 +104,7 @@ function backend(devices: DeviceRow[], options: BackendOptions & { connectionEna
 
 describe("the manifest", () => {
   it("is a valid workspace module with one full page", () => {
-    const manifest = ModuleManifestSchema.parse({ ...source, id: "network-ping", name: "Ping", version: "0.1.2", entry: "module.mjs", files: ["module.mjs", "ui/index.html", "ui/app.js", "ui/ping.svg"] });
+    const manifest = ModuleManifestSchema.parse({ ...source, id: "network-ping", name: "Ping", version: "0.1.3", entry: "module.mjs", files: ["module.mjs", "ui/index.html", "ui/app.js", "ui/ping.svg"] });
     expect(manifest.instanceScope).toBe("workspace");
     expect(manifest.pages?.[0]?.layout).toBe("full-page");
     expect(manifest.matrix?.triggers?.map((trigger) => trigger.id)).toEqual(["offline", "slow", "online"]);
@@ -327,11 +327,28 @@ describe("a device's state", () => {
     const slow = new DeviceWatch("10.0.0.5");
     slow.add("Slow", rules(null, 2000), start, 4);
     expect(slow.add("Slow", rules(null, 2000), start + 5000, null)?.message).toBe("Slow (10.0.0.5) stopped answering: no answer for 5 s");
-    // A device that has never answered counts from its first lost ping.
-    const never = new DeviceWatch("10.0.0.6");
-    expect(never.add("New", rules(null, 2000), start, null)).toBeNull();
-    expect(never.add("New", rules(null, 2000), start + 1000, null)).toBeNull();
-    expect(never.add("New", rules(null, 2000), start + 2000, null)?.stage).toBe("device-offline");
+  });
+
+  it("takes the first state a device settles into as where it starts, without alerting", () => {
+    // Already down when Ping starts, as after a restart: it reads Offline, and says nothing.
+    const down = new DeviceWatch("10.0.0.6");
+    for (const second of [0, 1, 2, 3]) expect(down.add("Down", rules(null, 2000), start + second * 1000, null)).toBeNull();
+    expect(down.state).toBe("offline");
+    // Coming back is a change, so that is announced.
+    expect(down.add("Down", rules(null, 2000), start + 10_000, 4)?.message).toBe("Down (10.0.0.6) is answering again after 8 s");
+    // And so is the next drop.
+    expect(down.add("Down", rules(null, 2000), start + 11_000, null)).toBeNull();
+    expect(down.add("Down", rules(null, 2000), start + 12_000, null)?.stage).toBe("device-offline");
+    // Already slow when Ping starts: Slow, and silent. Getting back under the limit is announced.
+    const slow = new DeviceWatch("10.0.0.7");
+    expect(slow.add("Slow", rules(80, null), start, 140)).toBeNull();
+    expect(slow.state).toBe("slow");
+    for (const second of [1, 2]) expect(slow.add("Slow", rules(80, null), start + second * 1000, 20)).toBeNull();
+    expect(slow.add("Slow", rules(80, null), start + 3000, 20)?.stage).toBe("device-online");
+    // Up when Ping starts: Online, silent, and the first drop after it alerts as usual.
+    const up = new DeviceWatch("10.0.0.8");
+    expect(up.add("Up", rules(null, 2000), start, 4)).toBeNull();
+    expect(up.state).toBe("online");
   });
 
   it("reads Offline without alerting when the lost alert is off", () => {
@@ -447,6 +464,8 @@ describe("the module", () => {
     const fake = fakePing();
     const { instance, logs, call, documents } = backend([row("a", "Router", "10.0.0.1"), row("b", "Quiet", "10.0.0.2", { over: "off" })], { start: fake.start, settings: { alertOverMs: 50 } });
     await instance.start!();
+    fake.current().say(answer("10.0.0.1", 99, 5));
+    fake.current().say(answer("10.0.0.2", 99, 5));
     fake.current().say(answer("10.0.0.1", 100, 70));
     fake.current().say(answer("10.0.0.2", 100, 70));
     expect(logs.map((item) => item.message)).toEqual(["Router (10.0.0.1) answered in 70 ms, over its 50 ms limit"]);
@@ -484,6 +503,24 @@ describe("the module", () => {
     expect(alerts).toHaveLength(before);
   });
 
+  it("says nothing on a restart about devices that were already down, and still lights their keys and counts them", async () => {
+    const fake = fakePing();
+    const { instance, logs, alerts, feedback, states } = backend([row("a", "Down already", "10.0.0.5", { lost: "2" }), row("b", "Up", "10.0.0.6")], { start: fake.start });
+    await instance.start!();
+    instance.subscribeFeedback!([{ id: "device", fields: { actionId: "row", actionColumnId: "column", values: { "module.device": "Down already" } } }] as never, { signal: new AbortController().signal });
+    fake.current().say(answer("10.0.0.6", 100, 3));
+    for (const second of [100, 101, 102, 103]) fake.current().say(timeout("10.0.0.5", second));
+    expect(logs, "no Status Log line").toEqual([]);
+    expect(alerts, "no notification").toEqual([]);
+    // It is still shown as down everywhere.
+    expect(feedback.at(-1)).toMatchObject({ state: "inactive", appearance: { triggers: ["offline"] } });
+    expect(states.at(-1)!.values).toMatchObject({ online: 1, alerts: 1, checked: 2 });
+    // The device that was up dropping afterwards is a change, and alerts.
+    for (const second of [104, 105, 106, 107]) fake.current().say(timeout("10.0.0.6", second));
+    expect(logs.map((item) => item.message)).toEqual(["Up (10.0.0.6) stopped answering: no answer for 4 s"]);
+    expect(alerts).toHaveLength(1);
+  });
+
   it("answers a waiting page as soon as a result arrives, with the timeline it asked for", async () => {
     const fake = fakePing();
     const { instance, live } = backend([row("a", "Router", "10.0.0.1")], { start: fake.start, now: () => 200_000, liveWaitMs: 5000 });
@@ -512,7 +549,7 @@ describe("the module", () => {
 
 // The real fping, against this computer and an address that never answers (192.0.2.0/24 is reserved for examples).
 describe.runIf(Boolean(findFping()))("real pings", () => {
-  it("measures this computer, loses an address that never answers, and raises its alert", async () => {
+  it("measures this computer, and shows an address that never answers as Offline without announcing it", async () => {
     const { instance, live, logs } = backend([row("a", "This computer", "127.0.0.1", { over: "500" }), row("b", "Nobody", "192.0.2.1", { lost: "2" })], { settings: { intervalMs: 200 }, liveWaitMs: 1000 });
     await instance.start!();
     let reply = await live();
@@ -522,6 +559,7 @@ describe.runIf(Boolean(findFping()))("real pings", () => {
     expect(reply.devices.a!.now!).toBeLessThan(50);
     expect(reply.devices.a!.lostPct).toBe(0);
     expect(reply.devices.b).toMatchObject({ state: "offline", now: null, lostPct: 100 });
-    expect(logs.map((item) => item.message)).toEqual(["Nobody (192.0.2.1) stopped answering: no answer for 2 s"]);
+    // It never answered, so Offline is where it started: shown, but not announced.
+    expect(logs).toEqual([]);
   }, 20_000);
 });
