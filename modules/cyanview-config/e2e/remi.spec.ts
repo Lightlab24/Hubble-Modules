@@ -45,12 +45,10 @@ test('adding and renaming a RIO camera updates a chain in Camera Configuration',
   expect((await(await request.get('/__inspect')).json()).fleet[1].actions).toHaveLength(beforeControl);
 
   await ui.locator('[data-tab="devices"]').click();
-  await ui.locator('[data-device-view="details"]').click();
-  const stage = ui.locator('[data-network-controller="CY-RIO-1-10"]');
-  const deviceName = stage.locator('[data-device-setting="name"]');
-  if (!await deviceName.isVisible()) await stage.locator('[data-action="toggle-network-device"]').click();
+  const deviceName = ui.locator('[data-role="device-sheet"] [data-device-cell="CY-RIO-1-10:name"]');
   await deviceName.fill('Stage Left');
   await deviceName.press('Enter');
+  await expect(deviceName).toHaveValue('Stage Left');
   await ui.locator('[data-tab="assignment"]').click().then(() => ui.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   await expect(master.getByRole('button',{name:'REMI source',exact:true})).toHaveText('Stage Left · RIO');
   await expectImported('CY-RCP-1-20','Stage Left');

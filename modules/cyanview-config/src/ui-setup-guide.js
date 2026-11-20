@@ -185,7 +185,7 @@
       case 'skip': if (target) setSetupGuideProgress({ skipped: [...new Set([...setupGuideProgress.skipped, target])] }); break;
       case 'unskip': if (target) { setupGuideExpanded = { forCurrent: setupGuideExpanded.forCurrent, id: target }; setSetupGuideProgress({ skipped: setupGuideProgress.skipped.filter(id => id !== target) }); } break;
       case 'discover': {
-        setTab('devices'); if (discoveryCard) discoveryCard.open = true;
+        setTab('devices');
         // The network list is Hubble's own dropdown, drawn beside the hidden select it stands for.
         const range = $('scan-range'), shown = range?.nextElementSibling?.matches('.hc-dropdown') ? range.nextElementSibling : range;
         shown?.focus();

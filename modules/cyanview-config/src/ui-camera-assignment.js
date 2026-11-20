@@ -1014,9 +1014,8 @@
     ignoredControllers.clear();
     for (const serial of Array.isArray(view?.ignored) ? view.ignored : []) if (typeof serial === 'string' && serial && serial.length <= 160) ignoredControllers.add(serial);
     const sheet = view?.devices ?? {};
-    Object.assign(deviceSheet, { lanOpen: sheet.lanOpen === true, wanOpen: sheet.wanOpen === true, details: sheet.details === true,
+    Object.assign(deviceSheet, { lanOpen: sheet.lanOpen === true, wanOpen: sheet.wanOpen === true,
       sort: deviceSortable.has(sheet.sort?.field) && ['asc', 'desc'].includes(sheet.sort.direction) ? { field: sheet.sort.field, direction: sheet.sort.direction } : null });
-    paintDeviceView();
     // Saved before Camera Configuration was one list, this tab meant that page and not the view under REMI Matrix.
     if (data.tab === 'cameras' && view?.byController === undefined) data.tab = 'setup';
     cameras = [...cameras.filter(camera => !unassigned(camera)), ...saved.map(restoredRow)];

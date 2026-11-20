@@ -39,9 +39,10 @@ test('Devices is one sheet with a row per controller, and its groups and sort ar
   await expect(row(f, RIO).locator('[data-device-column="base"]')).toHaveText('10.192.1.10');
   await expect(row(f, RIO).locator('[data-device-column="connected"]')).toHaveText('Base');
   await expect(row(f, RIO).locator('[data-device-column="cameras"] .hc-device-camera-count')).toHaveText('1');
-  // The old per-device cards and their finder stay out of the way.
-  await expect(f.locator('[data-network-controller]').first()).toBeHidden();
-  await expect(f.locator('[data-role="device-discovery"]')).toBeHidden();
+  // The sheet is the only view: no Sheet/Details switch, no per-device cards and no finder card.
+  await expect(f.locator('[data-device-view]')).toHaveCount(0);
+  await expect(f.locator('[data-network-controller]')).toHaveCount(0);
+  await expect(f.locator('[data-role="device-discovery"]')).toHaveCount(0);
 
   // Each group opens on its own.
   expect(await head()).not.toContain('LAN IP 2');
@@ -69,13 +70,6 @@ test('Devices is one sheet with a row per controller, and its groups and sort ar
   expect(await order(f)).toEqual([LEAF, MASTER, RIO]);
   await expect(group(f, 'wan')).toHaveAttribute('aria-expanded', 'true');
   await expect(group(f, 'lan')).toHaveAttribute('aria-expanded', 'false');
-
-  // Details still has each device's own network card.
-  await f.locator('[data-device-view="details"]').click();
-  await expect(f.locator('[data-network-controller]')).toHaveCount(3);
-  await expect(sheet(f)).toBeHidden();
-  await f.locator('[data-device-view="sheet"]').click();
-  await expect(rows(f)).toHaveCount(3);
 });
 
 test('a device is renamed in its Name cell, with the save held', async ({ page, request }) => {
@@ -366,25 +360,6 @@ test('a cell typed in while its device is sending keeps the keyboard, and its te
   await expect.poll(async () => (await fleet(request))[0]!.config.IP.wan).toMatchObject({ Gateway: '10.20.100.1' });
 });
 
-test('in Details, a change reported by a controller leaves the box being typed in alone', async ({ page, request }) => {
-  const f = await open(page, request, { live: true });
-  await expect.poll(async () => (await (await request.get('/__inspect')).json()).openSockets).toEqual([1, 1, 1]);
-  await f.locator('[data-device-view="details"]').click();
-  const card = f.locator('[data-network-controller="' + RIO + '"]'), name = card.locator('[data-device-setting="name"]');
-  if (!await name.isVisible()) await card.locator('[data-action="toggle-network-device"]').click();
-  await name.click();
-  await page.keyboard.press('ControlOrMeta+a');
-  await page.keyboard.type('Cam 1');
-  await controllerReportsAChange(request, 'Reported in Details');
-  await expect(name).toBeFocused();
-  await expect(name).toHaveValue('Cam 1');
-  await page.keyboard.type(' Rio');
-  await page.keyboard.press('Tab');
-  await expect(card.locator('[data-device-setting="address"]')).toBeFocused();
-  await expect(name).toHaveValue('Cam 1 Rio');
-  await expect.poll(async () => (await rpcOf(request)('read-plan')).plan.devices.find((device: { id: string }) => device.id === RIO).name).toBe('Cam 1 Rio');
-});
-
 test('a WAN on Static can be sent with no address', async ({ page, request }) => {
   const f = await open(page, request, { wan: true });
   await group(f, 'wan').click();
@@ -506,25 +481,23 @@ test('finding devices is one line in the toolbar, and a found device lists as a 
   const f = await open(page, request);
   await row(f, LEAF).locator('[data-action="remove-device"]').click();
   await expect(rows(f)).toHaveCount(2);
-  // The finder's card stays out of the sheet view; its controls sit in the toolbar.
-  await expect(f.locator('[data-role="device-discovery"]')).toBeHidden();
+  // The finder's controls sit in the toolbar, and there is no other finder.
   await expect(f.locator('[data-role="scan-bar"] [data-role="scan-range"]')).toHaveCount(1);
+  await expect(f.locator('[data-role="scan-bar"] [data-action="scan"]')).toBeVisible();
+  await expect(f.locator('[data-action="add-ip"]')).toHaveCount(0);
   await f.locator('[data-device-add]').fill('10.192.1.30');
   await f.locator('[data-device-add]').press('Enter');
   await expect(rows(f)).toHaveCount(3);
   await row(f, LEAF).locator('[data-action="remove-device"]').click();
-  // The Details view keeps the finder, with Add on each found device and Add all.
-  await f.getByRole('button', { name: 'Details', exact: true }).click();
-  await expect(f.locator('[data-role="device-discovery"]')).toBeVisible();
-  await f.locator('[data-action="add-ip"]').click();
-  await f.locator('[data-role="manual-ip"]').fill('10.192.1.30');
-  await f.getByRole('button', { name: 'Find', exact: true }).click();
-  await expect(f.locator('[data-role="discovery-results"]').getByRole('button', { name: 'Add CY-RCP-1-30' })).toBeVisible();
-  await expect(f.locator('[data-action="add-discovered"]')).toHaveText('Add all 1');
-  await f.getByRole('button', { name: 'Sheet', exact: true }).click();
+  // A search lists what it finds as rows in the sheet, each with its own Add, and Add all.
+  await f.getByRole('button', { name: 'Network range', exact: true }).click();
+  await f.getByRole('listbox', { name: 'Network range' }).getByRole('option', { name: 'Custom range…', exact: true }).click();
+  await f.getByRole('textbox', { name: 'Custom CIDR range', exact: true }).fill('10.192.1.30/32');
+  await f.getByRole('button', { name: 'Discover', exact: true }).click();
   const found = sheet(f).locator('tr[data-device-found]');
   await expect(found).toHaveCount(1);
   await expect(found).toContainText('CY-RCP-1-30');
+  await expect(f.locator('[data-action="add-all-found"]')).toHaveText('Add all 1');
   await found.getByRole('button', { name: /^Add / }).click();
   await expect(rows(f)).toHaveCount(3);
   await expect(found).toHaveCount(0);
