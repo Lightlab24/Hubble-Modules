@@ -1174,18 +1174,6 @@ test('after a worker restart nothing reads Offline before it has been tried, and
   } finally { await s.close(); }
 });
 
-test('sample data keeps the status its rows were saved with', async () => {
-  const s = await fleet();
-  const f = fixture({ sampleData: true }, s.options);
-  try {
-    await f.instance.start();
-    s.plan.devices[0]!.online = true; s.plan.devices[1]!.online = false;
-    await f.call('save-plan', { revision: null, plan: s.plan });
-    const { plan } = await f.call('read-plan');
-    assert.deepEqual(plan.devices.map((device: { online: unknown }) => device.online), [true, false]);
-  } finally { await f.instance.dispose(); await s.close(); }
-});
-
 test('after a worker restart every RCP and RIO answers by itself over MQTT, with nothing ticked', async () => {
   const s = await fleet();
   try {

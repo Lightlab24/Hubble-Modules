@@ -1,257 +1,30 @@
-import { createServer, type Socket } from "node:net";
+import { createServer } from "node:net";
 import { once } from "node:events";
+import { createBroker } from "../src/simulated/broker.js";
+
+/**
+ * A simulated controller's MQTT broker on a loopback TCP port, as the tests reach it through a real socket. The
+ * broker itself is the one Simulated runs in the worker over in-memory connections.
+ */
 const cleanups: (() => Promise<void>)[] = [];
 export async function closeBrokers(): Promise<void> {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 }
-
-function packet(header: number, body: Buffer): Buffer {
-  let length = body.length;
-  const bytes: number[] = [];
-  do {
-    let byte = length % 128;
-    length = Math.floor(length / 128);
-    if (length) byte |= 128;
-    bytes.push(byte);
-  } while (length);
-  return Buffer.concat([Buffer.from([header, ...bytes]), body]);
-}
-function publish(topic: string, value: string, retained = false) {
-  const text = Buffer.from(topic);
-  const length = Buffer.alloc(2);
-  length.writeUInt16BE(text.length);
-  return packet(
-    retained ? 0x31 : 0x30,
-    Buffer.concat([length, text, Buffer.from(value)]),
-  );
-}
 export async function broker(port = 0, options: { onlyHubble?: boolean } = {}) {
-  const sockets = new Set<Socket>();
-  const commands: { topic: string; value: string; header: number }[] = [];
-  const recordings = new Map<string, string>();
-  const controls = {
-    panel: true,
-    acknowledge: true,
-    feedback: true,
-    feedbackDelay: 0,
-    retainedFeedback: false,
-    ignoredCamera: "",
-    ackDelay: 0,
-    initialRecording: "0" as string | null,
-    variableNd: false,
-    // A camera answers an ND in/out command with its new state, as camera 1 did on RCP 1.
-    ndFeedback: true,
-    // Each camera's colour temperature and tint, moved by `action/add/wb_*` and reported back, as camera 1 did on RCP 1.
-    wb: {} as Record<string, { temp: number; tint: number | null }>,
-    wbFeedback: true,
-    capabilities: true,
-    silent: false,
-    root: "unit",
-    // Cameras listed with no connection report, as the RCP holds them while their RIO is off the network.
-    unreported: [] as string[],
-  };
-  let connections = 0;
-  let inFlight = 0;
-  let maxInFlight = 0;
-  const timers: ReturnType<typeof setTimeout>[] = [];
-  const send = (topic: string, value: string, retained = false) => {
-    if (topic.endsWith("/recording")) recordings.set(topic, value);
-    for (const socket of sockets) socket.write(publish(topic, value, retained));
-  };
-  const server = createServer((socket) => {
-    connections += 1;
-    // Nagle's algorithm can hold a small report back behind an unacknowledged packet. On Linux that
-    // outlasts the 20 ms a test waits after a report, so the report looks as if it never arrived.
-    socket.setNoDelay(true);
-    sockets.add(socket);
-    socket.on("error", () => undefined);
-    socket.on("close", () => sockets.delete(socket));
-    let buffer: Buffer = Buffer.alloc(0);
-    socket.on("data", (chunk) => {
-      buffer = Buffer.concat([buffer, chunk]);
-      for (;;) {
-        if (buffer.length < 2) return;
-        let length = 0;
-        let offset = 1;
-        let multiplier = 1;
-        for (;;) {
-          const byte = buffer[offset];
-          if (byte === undefined) return;
-          offset += 1;
-          length += (byte & 127) * multiplier;
-          multiplier *= 128;
-          if (!(byte & 128)) break;
-        }
-        if (buffer.length < offset + length) return;
-        const header = buffer.readUInt8(0);
-        const body = buffer.subarray(offset, offset + length);
-        buffer = buffer.subarray(offset + length);
-        if (header === 0x10) {
-          // On the real port, another app on this machine must not be fed fake cameras. CyanView Studio connects to any broker it finds there.
-          if (options.onlyHubble && !body.includes("hubble-")) {
-            socket.destroy();
-            return;
-          }
-          if (!controls.silent) socket.write(Buffer.from([0x20, 2, 0, 0]));
-        }
-        else if (header === 0x82) {
-          let count = 0;
-          for (let index = 2; index < body.length; count += 1)
-            index += body.readUInt16BE(index) + 3;
-          socket.write(
-            packet(
-              0x90,
-              Buffer.concat([body.subarray(0, 2), Buffer.alloc(count)]),
-            ),
-          );
-          if (controls.panel) socket.write(
-            publish(
-              `${controls.root}/RCP/rcp_helper/status/volatile/control`,
-              "online",
-              true,
-            ),
-          );
-          for (const [id, number] of [
-            ["a", "1"],
-            ["b", "2"],
-          ] as const) {
-            socket.write(
-              publish(`${controls.root}/${id}/camhead/status/persist/number`, number, true),
-            );
-            socket.write(
-              publish(
-                `${controls.root}/${id}/camhead/status/persist/name`,
-                `Camera ${id}`,
-                true,
-              ),
-            );
-            if (!controls.unreported.includes(id))
-              socket.write(
-                publish(
-                  `${controls.root}/${id}/camhead/status/volatile/control`,
-                  "online",
-                  true,
-                ),
-              );
-            if (controls.capabilities)
-              socket.write(
-                publish(
-                  `${controls.root}/${id}/camhead/status/volatile/capabilities`,
-                  "00 ".repeat(13) + (id === "a" ? "80" : "00"),
-                  true,
-                ),
-              );
-            if (controls.variableNd)
-              socket.write(
-                publish(
-                  `${controls.root}/${id}/camhead/status/persist/nd_filter_clear`,
-                  "0",
-                  true,
-                ),
-              );
-            if (controls.initialRecording !== null) {
-              const recordingTopic = `${controls.root}/${id}/camhead/status/volatile/recording`;
-              recordings.set(recordingTopic, controls.initialRecording);
-              socket.write(
-                publish(recordingTopic, controls.initialRecording, true),
-              );
-            }
-          }
-        } else if (header >> 4 === 3) {
-          const size = body.readUInt16BE(0);
-          const topic = body.subarray(2, size + 2).toString();
-          const value = body.subarray(size + 4).toString();
-          commands.push({ topic, value, header });
-          inFlight += 1;
-          maxInFlight = Math.max(maxInFlight, inFlight);
-          if (
-            controls.acknowledge &&
-            !topic.includes(`/${controls.ignoredCamera}/`)
-          ) {
-            const acknowledge = () => {
-              inFlight -= 1;
-              socket.write(packet(0x40, body.subarray(size + 2, size + 4)));
-            };
-            if (controls.ackDelay)
-              timers.push(setTimeout(acknowledge, controls.ackDelay));
-            else acknowledge();
-          }
-          const wb = /\/([^/]+)\/camhead\/action\/add\/(wb_temp|wb_tint)$/u.exec(topic);
-          if (wb) {
-            const camera = controls.wb[wb[1]!];
-            if (camera && controls.wbFeedback) {
-              if (wb[2] === "wb_temp") camera.temp += Number(value);
-              else if (camera.tint !== null) camera.tint = Math.max(-0.99, Math.min(0.99, Math.round((camera.tint + Number(value)) * 100) / 100));
-              const reported = wb[2] === "wb_temp" ? String(camera.temp) : String(camera.tint);
-              send(topic.replace(/action\/add\/wb_(temp|tint)$/u, `status/volatile/${wb[2]}`), reported);
-            }
-            continue;
-          }
-          if (topic.endsWith("/action/set/nd_filter_clear")) {
-            if (controls.ndFeedback && ["0", "1"].includes(value)) {
-              const report = () => send(topic.replace("/action/set/", "/status/volatile/"), value);
-              if (controls.feedbackDelay) timers.push(setTimeout(report, controls.feedbackDelay));
-              else report();
-            }
-            continue;
-          }
-          if (
-            !topic.endsWith("/action/set/keyboard") ||
-            !["Rec", "Stop", "RecToggle"].includes(value)
-          )
-            continue;
-          const recordingTopic = topic.replace(
-            "action/set/keyboard",
-            "status/volatile/recording",
-          );
-          const recording =
-            value === "Rec" ||
-            (value === "RecToggle" && recordings.get(recordingTopic) !== "1")
-              ? "1"
-              : "0";
-          recordings.set(recordingTopic, recording);
-          if (controls.feedback) {
-            // A real broker tells every subscriber, and a test can have more than one.
-            const feedback = () =>
-              send(recordingTopic, recording, controls.retainedFeedback);
-            if (controls.feedbackDelay)
-              timers.push(setTimeout(feedback, controls.feedbackDelay));
-            else feedback();
-          }
-        } else if (header === 0xc0) socket.write(Buffer.from([0xd0, 0]));
-      }
-    });
-  });
+  const simulated = createBroker(options);
+  const server = createServer((socket) => simulated.accept(socket));
   server.listen(port, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
   if (!address || typeof address === "string")
     throw new Error("Missing broker address");
   cleanups.push(async () => {
-    for (const timer of timers) clearTimeout(timer);
-    for (const socket of sockets) socket.destroy();
+    simulated.close();
     await new Promise<void>((resolve) => {
       server.close(() => {
         resolve();
       });
     });
   });
-  return {
-    port: address.port,
-    resetMaxInFlight() {
-      maxInFlight = inFlight;
-    },
-    get maxInFlight() {
-      return maxInFlight;
-    },
-    commands,
-    controls,
-    send,
-    get connections() {
-      return connections;
-    },
-    disconnect() {
-      for (const socket of sockets) socket.destroy();
-    },
-  };
+  return Object.assign(simulated, { port: address.port });
 }

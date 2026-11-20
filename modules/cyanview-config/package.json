@@ -1,6 +1,6 @@
 {
   "name": "@hubble-module/cyanview-config",
-  "version": "0.1.91",
+  "version": "0.1.92",
   "private": true,
   "type": "module",
   "hubble": {

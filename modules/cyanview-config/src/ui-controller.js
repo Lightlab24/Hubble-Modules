@@ -96,7 +96,7 @@ import { PresentationLedger } from './presentation-ledger.js';
     $('lan-pending').textContent=nl;
     $('pending-summary').textContent=inFlight?inFlight+' sending · '+Math.max(0,nl+nc-inFlight)+' pending':nl+nc?(nl+nc)+' changes pending':'All changes verified';
     $('pending-summary').classList.toggle('hc-changes-label',!!(nl+nc));
-    $('saved-label').textContent=(moduleBridge?.preview||!moduleBridge?'Sample data · ':persistence==='saving'?'Saving… · ':persistence==='failed'?'Changes not saved · ':persistence==='draft'?'Unsaved edits · ':'Workspace saved · ')+ui.sendMode;action('add-lan').disabled=!devices.length;
+    $('saved-label').textContent=(moduleBridge?.preview||!moduleBridge?'Sample data · ':persistence==='saving'?'Saving… · ':persistence==='failed'?'Changes not saved · ':persistence==='draft'?'Unsaved edits · ':moduleBridge.simulated?'Simulated · ':'Workspace saved · ')+ui.sendMode;action('add-lan').disabled=!devices.length;
     $('lan-foot').textContent=ui.sendMode==='Manual'?'Manual · edit, then Send settings.':'Auto send · Enter, Tab, or leave a cell to send.';
     $('camera-foot').textContent=nc+' pending · '+cameras.filter(c=>c.online===false).length+' cameras offline'+uncheckedCount(cameras,' · ');
     $('camera-mode-note').textContent=ui.sendMode==='Manual'?"Expand Iris, Zoom or Focus, then tick Use Iris, Use Zoom or Use Focus for a camera to configure that axis.":'Auto send · committed cell edits send to that device. Existing staged edits stay pending.';

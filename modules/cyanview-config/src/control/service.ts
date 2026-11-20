@@ -130,6 +130,7 @@ export class CameraControl {
     this.recording = new RecordingCoordinator({ feedbackTimeoutMs: RECORDING_FEEDBACK_TIMEOUT_MS, changed: () => this.emit() });
   }
   async start(signal: AbortSignal) {
+    // Recording that isn't known after a restart is about real cameras, so Simulated keeps none of it in the shared file.
     if (!this.sample && this.context.runtimeDirectory) {
       this.checkpoint = recordingCheckpoint(this.context.runtimeDirectory);
       this.recording = new RecordingCoordinator({ feedbackTimeoutMs: RECORDING_FEEDBACK_TIMEOUT_MS, recovery: this.checkpoint.recovery,
@@ -300,7 +301,9 @@ export class CameraControl {
     this.emit();
   }
   private session(device: RecordValue) {
-    if (this.stopped || this.sample) throw new Error('Cyanview commands are unavailable in sample data');
+    if (this.stopped) throw new Error('Cyanview module is unavailable');
+    // Simulated always brings its own sessions to the simulated controllers, and must never fall back to a real one.
+    if (this.sample && !this.options.session) throw new Error('Simulated controllers are unavailable');
     let session = this.sessions.get(device.id);
     if (!session) {
       const definition = { connectionId: device.id, name: device.name, serial: device.serial,
@@ -358,7 +361,7 @@ export class CameraControl {
   async execute(id: string, fields: ModuleValues, execution: Pick<ModuleExecutionContext, 'signal' | 'log'> & { readonly gesture?: ModuleExecutionContext['gesture'] }) {
     try {
       execution.signal.throwIfAborted();
-      if (this.stopped || this.sample) throw new Error('Sample data does not send commands to equipment');
+      if (this.stopped) throw new Error('Cyanview module is unavailable');
       const values = id === 'camera-control' ? object(fields.values) : fields;
       if (values.enabled === false) throw new Error('This action is disabled');
       const command = (id === 'camera-control' ? values.actionType : id) as Command;
@@ -683,7 +686,7 @@ export class CameraControl {
   }
   /** Every managed RCP, RIO and Gateway is watched, whether or not anything needs it yet. Watching only subscribes; it sends nothing. */
   private observe() {
-    if (this.stopped || this.sample) return;
+    if (this.stopped || (this.sample && !this.options.session)) return;
     for (const device of this.plan.devices) if (controlDevice(device)) this.session(device);
   }
   private feedback() {
