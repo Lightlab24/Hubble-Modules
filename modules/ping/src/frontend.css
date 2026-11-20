@@ -4,7 +4,7 @@
   --font-ui:var(--hubble-font,-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',Arial,sans-serif)}
 html,body{height:100%;margin:0;overflow:hidden;color-scheme:dark}
 body{color:var(--hubble-text,#dedede);font:var(--hubble-text-size,13px) var(--hubble-font,system-ui)}
-.ping-app{height:100%;display:grid;grid-template-rows:auto auto auto minmax(0,1fr) auto auto;background:var(--hubble-sheet,#111)}
+.ping-app{height:100%;display:grid;grid-template-rows:auto auto auto minmax(0,1fr) auto auto auto;background:var(--hubble-sheet,#111)}
 .ping-app *{box-sizing:border-box}
 [hidden]{display:none!important}
 .app-header{min-height:72px;padding:14px 20px;display:flex;align-items:center;gap:20px;border-bottom:1px solid var(--hubble-line,#292929);background:var(--hubble-bar,#151515)}
@@ -101,3 +101,8 @@ button.quiet.toggle[aria-pressed=true]{background:var(--hubble-selected,#373737)
 .empty{position:absolute;inset:70px 20px auto;max-width:460px;margin:auto;padding:28px;border:1px dashed var(--hubble-line-strong,#414141);border-radius:var(--hubble-radius-surface,8px);text-align:center;color:var(--hubble-text-secondary,#999);background:var(--hubble-bar,#171717)}
 .empty h2{margin:0 0 8px;font-size:15px;color:var(--hubble-text,#dedede)}.empty p{line-height:1.5;margin:0 0 14px}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
+/* Sheets sit just above the timeline. "Move selected rows…" comes and goes with a selection, so it shares the tabs' line and never moves the timeline. */
+.sheet-tabs{border-top:1px solid var(--hubble-line,#3b3b3b);background:var(--hubble-bar,#131313)}
+.sheet-tabs .hubble-spreadsheet-sheets{display:flex;align-items:center;gap:10px;min-width:0}
+.sheet-tabs .hubble-spreadsheet-sheets>.button-sheet-bar{flex:0 1 auto;min-width:0}
+.sheet-tabs .hubble-spreadsheet-sheets>select{flex:none;margin:0}

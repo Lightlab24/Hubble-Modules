@@ -1,6 +1,6 @@
 # Ping
 
-Module ID `network-ping`, version 0.1.7. Pings network devices, keeps a timeline of each one, and
+Module ID `network-ping`, version 0.1.8. Pings network devices, keeps a timeline of each one, and
 alerts when a device stops answering or answers slowly. It is a workspace module: add it once, and
 its **Ping** page lists every device. It needs a Hubble with `module-page-badges-v1` and
 `module-controls-inline-v1` (2.3.1).
@@ -33,6 +33,15 @@ Undo brings them all back.
 The toolbar sets what every device shares: **Pinging** (On or Paused), **Ping every** (0.2 s to
 60 s) and **Size** (32 to 1400 bytes). The **Alerts** row under it sets the global **Answer over**
 and **No answer for**, and whether an alert also raises a macOS **notification**.
+
+**Sheets** sit just above the timeline, on Hubble's own sheet tabs, so different things can be
+tracked apart: Cameras, Network, RIO. Each device is on one sheet, and every sheet's devices are
+pinged and alert whichever sheet is open; the header counts them all. **+** asks for a name; a tab's
+menu has Rename sheet…, Move sheet to end and Remove sheet, and tabs drag to reorder. Select rows to
+get **Move selected rows…** on the tabs line. Add device and the Devices box work on the open sheet.
+Removing a sheet removes its devices, naming any filled-in ones first; Undo brings them back.
+Device names stay unique across sheets, because keys pick devices by name. A list from before
+sheets opens as one sheet called Devices, and the open sheet is saved with the page.
 
 Click a row to see its **timeline**. Pinch (or Ctrl and the wheel) zooms around the pointer, two
 fingers or a drag move through time, and **Back to now** returns to the present. Bars are about two
@@ -99,6 +108,9 @@ sends nothing on the network.
 pings, in the same kind of sandboxed frame Hubble uses. `PING_RENDERER_ASSETS` points it at a
 folder of Hubble's control bundles; it defaults to the installed Hubble. `/__inspect` shows the
 saved document, log lines, alerts and feedback, and `/__simulate` holds, releases or fails saves.
+
+`tools/sheets-check.mjs` drives the sheets with real input against a preview started with the six
+devices it names, including a held and a failed save, Undo, and that the timeline never moves.
 
 `tools/scale-check.mjs` drives the timeline's Scale and Colors with real input against a preview started with
 `PING_PREVIEW_FAKE=1`, including a held and a failed save, and checks that nothing on the right of

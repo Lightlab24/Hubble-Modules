@@ -170,7 +170,8 @@ check("Bars are green, yellow, orange and red by time, on the timeline and the s
   `green ${await pixels("#63BC9C")}, yellow ${await pixels("#E6D35C")}, orange ${await pixels("#F08A4B")}, red ${await pixels("#E5766A")}, strip yellow ${await pixels("#E6D35C", strip)}`);
 check("The right of the row didn't move as the legend grew", (await spots()) === start, await spots());
 await setTime("yellow", "0.5");
-check("Yellow under green is refused and marked", (await time("yellow").getAttribute("aria-invalid")) === "true" && (await view()).bands.yellow === 1.5 && /Yellow has to be above green/u.test(await f.evaluate(() => document.body.innerText)));
+await page.waitForTimeout(1500);
+check("Yellow under green is refused, and stays as typed and marked through live updates", (await time("yellow").inputValue()) === "0.5" && (await time("yellow").getAttribute("aria-invalid")) === "true" && (await view()).bands.yellow === 1.5 && /Yellow has to be above green/u.test(await f.evaluate(() => document.body.innerText)));
 await setTime("yellow", "1.5");
 await simulate({ failNextSave: true });
 await setTime("green", "0.8"); await page.waitForTimeout(600);

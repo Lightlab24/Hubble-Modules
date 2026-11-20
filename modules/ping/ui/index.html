@@ -31,8 +31,9 @@
   <main class="work-area">
     <div class="sheet-scroll" id="viewport"><table id="device-grid" role="grid" aria-label="Ping devices" tabindex="0"><colgroup></colgroup></table></div>
     <div id="loading" class="loading" role="status">Connecting to workspace…</div>
-    <div id="empty" class="empty" hidden><h2>No devices yet</h2><p>One row per device: a name for it and its IP address. Ping starts as soon as the address is in.</p><button id="empty-add" class="primary">Add device</button></div>
+    <div id="empty" class="empty" hidden><h2 id="empty-title">No devices yet</h2><p>One row per device: a name for it and its IP address. Ping starts as soon as the address is in.</p><button id="empty-add" class="primary">Add device</button></div>
   </main>
+  <div class="sheet-tabs" id="sheet-tabs"></div>
   <section class="timeline" aria-label="Ping timeline">
     <div class="tl-head"><h2 id="tl-name">No device selected</h2><span class="sub" id="tl-sub"></span><div class="stats" id="tl-stats"></div></div>
     <canvas id="chart" role="img" aria-label="Answer time over time" tabindex="0"></canvas>

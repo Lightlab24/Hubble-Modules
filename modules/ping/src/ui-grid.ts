@@ -35,6 +35,8 @@ export interface GridOptions {
   readonly viewport: HTMLElement;
   readonly store: DraftStore;
   live(): Record<string, DeviceSummary>;
+  /** The devices on show: the open sheet's, in list order. */
+  rows(): DeviceRow[];
   onInsert(beforeId: string | null): void;
   /** Removes these devices as one step. */
   onRemove(rowIds: readonly string[]): void;
@@ -158,7 +160,7 @@ export async function createDeviceGrid(options: GridOptions) {
       columnTracks.set(column.id, track);
       tracks.append(track);
     }
-    for (const row of store.document.devices) {
+    for (const row of options.rows()) {
       ensureRow(row);
       body.append(rows.get(row.id)!);
     }
@@ -194,7 +196,7 @@ export async function createDeviceGrid(options: GridOptions) {
     viewport,
     extendedEditing: true,
     workbookEditing: true,
-    getRows: () => store.document.devices.map((row) => row.id),
+    getRows: () => options.rows().map((row) => row.id),
     getColumns: () => shown.map((column) => ({ id: column.id, label: headingOf(column), fill: column.fill })),
     getCell: cellValue,
     onEdit: (batch) => {
@@ -235,7 +237,7 @@ export async function createDeviceGrid(options: GridOptions) {
       return;
     }
     event.preventDefault();
-    const index = store.document.devices.findIndex((row) => row.id === rowId);
+    const index = options.rows().findIndex((row) => row.id === rowId);
     // Remove acts on everything selected when the click is inside the selection, and on this row alone when it isn't.
     const selected = selectedRowIds();
     const targets = selected.includes(rowId) ? selected : [rowId];
@@ -250,7 +252,7 @@ export async function createDeviceGrid(options: GridOptions) {
           ? [{ id: "discard", label: "Discard invalid draft", run: () => store.discard(rowId, columnId) }]
           : []),
         { id: "above", label: "Add device above", icon: "add", run: () => options.onInsert(rowId) },
-        { id: "below", label: "Add device below", icon: "add", run: () => options.onInsert(store.document.devices[index + 1]?.id ?? null) },
+        { id: "below", label: "Add device below", icon: "add", run: () => options.onInsert(options.rows()[index + 1]?.id ?? null) },
         { separator: true },
         {
           id: "remove",
@@ -281,7 +283,7 @@ export async function createDeviceGrid(options: GridOptions) {
         max: 1200,
       })),
       // Only rows already drawn: the controls ask while mounting, before the first render.
-      ...store.document.devices.filter((row) => rows.has(row.id)).map((row) => ({
+      ...options.rows().filter((row) => rows.has(row.id)).map((row) => ({
         id: row.id,
         label: valueOf(row, "name"),
         axis: "row" as const,
@@ -303,7 +305,7 @@ export async function createDeviceGrid(options: GridOptions) {
   const reorder = await mountSpreadsheetReorder({
     root: table,
     getItems: () =>
-      store.document.devices.filter((row) => rows.has(row.id)).map((row) => ({
+      options.rows().filter((row) => rows.has(row.id)).map((row) => ({
         id: row.id,
         label: valueOf(row, "name"),
         axis: "row" as const,
@@ -339,7 +341,7 @@ export async function createDeviceGrid(options: GridOptions) {
 
   /** Rows the operator has selected: whole rows picked by number, or else every row with a selected cell. */
   function selectedRowIds(): string[] {
-    const order = store.document.devices.map((row) => row.id);
+    const order = options.rows().map((row) => row.id);
     if (pickedRows.length) return order.filter((id) => pickedRows.includes(id));
     const withCells = new Set<string>();
     for (const cell of table.querySelectorAll<HTMLElement>('td[data-hubble-spreadsheet-selected="true"], td[data-hubble-spreadsheet-active="true"]'))
@@ -347,7 +349,7 @@ export async function createDeviceGrid(options: GridOptions) {
     return order.filter((id) => withCells.has(id));
   }
   function pickRow(id: string, how: "one" | "range" | "toggle") {
-    const order = store.document.devices.map((row) => row.id);
+    const order = options.rows().map((row) => row.id);
     if (how === "range" && pickAnchor && order.includes(pickAnchor)) {
       const [from, to] = [order.indexOf(pickAnchor), order.indexOf(id)].sort((a, b) => a - b);
       pickedRows = order.slice(from, to! + 1);
@@ -442,7 +444,7 @@ export async function createDeviceGrid(options: GridOptions) {
   function renderLive() {
     if (disposed) return;
     const live = options.live();
-    for (const row of store.document.devices) {
+    for (const row of options.rows()) {
       const on = pinged(row) && valueOf(row, "host") !== "";
       const summary = live[row.id];
       const limit = rulesOf(row, store.document.settings).overMs;
@@ -469,7 +471,7 @@ export async function createDeviceGrid(options: GridOptions) {
     if (disposed) return;
     table.style.setProperty("--grid-text-size", `${view().textSize ?? 13}px`);
     if (visibleColumns(view()).map((column) => column.id).join(",") !== shownKey) buildColumns();
-    const ids = new Set(store.document.devices.map((row) => row.id));
+    const ids = new Set(options.rows().map((row) => row.id));
     for (const [id, tr] of rows)
       if (!ids.has(id)) {
         tr.remove();
@@ -488,7 +490,7 @@ export async function createDeviceGrid(options: GridOptions) {
     table.style.width = `${width}px`;
     headers.get("name")!.style.left = `${GUTTER}px`;
     corner.style.left = "0px";
-    for (const [index, row] of store.document.devices.entries()) {
+    for (const [index, row] of options.rows().entries()) {
       ensureRow(row);
       const tr = rows.get(row.id)!;
       if (body.children[index] !== tr) body.insertBefore(tr, body.children[index] ?? null);
@@ -527,7 +529,7 @@ export async function createDeviceGrid(options: GridOptions) {
         else delete cell.dataset.empty;
       }
     }
-    while (body.children.length > store.document.devices.length) body.lastElementChild!.remove();
+    while (body.children.length > options.rows().length) body.lastElementChild!.remove();
     pickedRows = pickedRows.filter((id) => ids.has(id));
     markPicked();
     renderLive();
@@ -543,6 +545,8 @@ export async function createDeviceGrid(options: GridOptions) {
     refreshLive: renderLive,
     select: (address: SpreadsheetAddress, focus = true) => controls.select(address, undefined, focus ? undefined : { focus: false }),
     selected: () => active,
+    /** The devices selected: whole rows picked by number, or rows with a selected cell. */
+    selectedRows: selectedRowIds,
     dispose() {
       disposed = true;
       unsubscribe();

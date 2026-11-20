@@ -1,11 +1,11 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, describe, expect, it } from "vitest";
-import { ModuleManifestSchema, type ModuleContext } from "@hubble/module-sdk";
+import { ModuleDocumentValueSchema, ModuleManifestSchema, type ModuleContext } from "@hubble/module-sdk";
 import { createBackend, type BackendOptions, type LiveReply } from "../src/backend.js";
 import { findFping, parsePingLine, pingArguments, Pinger, type PingProcess, type PingSample } from "../src/engine.js";
 import { History } from "../src/history.js";
 import source from "../src/manifest.js";
-import { applyMutation, bytesPerSecond, colorFor, colorsOf, defaultDocument, PING_COLORS, roundScale, scaleStep, stepScale, DOCUMENT_ID, deviceHasData, formatRate, insertRows, inverse, newDevice, normalizeValue, rulesOf, ruleText, setDeviceCount, validateDocument, validateValue, type DeviceRow, type Mutation, type PingDocument } from "../src/model.js";
+import { addSheet, moveRowsToSheet, moveSheet, openSheetId, removeSheet, renameSheet, sheetOf, sheetRows, sheetsOf, applyMutation, bytesPerSecond, colorFor, colorsOf, defaultDocument, PING_COLORS, roundScale, scaleStep, stepScale, DOCUMENT_ID, deviceHasData, formatRate, insertRows, inverse, newDevice, normalizeValue, rulesOf, ruleText, setDeviceCount, validateDocument, validateValue, type DeviceRow, type Mutation, type PingDocument } from "../src/model.js";
 import { DeviceWatch } from "../src/watch.js";
 
 const cleanup: (() => unknown)[] = [];
@@ -104,7 +104,7 @@ function backend(devices: DeviceRow[], options: BackendOptions & { connectionEna
 
 describe("the manifest", () => {
   it("is a valid workspace module with one full page", () => {
-    const manifest = ModuleManifestSchema.parse({ ...source, id: "network-ping", name: "Ping", version: "0.1.7", entry: "module.mjs", files: ["module.mjs", "ui/index.html", "ui/app.js", "ui/ping.svg"] });
+    const manifest = ModuleManifestSchema.parse({ ...source, id: "network-ping", name: "Ping", version: "0.1.8", entry: "module.mjs", files: ["module.mjs", "ui/index.html", "ui/app.js", "ui/ping.svg"] });
     expect(manifest.instanceScope).toBe("workspace");
     expect(manifest.pages?.[0]?.layout).toBe("full-page");
     expect(manifest.matrix?.triggers?.map((trigger) => trigger.id)).toEqual(["offline", "slow", "online"]);
@@ -249,6 +249,77 @@ describe("the saved device list", () => {
     expect(bad({ green: 0, yellow: null, orange: null })).toThrow(/0\.1 to 60000/u);
     expect(bad({ green: null, yellow: null, orange: null })).toThrow(/at least one/u);
     expect(() => validateDocument({ ...doc, view: { ...doc.view, bands: { green: null, yellow: 3, orange: null } } })).not.toThrow();
+  });
+
+  it("keeps devices on named sheets, and reads a list from before sheets as one sheet", () => {
+    const device = (id: string, name: string, sheetId?: string): DeviceRow => ({ id, values: { name, enabled: "TRUE", host: "", over: "", lost: "" }, ...(sheetId ? { sheetId } : {}) });
+    let doc: PingDocument = { ...defaultDocument(), devices: [device("a", "Router"), device("b", "Camera A"), device("c", "Camera B")] };
+    // A document from 0.1.7 has no sheets: one, Devices, holds everything.
+    expect(sheetsOf(doc)).toEqual([{ id: "devices", name: "Devices" }]);
+    expect(sheetRows(doc).map((row) => row.id)).toEqual(["a", "b", "c"]);
+    const apply = (operation: Mutation | null) => {
+      const before = doc;
+      doc = applyMutation(doc, operation!);
+      return { before, operation: operation! };
+    };
+
+    // Adding a sheet opens it, empty; a new device lands on it.
+    const added = apply(addSheet(doc, "cams", " Cameras "));
+    expect(sheetsOf(doc).map((sheet) => sheet.name)).toEqual(["Devices", "Cameras"]);
+    expect(openSheetId(doc)).toBe("cams");
+    expect(sheetRows(doc)).toEqual([]);
+    expect(newDevice(doc, "d").sheetId).toBe("cams");
+    expect(() => addSheet(doc, "x", "cameras")).toThrow("There is already a sheet called cameras.");
+    expect(() => addSheet(doc, "x", "  ")).toThrow("Give the sheet a name.");
+    expect(applyMutation(doc, inverse(added.before, added.operation)).sheets).toEqual([{ id: "devices", name: "Devices" }]);
+    expect(openSheetId(applyMutation(doc, inverse(added.before, added.operation)))).toBe("devices");
+
+    // Moving devices keeps their place in the list; the Devices box counts only the open sheet.
+    apply(moveRowsToSheet(doc, ["b", "c"], "cams"));
+    expect(sheetRows(doc, "cams").map((row) => row.id)).toEqual(["b", "c"]);
+    expect(sheetRows(doc, "devices").map((row) => row.id)).toEqual(["a"]);
+    expect(moveRowsToSheet(doc, ["b"], "cams"), "already there").toBeNull();
+    const grow = setDeviceCount(doc, 3, () => "e")!;
+    expect(grow.rows.filter((row) => sheetOf({ ...doc, devices: grow.rows }, row) === "cams")).toHaveLength(3);
+    expect(grow.rows.find((row) => row.id === "a")).toBeDefined();
+    const shrink = setDeviceCount(doc, 1, () => "x")!;
+    expect(shrink.removed.map((row) => row.id)).toEqual(["c"]);
+    expect(shrink.rows.map((row) => row.id)).toEqual(["a", "b"]);
+
+    // Rename and reorder.
+    apply(renameSheet(doc, "cams", "Cameras on set"));
+    expect(renameSheet(doc, "cams", "Cameras on set"), "same name").toBeNull();
+    expect(() => renameSheet(doc, "cams", "devices")).toThrow("There is already a sheet called devices.");
+    apply(moveSheet(doc, "cams", "devices"));
+    expect(sheetsOf(doc).map((sheet) => sheet.id)).toEqual(["cams", "devices"]);
+    // Router came from before sheets, with no sheet of its own; it stays on Devices when Cameras moves to the front.
+    expect(sheetRows(doc, "devices").map((row) => row.id)).toEqual(["a"]);
+
+    // The portable document an export carries keeps sheets, each device's sheet and the open sheet.
+    const portable = validateDocument(JSON.parse(JSON.stringify(ModuleDocumentValueSchema.parse(doc))));
+    expect(portable.sheets).toEqual(doc.sheets);
+    expect(portable.devices.map((row) => row.sheetId)).toEqual(doc.devices.map((row) => row.sheetId));
+    expect(portable.view.sheetId).toBe("cams");
+
+    // Removing a sheet takes its devices; Undo brings both back. The last sheet stays.
+    const removing = removeSheet(doc, "cams")!;
+    expect(removing.removed.map((row) => row.id)).toEqual(["b", "c"]);
+    const { removed: _gone, ...change } = removing;
+    const removed = apply(change);
+    expect(doc.devices.map((row) => row.id)).toEqual(["a"]);
+    expect(openSheetId(doc)).toBe("devices");
+    expect(removeSheet(doc, "devices"), "the last sheet stays").toBeNull();
+    doc = applyMutation(doc, inverse(removed.before, removed.operation));
+    expect(sheetRows(doc, "cams").map((row) => row.id)).toEqual(["b", "c"]);
+    expect(openSheetId(doc)).toBe("cams");
+
+    // A device that names a sheet that is gone, or none (as 0.1.7 adds them), is on the first sheet.
+    expect(sheetOf(doc, device("z", "Old", "gone"))).toBe("cams");
+    expect(sheetOf(doc, device("z", "Old"))).toBe("cams");
+    // Names stay unique across sheets, because keys pick devices by name.
+    expect(() => validateDocument({ ...doc, devices: [...doc.devices, device("z", "camera a", "devices")] })).toThrow(/already called/u);
+    expect(() => validateDocument({ ...doc, sheets: [{ id: "a", name: "One" }, { id: "b", name: "one" }] })).toThrow(/already a sheet called one/u);
+    expect(() => validateDocument({ ...doc, sheets: [] })).toThrow(/1 to 32 sheets/u);
   });
 
   it("works out the data Ping sends", () => {

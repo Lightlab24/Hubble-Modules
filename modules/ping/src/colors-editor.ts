@@ -23,6 +23,8 @@ export function createColorsEditor(options: ColorsEditorOptions) {
   const { button, panel } = options;
   const rows = panel.querySelector<HTMLElement>(".color-rows")!;
   const inputs = new Map<BandStep, HTMLInputElement>();
+  /** Times typed that couldn't be used. They stay as typed, marked, until fixed or the panel closes. */
+  const wrong = new Set<BandStep>();
 
   const line = (color: string, name: string, ...rest: Node[]) => {
     const row = document.createElement("div");
@@ -66,10 +68,10 @@ export function createColorsEditor(options: ColorsEditorOptions) {
   function refresh() {
     const bands = options.get();
     for (const [step, input] of inputs) {
+      if (document.activeElement === input || wrong.has(step)) continue;
       const value = bands?.[step] ?? null;
       const text = value === null ? "" : String(value);
-      if (document.activeElement !== input && input.value !== text) input.value = text;
-      if (document.activeElement !== input) input.removeAttribute("aria-invalid");
+      if (input.value !== text) input.value = text;
     }
     const last = bands ? [...BAND_STEPS].reverse().map((step) => bands[step]).find((value) => value !== null) : undefined;
     overText.textContent = last ? `over ${label(last)}` : "over the last time";
@@ -93,10 +95,12 @@ export function createColorsEditor(options: ColorsEditorOptions) {
     }
     if (problem) {
       // The field keeps what was typed and shows it is wrong; the saved times stay as they were.
+      wrong.add(step);
       input.setAttribute("aria-invalid", "true");
       options.onError(problem);
       return;
     }
+    wrong.delete(step);
     input.removeAttribute("aria-invalid");
     // Emptying every time goes back to following the alert limit.
     options.set(BAND_STEPS.some((other) => next[other] !== null) ? next : null);
@@ -112,6 +116,9 @@ export function createColorsEditor(options: ColorsEditorOptions) {
   }
   function close() {
     if (panel.hidden) return;
+    // A wrong time that was never fixed goes back to the saved one.
+    for (const step of wrong) inputs.get(step)!.removeAttribute("aria-invalid");
+    wrong.clear();
     panel.hidden = true;
     button.setAttribute("aria-expanded", "false");
   }

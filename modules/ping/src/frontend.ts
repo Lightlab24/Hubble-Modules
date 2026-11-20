@@ -1,6 +1,6 @@
 import { connectModuleFrontend, ModuleFrontendValueSchema } from "@hubble/module-sdk/frontend";
 import { confirm, mountSegmented, mountStepper, mountSwitch, showToast } from "@hubble/module-sdk/controls";
-import { mountSpreadsheetColumnEditor, mountSpreadsheetToolbar } from "@hubble/module-sdk/spreadsheet-controls";
+import { mountSpreadsheetColumnEditor, mountSpreadsheetSheets, mountSpreadsheetToolbar } from "@hubble/module-sdk/spreadsheet-controls";
 import type { LiveReply, LiveRequest } from "./backend.js";
 import { createColorsEditor } from "./colors-editor.js";
 import { DraftStore, type SaveReceipt } from "./draft-store.js";
@@ -26,6 +26,14 @@ import {
   ALERT_OVER_MS,
   formatDuration,
   removeRows,
+  addSheet,
+  moveRowsToSheet,
+  moveSheet,
+  openSheetId,
+  removeSheet,
+  renameSheet,
+  sheetRows,
+  sheetsOf,
   deviceHasData,
   setDeviceCount,
   SIZES_BYTES,
@@ -56,7 +64,7 @@ try {
     return (await client.call("save", ModuleFrontendValueSchema.parse({ operation }))) as unknown as SaveReceipt;
   });
   let live: LiveReply = { sequence: 0, now: Date.now(), problem: "", devices: {}, timeline: null };
-  let selectedId: string | undefined = store.document.devices[0]?.id;
+  let selectedId: string | undefined = sheetRows(store.document)[0]?.id;
   let fetching = false;
   /** Counts every change to what the timeline should show: its stretch of time, or its device. */
   let windowVersion = 0;
@@ -188,7 +196,7 @@ try {
 
   /** The bar colours for the device on show: from the user's times, or following its alert limit. */
   function shownColors(): Colors {
-    const row = store.document.devices.find((item) => item.id === selectedId) ?? store.document.devices[0];
+    const row = sheetRows(store.document).find((item) => item.id === selectedId) ?? sheetRows(store.document)[0];
     return colorsOf(view().bands, row ? rulesOf(row, settings()).overMs : settings().alertOverMs);
   }
   const colorsEditor = createColorsEditor({
@@ -291,14 +299,18 @@ try {
     if (still.length) store.submit(removeRows(store.document, still));
   }
 
+  /** Lets the sheet tabs offer "Move selected rows…" as soon as rows are selected. Set once they are mounted. */
+  let refreshTabs = () => {};
   const grid = await createDeviceGrid({
     table: el<HTMLTableElement>("device-grid"),
     viewport: el("viewport"),
     store,
     live: () => live.devices,
+    rows: () => sheetRows(store.document),
     onInsert: insert,
     onRemove: (rowIds) => void removeDevices(rowIds),
     onSelect(rowId) {
+      refreshTabs();
       if (rowId === selectedId) return;
       selectedId = rowId;
       windowVersion++;
@@ -307,6 +319,65 @@ try {
     },
     onError: report,
   });
+
+  // Sheets: Hubble's tabs, just above the timeline. Each sheet holds its own devices; all are pinged.
+  const tryChange = (make: () => Mutation | null) => {
+    try {
+      const operation = make();
+      if (operation) store.submit(operation);
+    } catch (error) {
+      report(error instanceof Error ? error.message : String(error));
+    }
+  };
+  /** Opens a sheet. Which sheet is open is saved with the page but isn't an undo step. */
+  function openSheet(id: string) {
+    if (id === openSheetId(store.document)) return;
+    store.submit({ kind: "view", view: { ...clone(view()), sheetId: id }, expected: clone(view()) }, false);
+  }
+  const sheetTabs = await mountSpreadsheetSheets({
+    root: el("sheet-tabs"),
+    getState: () => ({
+      sheets: sheetsOf(store.document).map(({ id, name }) => ({ id, name })),
+      activeSheetId: openSheetId(store.document),
+      counts: new Map(sheetsOf(store.document).map((sheet) => [sheet.id, sheetRows(store.document, sheet.id).length])),
+      canMoveSelection: grid.selectedRows().length > 0,
+    }),
+    onSelect: openSheet,
+    onCreate: (name) => tryChange(() => addSheet(store.document, crypto.randomUUID(), name)),
+    onRename: (id, name) => tryChange(() => renameSheet(store.document, id, name)),
+    onReorder: (id, beforeId) => tryChange(() => moveSheet(store.document, id, beforeId)),
+    onMoveSelection: (id) => tryChange(() => moveRowsToSheet(store.document, grid.selectedRows(), id)),
+    async onRemove(id) {
+      const operation = removeSheet(store.document, id);
+      if (!operation) return;
+      const { removed, ...mutation } = operation;
+      const name = sheetsOf(store.document).find((sheet) => sheet.id === id)?.name ?? "this sheet";
+      // An empty sheet, or one with only counted rows, goes at once. Filled-in devices are named first.
+      const filled = removed.filter(deviceHasData);
+      if (filled.length) {
+        const names = filled.slice(0, 8).map((row) => valueOf(row, "name")).join(", ");
+        const sure = await confirm({
+          title: `Remove the ${name} sheet?`,
+          message: `This takes the sheet and its ${removed.length} device${removed.length === 1 ? "" : "s"} off, with their addresses and alert settings, and stops pinging them. Filled in: ${names}${filled.length > 8 ? ` and ${filled.length - 8} more` : ""}. Undo brings them back.`,
+          confirmLabel: "Remove sheet",
+          danger: true,
+        });
+        if (!sure) return;
+      }
+      // The sheets may have changed while the question was open, so work it out again.
+      void mutation;
+      tryChange(() => {
+        const again = removeSheet(store.document, id);
+        if (!again) return null;
+        const { removed: _gone, ...change } = again;
+        return change;
+      });
+    },
+  });
+
+  refreshTabs = () => sheetTabs.refresh();
+  // A selection made by dragging or with the keyboard changes no device, so look again after each.
+  for (const type of ["pointerup", "keyup"]) el("device-grid").addEventListener(type, () => refreshTabs());
 
   const columnEditor = await mountSpreadsheetColumnEditor({
     root: el("columns"),
@@ -331,7 +402,10 @@ try {
   });
 
   function updateTimeline() {
-    const row = store.document.devices.find((item) => item.id === selectedId) ?? store.document.devices[0];
+    // The timeline shows a device on the open sheet: the one picked there, or else its first.
+    const onSheet = sheetRows(store.document);
+    const row = onSheet.find((item) => item.id === selectedId) ?? onSheet[0];
+    if (row?.id !== selectedId) windowVersion++;
     selectedId = row?.id;
     const summary = row ? live.devices[row.id] : undefined;
     const rules = row ? rulesOf(row, settings()) : { overMs: null, lostMs: null };
@@ -391,11 +465,14 @@ try {
     el("data-use").textContent = settings().pinging
       ? `${count} device${count === 1 ? "" : "s"} · ${settings().sizeBytes} bytes every ${formatInterval(settings().intervalMs)} · about ${formatRate(bytesPerSecond(count, settings()))} in total · Alerts go to the Status Log${settings().notify ? ", a notification" : ""} and any key that shows the device`
       : "Paused · nothing is being sent";
-    // Never overwrite the number while it is being typed.
+    // The Devices box counts the open sheet. Never overwrite the number while it is being typed.
+    const onSheet = sheetRows(store.document).length;
     const counter = el<HTMLInputElement>("device-count");
-    if (document.activeElement !== counter && counter.value !== String(devices.length)) counter.value = String(devices.length);
-    el("empty").hidden = devices.length > 0;
+    if (document.activeElement !== counter && counter.value !== String(onSheet)) counter.value = String(onSheet);
+    el("empty").hidden = onSheet > 0;
+    el("empty-title").textContent = devices.length ? "No devices on this sheet" : "No devices yet";
     el<HTMLButtonElement>("add-device").disabled = devices.length >= MAX_DEVICES;
+    sheetTabs.refresh();
     updateTimeline();
   }
   store.subscribe(update);
@@ -429,7 +506,7 @@ try {
       report(error instanceof Error ? error.message : String(error));
     } finally {
       counting = false;
-      countInput.value = String(store.document.devices.length);
+      countInput.value = String(sheetRows(store.document).length);
     }
   }
   countInput.addEventListener("change", () => void applyCount());

@@ -110,7 +110,16 @@ export const editableColumns = columns.filter((column) => !column.live).map((col
 export interface DeviceRow {
   readonly id: string;
   readonly values: Record<string, string>;
+  /** The sheet the device is on. Absent, or a sheet that is gone, is the first sheet. */
+  readonly sheetId?: string;
 }
+/** A named tab of devices. Every device is on one; all of them are pinged whichever is open. */
+export interface Sheet {
+  id: string;
+  name: string;
+}
+export const FIRST_SHEET: Sheet = { id: "devices", name: "Devices" };
+export const MAX_SHEETS = 32;
 export interface Settings {
   intervalMs: number;
   sizeBytes: number;
@@ -134,10 +143,14 @@ export interface View {
   scaleMs?: number;
   /** The times for green, yellow and orange bars on the timeline and the strips. Absent follows the alert limit. */
   bands?: Bands;
+  /** The sheet on show. Absent, or a sheet that is gone, is the first sheet. */
+  sheetId?: string;
 }
 export interface PingDocument {
   version: 1;
   devices: DeviceRow[];
+  /** The sheets in order. Absent is one sheet, Devices, holding every device. */
+  sheets?: Sheet[];
   settings: Settings;
   view: View;
 }
@@ -153,7 +166,12 @@ export type Mutation =
   /** Adding, removing and reordering devices replace the list as one step. */
   | { kind: "rows"; rows: DeviceRow[]; expected: DeviceRow[] }
   | { kind: "settings"; settings: Settings; expected: Settings }
-  | { kind: "view"; view: View; expected: View };
+  | { kind: "view"; view: View; expected: View }
+  /**
+   * Adding, renaming, moving or removing sheets, as one step. Removing a sheet takes its devices
+   * with it, and adding one opens it, so the device list and the open sheet can change too.
+   */
+  | { kind: "sheets"; sheets: Sheet[]; expected: Sheet[]; rows?: DeviceRow[]; expectedRows?: DeviceRow[]; open?: string; expectedOpen?: string };
 
 export const clone = <T>(value: T): T => structuredClone(value);
 const sorted = (value: unknown): unknown =>
@@ -319,8 +337,23 @@ export function validateDocument(value: unknown): PingDocument {
     if (names.has(name)) throw Error(`Another device is already called ${valueOf(row, "name").trim()}. Buttons pick devices by name.`);
     names.add(name);
   }
+  if (doc.sheets !== undefined) {
+    if (!Array.isArray(doc.sheets) || !doc.sheets.length || doc.sheets.length > MAX_SHEETS) throw Error(`Use from 1 to ${MAX_SHEETS} sheets.`);
+    const sheetIds = new Set<string>();
+    const sheetNames = new Set<string>();
+    for (const sheet of doc.sheets) {
+      if (!sheet || typeof sheet.id !== "string" || !sheet.id || sheet.id.length > 96 || sheetIds.has(sheet.id)) throw Error("Invalid sheet identity.");
+      if (typeof sheet.name !== "string" || !sheet.name.trim() || sheet.name.length > 64) throw Error("Give each sheet a name of up to 64 characters.");
+      const name = sheet.name.trim().toLowerCase();
+      if (sheetNames.has(name)) throw Error(`There is already a sheet called ${sheet.name.trim()}.`);
+      sheetIds.add(sheet.id);
+      sheetNames.add(name);
+    }
+  }
+  for (const row of doc.devices) if (row.sheetId !== undefined && (typeof row.sheetId !== "string" || row.sheetId.length > 96)) throw Error("Invalid device sheet.");
   validateSettings(doc.settings);
   validateView(doc.view);
+  if (doc.view.sheetId !== undefined && (typeof doc.view.sheetId !== "string" || doc.view.sheetId.length > 96)) throw Error("Invalid open sheet.");
   return doc;
 }
 
@@ -341,6 +374,19 @@ export function applyMutation(document: PingDocument, operation: Mutation): Ping
   } else if (operation.kind === "settings") {
     if (!same(next.settings, operation.expected)) throw Error("The ping settings changed before this change saved.");
     next.settings = clone(operation.settings);
+  } else if (operation.kind === "sheets") {
+    if (!same(sheetsOf(next), operation.expected)) throw Error("The sheets changed before this change saved.");
+    if (operation.rows) {
+      if (!same(next.devices, operation.expectedRows)) throw Error("The device list changed before this change saved.");
+      next.devices = clone(operation.rows);
+    } else {
+      // A device with no sheet of its own is on the first sheet. Write its sheet down before the
+      // sheets change, so that moving another sheet to the front never moves devices with it.
+      const before = next;
+      next.devices = next.devices.map((row) => (row.sheetId === sheetOf(before, row) ? row : { ...row, sheetId: sheetOf(before, row) }));
+    }
+    next.sheets = clone(operation.sheets);
+    if (operation.open !== undefined) next.view = { ...next.view, sheetId: operation.open };
   } else {
     if (!same(next.view, operation.expected)) throw Error("The layout changed before this change saved.");
     next.view = clone(operation.view);
@@ -359,14 +405,101 @@ export function inverse(before: PingDocument, operation: Mutation): Mutation {
     };
   if (operation.kind === "rows") return { kind: "rows", rows: clone(operation.expected), expected: clone(operation.rows) };
   if (operation.kind === "settings") return { kind: "settings", settings: clone(operation.expected), expected: clone(operation.settings) };
+  if (operation.kind === "sheets")
+    return {
+      kind: "sheets",
+      sheets: clone(operation.expected),
+      expected: clone(operation.sheets),
+      ...(operation.rows ? { rows: clone(operation.expectedRows!), expectedRows: clone(operation.rows) } : {}),
+      ...(operation.open !== undefined ? { open: before.view.sheetId ?? sheetsOf(before)[0]!.id, expectedOpen: operation.open } : {}),
+    };
   return { kind: "view", view: clone(operation.expected), expected: clone(operation.view) };
 }
 
 /** A new device, named after the first free "Device N". */
-export function newDevice(document: PingDocument, id: string): DeviceRow {
+export function newDevice(document: PingDocument, id: string, sheetId = openSheetId(document)): DeviceRow {
   let number = document.devices.length + 1;
   while (document.devices.some((row) => sameName(valueOf(row, "name"), `Device ${number}`))) number++;
-  return { id, values: { name: `Device ${number}`, enabled: "TRUE", host: "", over: "", lost: "" } };
+  return { id, values: { name: `Device ${number}`, enabled: "TRUE", host: "", over: "", lost: "" }, sheetId };
+}
+
+/** The sheets in order; a document from before sheets has one, Devices, holding everything. */
+export const sheetsOf = (document: PingDocument): Sheet[] => (document.sheets?.length ? document.sheets : [FIRST_SHEET]);
+/** The sheet a device is on. */
+export function sheetOf(document: PingDocument, row: DeviceRow): string {
+  const sheets = sheetsOf(document);
+  return row.sheetId !== undefined && sheets.some((sheet) => sheet.id === row.sheetId) ? row.sheetId : sheets[0]!.id;
+}
+/** The sheet on show. */
+export function openSheetId(document: PingDocument): string {
+  const sheets = sheetsOf(document);
+  return sheets.some((sheet) => sheet.id === document.view.sheetId) ? document.view.sheetId! : sheets[0]!.id;
+}
+/** The devices on a sheet, in list order. */
+export const sheetRows = (document: PingDocument, sheetId = openSheetId(document)) => document.devices.filter((row) => sheetOf(document, row) === sheetId);
+
+type SheetsChange = Extract<Mutation, { kind: "sheets" }>;
+const sheetsChange = (document: PingDocument, sheets: Sheet[], extra: Partial<SheetsChange> = {}): SheetsChange => ({
+  kind: "sheets",
+  sheets,
+  expected: clone(sheetsOf(document)),
+  ...extra,
+});
+function checkName(document: PingDocument, name: string, exceptId?: string) {
+  const trimmed = name.trim();
+  if (!trimmed) throw Error("Give the sheet a name.");
+  if (trimmed.length > 64) throw Error("Use a sheet name of up to 64 characters.");
+  if (sheetsOf(document).some((sheet) => sheet.id !== exceptId && sameName(sheet.name, trimmed))) throw Error(`There is already a sheet called ${trimmed}.`);
+  return trimmed;
+}
+/** A new, empty sheet after the others, opened. */
+export function addSheet(document: PingDocument, id: string, name: string): SheetsChange {
+  const sheets = sheetsOf(document);
+  if (sheets.length >= MAX_SHEETS) throw Error(`Use up to ${MAX_SHEETS} sheets.`);
+  return sheetsChange(document, [...clone(sheets), { id, name: checkName(document, name) }], { open: id, expectedOpen: openSheetId(document) });
+}
+export function renameSheet(document: PingDocument, id: string, name: string): SheetsChange | null {
+  const trimmed = checkName(document, name, id);
+  const sheets = clone(sheetsOf(document));
+  const sheet = sheets.find((item) => item.id === id);
+  if (!sheet || sheet.name === trimmed) return null;
+  sheet.name = trimmed;
+  return sheetsChange(document, sheets);
+}
+export function moveSheet(document: PingDocument, id: string, beforeId: string | null): SheetsChange | null {
+  const sheets = clone(sheetsOf(document));
+  const sheet = sheets.find((item) => item.id === id);
+  if (!sheet || id === beforeId) return null;
+  const rest = sheets.filter((item) => item !== sheet);
+  const index = beforeId ? rest.findIndex((item) => item.id === beforeId) : -1;
+  rest.splice(index < 0 ? rest.length : index, 0, sheet);
+  return same(rest.map((item) => item.id), sheets.map((item) => item.id)) ? null : sheetsChange(document, rest);
+}
+/** Removes a sheet and its devices as one step; the last sheet stays. */
+export function removeSheet(document: PingDocument, id: string): (SheetsChange & { removed: DeviceRow[] }) | null {
+  const sheets = sheetsOf(document);
+  const index = sheets.findIndex((sheet) => sheet.id === id);
+  if (index < 0 || sheets.length < 2) return null;
+  const rest = clone(sheets.filter((sheet) => sheet.id !== id));
+  const removed = sheetRows(document, id);
+  // Devices left on the first sheet by default keep it if the first sheet is the one going.
+  const rows = document.devices.filter((row) => !removed.includes(row)).map((row) => ({ ...clone(row), sheetId: sheetOf(document, row) }));
+  const open = openSheetId(document);
+  return {
+    ...sheetsChange(document, rest, {
+      rows,
+      expectedRows: clone(document.devices),
+      ...(open === id ? { open: (sheets[index + 1] ?? sheets[index - 1])!.id, expectedOpen: open } : {}),
+    }),
+    removed: clone(removed),
+  };
+}
+/** Moves devices to another sheet, keeping their place in the list. */
+export function moveRowsToSheet(document: PingDocument, ids: readonly string[], sheetId: string): Mutation | null {
+  if (!sheetsOf(document).some((sheet) => sheet.id === sheetId)) return null;
+  const moving = document.devices.filter((row) => ids.includes(row.id) && sheetOf(document, row) !== sheetId);
+  if (!moving.length) return null;
+  return { kind: "rows", rows: document.devices.map((row) => (moving.includes(row) ? { ...clone(row), sheetId } : clone(row))), expected: clone(document.devices) };
 }
 
 /** A row someone has only counted, not filled in, can go without asking. */
@@ -375,12 +508,19 @@ export const deviceHasData = (row: DeviceRow): boolean =>
     id === "name" ? !/^Device \d+$/u.test(value.trim()) : id === "enabled" ? value !== "TRUE" : value !== "",
   );
 
-/** Sets how many devices there are: adds blank rows at the end, or takes rows off the end, as one undo step. */
+/** Sets how many devices the open sheet has: adds blank rows at its end, or takes its last rows off, as one undo step. */
 export function setDeviceCount(document: PingDocument, count: number, newId: () => string): (Extract<Mutation, { kind: "rows" }> & { removed: DeviceRow[] }) | null {
-  if (!Number.isInteger(count) || count < 0 || count > MAX_DEVICES) throw Error(`Use from 0 to ${MAX_DEVICES} devices.`);
-  const have = document.devices.length;
+  const mine = sheetRows(document);
+  const others = document.devices.length - mine.length;
+  const most = MAX_DEVICES - others;
+  if (!Number.isInteger(count) || count < 0 || count > most)
+    throw Error(others ? `Use from 0 to ${most} devices on this sheet (${MAX_DEVICES} in all).` : `Use from 0 to ${MAX_DEVICES} devices.`);
+  const have = mine.length;
   if (count === have) return null;
-  if (count < have) return { kind: "rows", rows: clone(document.devices.slice(0, count)), expected: clone(document.devices), removed: clone(document.devices.slice(count)) };
+  if (count < have) {
+    const removed = mine.slice(count);
+    return { kind: "rows", rows: clone(document.devices.filter((row) => !removed.includes(row))), expected: clone(document.devices), removed: clone(removed) };
+  }
   const next = clone(document);
   for (let index = have; index < count; index++) next.devices.push(newDevice(next, newId()));
   return { kind: "rows", rows: next.devices, expected: clone(document.devices), removed: [] };
