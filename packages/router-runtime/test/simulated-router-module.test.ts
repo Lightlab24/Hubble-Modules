@@ -262,7 +262,7 @@ it.each(routers)(
       expect(publishState).toHaveBeenLastCalledWith(
         expect.objectContaining({
           phase: "ready",
-          message: "Simulated router",
+          message: null,
           values: expect.objectContaining({ simulated: true }),
         }),
       ),

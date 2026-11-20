@@ -36,14 +36,14 @@ it("adds the routing revision to state and republishes when it changes", () => {
   );
 });
 
-it("marks a simulated router's state and gives a ready one a message", () => {
+it("marks a simulated router's state and adds no message, which Hubble would show as an error", () => {
   const publish = vi.fn();
   const simulated = createRoutingStatePublisher(publish, { simulated: true });
   simulated.publish(state);
   expect(publish).toHaveBeenLastCalledWith(
     expect.objectContaining({
       phase: "ready",
-      message: "Simulated router",
+      message: null,
       values: {
         model: "Videohub",
         routingGroupsRevision: null,

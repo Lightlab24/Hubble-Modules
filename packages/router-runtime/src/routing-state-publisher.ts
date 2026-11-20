@@ -17,11 +17,9 @@ export function createRoutingStatePublisher(
   let latest: PublishedState | undefined;
   let revision: string | null = null;
   const send = (state: PublishedState) =>
+    // No message is added: Hubble 2.3.0 shows a ready module's message as its connection error.
     publishState({
       ...state,
-      ...(simulated && state.phase === "ready" && state.message === null
-        ? { message: "Simulated router" }
-        : {}),
       values: {
         ...state.values,
         routingGroupsRevision: revision,
