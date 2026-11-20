@@ -9,9 +9,8 @@
  * found it: nothing selected.
  *
  * Parameter numbers and behaviour were read from a Carbonite Ultra, software 9.2.1.
- * Adding, reading and deleting a device were run on that switcher. Changing a device that
- * already exists, and Enable/Disable, are written the way the form suggests and have not
- * been run on a real switcher yet.
+ * Adding, reading, changing (options, port, transport and TSL version), enabling, disabling
+ * and deleting a device were all run on that switcher.
  */
 import {
   cstring,
@@ -94,8 +93,16 @@ const CHANGES_SAVE = 1;
 const CHANGES_CANCEL = 0;
 const ADD_DEVICE = 0;
 const DELETE_DEVICE = 1;
-const DISABLE_DEVICE = 2;
-const ENABLE_DEVICE = 3;
+// The value is the label the button shows afterwards: 2 leaves "Disable Device" showing, so
+// the device is on; 3 leaves "Enable Device" showing, so it is off. Seen on the real switcher.
+const ENABLE_DEVICE = 2;
+const DISABLE_DEVICE = 3;
+/** How long the list is given to show a change the switcher has just accepted. */
+const LIST_SETTLE_MS = 2500;
+/** How long a form that looks in use is watched before it is called busy. */
+const FORM_SETTLE_MS = 1200;
+/** The real switcher's list shows an Enable or Disable about 400 ms after it is written. */
+const ENABLE_SETTLE_MS = 2500;
 const TRANSPORT_TCP = 0;
 const TRANSPORT_UDP = 1;
 const NOT_FOUND = 0x11;
@@ -309,7 +316,38 @@ async function identify(client: OgpBinaryClient): Promise<{ product: string; sof
   return { product: engine || name || "Ross switcher", software };
 }
 
+/**
+ * The switcher's list is seven columns read one after another, and the switcher fills them in
+ * one at a time just after a save, a delete or a new connection to a device. A read that
+ * catches it halfway is taken again for a short while before it is called a real change.
+ */
 async function readRows(client: OgpBinaryClient): Promise<SwitcherDeviceRow[]> {
+  const until = Date.now() + LIST_SETTLE_MS;
+  for (;;) {
+    try {
+      return await readRowsOnce(client);
+    } catch (error) {
+      if (!(error instanceof SwitcherError) || error.message !== LIST_CHANGED || Date.now() >= until)
+        throw error;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+  }
+}
+
+/** Reads the list until it shows what is expected, or the wait runs out. Returns the last reading. */
+async function readRowsUntil(
+  client: OgpBinaryClient,
+  expected: (rows: readonly SwitcherDeviceRow[]) => boolean,
+): Promise<SwitcherDeviceRow[]> {
+  const until = Date.now() + LIST_SETTLE_MS;
+  for (;;) {
+    const rows = await readRows(client);
+    if (expected(rows) || Date.now() >= until) return rows;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+}
+
+async function readRowsOnce(client: OgpBinaryClient): Promise<SwitcherDeviceRow[]> {
   const column = async (oid: number) => readStrings(await client.get(oid));
   let slots: string[];
   try {
@@ -353,6 +391,20 @@ async function readFormState(client: OgpBinaryClient): Promise<FormState> {
     type: await getInt(client, SWITCHER_OID.type),
     changes: await getInt(client, SWITCHER_OID.changes),
   };
+}
+
+/**
+ * Whether nobody is using the form. The real switcher takes a moment to show an emptied form
+ * after a device is put away, so a form that looks in use is looked at again for a short
+ * while. Someone editing in DashBoard stays there far longer than this wait.
+ */
+async function formStaysBusy(client: OgpBinaryClient): Promise<boolean> {
+  const until = Date.now() + FORM_SETTLE_MS;
+  for (;;) {
+    if (formIsIdle(await readFormState(client))) return false;
+    if (Date.now() >= until) return true;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
 }
 
 async function driverChoices(client: OgpBinaryClient): Promise<DriverChoices> {
@@ -588,7 +640,15 @@ async function confirmSaved(
   settings: SwitcherDeviceSettings,
 ): Promise<{ rows: SwitcherDeviceRow[]; mine: SwitcherMine }> {
   const { client } = session;
-  let rows = await readRows(client);
+  const asAsked = (row: SwitcherDeviceRow) =>
+    row.type === TYPE_TSL_UMD_LABEL &&
+    protocolOfDriver(row.driver) === settings.protocol &&
+    row.ip === settings.ip &&
+    row.port === settings.port;
+  let rows = await readRowsUntil(client, (list) => {
+    const named = list.filter((row) => row.name === settings.name);
+    return named.length === 1 && !!named[0] && asAsked(named[0]);
+  });
   let saved = rows.filter((row) => row.name === settings.name);
   const row = saved[0];
   if (saved.length !== 1 || !row) {
@@ -596,27 +656,26 @@ async function confirmSaved(
     session.editing = true;
     throw new SwitcherError(NOT_KEPT);
   }
-  if (
-    row.type !== TYPE_TSL_UMD_LABEL ||
-    protocolOfDriver(row.driver) !== settings.protocol ||
-    row.ip !== settings.ip ||
-    row.port !== settings.port
-  )
-    throw new SwitcherError(NOT_KEPT);
+  if (!asAsked(row)) throw new SwitcherError(NOT_KEPT);
   checkOthersUnchanged(before, rows, mineBefore, row);
   // After a save the form shows the saved device. Choose it only if it shows something else.
   if ((await getInt(client, SWITCHER_OID.selectedRow)) !== row.row) await selectRow(session, row.row);
   session.moved = true;
   if (row.enabled !== settings.enabled) {
-    // Not yet run on a real switcher: Enable/Disable acts on the device loaded in the form.
+    // Enable/Disable acts at once on the device loaded in the form, with no Save. The list
+    // catches up a moment later, so it is read until it agrees or the wait runs out.
     await client.set(
       SWITCHER_OID.enableDisable,
       int32(settings.enabled ? ENABLE_DEVICE : DISABLE_DEVICE),
     );
-    rows = await readRows(client);
-    saved = rows.filter((candidate) => candidate.name === settings.name);
-    if (saved.length !== 1 || saved[0]?.enabled !== settings.enabled)
-      throw new SwitcherError(NOT_KEPT);
+    const until = Date.now() + ENABLE_SETTLE_MS;
+    for (;;) {
+      rows = await readRows(client);
+      saved = rows.filter((candidate) => candidate.name === settings.name);
+      if (saved.length === 1 && saved[0]?.enabled === settings.enabled) break;
+      if (Date.now() >= until) throw new SwitcherError(NOT_KEPT);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
     checkOthersUnchanged(before, rows, mineBefore, saved[0] ?? row);
   }
   const final = saved[0] ?? row;
@@ -683,7 +742,7 @@ async function updateDevice(
 
 async function startWrite(session: Session): Promise<SwitcherDeviceRow[]> {
   const before = await readRows(session.client);
-  if (!formIsIdle(await readFormState(session.client))) throw new SwitcherError(BUSY);
+  if (await formStaysBusy(session.client)) throw new SwitcherError(BUSY);
   return before;
 }
 
@@ -696,7 +755,7 @@ export async function readSwitcher(
     const { client } = session;
     const about = await identify(client);
     const devices = await readRows(client);
-    const formBusy = !formIsIdle(await readFormState(client));
+    const formBusy = await formStaysBusy(client);
     const row = findMine(devices, deviceName);
     if (!row) return { ...about, devices, mine: null, formBusy };
     if (formBusy || row.type !== TYPE_TSL_UMD_LABEL)
@@ -742,7 +801,10 @@ export async function deleteDevice(
     if (mine.type !== TYPE_TSL_UMD_LABEL) throw new SwitcherError(notTslDevice(mine));
     await openRow(session, mine);
     await client.set(SWITCHER_OID.deleteDevice, int32(DELETE_DEVICE));
-    const after = await readRows(client);
+    const after = await readRowsUntil(
+      client,
+      (list) => !list.some((row) => row.name === deviceName || row.slot === mine.slot),
+    );
     if (after.some((row) => row.name === deviceName || row.slot === mine.slot))
       throw new SwitcherError(NOT_KEPT);
     checkOthersUnchanged(before, after, mine, null);

@@ -304,12 +304,24 @@ describe("sending this computer's device", () => {
     expect(fake.devices[3]).toMatchObject({ driverKey: FAKE_DRIVER.tsl31, port: 5727, transport: 0 });
   });
 
+  it("waits out a list the switcher is still filling in after a save or a delete", async () => {
+    // Seen on the real switcher: the list's columns disagree for a moment after a change.
+    const fake = await start({ listSettlesAfterMs: 700 });
+    const added = await sendDevice({ ...at(fake), settings: HUBBLE });
+    expect(added.mine).toMatchObject({ slot: 3, name: "HUBBLE" });
+    expect(fake.devices).toEqual(withHubble());
+    const gone = await deleteDevice({ ...at(fake), deviceName: "HUBBLE" });
+    expect(gone.mine).toBeNull();
+    expect(gone.devices.map((row) => row.name)).toEqual(["CP", "ADAM", "RTR TALL"]);
+    expect(fake.formIsIdle).toBe(true);
+  });
+
   it("turns its device off and on without touching its settings", async () => {
     const fake = await start();
     const off = await sendDevice({ ...at(fake), settings: { ...HUBBLE, enabled: false } });
     expect(fake.writes.slice(-3)).toEqual([
       w(FAKE_OID.changes, 1),
-      w(FAKE_OID.enableDisable, 2),
+      w(FAKE_OID.enableDisable, 3),
       w(FAKE_OID.selectedRow, 0),
     ]);
     expect(off.mine).toMatchObject({ enabled: false, settings: { ...HUBBLE, enabled: false } });
@@ -318,7 +330,7 @@ describe("sending this computer's device", () => {
     const on = await sendDevice({ ...at(fake), settings: HUBBLE });
     expect(fake.writes).toEqual([
       w(FAKE_OID.selectedRow, 4),
-      w(FAKE_OID.enableDisable, 3),
+      w(FAKE_OID.enableDisable, 2),
       w(FAKE_OID.selectedRow, 0),
     ]);
     expect(on.mine?.enabled).toBe(true);

@@ -1,7 +1,9 @@
 // Runs the built TSL Tally page against the real backend, outside Hubble, with a pretend Ross
 // switcher on this computer. The page sits in the same kind of sandboxed frame Hubble gives it,
 // and the shared control files are read, unchanged, from an installed Hubble
-// (TSL_RENDERER_ASSETS). Nothing here reaches a real switcher.
+// (TSL_RENDERER_ASSETS). Nothing here reaches a real switcher unless TSL_PREVIEW_SWITCHER names
+// one: then the page talks to that switcher, this computer's real addresses are used, and the
+// pretend switcher sends no tally.
 import dgram from "node:dgram";
 import net from "node:net";
 import { createServer } from "node:http";
@@ -55,8 +57,10 @@ const sendTally = (onlyChanged: boolean) => {
     }
   }
 };
+const realSwitcher = process.env.TSL_PREVIEW_SWITCHER || "";
 let ticks = 0;
 setInterval(() => {
+  if (realSwitcher) return;
   // A cut every few seconds, and everything again now and then, as the real switcher does.
   // Every fourth cut leaves program and preview on the same input, which a Ross switcher
   // sends as green, amber and red together.
@@ -75,7 +79,7 @@ const settings: Record<string, unknown> = {
   sourceAddress: "",
   staleAfterMs: 0,
 };
-let saved = { id: SWITCHER_DOCUMENT_ID, version: 1, revision: null as string | null, value: { ...defaultSwitcherDocument(), host: process.env.TSL_PREVIEW_EMPTY ? "" : `127.0.0.1:${fake.port}` } };
+let saved = { id: SWITCHER_DOCUMENT_ID, version: 1, revision: null as string | null, value: { ...defaultSwitcherDocument(), host: realSwitcher || (process.env.TSL_PREVIEW_EMPTY ? "" : `127.0.0.1:${fake.port}`) } };
 let writes = 0;
 let holdSaves: Promise<void> | undefined;
 let releaseSaves: (() => void) | undefined;
@@ -99,11 +103,15 @@ const services = {
   },
 };
 const runtimeDirectory = await mkdtemp(path.join(os.tmpdir(), "tsl-preview-"));
-const module = createTslModule({
-  // The pretend switcher is on this computer, so loopback counts as one of its addresses here.
-  localAddresses: () => [...localAddresses(), { id: "127.0.0.1", label: "127.0.0.1 · this computer" }],
-  routeAddress: async (host) => (host === "127.0.0.1" ? "127.0.0.1" : null),
-});
+const module = createTslModule(
+  realSwitcher
+    ? {}
+    : {
+        // The pretend switcher is on this computer, so loopback counts as one of its addresses here.
+        localAddresses: () => [...localAddresses(), { id: "127.0.0.1", label: "127.0.0.1 · this computer" }],
+        routeAddress: async (host) => (host === "127.0.0.1" ? "127.0.0.1" : null),
+      },
+);
 let instance: ModuleInstance;
 const startInstance = async () => {
   generation++;
@@ -222,7 +230,7 @@ const server = createServer(async (request, response) => {
     else response.end();
   }
 });
-server.listen(port, "127.0.0.1", () => console.log(`TSL Tally preview on http://127.0.0.1:${port} (pretend switcher on 127.0.0.1:${fake.port})`));
+server.listen(port, "127.0.0.1", () => console.log(`TSL Tally preview on http://127.0.0.1:${port} (${realSwitcher ? `REAL switcher ${realSwitcher}` : `pretend switcher on 127.0.0.1:${fake.port}`})`));
 const stop = async () => {
   await instance.dispose();
   await fake.stop();

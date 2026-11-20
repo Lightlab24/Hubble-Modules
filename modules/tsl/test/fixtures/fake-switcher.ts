@@ -4,8 +4,8 @@
  * one shared edit form, list columns as counted strings, driver numbers the switcher makes
  * up, and frames nobody asked for arriving between replies.
  *
- * Not seen on a real switcher, and guessed here: Cancel, changing a saved device, and
- * Enable/Disable.
+ * Changing a saved device and Enable/Disable follow what the real switcher did. Cancel is
+ * as the real switcher answered it: the unsaved device goes and the form shows nothing.
  */
 import net from "node:net";
 
@@ -115,6 +115,11 @@ export interface FakeSwitcherOptions {
   spoilAnotherOnSave?: boolean;
   /** Not a Carbonite: the device list is missing. */
   noDeviceList?: boolean;
+  /**
+   * As seen on the real switcher: for this long after a save or a delete, the name column
+   * still shows the list as it was, so its length disagrees with the other columns.
+   */
+  listSettlesAfterMs?: number;
   /** Frames nobody asked for, junk bytes and split replies. On unless set false. */
   chatter?: boolean;
   devices?: FakeDevice[];
@@ -427,7 +432,18 @@ export class FakeSwitcher {
     return this.#error(oid, NOT_FOUND);
   }
 
+  #staleNames: { names: string[]; until: number } | undefined;
+  /** Call just before the device list changes. */
+  #listChanging(): void {
+    const wait = this.options.listSettlesAfterMs ?? 0;
+    if (wait > 0) this.#staleNames = { names: this.#column(FAKE_OID.listName), until: Date.now() + wait };
+  }
+
   #column(oid: number): string[] {
+    if (oid === FAKE_OID.listName && this.#staleNames) {
+      if (Date.now() < this.#staleNames.until) return this.#staleNames.names;
+      this.#staleNames = undefined;
+    }
     const serial: Readonly<Record<number, string>> = {
       [FAKE_OID.listSlot]: "SP",
       [FAKE_OID.listType]: "--none--",
@@ -515,6 +531,7 @@ export class FakeSwitcher {
         if (this.options.dropSave) return done();
         if (this.#mode === "adding") {
           const { selected: _selected, changes: _changes, ...fields } = form;
+          this.#listChanging();
           this.devices.push({ ...fields, enabled: true });
           this.#load(this.devices.length);
         } else if (this.#mode === "viewing") {
@@ -535,6 +552,7 @@ export class FakeSwitcher {
     }
     if (oid === FAKE_OID.deleteDevice) {
       if (number !== 1 || this.#mode !== "viewing") return bad();
+      this.#listChanging();
       this.devices.splice(form.selected - 1, 1);
       this.#load(form.selected - 1);
       this.#form.changes = 0;
@@ -543,7 +561,11 @@ export class FakeSwitcher {
     if (oid === FAKE_OID.enableDisable) {
       const device = this.devices[form.selected - 1];
       if ((number !== 2 && number !== 3) || this.#mode !== "viewing" || !device) return bad();
-      device.enabled = number === 3;
+      // As on the real switcher: 2 turns the device on, 3 turns it off, and the list shows
+      // it a moment after the write is answered.
+      setTimeout(() => {
+        device.enabled = number === 2;
+      }, 150);
       return done();
     }
 
