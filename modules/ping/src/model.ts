@@ -296,6 +296,23 @@ export function newDevice(document: PingDocument, id: string): DeviceRow {
   return { id, values: { name: `Device ${number}`, enabled: "TRUE", host: "", over: "", lost: "" } };
 }
 
+/** A row someone has only counted, not filled in, can go without asking. */
+export const deviceHasData = (row: DeviceRow): boolean =>
+  Object.entries(row.values).some(([id, value]) =>
+    id === "name" ? !/^Device \d+$/u.test(value.trim()) : id === "enabled" ? value !== "TRUE" : value !== "",
+  );
+
+/** Sets how many devices there are: adds blank rows at the end, or takes rows off the end, as one undo step. */
+export function setDeviceCount(document: PingDocument, count: number, newId: () => string): (Extract<Mutation, { kind: "rows" }> & { removed: DeviceRow[] }) | null {
+  if (!Number.isInteger(count) || count < 0 || count > MAX_DEVICES) throw Error(`Use from 0 to ${MAX_DEVICES} devices.`);
+  const have = document.devices.length;
+  if (count === have) return null;
+  if (count < have) return { kind: "rows", rows: clone(document.devices.slice(0, count)), expected: clone(document.devices), removed: clone(document.devices.slice(count)) };
+  const next = clone(document);
+  for (let index = have; index < count; index++) next.devices.push(newDevice(next, newId()));
+  return { kind: "rows", rows: next.devices, expected: clone(document.devices), removed: [] };
+}
+
 export function insertRows(document: PingDocument, rows: DeviceRow[], beforeId: string | null): Mutation {
   const next = clone(document.devices);
   const index = beforeId ? next.findIndex((row) => row.id === beforeId) : -1;

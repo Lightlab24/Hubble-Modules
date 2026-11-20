@@ -5,7 +5,7 @@ import { createBackend, type BackendOptions, type LiveReply } from "../src/backe
 import { findFping, parsePingLine, pingArguments, Pinger, type PingProcess, type PingSample } from "../src/engine.js";
 import { History } from "../src/history.js";
 import source from "../src/manifest.js";
-import { applyMutation, bytesPerSecond, defaultDocument, DOCUMENT_ID, formatRate, insertRows, inverse, newDevice, normalizeValue, rulesOf, ruleText, validateDocument, validateValue, type DeviceRow, type Mutation, type PingDocument } from "../src/model.js";
+import { applyMutation, bytesPerSecond, defaultDocument, DOCUMENT_ID, deviceHasData, formatRate, insertRows, inverse, newDevice, normalizeValue, rulesOf, ruleText, setDeviceCount, validateDocument, validateValue, type DeviceRow, type Mutation, type PingDocument } from "../src/model.js";
 import { DeviceWatch } from "../src/watch.js";
 
 const cleanup: (() => unknown)[] = [];
@@ -104,7 +104,7 @@ function backend(devices: DeviceRow[], options: BackendOptions & { connectionEna
 
 describe("the manifest", () => {
   it("is a valid workspace module with one full page", () => {
-    const manifest = ModuleManifestSchema.parse({ ...source, id: "network-ping", name: "Ping", version: "0.1.0", entry: "module.mjs", files: ["module.mjs", "ui/index.html", "ui/app.js", "ui/ping.svg"] });
+    const manifest = ModuleManifestSchema.parse({ ...source, id: "network-ping", name: "Ping", version: "0.1.1", entry: "module.mjs", files: ["module.mjs", "ui/index.html", "ui/app.js", "ui/ping.svg"] });
     expect(manifest.instanceScope).toBe("workspace");
     expect(manifest.pages?.[0]?.layout).toBe("full-page");
     expect(manifest.matrix?.triggers?.map((trigger) => trigger.id)).toEqual(["offline", "slow", "online"]);
@@ -156,6 +156,32 @@ describe("the saved device list", () => {
     expect(ruleText("lost", "90", settings)).toEqual({ text: "1.5 min", inherited: false });
     expect(ruleText("over", "off", settings)).toEqual({ text: "Off", inherited: false });
     expect(ruleText("over", "", { ...settings, alertOverMs: null })).toEqual({ text: "Off", inherited: true });
+  });
+
+  it("sets the number of devices: blank rows added at the end, or the last rows taken off, in one undo step", () => {
+    const doc = defaultDocument();
+    doc.devices = [row("a", "Router", "10.0.0.1"), row("b", "Device 2", "")];
+    let next = 0;
+    const grow = setDeviceCount(doc, 5, () => `new-${++next}`)!;
+    expect(grow.removed).toEqual([]);
+    const grown = applyMutation(doc, { kind: grow.kind, rows: grow.rows, expected: grow.expected });
+    // "Device 2" is taken, so the new names step past it and stay unique.
+    expect(grown.devices.map((item) => item.values.name)).toEqual(["Router", "Device 2", "Device 3", "Device 4", "Device 5"]);
+    expect(grown.devices.slice(2).every((item) => item.values.host === "" && item.values.enabled === "TRUE")).toBe(true);
+    expect(applyMutation(grown, inverse(doc, { kind: grow.kind, rows: grow.rows, expected: grow.expected }))).toEqual(doc);
+    const shrink = setDeviceCount(grown, 1, () => "x")!;
+    expect(shrink.rows.map((item) => item.id)).toEqual(["a"]);
+    expect(shrink.removed.map((item) => item.id)).toEqual(["b", "new-1", "new-2", "new-3"]);
+    expect(setDeviceCount(doc, 2, () => "x"), "the same number changes nothing").toBeNull();
+    expect(() => setDeviceCount(doc, 129, () => "x")).toThrow("Use from 0 to 128 devices.");
+    expect(() => setDeviceCount(doc, 2.5, () => "x")).toThrow("Use from 0 to 128 devices.");
+    expect(() => setDeviceCount(doc, NaN, () => "x")).toThrow("Use from 0 to 128 devices.");
+    // Only a row with something filled in is worth asking about before it goes.
+    expect(deviceHasData(row("b", "Device 2", ""))).toBe(false);
+    expect(deviceHasData(row("a", "Router", ""))).toBe(true);
+    expect(deviceHasData(row("b", "Device 2", "10.0.0.2"))).toBe(true);
+    expect(deviceHasData(row("b", "Device 2", "", { over: "80" }))).toBe(true);
+    expect(deviceHasData(row("b", "Device 2", "", { enabled: "FALSE" }))).toBe(true);
   });
 
   it("rejects a ping time or size that isn't on the list", () => {

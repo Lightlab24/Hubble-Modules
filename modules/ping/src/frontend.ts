@@ -1,5 +1,5 @@
 import { connectModuleFrontend, ModuleFrontendValueSchema } from "@hubble/module-sdk/frontend";
-import { mountSegmented, mountSwitch, showToast } from "@hubble/module-sdk/controls";
+import { confirm, mountSegmented, mountSwitch, showToast } from "@hubble/module-sdk/controls";
 import { mountSpreadsheetColumnEditor, mountSpreadsheetToolbar } from "@hubble/module-sdk/spreadsheet-controls";
 import type { LiveReply, LiveRequest } from "./backend.js";
 import { DraftStore, type SaveReceipt } from "./draft-store.js";
@@ -19,6 +19,8 @@ import {
   ALERT_OVER_MS,
   formatDuration,
   removeRows,
+  deviceHasData,
+  setDeviceCount,
   SIZES_BYTES,
   SPANS,
   spanOf,
@@ -222,6 +224,9 @@ try {
     el("data-use").textContent = settings().pinging
       ? `${count} device${count === 1 ? "" : "s"} · ${settings().sizeBytes} bytes every ${formatInterval(settings().intervalMs)} · about ${formatRate(bytesPerSecond(count, settings()))} in total · Alerts go to the Status Log${settings().notify ? ", a notification" : ""} and any key that shows the device`
       : "Paused · nothing is being sent";
+    // Never overwrite the number while it is being typed.
+    const counter = el<HTMLInputElement>("device-count");
+    if (document.activeElement !== counter && counter.value !== String(devices.length)) counter.value = String(devices.length);
     el("empty").hidden = devices.length > 0;
     el<HTMLButtonElement>("add-device").disabled = devices.length >= MAX_DEVICES;
     updateTimeline();
@@ -229,6 +234,44 @@ try {
   store.subscribe(update);
 
   el("add-device").addEventListener("click", () => insert(null));
+
+  // The Devices box sets how many rows there are: new blank ones at the end, or the last ones taken off.
+  const countInput = el<HTMLInputElement>("device-count");
+  let counting = false;
+  async function applyCount() {
+    if (counting) return;
+    counting = true;
+    try {
+      const operation = setDeviceCount(store.document, countInput.value.trim() === "" ? NaN : Number(countInput.value), () => crypto.randomUUID());
+      if (!operation) return;
+      const { removed, ...mutation } = operation;
+      const filled = removed.filter(deviceHasData);
+      // Rows that were only counted go without asking. Filled-in ones are named first; Undo brings them back.
+      if (filled.length) {
+        const names = filled.map((row) => valueOf(row, "name")).join(", ");
+        const sure = await confirm({
+          title: `Remove ${removed.length} device${removed.length === 1 ? "" : "s"}?`,
+          message: `This takes the last ${removed.length === 1 ? "device" : `${removed.length} devices`} off the list, with their addresses and alert settings. Filled in: ${names}. Undo brings them back.`,
+          confirmLabel: removed.length === 1 ? "Remove device" : "Remove devices",
+          danger: true,
+        });
+        if (!sure) return;
+      }
+      store.submit(mutation);
+    } catch (error) {
+      report(error instanceof Error ? error.message : String(error));
+    } finally {
+      counting = false;
+      countInput.value = String(store.document.devices.length);
+    }
+  }
+  countInput.addEventListener("change", () => void applyCount());
+  countInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      countInput.blur();
+    }
+  });
   el("empty-add").addEventListener("click", () => insert(null));
 
   function request(after: number): LiveRequest {

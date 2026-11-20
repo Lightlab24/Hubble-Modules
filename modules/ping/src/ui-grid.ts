@@ -87,7 +87,7 @@ export async function createDeviceGrid(options: GridOptions) {
   function liveText(row: DeviceRow, columnId: string): string {
     const summary = options.live()[row.id];
     const state = pinged(row) && valueOf(row, "host") ? (summary?.state ?? "not-checked") : "not-checked";
-    if (columnId === "status") return !valueOf(row, "host") && valueOf(row, "enabled") === "TRUE" ? "Needs an IP address" : STATE_LABELS[state];
+    if (columnId === "status") return !valueOf(row, "host") && valueOf(row, "enabled") === "TRUE" ? "No IP address" : STATE_LABELS[state];
     if (!summary || state === "not-checked") return "—";
     const value = { now: summary.now, average: summary.average, best: summary.best, worst: summary.worst, jitter: summary.jitter }[columnId];
     if (columnId === "lostPct") return summary.lostPct === null ? "—" : `${summary.lostPct.toFixed(1)}%`;

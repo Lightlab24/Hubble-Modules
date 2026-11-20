@@ -28,6 +28,7 @@ button.quiet{appearance:none;min-height:var(--hubble-control-height,26px);paddin
 button.quiet:hover{background:var(--hubble-hover,#2e2e2e)}
 .toolbar-divider{height:20px;width:1px;background:var(--hubble-line-strong,#3b3b3b);margin:0 3px}
 .toolbar-spacer{flex:1}
+.field.count input{width:58px;min-height:var(--hubble-control-height,26px);padding:0 6px;border:1px solid var(--hubble-line-strong,#414141);border-radius:var(--hubble-radius-control,7px);background:var(--hubble-bar,#111);color:var(--hubble-text,#dedede);font:var(--hubble-control-text-size,11px) var(--hubble-font,system-ui);font-variant-numeric:tabular-nums}
 .field{display:inline-flex;align-items:center;gap:7px;color:var(--hubble-text-secondary,#b2b2b2);font-size:var(--hubble-text-size-small,12px);white-space:nowrap}
 #text-size .hubble-spreadsheet-workbook-tools{margin:0;padding:0;border:0;background:transparent;min-height:30px}
 .work-area{position:relative;display:flex;min-height:0;overflow:hidden}
