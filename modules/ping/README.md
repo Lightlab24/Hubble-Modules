@@ -1,6 +1,6 @@
 # Ping
 
-Module ID `network-ping`, version 0.1.5. Pings network devices, keeps a timeline of each one, and
+Module ID `network-ping`, version 0.1.6. Pings network devices, keeps a timeline of each one, and
 alerts when a device stops answering or answers slowly. It is a workspace module: add it once, and
 its **Ping** page lists every device. It needs a Hubble with `module-page-badges-v1` and
 `module-controls-inline-v1` (2.3.1).
@@ -40,6 +40,12 @@ pixels apart, one per ping where the history allows, and zooming in stops where 
 wider than that. A bar with any lost ping is red from top to bottom. **Clear history** under the
 timeline forgets every device's past pings after asking; devices and alert settings stay.
 
+**Scale** under the timeline sets the answer time at its top. **Auto** fits the tallest bar on
+show; a fixed scale from 1 ms to 1000 ms keeps a fast device readable when a few large pings come
+in. A bar taller than the scale stops at the top with a white tip, and hovering it still gives its
+real time. Pinching over the ms numbers moves the scale a step, and double-clicking them returns to
+Auto. The scale is one setting for every device, saved with the page like Show last.
+
 ## Alerts
 
 A device goes **Offline** once it hasn't answered for its lost time and **Slow** as soon as an
@@ -76,10 +82,18 @@ pnpm test
 PING_PREVIEW_DEVICES="This Mac=127.0.0.1,Nobody=192.0.2.1" pnpm preview
 ```
 
+`PING_PREVIEW_FAKE=1` answers with a stand-in for fping instead of real pings: about 0.8 ms with a
+spike now and then, the last five minutes filled in at the start, and no answer from 192.0.2.x. It
+sends nothing on the network.
+
 `pnpm preview` serves the built page at http://127.0.0.1:43191 with the real backend and real
 pings, in the same kind of sandboxed frame Hubble uses. `PING_RENDERER_ASSETS` points it at a
 folder of Hubble's control bundles; it defaults to the installed Hubble. `/__inspect` shows the
 saved document, log lines, alerts and feedback, and `/__simulate` holds, releases or fails saves.
+
+`tools/scale-check.mjs` drives the timeline's Scale with real input against a preview started with
+`PING_PREVIEW_FAKE=1`, including a held and a failed save, and checks that nothing on the right of
+the row under the timeline moves.
 
 `tools/flash-check.mjs` watches the timeline frame by frame across each Show last switch, against a
 running preview, and reports any earlier picture that comes back.

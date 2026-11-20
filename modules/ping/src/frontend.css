@@ -72,8 +72,13 @@ button.quiet:hover{background:var(--hubble-hover,#2e2e2e)}
 .legend{display:flex;gap:16px;align-items:center;min-height:26px;font-size:var(--hubble-control-text-size,11px);color:var(--hubble-text-secondary,#b2b2b2);margin-top:4px}
 .legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px}
 .legend i.ok{background:var(--ping-ok)}.legend i.warn{background:var(--ping-warn)}.legend i.bad{background:var(--ping-bad)}
-.legend .hint{margin-left:auto;font-variant-numeric:tabular-nums}
-.legend #clear-history{margin-left:auto}.legend #clear-history~.hint{margin-left:0}
+/*
+ * Nothing on the right of this row ever moves: the hint has a set width, so hovering the timeline
+ * can't push Scale and Clear history, and Back to now appears to their left, in the free space.
+ */
+.legend .legend-spacer{flex:1}
+.legend .hint{width:320px;flex:none;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.legend .scale{font-size:var(--hubble-control-text-size,11px)}.legend .scale select{width:88px}
 .app-footer{display:flex;gap:14px;justify-content:space-between;align-items:center;min-height:34px;padding:8px 16px;border-top:1px solid var(--hubble-line,#3b3b3b);background:var(--hubble-bar,#171717);font-size:var(--hubble-control-text-size,11px);color:var(--hubble-text-secondary,#b2b2b2);white-space:nowrap}
 #save-status[data-error=true]{color:#f2aaa5}
 .loading{position:absolute;inset:0;display:grid;place-content:center;background:var(--hubble-sheet,#111);color:var(--hubble-text-secondary,#999)}

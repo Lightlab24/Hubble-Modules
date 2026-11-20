@@ -104,7 +104,7 @@ function backend(devices: DeviceRow[], options: BackendOptions & { connectionEna
 
 describe("the manifest", () => {
   it("is a valid workspace module with one full page", () => {
-    const manifest = ModuleManifestSchema.parse({ ...source, id: "network-ping", name: "Ping", version: "0.1.5", entry: "module.mjs", files: ["module.mjs", "ui/index.html", "ui/app.js", "ui/ping.svg"] });
+    const manifest = ModuleManifestSchema.parse({ ...source, id: "network-ping", name: "Ping", version: "0.1.6", entry: "module.mjs", files: ["module.mjs", "ui/index.html", "ui/app.js", "ui/ping.svg"] });
     expect(manifest.instanceScope).toBe("workspace");
     expect(manifest.pages?.[0]?.layout).toBe("full-page");
     expect(manifest.matrix?.triggers?.map((trigger) => trigger.id)).toEqual(["offline", "slow", "online"]);
@@ -188,6 +188,19 @@ describe("the saved device list", () => {
     const doc = defaultDocument();
     expect(() => validateDocument({ ...doc, settings: { ...doc.settings, intervalMs: 50 } })).toThrow(/ping time/u);
     expect(() => validateDocument({ ...doc, settings: { ...doc.settings, sizeBytes: 9000 } })).toThrow(/ping size/u);
+  });
+
+  it("saves the timeline scale with the page, and Auto as no scale at all", () => {
+    const doc = defaultDocument();
+    expect(doc.view.scaleMs).toBeUndefined();
+    const set: Mutation = { kind: "view", view: { ...structuredClone(doc.view), scaleMs: 2 }, expected: structuredClone(doc.view) };
+    const scaled = applyMutation(doc, set);
+    expect(scaled.view.scaleMs).toBe(2);
+    expect(() => validateDocument(scaled)).not.toThrow();
+    // Undo takes it back to Auto, which a document without the field reads as.
+    expect(applyMutation(scaled, inverse(doc, set)).view.scaleMs).toBeUndefined();
+    expect(() => validateDocument({ ...doc, view: { ...doc.view, scaleMs: 3 } })).toThrow(/timeline scale/u);
+    expect(() => validateDocument({ ...doc, view: { ...doc.view, scaleMs: 0 } })).toThrow(/timeline scale/u);
   });
 
   it("works out the data Ping sends", () => {

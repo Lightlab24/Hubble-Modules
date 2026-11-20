@@ -1,10 +1,12 @@
 import type { Series } from "./history.js";
-import { formatMs } from "./model.js";
+import { formatMs, SCALES_MS } from "./model.js";
 
 /**
  * The ping timeline for one device, drawn on a canvas. Pinch (or Ctrl and the
  * wheel) zooms the time scale around the pointer, two fingers or a drag move
  * through time, and it follows the present until it is moved away from it.
+ * Pinching over the ms numbers changes the height scale instead; a bar taller
+ * than a set scale is cut off at the top with a light cap.
  */
 export const MIN_SPAN_MS = 10_000;
 export const MAX_SPAN_MS = 24 * 60 * 60 * 1000;
@@ -31,10 +33,17 @@ export interface TimelineOptions {
   onHover(text: string | null): void;
   /** Whether the timeline follows the present changed. */
   onFollow(following: boolean): void;
+  /** A pinch over the ms numbers asked for this scale; null is Auto. */
+  onScale(ms: number | null): void;
   readonly now?: () => number;
 }
 
 const clamp = (value: number, low: number, high: number) => Math.min(high, Math.max(low, value));
+/** How far a pinch over the ms numbers has to go to move the scale one step. */
+const SCALE_PINCH = 20;
+/** The height of the cap on a bar that goes past the top of the scale. */
+const CAP = 3;
+const HINT = "Pinch here to change the scale · double-click for Auto";
 function niceCeiling(value: number) {
   const power = 10 ** Math.floor(Math.log10(Math.max(value, 1e-9)));
   for (const step of [1, 2, 4, 5, 8, 10]) if (value <= step * power) return step * power;
@@ -91,6 +100,12 @@ export function createTimeline(options: TimelineOptions) {
   let end: number | null = null;
   let series: Series | undefined;
   let limit: number | null = null;
+  /** The answer time at the top of the scale the user chose, or null for Auto. */
+  let scaleMs: number | null = null;
+  /** The top of the scale as last drawn, Auto or not. */
+  let drawnTop = 1;
+  let scalePinch = 0;
+  let scalePinchAt = 0;
   let dragging: { x: number; end: number } | undefined;
   /**
    * A Show last choice that is waiting for its own results. The view keeps the old stretch and its
@@ -152,13 +167,17 @@ export function createTimeline(options: TimelineOptions) {
     const xOf = (time: number) => LEFT + ((time - from) / spanMs) * width_;
 
     let top = limit !== null ? limit * 1.25 : 0;
-    if (series)
-      for (let index = 0; index < series.max.length; index++) {
-        const start = series.from + index * series.stepMs;
-        const value = series.max[index];
-        if (value !== null && value !== undefined && value > top && start + series.stepMs > from && start < to) top = value;
-      }
-    top = niceCeiling(Math.max(top, 1));
+    if (scaleMs !== null) top = scaleMs;
+    else {
+      if (series)
+        for (let index = 0; index < series.max.length; index++) {
+          const start = series.from + index * series.stepMs;
+          const value = series.max[index];
+          if (value !== null && value !== undefined && value > top && start + series.stepMs > from && start < to) top = value;
+        }
+      top = niceCeiling(Math.max(top, 1));
+    }
+    drawnTop = top;
     const yOf = (value: number) => TOP + plotHeight - (Math.min(value, top) / top) * plotHeight;
 
     context.font = `11px ${font}`;
@@ -174,7 +193,7 @@ export function createTimeline(options: TimelineOptions) {
       context.stroke();
       context.fillStyle = quiet;
       context.textAlign = "right";
-      context.fillText(top >= 8 ? String(Math.round(value)) : value.toFixed(1), LEFT - 8, y);
+      context.fillText(top >= 8 ? String(Math.round(value)) : String(Number(value.toFixed(2))), LEFT - 8, y);
     }
     context.font = `10px ${font}`;
     context.fillText("ms", LEFT - 8, cssHeight - 8);
@@ -185,6 +204,7 @@ export function createTimeline(options: TimelineOptions) {
       context.rect(LEFT, TOP, width_, plotHeight);
       context.clip();
       const barWidth = (series.stepMs / spanMs) * width_;
+      const capped: number[] = [];
       for (let index = 0; index < series.sent.length; index++) {
         const bar = barOf(series, index, limit);
         if (!bar) continue;
@@ -201,7 +221,11 @@ export function createTimeline(options: TimelineOptions) {
         }
         const y = Math.min(yOf(bar.value), TOP + plotHeight - 1);
         context.fillRect(x, y, drawn, TOP + plotHeight - y);
+        if (bar.value > top) capped.push(x, drawn);
       }
+      // A bar cut off by the scale ends in a light cap, so it never reads as the real height.
+      context.fillStyle = color("--hubble-text-strong", "#f4f4f4");
+      for (let index = 0; index < capped.length; index += 2) context.fillRect(capped[index]!, TOP, capped[index + 1]!, CAP);
       context.restore();
     }
 
@@ -276,6 +300,28 @@ export function createTimeline(options: TimelineOptions) {
     setEnd(right() + ms);
     changed();
   }
+  /** Whether a point is over the ms numbers left of the bars. */
+  const overNumbers = (clientX: number) => clientX - canvas.getBoundingClientRect().left < LEFT;
+  /**
+   * Moves the scale one step for each stretch of a pinch: apart makes the bars taller (a smaller
+   * scale), together makes them shorter. From Auto it starts at the scale on screen.
+   */
+  function pinchScale(deltaY: number) {
+    // A pause starts a new pinch, so what was left of the last one doesn't carry over.
+    const at = performance.now();
+    if (at - scalePinchAt > 300) scalePinch = 0;
+    scalePinchAt = at;
+    scalePinch += deltaY;
+    if (Math.abs(scalePinch) < SCALE_PINCH) return;
+    const taller = scalePinch < 0;
+    scalePinch = 0;
+    const from = scaleMs ?? drawnTop;
+    const next = taller ? [...SCALES_MS].reverse().find((ms) => ms < from) : SCALES_MS.find((ms) => ms > from);
+    if (next === undefined || next === scaleMs) return;
+    scaleMs = next;
+    schedule();
+    options.onScale(next);
+  }
   const fractionAt = (clientX: number) => clamp((clientX - canvas.getBoundingClientRect().left - LEFT) / plotWidth(), 0, 1);
 
   const controller = new AbortController();
@@ -285,7 +331,8 @@ export function createTimeline(options: TimelineOptions) {
     (event) => {
       event.preventDefault();
       // A trackpad pinch arrives as a wheel event with Ctrl held.
-      if (event.ctrlKey) zoomAbout(fractionAt(event.clientX), Math.exp(event.deltaY * 0.01));
+      if (event.ctrlKey && overNumbers(event.clientX)) pinchScale(event.deltaY);
+      else if (event.ctrlKey) zoomAbout(fractionAt(event.clientX), Math.exp(event.deltaY * 0.01));
       else {
         const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
         panBy(delta * (spanMs / plotWidth()) * (event.deltaMode === 1 ? 16 : 1));
@@ -310,6 +357,12 @@ export function createTimeline(options: TimelineOptions) {
         changed();
         return;
       }
+      const numbers = overNumbers(event.clientX);
+      canvas.style.cursor = numbers ? "ns-resize" : "";
+      if (numbers) {
+        options.onHover(HINT);
+        return;
+      }
       if (!series) return;
       const time = right() - spanMs + fractionAt(event.clientX) * spanMs;
       const index = Math.floor((time - series.from) / series.stepMs);
@@ -317,7 +370,7 @@ export function createTimeline(options: TimelineOptions) {
       const when = new Date(series.from + Math.max(0, index) * series.stepMs).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
       if (!bar) options.onHover(`${when} · no pings`);
       else if (bar.value === null) options.onHover(`${when} · ${bar.partLost ? `${series.lost[index]} of ${series.sent[index]} pings lost` : "no answer"}`);
-      else options.onHover(`${when} · ${formatMs(bar.value)}`);
+      else options.onHover(`${when} · ${formatMs(bar.value)}${bar.value > drawnTop ? " · past the top of the scale" : ""}`);
     },
     listen,
   );
@@ -329,6 +382,16 @@ export function createTimeline(options: TimelineOptions) {
   canvas.addEventListener("pointerup", release, listen);
   canvas.addEventListener("pointercancel", release, listen);
   canvas.addEventListener("pointerleave", () => options.onHover(null), listen);
+  canvas.addEventListener(
+    "dblclick",
+    (event) => {
+      if (!overNumbers(event.clientX) || scaleMs === null) return;
+      scaleMs = null;
+      schedule();
+      options.onScale(null);
+    },
+    listen,
+  );
   canvas.addEventListener(
     "keydown",
     (event) => {
@@ -364,6 +427,12 @@ export function createTimeline(options: TimelineOptions) {
       }
     },
     following: () => end === null,
+    /** The saved scale: the answer time at the top, or null for Auto. */
+    setScale(ms: number | null) {
+      if (ms === scaleMs) return;
+      scaleMs = ms;
+      schedule();
+    },
     spanMs: () => spanMs,
     /**
      * New results to draw. `forWindow` says they answer the newest window(), which is what lets a

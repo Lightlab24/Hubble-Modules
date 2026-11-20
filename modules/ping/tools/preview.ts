@@ -6,6 +6,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { ModuleContext } from "@hubble/module-sdk";
 import { createBackend } from "../src/backend.js";
+import type { PingProcess } from "../src/engine.js";
 import { defaultDocument, DOCUMENT_ID, type DeviceRow, type PingDocument } from "../src/model.js";
 
 const assets = process.env.PING_RENDERER_ASSETS || "/Applications/Hubble.app/Contents/Library/HubbleAgent/renderer/main_window/assets";
@@ -66,7 +67,47 @@ const context = {
   // Hubble would raise a notification here; the preview only records what was asked for.
   publishEvent: (channel: string, value: unknown) => alerts.push({ channel, value }),
 } as unknown as ModuleContext;
-const instance = createBackend(context);
+/**
+ * PING_PREVIEW_FAKE=1 answers with a stand-in for fping instead of real pings: about 0.8 ms with a
+ * spike now and then, and the last few minutes filled in at the start, so the timeline's scale can
+ * be looked at without waiting for a real network to misbehave. Addresses in 192.0.2.x never answer.
+ */
+function fakePinger(args: readonly string[]): PingProcess {
+  const every = Number(args[args.indexOf("-p") + 1]) || 1000;
+  const addresses = args.slice(args.indexOf("-b") + 2);
+  const listeners: ((chunk: string) => void)[] = [];
+  let count = 0;
+  // A fixed sequence, so every run of the preview draws the same picture.
+  let seed = 7;
+  const random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const line = (at: number) =>
+    addresses
+      .map((address) => {
+        const spike = random() < 0.012 ? 4 + random() * 22 : 0;
+        const rtt = 0.5 + random() * 0.6 + spike;
+        return address.startsWith("192.0.2.")
+          ? `[${(at / 1000).toFixed(5)}] ${address} : [${count}], timed out (NaN avg, 100% loss)\n`
+          : `[${(at / 1000).toFixed(5)}] ${address} : [${count}], 64 bytes, ${rtt.toFixed(3)} ms (0.8 avg, 0% loss)\n`;
+      })
+      .join("");
+  const backfillFrom = Date.now() - 5 * 60_000;
+  const timer = setInterval(() => {
+    const text = line(Date.now());
+    count++;
+    for (const listener of listeners) listener(text);
+  }, every);
+  setTimeout(() => {
+    let text = "";
+    for (let at = backfillFrom; at < Date.now(); at += every) text += line(at);
+    for (const listener of listeners) listener(text);
+  }, 50);
+  return {
+    stdout: { on: (_event: "data", listener: (chunk: Buffer | string) => void) => void listeners.push(listener) },
+    on: () => undefined,
+    kill: () => clearInterval(timer),
+  };
+}
+const instance = createBackend(context, process.env.PING_PREVIEW_FAKE ? { start: fakePinger } : {});
 await instance.start!();
 
 const manifest = JSON.parse(await readFile(path.resolve("dist/hubble-module.json"), "utf8"));

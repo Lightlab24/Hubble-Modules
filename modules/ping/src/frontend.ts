@@ -15,6 +15,7 @@ import {
   MAX_DEVICES,
   newDevice,
   rulesOf,
+  SCALES_MS,
   ALERT_LOST_MS,
   ALERT_OVER_MS,
   formatDuration,
@@ -61,6 +62,14 @@ try {
   const view = () => store.document.view;
   const setSettings = (change: Partial<Settings>) => store.submit({ kind: "settings", settings: { ...clone(settings()), ...change }, expected: clone(settings()) });
   const setView = (change: Partial<View>) => store.submit({ kind: "view", view: { ...clone(view()), ...change }, expected: clone(view()) });
+  /** Saves the timeline's scale. Auto is no scale at all, so older versions read the page as before. */
+  function setScale(ms: number | null) {
+    if (ms === (view().scaleMs ?? null)) return;
+    const next = clone(view());
+    if (ms === null) delete next.scaleMs;
+    else next.scaleMs = ms;
+    store.submit({ kind: "view", view: next, expected: clone(view()) });
+  }
 
   // The two dropdowns are plain <select>s: Hubble's stylesheet gives them its own list.
   const every = el<HTMLSelectElement>("every");
@@ -79,6 +88,12 @@ try {
   alertLost.add(new Option("Off", ""));
   for (const ms of ALERT_LOST_MS) alertLost.add(new Option(formatDuration(ms), String(ms)));
   alertLost.addEventListener("change", () => setSettings({ alertLostMs: alertLost.value ? Number(alertLost.value) : null }));
+
+  // The timeline's height: Auto fits the tallest bar on show, a number holds the top there.
+  const scale = el<HTMLSelectElement>("scale");
+  scale.add(new Option("Auto", ""));
+  for (const ms of SCALES_MS) scale.add(new Option(`${ms} ms`, String(ms)));
+  scale.addEventListener("change", () => setScale(scale.value ? Number(scale.value) : null));
 
   const pinging = await mountSwitch({
     root: el("pinging"),
@@ -110,6 +125,7 @@ try {
     onFollow: (following) => {
       el("tl-live").hidden = following;
     },
+    onScale: setScale,
   });
   timeline.setPingTime(settings().intervalMs);
   timeline.showLast(spanOf(view().span).ms, true);
@@ -247,6 +263,9 @@ try {
     if (alertOver.value !== over) alertOver.value = over;
     const lost = settings().alertLostMs === null ? "" : String(settings().alertLostMs);
     if (alertLost.value !== lost) alertLost.value = lost;
+    const scaleMs = view().scaleMs ?? null;
+    timeline.setScale(scaleMs);
+    if (scale.value !== String(scaleMs ?? "")) scale.value = String(scaleMs ?? "");
     if (store.error !== lastSaveError) {
       lastSaveError = store.error;
       if (lastSaveError) report(lastSaveError);

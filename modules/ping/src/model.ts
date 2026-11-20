@@ -22,6 +22,8 @@ export const spanOf = (id: string) => SPANS.find((span) => span.id === id) ?? SP
 /** The choices for the two alerts every device shares unless its own cell says otherwise. */
 export const ALERT_OVER_MS = [10, 20, 50, 80, 100, 150, 200, 300, 500, 1000] as const;
 export const ALERT_LOST_MS = [1000, 2000, 3000, 5000, 10_000, 30_000, 60_000, 300_000] as const;
+/** The answer times the top of the timeline can be set to. Without one (Auto) it fits the tallest bar on show. */
+export const SCALES_MS = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000] as const;
 
 export type ColumnId =
   | "name" | "enabled" | "host" | "over" | "lost"
@@ -77,6 +79,8 @@ export interface View {
   hidden: string[];
   order: string[];
   span: SpanId;
+  /** The answer time at the top of the timeline, in ms. Absent is Auto: it fits the tallest bar on show. */
+  scaleMs?: number;
 }
 export interface PingDocument {
   version: 1;
@@ -216,6 +220,7 @@ function validateView(view: View) {
   if (!Array.isArray(view.order) || view.order.length !== columns.length || new Set(view.order).size !== columns.length || view.order.some((id) => !columnOf(id)))
     throw Error("Invalid column order.");
   if (!SPANS.some((span) => span.id === view.span)) throw Error("Invalid time span.");
+  if (view.scaleMs !== undefined && !SCALES_MS.includes(view.scaleMs as (typeof SCALES_MS)[number])) throw Error("Choose a timeline scale from the list.");
 }
 
 function validateSettings(settings: Settings) {
