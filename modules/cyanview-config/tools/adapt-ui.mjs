@@ -28,6 +28,8 @@ export async function buildUiAdapter() {
   replace("selectedCameras=new Set(),selectedResults=new Set(),deviceQueues=new Map()", "selectedResults=new Set()");
   replaceBetween("  function sendItems(", "  function showReview(", await readFile(path.join(root, 'src/ui-send-workflows.js'), 'utf8'));
   replace("group.querySelector('[data-action=\"delete-controller\"]').disabled=!cameras.some(c=>c.device===d.id&&selectedCameras.has(c.id));", "syncCameraDeleteButton(group);");
+  // A camera deleted or moved while its controller was off is out of the workspace, though that controller still has it.
+  replace("const rows=cameras.filter(c=>c.device===d.id),open=openControllers.has(d.id)", "const rows=cameras.filter(c=>c.device===d.id&&!c.leftBehind),open=openControllers.has(d.id)");
   replace("    syncSummary();icons();\n  }\n  function inputCell", "    if(item.deleting&&row)row.querySelectorAll('[data-field],input[data-lens-axis]').forEach(el=>el.disabled=true);\n    paintCameraColumn(item);\n    paintIrisSwap(item);\n    syncSummary();icons();\n  }\n  function inputCell");
   replace("row.querySelectorAll('input[data-field],select[data-field]')", "row.querySelectorAll('[data-field]')");
   replace("+' for '+(device(row.device)?.name||'new row'))+'\"'+(disabled?' disabled':'')", "+' for '+(device(row.device)?.name||'new row'))+'\"'+(disabled||row.deleting?' disabled':'')");

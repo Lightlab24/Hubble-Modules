@@ -71,7 +71,7 @@
       if (!fields.length) continue;
       // What it was before the first edit since the last send, which is what Cancel goes back to.
       const row = rows.find(item => item.id === old.id);
-      for (const field of fields) if (!['routeDraft', 'device', 'remiMaster', 'removeStaged'].includes(field) && !(field in (row.sentValues ??= {}))) row.sentValues[field] = old.values[field] ?? null;
+      for (const field of fields) if (!['routeDraft', 'device', 'remiMaster', 'removeStaged', 'leftBehind'].includes(field) && !(field in (row.sentValues ??= {}))) row.sentValues[field] = old.values[field] ?? null;
       // Undo belongs to the sheet the edit was made on.
       const id = virtualSheet(tab) ?? row.device;
       if (!byDevice.has(id)) byDevice.set(id, []);

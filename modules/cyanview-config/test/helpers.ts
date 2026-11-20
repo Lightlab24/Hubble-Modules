@@ -264,6 +264,11 @@ export class FakeRemiFleet {
   keepCopies = false;
   /** Serials a controller still lists from an earlier job, which nothing on this network answers to. */
   remembered: string[] = [];
+  /**
+   * Controllers switched off. Nothing reaches them, and the others stop listing their cameras but keep the
+   * copies they made from them, as the Gateway did with a RIO that went off on Nov 20, 2026.
+   */
+  readonly off = new Set<FakeController>();
   /** Which controllers list which. Every one lists every other unless a test says otherwise. */
   sees: (from: FakeController, to: FakeController) => boolean = () => true;
   private sequence = 0;
@@ -292,7 +297,13 @@ export class FakeRemiFleet {
   }
   private key(prefix: string) { return prefix + (++this.sequence); }
   deviceAt(address: string) {
-    return this.devices.find(device => Object.values(object(device.config.IP)).some(row => row.IP === address));
+    return this.devices.find(device => !this.off.has(device) && Object.values(object(device.config.IP)).some(row => row.IP === address));
+  }
+  /** Switches a controller off or back on. Its open sockets drop when it goes off. */
+  power(device: FakeController, on: boolean) {
+    if (on) this.off.delete(device);
+    else { this.off.add(device); for (const socket of device.sockets) socket.terminate(); }
+    this.publish();
   }
   client = (address: string) => {
     const device = this.deviceAt(address);
@@ -319,14 +330,14 @@ export class FakeRemiFleet {
       }
       // Like a real controller, each one lists every other it has seen, whether or not it takes cameras from it.
       for (const key of Object.keys(receiver.config.Remi)) if (key.startsWith('seen-')) delete receiver.config.Remi[key];
-      for (const other of this.devices) if (other !== receiver && this.sees(receiver, other)) {
+      for (const other of this.devices) if (other !== receiver && !this.off.has(other) && this.sees(receiver, other)) {
         const serial = String(other.config.Product.Serial).toLowerCase();
         receiver.config.Remi['seen-' + serial] = { Type: 'LAN_auto', IP: other.config.IP.protected.IP, Connections: { ['seen-' + serial]: { name: serial, connected: '1', cameras: [] } } };
       }
       for (const serial of this.remembered) receiver.config.Remi['seen-' + serial] = { Type: 'LAN_auto', IP: '', Connections: { ['seen-' + serial]: { name: serial, connected: '0', cameras: [] } } };
     }
   }
-  publish() { this.sync(); for (const device of this.devices) device.broadcast(); }
+  publish() { this.sync(); for (const device of this.devices) if (!this.off.has(device)) device.broadcast(); }
   elements(receiver: FakeController) {
     return [...this.entries.get(receiver)!.entries()].map(([key, row]) => ({
       key, module: 'CyElement.ImportedDevice', parents: [row.connection],
@@ -340,6 +351,8 @@ export class FakeRemiFleet {
       this.sync();
       return ['ok', key];
     }
+    // A deleted copy is no longer what its import feeds.
+    if (request.delete) for (const [selector, key] of this.assignments.get(receiver)!) if (key === request.delete[0]) this.assignments.get(receiver)!.delete(selector);
     const update = request.update;
     if (!update) return;
     if (update.key === 'relay' && typeof update.changes.tags === 'string') {
@@ -357,7 +370,8 @@ export class FakeRemiFleet {
     if (enable === '1' && !previous) {
       const key = this.key('copy');
       const row = entry.source.config.Camera[entry.sourceKey];
-      receiver.config.Camera[key] = { Number: row.Number, Name: row.Name, Model: 'Cyan - Imported', Enabled: '1' };
+      // A copy names the controller and camera it came from, as real copies do.
+      receiver.config.Camera[key] = { Number: row.Number, Name: row.Name, Model: 'Cyan - Imported', Enabled: '1', Interface: { device: '(D)' + String(entry.source.config.Product.Serial).toLowerCase(), port: entry.sourceKey } };
       assignments.set(update.key, key);
     } else if (enable === '0' && previous) {
       if (!this.keepCopies) delete receiver.config.Camera[previous];
