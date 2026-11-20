@@ -28,7 +28,7 @@ if (window.parent !== window) {
   let tail: Promise<unknown> = Promise.resolve();
   const receipts = new Set<(plan: Record<string, unknown>) => void>();
   async function readPlan() {
-    const result = await client.call('read-plan') as { revision: string | null; sample: boolean; plan: Record<string, unknown> | null; token?: string; length?: number };
+    const result = await client.call('read-plan') as { revision: string | null; sample: boolean; simulated?: boolean; plan: Record<string, unknown> | null; token?: string; length?: number };
     if (result.token) {
       let text = '';
       for (let offset = 0; offset < result.length!; offset += 60000) text += (await client.call('read-part', { token: result.token, offset }) as { text: string }).text;
@@ -50,9 +50,11 @@ if (window.parent !== window) {
   }
   const bridge = {
     preview: false,
+    // The module is running against its simulated controllers, which the save status says.
+    simulated: false,
     async read() {
       const result = await readPlan();
-      revision = result.revision; bridge.preview = result.sample; return result.plan;
+      revision = result.revision; bridge.preview = result.sample; bridge.simulated = result.simulated === true; return result.plan;
     },
     save(plan: unknown | (() => unknown), saved?: () => void, failed?: (error: unknown) => void) {
       return enqueue(async () => {

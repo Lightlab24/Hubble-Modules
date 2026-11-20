@@ -47,22 +47,40 @@ test('closes, reopens from the header and keeps that across a reload', async ({ 
   await expect(panel(page)).toBeVisible();
 });
 
-test('a simulated rig says so, ticks the steps done and sends from the panel', async ({ page, request }) => {
-  await open(page, request, true);
-  await expect(ui(page).locator('.cv-simulated-pill')).toHaveText('Simulated');
-  // Controllers are already there, so it waits to be opened.
-  await expect(panel(page)).toBeHidden();
-  await ui(page).getByRole('button', { name: 'Setup guide', exact: true }).click();
+test('a simulated rig says so, and its steps tick as it is found, added and sent', async ({ page, request }) => {
+  await request.post('/__reset', { data: { simulated: true } });
+  await page.goto('/');
+  const f = ui(page);
+  await expect(f.locator('[data-role="saved-label"]')).toContainText('Simulated');
+  await expect(f.locator('.cv-simulated-pill')).toHaveText('Simulated');
+  // A new simulated setup has no controllers, so the panel opens by itself.
+  await expect(panel(page)).toBeVisible();
   await expect(panel(page).locator('.guided-setup-note')).toContainText('Simulated. You’re working on a simulated RIO and RCPs');
-  await expect(panel(page).locator('.guided-setup-header p')).toHaveText('3 of 7 done');
-  for (const id of ['find', 'name', 'cameras']) await expect(step(page, id)).toHaveAttribute('data-status', 'done');
-  await expect(step(page, 'send')).toHaveAttribute('data-status', 'current');
-  await expect(step(page, 'remi').locator('small')).toHaveText('Optional');
-  await panel(page).getByRole('button', { name: 'Show pending sends' }).click();
-  await expect(ui(page).locator('[data-role="pending-sends"]')).toBeVisible();
-  // A done step opens to say what was found, and the current one stays where it was.
-  await step(page, 'find').getByRole('button', { name: /Find your controllers/ }).click();
-  await expect(step(page, 'find')).toContainText('You have 5 controllers. 4 are online.');
+  await expect(step(page, 'find')).toContainText('This is Simulated: Discover finds a simulated RIO and two RCPs on any network.');
+  await panel(page).getByRole('button', { name: 'Open Devices' }).click();
+  await expect(f.getByRole('button', { name: 'Network range', exact: true })).toBeFocused();
+  await f.getByRole('button', { name: 'Network range', exact: true }).click();
+  await f.getByRole('listbox', { name: 'Network range' }).getByRole('option', { name: '10.192.0.0/16', exact: true }).click();
+  await f.getByRole('button', { name: 'Discover', exact: true }).click();
+  await f.locator('[data-action="add-all-found"]').click();
+  await expect(f.locator('[data-role="device-count"]')).toHaveText('3');
+  // The rig comes with cameras on the RIO and REMI copies on both RCPs, all sent; the controllers
+  // still carry their serial numbers as names.
+  for (const id of ['find', 'cameras', 'send', 'remi']) await expect(step(page, id)).toHaveAttribute('data-status', 'done');
+  await expect(step(page, 'name')).toHaveAttribute('data-status', 'current');
+  await expect(step(page, 'name')).toContainText('3 controllers are still named by serial number.');
+  await expect(panel(page).locator('.guided-setup-header p')).toHaveText('4 of 7 done');
+  // An edit waits to send, which puts Send back; the panel's own Send sends it.
+  await f.locator('[data-tab="assignment"]').click().then(() => f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
+  const rio = f.locator('[data-controller="CY-RIO-1-10"]'), wide = rio.locator('tr[data-id]').first();
+  if (!await wide.isVisible()) await rio.locator('[data-action="toggle-controller"]').click();
+  await wide.locator('[data-field="name"]').fill('Wide practice'); await wide.locator('[data-field="name"]').press('Enter');
+  // Name is still the current step, so Send goes back to waiting behind it; open it to use it.
+  await expect(step(page, 'send')).toHaveAttribute('data-status', 'upcoming');
+  await step(page, 'send').getByRole('button', { name: /Send to the controllers/ }).click();
+  await panel(page).getByRole('button', { name: /^Send \d+$/ }).click();
+  await expect(wide.locator('[data-column="sync"]')).toContainText('In sync');
+  await expect(step(page, 'send')).toHaveAttribute('data-status', 'done');
 });
 
 test('Skip for now moves on, and Go back to this step returns', async ({ page, request }) => {

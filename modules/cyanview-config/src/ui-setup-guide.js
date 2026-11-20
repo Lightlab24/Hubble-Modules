@@ -49,7 +49,7 @@
       remiCopies: cameras.filter(c => c.remi).length,
       keys: setupGuideKeys,
       pressed: setupGuidePressed,
-      simulated: !!moduleBridge?.preview,
+      simulated: !!moduleBridge?.simulated,
     };
   }
   const plural = (count, one, many = one + 's') => count + ' ' + (count === 1 ? one : many);

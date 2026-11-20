@@ -114,15 +114,19 @@ test('a socket that answers as another controller is not held', async () => {
   } finally { await f.instance.dispose(); await fake.close(); }
 });
 
-test('sample data opens no settings sockets', async () => {
+test('Simulated holds its settings sockets on the simulated controllers, never on the controller it is given', async () => {
   const fake = new FakeController();
   await fake.start();
   const f = fixture({ sampleData: true }, { client: fake.client, liveConfig: live });
   try {
     await f.instance.start();
+    // The given controller answers at the simulated RIO's own address, and still isn't the one reached.
     await f.call('save-plan', { revision: null, plan: planFor(fake) });
     await delay(100);
     assert.equal(fake.opened, 0);
-    assert.equal(changes(f)?.counts && Object.keys(changes(f).counts).length, 0);
+    const reply = await f.call('refresh', { live: true });
+    assert.deepEqual(reply.snapshots.map((snapshot: { device: { serial: string } }) => snapshot.device.serial), ['CY-RIO-1-10']);
+    assert.deepEqual(reply.snapshots[0].cameras.map((camera: { name: string }) => camera.name), ['Wide', 'Tight'], 'The simulated RIO, with its own two cameras');
+    assert.equal(fake.opened, 0);
   } finally { await f.instance.dispose(); await fake.close(); }
 });

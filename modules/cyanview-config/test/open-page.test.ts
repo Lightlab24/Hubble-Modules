@@ -59,7 +59,7 @@ test('the page’s request opens the address it names, and nothing else', async 
   } finally { await f.instance.dispose(); }
 });
 
-test('a browser that won’t open is reported, and sample devices open nothing', async () => {
+test('a browser that won’t open is reported, and a simulated controller opens nothing', async () => {
   const failing = fixture({}, { openPage: async () => { throw new Error('The browser could not be opened'); } });
   try {
     await failing.instance.start();
@@ -69,7 +69,7 @@ test('a browser that won’t open is reported, and sample devices open nothing',
   const sample = fixture({ sampleData: true }, { openPage: async address => { opened.push(address); } });
   try {
     await sample.instance.start();
-    await assert.rejects(() => sample.call('open-device-page', { address: '10.192.1.10' }), /Sample devices have no web page/);
+    await assert.rejects(() => sample.call('open-device-page', { address: '10.192.1.10' }), /simulated controller has no web page/);
     assert.deepEqual(opened, []);
   } finally { await sample.instance.dispose(); }
 });
