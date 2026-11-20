@@ -1,20 +1,61 @@
-# TSL UMD
+# TSL Tally
 
-Official module `hubble-tsl`, version **1.0.0**, using stable Hubble module API **1**.
-TSL packet parsing and UDP/TCP receivers; saved follow controls remain host-owned.
+Official module `hubble-tsl`, version **1.3.0**, using stable Hubble module API **1**.
+It receives TSL UMD 3.1 and 5.0 tally over UDP or TCP, shows what a switcher sends, feeds
+TALLY Switch and Button Matrix tally feedback, and can set a Ross Carbonite switcher to send
+its tally to this computer.
+
+## The page
+
+`TSL Tally` fills the app area (`layout: "full-page"`) with two tabs.
+
+- **Tally** lists every address received, with its name and tally colours, as it changes.
+- **Setup** holds every setting of the link in one place:
+  - **This computer** is the receiver. These are the module's own settings; the page saves
+    them through Hubble (`settings` on the custom section, `module-frontend-settings-v1`),
+    which restarts the listener and reloads the page. The open tab and the last switcher
+    reading are kept in the runtime directory so the page comes back where it was.
+  - **Ross switcher** is the one TSL UMD device the switcher keeps for this computer. Its
+    settings are saved in the `switcher` document, with the workspace, and reach the
+    switcher only on **Send to switcher**.
+  - **Match switcher** sets this computer's TSL version, transport and port to what the
+    switcher's device sends. **Send to switcher** goes the other way.
+
+## Talking to the switcher
+
+`src/switcher/` speaks binary OGP (TCP 5253), the protocol DashBoard uses, to the switcher's
+Ethernet Devices form. It is our own code, written from the protocol as observed on a
+Carbonite Ultra 2ME (software 9.2.1); see the comments in `carbonite-devices.ts` for what was
+seen on the real switcher and what is still unverified there (editing an existing device,
+Enable/Disable, Cancel).
+
+- It writes only the fields of that form (`SWITCHER_WRITABLE_OIDS`), and only for the device
+  with this computer's device name. Every other device must read back unchanged.
+- It does nothing while someone has the form open in DashBoard.
+- Every field is read back before Save; a mismatch cancels the edit.
+- The page reaches the switcher only when the operator presses Read switcher, Send to
+  switcher or Delete from switcher. Opening the page never does.
 
 ## Source ownership
 
-- `src/index.ts` is the module entry; `src/module.ts` composes instance lifecycle and host capabilities.
-- `src/manifest.ts` declares the supported actions, feedback, settings and required host features. Package identity and version live in `package.json`.
-- `src/actions.ts` owns the action-ID/validator registry. `src/schema/` contains only this module's saved action and connection validators; no Hubble application schema is imported.
-- Device clients own connection lifecycle and observed device state. Transport, command queues and confirmation helpers are separate where those responsibilities exist. Reusable protocols live in public `packages/`.
-- `test/` covers action behavior and/or a local device simulator. The manifest/registry test prevents advertising actions without a local validator.
+- `src/module.ts` composes the instance: the receiver, Matrix feedback, the published tally
+  data and the page. Hubble's own older TSL code still reads the reports the managed helper
+  publishes, so the receiver stays wrapped in it.
+- `src/receiver.ts` and `src/protocol.ts` are the TSL listener and packet parsing.
+- `src/page.ts` is the page's backend; `src/frontend.ts` and `ui/` are the page. `src/setup.ts`
+  holds the rules both share: the saved switcher setup and whether the two ends match.
+- `src/matrix.ts` and `src/matrix-feedback.ts` own the Button Matrix column.
+- `src/manifest.ts` declares actions, feedback, settings, the document and host features.
 
-Existing saved IDs and completion evidence are preserved. Legacy descriptors keep Hubble's existing editors during migration; new actions can declare their own fields and handlers through the public SDK without editing host enums. Host persistence and native application access are requested through named capabilities.
+Existing saved IDs are preserved: settings, actions, feedback, `tally` and `matrix-columns`
+data. Saved Button feedback mappings keep working; the page no longer edits them.
 
 ## Develop
 
-From this repository, run `pnpm --filter @hubble-module/tsl build` and `pnpm --filter @hubble-module/tsl test`.
+Run the repository's `pnpm build` once, then `pnpm --filter @hubble-module/tsl build` and
+`pnpm --filter @hubble-module/tsl test`.
+`pnpm --filter @hubble-module/tsl preview` serves the built page on http://127.0.0.1:43197
+against the real backend and a pretend switcher on this computer, with Hubble's shared
+control files read from an installed Hubble. `/__simulate` holds or fails saves and makes the
+pretend switcher misbehave; `/__inspect` shows what was saved and every write it received.
 `pnpm --filter @hubble-module/tsl package` creates the versioned `.hubble-module` artifact.
-Generated `dist/module.mjs` is a distribution bundle; edit the focused TypeScript source instead.

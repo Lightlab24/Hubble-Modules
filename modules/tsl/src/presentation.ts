@@ -1,9 +1,5 @@
 import { z } from "zod";
-import type {
-  ModuleContext,
-  ModuleJsonValue,
-  ModuleTableRow,
-} from "@hubble/module-sdk";
+import type { ModuleContext, ModuleJsonValue } from "@hubble/module-sdk";
 import type { TslDiscoveredDisplay, TslReceiver } from "./receiver.js";
 
 export const indicatorValues = [
@@ -84,23 +80,7 @@ export class TslPresentation {
   emit(): void {
     if (this.closed) return;
     const state = this.receiver().snapshot();
-    const rows: ModuleTableRow[] = state.displays.slice(-512).map((d) => ({
-      id: `display-${d.screen}-${d.address}`,
-      values: {
-        screen: d.screen,
-        address: d.address,
-        label: d.label.slice(0, 256),
-        tally:
-          d.protocol === "3.1"
-            ? d.flags
-                .map((flag, i) => (flag ? `T${i + 1}` : ""))
-                .filter(Boolean)
-                .join(" ") || "Off"
-            : `L:${d.left} Text:${d.text} R:${d.right}`,
-        status: d.fresh ? "Receiving" : "Unavailable",
-        sender: `${d.sourceAddress}:${d.sourcePort}`,
-      },
-    }));
+    // The page reads live tally through its own command; the state only says how the listener is.
     this.context.publishState({
       phase:
         state.phase === "listening"
@@ -114,24 +94,6 @@ export class TslPresentation {
         listener: `${this.context.settings.transport ?? "udp"} ${this.context.settings.bindAddress ?? "0.0.0.0"}:${this.context.settings.port ?? 9821}`,
         received: state.displays.length,
         invalidPackets: state.invalidPackets,
-        discovery: rows,
-        discoveryNote:
-          state.displays.length > 512
-            ? "Showing the latest 512 displays; all addresses remain available for feedback and routing."
-            : "Waiting for tally",
-        feedbackStatus: {
-          settings: JSON.parse(JSON.stringify(this.context.settings)),
-          rows: this.mappings.map((row) => ({
-            id: row.id,
-            values: {
-              status: this.status(
-                row.values.screen,
-                row.values.address,
-                row.values.indicator,
-              ),
-            },
-          })),
-        },
       },
     });
     for (const row of this.mappings) {
@@ -159,10 +121,6 @@ export class TslPresentation {
     }
     this.pending = this.shared();
     void this.flush();
-  }
-  private status(screen: number, address: number, indicator: string): string {
-    const active = onAir(this.receiver().resolve(screen, address), indicator);
-    return active === null ? "Waiting for tally" : active ? "ON AIR" : "Off";
   }
   private async flush(): Promise<void> {
     if (this.publishing || !this.context.modules) return;

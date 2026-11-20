@@ -1,28 +1,59 @@
 import { matrix } from "./matrix.js";
 import { defineModuleManifest } from "@hubble/module-sdk/authoring";
-import { listenerFields, feedbackColumns, text, number } from "./fields.js";
+import { ModuleDocumentValueSchema } from "@hubble/module-sdk";
+import { listenerFields } from "./fields.js";
+import {
+  PAGE_COMMANDS,
+  PAGE_ID,
+  PAGE_SECTION_ID,
+  PAGE_SETTINGS,
+} from "./page.js";
+import { defaultSwitcherDocument, SWITCHER_DOCUMENT_ID } from "./setup.js";
 
 export default defineModuleManifest({
   formatVersion: 1,
   apiVersion: 1,
   host: {
-    minimumVersion: "2.0.10",
+    minimumVersion: "2.3.0",
     requiredFeatures: [
       "module-matrix-v1",
       "module-feedback-observers-v1",
       "module-runtime-directory-v1",
       "host-services-v1",
+      "host-service-registry-v1",
       "module-pages-v1",
-      "module-table-workbook-v1",
+      "module-page-icons-v1",
+      "module-custom-pages-v1",
+      "module-custom-pages-full-page-v1",
+      // The page saves this module's own receiver settings.
+      "module-frontend-settings-v1",
+      "module-theme-v1",
+      "module-controls-v1",
+      // The Tally and Setup tabs sit on one line in the toolbar.
+      "module-controls-inline-v1",
+      "module-documents-v1",
       "module-fields-v2",
-      "module-table-spreadsheet-v1",
-      "module-table-selection-v1",
       "module-exchange-v1",
       "module-exchange-peers-v1",
     ],
   },
   configVersion: 1,
-  capabilities: ["persistent-listener", "state-feedback", "tally-receiver"],
+  // No "tally-receiver": it only made TALLY Switch tuck this page under its own page,
+  // and this page now fills the app area with its own sidebar entry.
+  capabilities: [
+    "persistent-listener",
+    "state-feedback",
+    `service.page.${PAGE_ID}`,
+    "host.documents",
+  ],
+  documents: [
+    {
+      id: SWITCHER_DOCUMENT_ID,
+      label: "Ross switcher setup",
+      version: 1,
+      defaultValue: ModuleDocumentValueSchema.parse(defaultSwitcherDocument()),
+    },
+  ],
   settings: listenerFields,
   matrix,
   actions: [
@@ -145,65 +176,19 @@ export default defineModuleManifest({
   },
   pages: [
     {
-      id: "tsl",
+      id: PAGE_ID,
       label: "TSL Tally",
+      icon: "ui/tsl.svg",
+      layout: "full-page",
       sections: [
         {
-          type: "settings",
-          id: "receiver",
-          label: "Receiver",
-          fields: listenerFields.map((field) => field.id),
-        },
-        {
-          type: "status",
-          id: "status",
-          label: "Reception",
-          fields: [
-            { id: "listener", label: "Listening on" },
-            { id: "received", label: "Discovered displays" },
-            { id: "invalidPackets", label: "Invalid packets" },
-          ],
-        },
-        {
-          type: "table",
-          id: "discovery",
-          workbook: {
-            stateKey: "discoveryWorkbook",
-            defaults: { frozenColumns: 1, textSize: 12 },
-            columns: {},
-          },
-          label: "Live discovery",
-          source: "state",
-          selectionHighlight: "row",
-          maxRows: 512,
-          columns: [
-            number("screen", "Screen"),
-            number("address", "Address"),
-            text("label", "Label"),
-            text("tally", "Tally"),
-            text("status", "Status"),
-            text("sender", "Sender"),
-          ],
-        },
-        {
-          type: "table",
-          id: "feedbackMappings",
-          workbook: {
-            stateKey: "feedbackWorkbook",
-            defaults: { frozenColumns: 1, textSize: 12 },
-            columns: {
-              name: { fill: "series" },
-              address: { fill: "series" },
-              screen: { fill: "copy" },
-              indicator: { fill: "copy" },
-            },
-          },
-          label: "Button feedback mappings",
-          source: "settings",
-          selectionHighlight: "row",
-          maxRows: 256,
-          columns: feedbackColumns,
-          computed: { source: "feedbackStatus", columns: ["status"] },
+          type: "custom",
+          id: PAGE_SECTION_ID,
+          label: "TSL Tally",
+          entry: "ui/index.html",
+          height: 560,
+          commands: PAGE_COMMANDS.map((command) => ({ ...command })),
+          settings: [...PAGE_SETTINGS],
         },
       ],
     },

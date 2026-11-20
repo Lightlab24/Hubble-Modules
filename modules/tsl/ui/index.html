@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>TSL Tally</title><link rel="stylesheet" href="/api/module-controls/theme-v1.css"><link rel="stylesheet" href="./app.css"></head>
+<body>
+<div class="tsl-app" id="app">
+  <header class="app-header">
+    <div class="app-title"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="6.5" width="17" height="11" rx="2.5"/><circle cx="8.5" cy="12" r="1.7"/><path d="M12.5 10.5h5M12.5 13.5h3.5"/></svg><div><h1>TSL Tally</h1><p id="instance-name">&nbsp;</p></div></div>
+    <div class="header-status" id="listener" data-tone="idle"><span class="status-dot"></span><span id="listener-text">Loading workspace…</span></div>
+  </header>
+  <div class="toolbar" role="toolbar" aria-label="TSL Tally">
+    <div id="tabs"></div>
+    <span class="toolbar-divider" data-for="tally"></span>
+    <label class="field" data-for="tally">Find <input id="find" type="search" autocomplete="off" spellcheck="false" placeholder="Address or name" aria-label="Find an address or name"></label>
+    <span class="toolbar-spacer"></span>
+    <span class="count" id="count" data-for="tally"></span>
+    <span class="note" data-for="setup">Changes to This computer save as you make them. The switcher changes only when you send.</span>
+  </div>
+  <main class="work-area">
+    <div class="sheet-scroll" id="tally-view"><table id="tally-grid" class="sheet" role="grid" aria-label="Received tally"></table><div id="tally-empty" class="empty" hidden><h2>No tally received yet</h2><p>Addresses appear here as soon as the switcher sends them. Use Setup to point the switcher at this computer.</p></div><p id="tally-none" class="none" hidden>No addresses match your search</p></div>
+    <div class="setup-scroll" id="setup-view" hidden>
+      <div class="setup">
+        <p class="link" id="link" data-tone="idle"><span class="status-dot"></span><strong id="link-title">Not checked</strong><span id="link-text">&nbsp;</span></p>
+        <div class="column">
+          <section class="panel" aria-labelledby="computer-title">
+            <div class="panel-head"><h2 id="computer-title">This computer</h2><span class="panel-sub">What Hubble listens for</span></div>
+            <div class="fields two">
+              <div class="control" id="protocol"></div>
+              <div class="control" id="transport"></div>
+              <label class="box">Port<input id="port" type="number" min="1" max="65535" step="1" inputmode="numeric" autocomplete="off"></label>
+              <label class="box">Listen on<select id="bind"></select></label>
+              <label class="box">Allowed sender<input id="sender" type="text" autocomplete="off" spellcheck="false" placeholder="Any sender"></label>
+              <label class="box">Stale timeout (ms)<input id="stale" type="number" min="0" max="3600000" step="1000" inputmode="numeric" autocomplete="off"></label>
+              <label class="box wide">TALLY Switch module<select id="peer"></select></label>
+            </div>
+            <div class="panel-actions"><button id="match" class="primary" type="button">Match switcher</button><span class="action-hint" id="match-hint">Listens for exactly what the switcher sends</span></div>
+          </section>
+          <section class="panel" aria-labelledby="devices-title">
+            <div class="panel-head"><h2 id="devices-title">TSL devices on the switcher</h2><span class="panel-sub" id="devices-sub">&nbsp;</span></div>
+            <table id="device-grid" class="sheet plain" aria-label="TSL devices on the switcher"></table>
+            <p id="devices-empty" class="none in-panel" hidden>Read the switcher to list its devices</p>
+          </section>
+        </div>
+        <section class="panel" aria-labelledby="switcher-title">
+          <div class="panel-head"><h2 id="switcher-title">Ross switcher</h2><span class="panel-sub">What the switcher sends to this computer</span></div>
+          <div class="fields three">
+            <label class="box wide">Host or IP address<span class="with-button"><input id="host" type="text" autocomplete="off" spellcheck="false" placeholder="10.0.0.10"><button id="read" class="quiet tall" type="button">Read switcher</button></span></label>
+            <p class="found wide" id="found" data-tone="idle"><span class="status-dot"></span><span id="found-text">Not checked</span></p>
+            <label class="box">Send to<select id="send-to"></select></label>
+            <label class="box">Device name<input id="device-name" type="text" maxlength="8" autocomplete="off" spellcheck="false"></label>
+            <label class="box">Address offset<select id="offset"></select></label>
+            <div class="control wide" id="brightness"></div>
+          </div>
+          <div class="fields three switches">
+            <div class="control" id="enabled"></div>
+            <div class="control" id="screen"></div>
+            <div class="control" id="center"></div>
+            <div class="control" id="fsfc"></div>
+            <div class="control" id="bus-name"></div>
+            <div class="control" id="umd-id"></div>
+            <div class="control" id="one-second"></div>
+            <div class="control" id="header"></div>
+          </div>
+          <p class="panel-note" id="link-note">&nbsp;</p>
+          <div class="panel-actions"><button id="send" class="primary" type="button">Send to switcher</button><button id="delete" class="quiet tall" type="button">Delete from switcher</button><span class="device-state" id="device-state" data-tone="idle"><span class="status-dot"></span><span id="device-state-text">&nbsp;</span></span></div>
+        </section>
+      </div>
+    </div>
+    <div id="loading" class="loading" role="status">Connecting to workspace…</div>
+  </main>
+  <footer class="app-footer"><output id="status-line" aria-live="polite">Loading…</output><span id="packets"></span></footer>
+</div>
+<script type="module" src="./app.js"></script>
+</body></html>
