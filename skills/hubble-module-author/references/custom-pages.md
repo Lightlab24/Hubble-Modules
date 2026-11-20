@@ -81,6 +81,47 @@ frontend saves on its own schedule rather than with **Save changes**; say so in
 its text. It uses the same sandbox and scoped bridge as any other custom page.
 `height` can be as low as 48 for a single settings row.
 
+## Save the module's settings from a page
+
+A page a module draws can show the module's own settings and save them, so a setup page
+need not send the operator to Module Connections. List the settings the page may save on
+its `custom` section and require `module-frontend-settings-v1` (Hubble 2.3.1):
+
+```ts
+{
+  type: 'custom', id: 'app', label: 'Setup', entry: 'ui/index.html',
+  commands: [{ id: 'snapshot', label: 'Read the page' }],
+  settings: ['protocol', 'transport', 'port'],
+}
+```
+
+```ts
+const page = await connectModuleFrontend(window);
+await page.saveSettings({ protocol: "5.0", port: 9821 });
+```
+
+- Each ID is one of the module's declared `settings`, and never a secret. Hubble refuses a
+  save that names any other setting, as a whole, and saves nothing.
+- Settings you leave out keep their values. Hubble checks the result the way its own
+  settings form does, and an invalid value is refused with the form's message.
+- The save is Hubble's ordinary settings save: shown at once in Module Connections, saved in
+  order behind any save still on its way, and rolled back with Hubble's fading toast when
+  the workspace refuses it.
+- **A saved setting restarts the module, and Hubble then reloads the page.** Show the new
+  value the moment the operator makes the change and never wait on `saveSettings` to draw
+  it. Save several values in one call rather than one call each, and hold a typed value
+  until Enter or leaving the box. Keep anything the page must still show after the reload,
+  such as the open tab, in the backend's `runtimeDirectory` or a module document.
+- The backend reads the saved values from `context.settings` when it starts, as always.
+  Hand them to the page in the reply to its first command.
+- A `module-settings` page cannot save settings this way: its settings already sit beside it
+  with their own **Save changes**. `saveSettings` rejects there, and on a Hubble without the
+  feature.
+
+Use this only for settings that already belong to the module. A value an operator changes
+while a device runs belongs in a page command or a module document, which do not restart
+the module.
+
 ## Declare and build
 
 Add a `custom` section to a normal page. Require both `module-pages-v1` and

@@ -31,6 +31,10 @@ To show a count on a page's sidebar tab, such as alerts waiting, set `pages[].ba
 value with that name and shows it while it is a whole number above zero; zero, a missing
 value or a module that isn't running shows no badge. `tone` is `alert` (red, the default)
 or `info`. The count follows the module's published state, so publish when it changes.
+For a page that shows and saves the module's own settings, list them on the custom section as
+`settings: [...]`, call `saveSettings` from the page and require `module-frontend-settings-v1`
+(Hubble 2.3.1). A saved setting restarts the module and reloads the page, so read
+[custom pages](references/custom-pages.md) before relying on it.
 A page can also set `pages[].wideIcon`, a wide logo such as a wordmark, with the same file
 rules, requiring `module-page-wide-icons-v1`. Hubble shows it beside the label in the expanded
 sidebar, fitted into 44 by 16 pixels, and `icon` when the sidebar is collapsed.
