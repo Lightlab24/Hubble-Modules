@@ -27,6 +27,8 @@ const WORDS = ["Off", "Red", "Green", "Amber"] as const;
 /** 3.1 lamps are only on or off. Tally 2 is program on a Ross switcher, tally 1 preview. */
 const TALLY_31 = ["green", "red", "amber", "amber"] as const;
 const SETTINGS_SAVE_DELAY_MS = 600;
+/** How long to wait for Hubble's reload after a save before letting the page carry on as it is. */
+const RELOAD_WAIT_MS = 5000;
 const IPV4 = /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/u;
 const clock = (time: number) => new Date(time).toLocaleTimeString([], { hour12: false });
 
@@ -178,9 +180,11 @@ try {
     const state = deviceState({ reading, wanted: wanted() });
     el("device-state").dataset.tone = state.tone;
     el("device-state-text").textContent = state.text;
-    el<HTMLButtonElement>("delete").disabled = busy || !state.onSwitcher;
-    el<HTMLButtonElement>("send").disabled = busy || !switcher.host;
-    el<HTMLButtonElement>("read").disabled = busy || !switcher.host;
+    // No switcher request while Hubble is restarting the module: the restart would cut it short.
+    const away = busy || restarting;
+    el<HTMLButtonElement>("delete").disabled = away || !state.onSwitcher;
+    el<HTMLButtonElement>("send").disabled = away || !switcher.host;
+    el<HTMLButtonElement>("read").disabled = away || !switcher.host;
     const lines = (reading?.devices ?? []).filter((row) => row.type === "TSL UMD").map((row) => deviceLine(row, row.name === switcher.name));
     const deviceBody = document.createElement("tbody");
     for (const line of lines) {
@@ -228,22 +232,69 @@ try {
   };
 
   // ----- Setup: this computer. Hubble saves these settings, then restarts the listener. -----
+  // A save ends with Hubble restarting the module and reloading this page. So a save never runs
+  // beside a switcher request, and it waits while a box holds text that hasn't been entered yet.
   let waiting: Partial<ReceiverSettings> = {};
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Hubble has a save and is about to reload this page. */
+  let restarting = false;
+  /** What the module runs with is the snapshot's, until Hubble has taken a save from this page. */
+  let savedIsSnapshot = true;
+  let held = 0;
+  let typingIn: EventTarget | null = null;
+  /** A box that was taken off the page or left without a word no longer counts. */
+  const typing = () => typingIn instanceof HTMLElement && typingIn.isConnected && document.activeElement === typingIn;
   const flushSettings = () => {
     clearTimeout(saveTimer);
     saveTimer = undefined;
-    const values = waiting;
+    if (held || disposed || !Object.keys(waiting).length) return;
+    if (typing() && !restarting) {
+      saveTimer = setTimeout(flushSettings, SETTINGS_SAVE_DELAY_MS);
+      return;
+    }
+    // A change put back before it was saved is nothing to save, and Hubble would not restart for it.
+    const values = Object.fromEntries(
+      Object.entries(waiting).filter(([id, value]) => !savedIsSnapshot || snapshot.receiver[id as keyof ReceiverSettings] !== value),
+    ) as Partial<ReceiverSettings>;
     waiting = {};
     if (!Object.keys(values).length) return;
+    restarting = true;
+    savedIsSnapshot = false;
     say("Saving, then restarting the listener…");
+    drawSwitcher();
     // Hubble reloads the page once the listener has restarted, so nothing waits on success.
     // Hubble closing this page for that reload is the expected end, not a failure to report.
-    client.saveSettings(values).catch((error: unknown) => {
-      if (disposed || /^Module page (?:closed|reloaded)/u.test(text(error, ""))) return;
-      say(text(error, "These settings could not be saved"), true);
-      toast("failure", text(error, "These settings could not be saved"));
-    });
+    client.saveSettings(values).then(
+      () => {
+        setTimeout(() => {
+          if (disposed) return;
+          restarting = false;
+          say("");
+          drawSwitcher();
+          flushSettings();
+        }, RELOAD_WAIT_MS);
+      },
+      (error: unknown) => {
+        if (disposed || /^Module page (?:closed|reloaded)/u.test(text(error, ""))) return;
+        restarting = false;
+        savedIsSnapshot = true;
+        say(text(error, "These settings could not be saved"), true);
+        drawSwitcher();
+        toast("failure", text(error, "These settings could not be saved"));
+      },
+    );
+  };
+  /** Keeps a save back until the switcher request (and any question before it) is over. */
+  const hold = async (work: () => Promise<void>) => {
+    held += 1;
+    clearTimeout(saveTimer);
+    saveTimer = undefined;
+    try {
+      await work();
+    } finally {
+      held -= 1;
+      if (!held) flushSettings();
+    }
   };
   const setReceiver = (change: Partial<ReceiverSettings>, now = false) => {
     Object.assign(receiver, change);
@@ -252,9 +303,18 @@ try {
     drawSwitcher();
     for (const control of controls) control.refresh();
     clearTimeout(saveTimer);
-    if (now) flushSettings();
+    // Once Hubble is about to reload the page, a later change has to reach it before that.
+    if (now || restarting) flushSettings();
     else saveTimer = setTimeout(flushSettings, SETTINGS_SAVE_DELAY_MS);
   };
+  // Typed text that hasn't been entered would be lost in the reload, so the save waits for it.
+  document.addEventListener("input", (event) => {
+    if (event.target instanceof HTMLInputElement && event.target.id !== "find") typingIn = event.target;
+  }, true);
+  for (const done of ["change", "focusout"])
+    document.addEventListener(done, (event) => {
+      if (event.target === typingIn) typingIn = null;
+    }, true);
   /** A box keeps what was typed and turns red when it can't be used; nothing is saved until it can. */
   const box = <T>(id: string, read: (raw: string) => T | undefined, write: (value: T) => void) => {
     const input = el<HTMLInputElement>(id);
@@ -403,7 +463,7 @@ try {
 
   // ----- Setup: talking to the switcher. One request at a time; a button keeps its label while it works. -----
   const contact = async (button: string, working: string, done: (at: number) => string, command: string, value: unknown = {}) => {
-    if (busy) return;
+    if (busy || restarting) return;
     busy = true;
     el(button).dataset.busy = "true";
     el(button).setAttribute("aria-busy", "true");
@@ -438,30 +498,42 @@ try {
       drawSwitcher();
     }
   };
-  el("read").addEventListener("click", () => void contact("read", "Reading the switcher…", (at) => `Read the switcher ${clock(at)}`, "read-switcher"));
-  el("send").addEventListener("click", async () => {
-    if (busy) return;
-    const mine = reading?.mine;
-    let adopt = false;
-    if (mine && !localAddresses.includes(mine.ip)) {
-      adopt = await confirm({
-        title: `Change ${mine.name} on the switcher?`,
-        message: `${mine.name} now sends to ${mine.ip} : ${mine.port}, which isn't this computer. Sending points it at ${sendTo() || "this computer"}.`,
-        confirmLabel: "Send to switcher",
-      });
-      if (!adopt) return;
-    }
-    void contact("send", "Sending to the switcher…", (at) => `Sent to the switcher ${clock(at)}`, "send-switcher", { adopt });
+  const idle = () => !busy && !restarting;
+  el("read").addEventListener("click", () => {
+    if (idle()) void hold(() => contact("read", "Reading the switcher…", (at) => `Read the switcher ${clock(at)}`, "read-switcher"));
   });
-  el("delete").addEventListener("click", async () => {
-    if (busy) return;
-    const yes = await confirm({
-      title: `Delete ${switcher.name} from the switcher?`,
-      message: "The switcher stops sending tally to this computer. Its other devices aren't changed.",
-      confirmLabel: "Delete from switcher",
-      danger: true,
+  el("send").addEventListener("click", () => {
+    if (!idle()) return;
+    void hold(async () => {
+      const mine = reading?.mine;
+      let adopt = false;
+      if (mine && !localAddresses.includes(mine.ip)) {
+        adopt = await confirm({
+          title: `Change ${mine.name} on the switcher?`,
+          message: `${mine.name} now sends to ${mine.ip} : ${mine.port}, which isn't this computer. Sending points it at ${sendTo() || "this computer"}.`,
+          confirmLabel: "Send to switcher",
+        });
+        if (!adopt) return;
+      }
+      // The switcher gets what this page shows for This computer, saved yet or not.
+      const { protocol, transport, port: listenPort } = receiver;
+      await contact("send", "Sending to the switcher…", (at) => `Sent to the switcher ${clock(at)}`, "send-switcher", {
+        adopt,
+        receiver: { protocol, transport, port: listenPort },
+      });
     });
-    if (yes) void contact("delete", "Deleting from the switcher…", (at) => `Deleted from the switcher ${clock(at)}`, "delete-switcher");
+  });
+  el("delete").addEventListener("click", () => {
+    if (!idle()) return;
+    void hold(async () => {
+      const yes = await confirm({
+        title: `Delete ${switcher.name} from the switcher?`,
+        message: "The switcher stops sending tally to this computer. Its other devices aren't changed.",
+        confirmLabel: "Delete from switcher",
+        danger: true,
+      });
+      if (yes) await contact("delete", "Deleting from the switcher…", (at) => `Deleted from the switcher ${clock(at)}`, "delete-switcher");
+    });
   });
 
   // ----- Tabs -----

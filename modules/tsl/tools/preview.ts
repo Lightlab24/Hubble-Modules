@@ -85,6 +85,8 @@ let holdSaves: Promise<void> | undefined;
 let releaseSaves: (() => void) | undefined;
 let failNextSave = false;
 let failNextSettings = false;
+/** Hubble takes a moment to save a setting and restart the module. Zero unless a check asks. */
+let settingsDelayMs = 0;
 let generation = 0;
 const logs: unknown[] = [];
 let state: unknown = null;
@@ -173,6 +175,7 @@ const server = createServer(async (request, response) => {
         }
         if (input.failNextSave) failNextSave = true;
         if (input.failNextSettings) failNextSettings = true;
+        if (typeof input.settingsDelayMs === "number") settingsDelayMs = input.settingsDelayMs;
         if (input.switcher) Object.assign(fake.options, input.switcher);
         if (input.holdSwitcher) fake.hold();
         if (input.releaseSwitcher) fake.release();
@@ -192,6 +195,7 @@ const server = createServer(async (request, response) => {
           failNextSettings = false;
           return send({ error: "The workspace refused this save." });
         }
+        if (settingsDelayMs) await new Promise((resolve) => setTimeout(resolve, settingsDelayMs));
         Object.assign(settings, input.values);
         await instance.dispose();
         await startInstance();

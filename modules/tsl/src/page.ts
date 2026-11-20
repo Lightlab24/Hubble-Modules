@@ -452,7 +452,14 @@ export class TslPage {
         );
       }
       case "send-switcher": {
-        const { adopt } = z.object({ adopt: z.boolean().default(false) }).parse(request.value ?? {});
+        // The page sends what it shows for This computer: a change there may still be on its way
+        // through Hubble, and the switcher has to get what the person is looking at.
+        const { adopt, receiver } = z
+          .object({
+            adopt: z.boolean().default(false),
+            receiver: ReceiverSettingsSchema.pick({ protocol: true, transport: true, port: true }).optional(),
+          })
+          .parse(request.value ?? {});
         const { value: document } = await this.document(signal);
         const target = switcherTarget(document.host);
         const sendTo = document.sendTo || (await this.switcher.routeAddress(target.host));
@@ -467,7 +474,7 @@ export class TslPage {
               throw new Error(`${before.mine.name} on the switcher sends to ${before.mine.ip}. Confirm before changing it`);
             return this.switcher.sendDevice({
               ...target,
-              settings: wantedDevice(document, this.receiverSettings(), sendTo),
+              settings: wantedDevice(document, { ...this.receiverSettings(), ...receiver }, sendTo),
               signal,
             });
           }),

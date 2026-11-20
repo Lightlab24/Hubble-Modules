@@ -242,6 +242,20 @@ describe("the switcher", () => {
     expect(fake.formIsIdle).toBe(true);
   });
 
+  it("sends what the page shows for this computer, even before Hubble has saved it", async () => {
+    const fake = await fakeSwitcher();
+    // The module still runs on TSL 5.0 over TCP; the page has just been changed to 3.1 over UDP.
+    const { call } = await world({ fake, settings: { protocol: "5.0", transport: "tcp", port: 9821 } });
+    const sent = await call<Contact>("send-switcher", { receiver: { protocol: "3.1", transport: "udp", port: 9900 } });
+    expect(sent.reading?.mine?.settings).toMatchObject({ protocol: "3.1", transport: "udp", port: 9900 });
+    expect(fake.devices[3]).toMatchObject({ name: "HUBBLE", port: 9900, transport: 1, driverKey: FAKE_DRIVER.tsl31 });
+    // Anything else in its place is refused before the switcher is contacted.
+    const before = fake.requests.length;
+    await expect(call("send-switcher", { receiver: { protocol: "4.0", transport: "udp", port: 9900 } })).rejects.toThrow();
+    await expect(call("send-switcher", { receiver: { protocol: "3.1", transport: "udp", port: 0 } })).rejects.toThrow();
+    expect(fake.requests).toHaveLength(before);
+  });
+
   it("never repoints a device that sends somewhere else without being told to", async () => {
     const fake = await fakeSwitcher();
     const { call, setDocument } = await world({ fake, settings: { protocol: "3.1", transport: "tcp", port: 5727 } });

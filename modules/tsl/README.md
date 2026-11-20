@@ -19,7 +19,9 @@ its tally to this computer.
     settings are saved in the `switcher` document, with the workspace, and reach the
     switcher only on **Send to switcher**.
   - **Match switcher** sets this computer's TSL version, transport and port to what the
-    switcher's device sends. **Send to switcher** goes the other way.
+    switcher's device sends. **Send to switcher** goes the other way. It sends what the page
+    shows for this computer, even when that change is still being saved; a save never runs
+    beside a switcher request, because the restart would cut the request short.
 
 ## Talking to the switcher
 
