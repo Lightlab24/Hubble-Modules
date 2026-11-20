@@ -43,6 +43,8 @@ button.quiet:hover{background:var(--hubble-hover,#2e2e2e)}
 #device-grid .corner{z-index:26}
 #device-grid td[aria-readonly=true]{color:var(--hubble-text-secondary,#b2b2b2)}
 #device-grid td.num,#device-grid th.num{text-align:right;padding:4px 8px;font-variant-numeric:tabular-nums}
+#device-grid tr[data-picked=true] td{background-image:linear-gradient(#cecece1f,#cecece1f)}
+#device-grid tr[data-picked=true] th.row-number{background:var(--hubble-selected,#373737);color:var(--hubble-text-strong,#f4f4f4)}
 #device-grid tr[data-off=true] td{color:var(--hubble-text-disabled,#7a7a7a)}
 #device-grid td[data-inherited=true]{color:var(--hubble-text-disabled,#7a7a7a)}
 #device-grid td[data-empty=true]::before{content:"—";color:var(--hubble-text-disabled,#4c4c4c);pointer-events:none}

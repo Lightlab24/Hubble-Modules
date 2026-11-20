@@ -1,6 +1,6 @@
 # Ping
 
-Module ID `network-ping`, version 0.1.3. Pings network devices, keeps a timeline of each one, and
+Module ID `network-ping`, version 0.1.4. Pings network devices, keeps a timeline of each one, and
 alerts when a device stops answering or answers slowly. It is a workspace module: add it once, and
 its **Ping** page lists every device. It needs a Hubble with `module-page-badges-v1` and
 `module-controls-inline-v1` (2.3.1).
@@ -24,6 +24,11 @@ checkboxes, menus, resize, row moves, zoom and the Columns list).
 **Add device** adds one row. The **Devices** box beside it sets how many rows there are: type a
 number to add blank rows at the end or take the last ones off. Blank rows go without asking; a row
 with anything filled in is named first, and Undo brings it back.
+
+To remove several devices at once, select them and right-click: **Remove 3 devices**. Select by
+dragging or Shift-clicking cells, or by the row numbers: click one, Shift-click for a range,
+Command-click to add or drop one. Right-clicking outside the selection removes only that row. One
+Undo brings them all back.
 
 The toolbar sets what every device shares: **Pinging** (On or Paused), **Ping every** (0.2 s to
 60 s) and **Size** (32 to 1400 bytes). The **Alerts** row under it sets the global **Answer over**

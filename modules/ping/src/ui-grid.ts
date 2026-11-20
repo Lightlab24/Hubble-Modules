@@ -36,7 +36,8 @@ export interface GridOptions {
   readonly store: DraftStore;
   live(): Record<string, DeviceSummary>;
   onInsert(beforeId: string | null): void;
-  onRemove(rowId: string): void;
+  /** Removes these devices as one step. */
+  onRemove(rowIds: readonly string[]): void;
   onSelect(rowId: string): void;
   onError(message: string): void;
 }
@@ -77,6 +78,11 @@ export async function createDeviceGrid(options: GridOptions) {
   let editor: { address: SpreadsheetAddress; cell: HTMLTableCellElement } | undefined;
   let disposed = false;
   let zoom = 1;
+  /** Whole rows picked by their row numbers: click one, Shift-click to a range, Command-click to add or drop one. */
+  let pickedRows: string[] = [];
+  let pickAnchor: string | undefined;
+  let commandHeld = false;
+  let rightPress = false;
 
   const view = () => store.document.view;
   const widthOf = (columnId: string) => view().widths[columnId] ?? columnOf(columnId)!.width;
@@ -230,11 +236,14 @@ export async function createDeviceGrid(options: GridOptions) {
     }
     event.preventDefault();
     const index = store.document.devices.findIndex((row) => row.id === rowId);
+    // Remove acts on everything selected when the click is inside the selection, and on this row alone when it isn't.
+    const selected = selectedRowIds();
+    const targets = selected.includes(rowId) ? selected : [rowId];
     const column = columnId ? columnOf(columnId) : undefined;
     menu.open({
       x: event.clientX,
       y: event.clientY,
-      label: valueOf(rowOf(rowId)!, "name") || "Device",
+      label: targets.length > 1 ? `${targets.length} devices` : valueOf(rowOf(rowId)!, "name") || "Device",
       items: [
         ...(column && !column.live && column.id !== "enabled" ? [{ id: "edit", label: "Edit cell", run: () => startEdit(target) }] : []),
         ...(columnId && store.invalid.has(`${rowId}/${columnId}`)
@@ -243,7 +252,16 @@ export async function createDeviceGrid(options: GridOptions) {
         { id: "above", label: "Add device above", icon: "add", run: () => options.onInsert(rowId) },
         { id: "below", label: "Add device below", icon: "add", run: () => options.onInsert(store.document.devices[index + 1]?.id ?? null) },
         { separator: true },
-        { id: "remove", label: "Remove device", icon: "delete", danger: true, run: () => options.onRemove(rowId) },
+        {
+          id: "remove",
+          label: targets.length > 1 ? `Remove ${targets.length} devices` : "Remove device",
+          icon: "delete",
+          danger: true,
+          run: () => {
+            pickedRows = [];
+            options.onRemove(targets);
+          },
+        },
       ],
     });
   });
@@ -292,6 +310,13 @@ export async function createDeviceGrid(options: GridOptions) {
         handle: rows.get(row.id)!.cells[0] as HTMLElement,
         elements: [...rows.get(row.id)!.cells] as HTMLElement[],
       })),
+    getSelectedRows: () => pickedRows,
+    onSelect(item, extend) {
+      // A right-click opens the menu for what is already picked; it never changes the pick.
+      if (rightPress) return;
+      // The shared control reports a plain or Shift click; Command is read from the press that caused it.
+      pickRow(item.id, extend ? "range" : commandHeld ? "toggle" : "one");
+    },
     onMove(move) {
       const operation = moveRows(store.document, move.ids, move.beforeId);
       if (operation) store.submit(operation);
@@ -311,6 +336,51 @@ export async function createDeviceGrid(options: GridOptions) {
     },
   });
   disposables.push(zoomControls);
+
+  /** Rows the operator has selected: whole rows picked by number, or else every row with a selected cell. */
+  function selectedRowIds(): string[] {
+    const order = store.document.devices.map((row) => row.id);
+    if (pickedRows.length) return order.filter((id) => pickedRows.includes(id));
+    const withCells = new Set<string>();
+    for (const cell of table.querySelectorAll<HTMLElement>('td[data-hubble-spreadsheet-selected="true"], td[data-hubble-spreadsheet-active="true"]'))
+      if (cell.dataset.rowId) withCells.add(cell.dataset.rowId);
+    return order.filter((id) => withCells.has(id));
+  }
+  function pickRow(id: string, how: "one" | "range" | "toggle") {
+    const order = store.document.devices.map((row) => row.id);
+    if (how === "range" && pickAnchor && order.includes(pickAnchor)) {
+      const [from, to] = [order.indexOf(pickAnchor), order.indexOf(id)].sort((a, b) => a - b);
+      pickedRows = order.slice(from, to! + 1);
+    } else if (how === "toggle") {
+      pickedRows = pickedRows.includes(id) ? pickedRows.filter((item) => item !== id) : [...pickedRows, id];
+      pickAnchor = id;
+    } else {
+      pickedRows = [id];
+      pickAnchor = id;
+    }
+    markPicked();
+    options.onSelect(id);
+  }
+  function markPicked() {
+    for (const [id, tr] of rows) {
+      if (pickedRows.includes(id)) tr.dataset.picked = "true";
+      else delete tr.dataset.picked;
+    }
+  }
+  // Command-click on a row number adds or drops that row. Pressing on a cell goes back to cell selection.
+  // Listened for on the window, so the keys held are known before the shared control reports the click.
+  const pressed = (event: PointerEvent) => {
+    commandHeld = event.metaKey || event.ctrlKey;
+    rightPress = event.button === 2 || (event.button === 0 && event.ctrlKey && !event.metaKey && navigator.platform.startsWith("Mac"));
+    if (event.button !== 0 || !pickedRows.length) return;
+    const target = event.target instanceof Element ? event.target.closest<HTMLElement>("#device-grid td") : null;
+    if (target && table.contains(target)) {
+      pickedRows = [];
+      markPicked();
+    }
+  };
+  window.addEventListener("pointerdown", pressed, true);
+  disposables.push({ dispose: () => window.removeEventListener("pointerdown", pressed, true) });
 
   /** The page's own text editor for Device, IP Address and the two alert cells. */
   function startEdit(cell: HTMLTableCellElement, initial?: string): boolean {
@@ -458,6 +528,8 @@ export async function createDeviceGrid(options: GridOptions) {
       }
     }
     while (body.children.length > store.document.devices.length) body.lastElementChild!.remove();
+    pickedRows = pickedRows.filter((id) => ids.has(id));
+    markPicked();
     renderLive();
     controls.refresh();
     resize.refresh();

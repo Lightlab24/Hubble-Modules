@@ -138,13 +138,33 @@ try {
     if (store.submit(insertRows(store.document, [row], beforeId))) grid.select({ rowId: row.id, columnId: "host" });
   }
 
+  /** Removes devices as one undo step. One row goes at once; several are named first when any is filled in. */
+  async function removeDevices(rowIds: readonly string[]) {
+    const going = store.document.devices.filter((row) => rowIds.includes(row.id));
+    if (!going.length) return;
+    const filled = going.filter(deviceHasData);
+    if (going.length > 1 && filled.length) {
+      const names = filled.slice(0, 8).map((row) => valueOf(row, "name")).join(", ");
+      const sure = await confirm({
+        title: `Remove ${going.length} devices?`,
+        message: `This takes ${going.length} devices off the list, with their addresses and alert settings. Filled in: ${names}${filled.length > 8 ? ` and ${filled.length - 8} more` : ""}. Undo brings them back.`,
+        confirmLabel: "Remove devices",
+        danger: true,
+      });
+      if (!sure) return;
+    }
+    // The list may have changed while the question was open.
+    const still = going.map((row) => row.id).filter((id) => store.document.devices.some((row) => row.id === id));
+    if (still.length) store.submit(removeRows(store.document, still));
+  }
+
   const grid = await createDeviceGrid({
     table: el<HTMLTableElement>("device-grid"),
     viewport: el("viewport"),
     store,
     live: () => live.devices,
     onInsert: insert,
-    onRemove: (rowId) => store.submit(removeRows(store.document, [rowId])),
+    onRemove: (rowIds) => void removeDevices(rowIds),
     onSelect(rowId) {
       if (rowId === selectedId) return;
       selectedId = rowId;
