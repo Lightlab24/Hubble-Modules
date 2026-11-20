@@ -1,5 +1,24 @@
 # Hubble module developer kit
 
+## Start here
+
+New to Hubble modules? Read [Build a Hubble module: start here](getting-started.md).
+It covers what you need, trying your module in Hubble and sending it in for testing.
+The short version, run from this folder with Node 22 or newer:
+
+```sh
+node ./module-tool.mjs create ./my-device my-device
+node ./module-tool.mjs build ./my-device
+node ./module-tool.mjs test ./my-device
+node ./module-tool.mjs validate ./my-device
+node ./module-tool.mjs pack ./my-device my-device-1.0.0.hubble-module
+```
+
+Then import `my-device-1.0.0.hubble-module` in HubDash: **Module Connections** >
+**Add module** > **Import a module file**.
+
+## What each kit adds
+
 Developer kit **1.8.1-dev.7** brings the SDK and the module-author skill up to Hubble
 2.3.1. Each addition is optional and named by a host feature, so check for it in the
 actual host's `describe` response and keep it out of releases meant for older hosts.
