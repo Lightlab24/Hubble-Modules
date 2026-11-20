@@ -220,7 +220,6 @@ body:has(#cyanview-design .hc-veil:not([hidden])) .hubble-column-resize-handles 
 #cyanview-design .hc-remi-view button { white-space: nowrap; }
 /* The Devices sheet looks like the camera sheets, without being one of the shared spreadsheets. */
 #cyanview-design .hc-device-column { display: flex; flex: 1 1 auto; flex-direction: column; gap: 9px; min-width: 0; }
-#cyanview-design .hc-device-view { flex: 0 0 auto; }
 #cyanview-design .hc-grid[data-device-sheet] { min-width: 0; border-collapse: separate; border-spacing: 0; color: light-dark(#252525, #dedede); font: var(--hc-sheet-text-size, 13px) system-ui, sans-serif; --hc-matrix-heading: light-dark(#eaeaea, #222); --hc-matrix-grid: light-dark(#d9d9d9, #3b3b3b); }
 #cyanview-design .hc-grid[data-device-sheet] :is(td, th) { border-color: var(--hc-matrix-grid); font-size: var(--hc-sheet-text-size, 13px); }
 #cyanview-design .hc-controller .hc-grid[data-device-sheet] thead th { height: 30px; background: var(--hc-matrix-heading); text-align: left; font-weight: 600; }

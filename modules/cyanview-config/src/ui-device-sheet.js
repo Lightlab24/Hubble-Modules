@@ -1,9 +1,9 @@
   // The Devices tab as one sheet: a row per controller with its addresses as columns. LAN and WAN
   // settings fold away behind their own groups. A device is added by typing its IP in the last row,
-  // and found devices list under the managed ones, each with its own Add. The cards this replaces
-  // stay as the Details view, and every edit here goes through the same rows and sends they use.
+  // and found devices list under the managed ones, each with its own Add. It replaced a card per
+  // device, and its edits still go through the same LAN rows and sends those cards used.
   // The remove button sits beside the name, where it is on the camera sheets.
-  const deviceSheet = { lanOpen: false, wanOpen: false, sort: null, details: false };
+  const deviceSheet = { lanOpen: false, wanOpen: false, sort: null };
   let selectedDeviceId = '', deviceAddNote = '', deviceAddBusy = false, committingDeviceCell = '';
   // The cell that has been typed in since the keyboard came to it. Only that cell has something to
   // commit when it is left, and only that cell keeps its own text through a redraw.
@@ -198,7 +198,6 @@
         try { if (committed) element.select?.(); else element.setSelectionRange?.(focus.start, focus.end); } catch { /* A select has no caret. */ }
       } else if (focus.key === typedDeviceCell) typedDeviceCell = '';
     }
-    paintDeviceView();
     paintDeviceSheet();
   }
   // Status and counts change without anyone editing, so they are painted in place and typing isn't interrupted.
@@ -223,7 +222,7 @@
     addAll.disabled = deviceAddBusy;
     addAll.querySelector('[data-add-all-label]').textContent = 'Add all ' + found;
     $('device-summary').textContent = devices.length + (devices.length === 1 ? ' device' : ' devices') + ' · ' + devices.filter(d => d.online).length + ' online';
-    if (!deviceSheet.details) $('lan-foot').textContent = 'Click a heading to sort. Address changes wait in Pending sends until you press Send.';
+    $('lan-foot').textContent = 'Click a heading to sort. Address changes wait in Pending sends until you press Send.';
     releaseHeldDeviceEdits();
   }
   function releaseHeldDeviceEdits() {
@@ -234,26 +233,10 @@
       setTimeout(() => runDeviceCommit(key, value), 0);
     }
   }
-  function paintDeviceView() {
-    for (const button of root.querySelectorAll('[data-device-view]')) button.setAttribute('aria-pressed', String((button.dataset.deviceView === 'details') === deviceSheet.details));
-    $('device-sheet-group').hidden = deviceSheet.details;
-    $('network-devices').hidden = !deviceSheet.details;
-    action('toggle-all-network').hidden = !deviceSheet.details;
-    action('add-ip').hidden = !deviceSheet.details;
-    // On the sheet, finding devices is one line in its toolbar, and what it finds lists as rows. The
-    // Details view keeps its card, so the controls move back into it there.
-    discoveryCard.hidden = !deviceSheet.details;
-    placeScanControls(deviceSheet.details);
-  }
-  const scanControlHomes = [];
-  function placeScanControls(inCard) {
-    const bar = $('scan-bar'), parts = [root.querySelector('.hc-scan-controls'), $('discovery-error'), root.querySelector('.hc-scan-status')].filter(Boolean);
-    if (!bar || !parts.length) return;
-    if (!scanControlHomes.length) for (const part of parts) { const home = document.createComment('scan control'); part.before(home); scanControlHomes.push([part, home]); }
-    for (const [part, home] of scanControlHomes) {
-      if (inCard) { if (part.parentElement === bar) home.after(part); }
-      else if (part.parentElement !== bar) bar.append(part);
-    }
+  // Finding devices is one line in the sheet's toolbar, and what it finds lists as rows.
+  function placeScanControls() {
+    const bar = $('scan-bar');
+    for (const part of [root.querySelector('.hc-scan-controls'), $('discovery-error'), root.querySelector('.hc-scan-status')]) if (part) bar.append(part);
   }
   // Every found device that isn't in the list yet is added in one go.
   async function addAllFound() {
@@ -449,10 +432,9 @@
   }
 
   function createDeviceSheet() {
-    const list = $('network-devices'), toolbar = action('review-lan').closest('.hc-toolbar');
+    const panel = root.querySelector('#hc-devices'), toolbar = action('review-lan').closest('.hc-toolbar');
     toolbar.querySelector('.hc-toolbar-title h3').textContent = 'Devices';
-    toolbar.insertAdjacentHTML('beforeend', '<div class="hc-segment hc-device-view" role="group" aria-label="Devices view"><button type="button" data-device-view="sheet" aria-pressed="true">Sheet</button><button type="button" data-device-view="details" aria-pressed="false">Details</button></div>' +
-      pendingSendsToggle());
+    toolbar.insertAdjacentHTML('beforeend', pendingSendsToggle());
     const body = document.createElement('div'), column = document.createElement('div');
     body.className = 'hc-assignment-body';
     body.dataset.pendingHost = 'devices';
@@ -460,34 +442,15 @@
     column.innerHTML = '<div class="hc-controller-list"><section class="hc-controller" data-role="device-sheet-group"><div class="hc-controller-tools">' +
       '<div class="hc-scan-bar" data-role="scan-bar"></div><span class="hc-right"></span><span class="hc-found-count" data-role="found-summary" aria-live="polite"></span>' +
       '<button class="hc-primary" data-action="add-all-found" hidden>' + icon('plus') + '<span data-add-all-label>Add all</span></button></div><div data-role="device-sheet"></div></section></div>';
-    list.before(body);
+    panel.querySelector(':scope > .hc-sheet').replaceWith(body);
     body.append(column);
-    column.append(list);
-    discoveryCard.addEventListener('toggle', paintDeviceView);
     if ($('scan-label').textContent === 'No scan running') $('scan-label').textContent = '';
-    paintDeviceView();
+    placeScanControls();
   }
-  const initializeDeviceCards = initializeDeviceWorkflow;
-  initializeDeviceWorkflow = function() { initializeDeviceCards(); createDeviceSheet(); };
-  const renderNetworkCards = renderLans;
-  renderLans = function() { const drawn = renderNetworkCards(); renderDeviceSheet(); return drawn; };
-  const renderDiscoveryResults = renderResults;
-  renderResults = function() { renderDiscoveryResults(); paintFoundList(); renderDeviceSheet(); };
-  // The Details view's list of found devices has an Add on each one and Add all, not ticks.
-  function paintFoundList() {
-    for (const box of root.querySelectorAll('input[data-select-found]')) {
-      box.closest('td').innerHTML = box.disabled ? '' : '<button type="button" class="hc-primary hc-add-found" data-action="add-found-device" data-id="' + esc(box.dataset.selectFound) + '" aria-label="Add ' + esc(results.find(candidate => candidate.id === box.dataset.selectFound)?.serial ?? 'device') + '"' + (deviceAddBusy ? ' disabled' : '') + '>' + icon('plus') + 'Add</button>';
-    }
-    const found = foundDevices().length, button = action('add-discovered');
-    button.innerHTML = 'Add all <span data-role="found-selected">' + found + '</span>';
-    button.disabled = !found || deviceAddBusy;
-    icons();
-  }
-  root.addEventListener('click', event => {
-    if (!event.target.closest('[data-action="add-discovered"]')) return;
-    event.stopImmediatePropagation();
-    void addAllFound();
-  }, true);
+  const initializeDevicePanel = initializeDeviceWorkflow;
+  initializeDeviceWorkflow = function() { initializeDevicePanel(); createDeviceSheet(); };
+  // Found devices are rows in the sheet. The old finder's own table, with a tick on each, is never drawn.
+  renderResults = function() { renderDeviceSheet(); };
   const syncLiveConnections = syncConnections;
   syncConnections = function() { syncLiveConnections(); paintDeviceSheet(); };
   const syncBeforeDeviceSheet = syncSummary;
@@ -500,7 +463,6 @@
     if (!button) return;
     const data = button.dataset;
     if (data.deviceSort) sortDevices(data.deviceSort);
-    else if (data.deviceView) { deviceSheet.details = data.deviceView === 'details'; paintDeviceView(); renderLans(); remember(); }
     else if (data.action === 'toggle-device-group') { deviceSheet[data.group + 'Open'] = !deviceSheet[data.group + 'Open']; renderDeviceSheet(); root.querySelector('[data-action="toggle-device-group"][data-group="' + data.group + '"]')?.focus({ preventScroll: true }); remember(); }
     else if (data.action === 'add-all-found') void addAllFound();
     else if (data.action === 'add-found-device') { deviceAddBusy = true; renderDeviceSheet(); void addFoundDevice(data.id).catch(error => toast(error.message)).finally(() => { deviceAddBusy = false; renderLans(); }); }
