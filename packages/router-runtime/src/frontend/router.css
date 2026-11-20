@@ -51,6 +51,39 @@
   letter-spacing: -0.02em;
 }
 
+/* The router's status, with a Simulated pill before it when the router is the stand-in. */
+.router-status-group {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Matches Hubble's status pill, with the Simulated colour on the dot. */
+.router-simulated-badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  color: var(--hubble-text, #dedede);
+  background: var(--hubble-raised, #191a1b);
+  font-family: var(--font-ui);
+  font-size: var(--control-font-size, 11px);
+  font-weight: 400;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.router-simulated-mark {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: #b9a3e3;
+}
+
 .router-eyebrow,
 .router-context-label {
   color: var(--quiet);

@@ -40,6 +40,20 @@ export const RouterHostSchema = z
     'router host must be a hostname or IP address containing 1..253 characters',
   )
 
+/** A simulated router has no address, so Host is checked only for a real one. */
+export const RouterHostSettingSchema = z.string().trim().default('')
+
+function requireRouterHostUnlessSimulated(
+  connection: { readonly host: string; readonly simulated?: boolean | undefined },
+  context: z.core.$RefinementCtx,
+): void {
+  if (connection.simulated === true) return
+  const host = RouterHostSchema.safeParse(connection.host)
+  if (!host.success)
+    for (const issue of host.error.issues)
+      context.addIssue({ code: 'custom', path: ['host'], message: issue.message })
+}
+
 export const BlackmagicVideohubSourceLimitSchema = z
   .int()
   .min(BLACKMAGIC_VIDEOHUB_SOURCE_LIMIT_MIN)
@@ -56,7 +70,8 @@ const BlackmagicVideohubConnectionObjectSchema = z.strictObject({
   type: z.literal('blackmagic-videohub'),
   name: ConnectionNameSchema,
   enabled: z.boolean(),
-  host: RouterHostSchema,
+  simulated: z.boolean().optional(),
+  host: RouterHostSettingSchema,
   port: z.int().min(1).max(65_535),
   sourceLimit: BlackmagicVideohubSourceLimitSchema.optional(),
   destinationLimit: BlackmagicVideohubDestinationLimitSchema.optional(),
@@ -72,7 +87,7 @@ const BlackmagicVideohubConnectionObjectSchema = z.strictObject({
 })
 
 export const BlackmagicVideohubConnectionDefinitionSchema =
-  BlackmagicVideohubConnectionObjectSchema.readonly()
+  BlackmagicVideohubConnectionObjectSchema.superRefine(requireRouterHostUnlessSimulated).readonly()
 
 export type BlackmagicVideohubConnectionDefinition = z.infer<
   typeof BlackmagicVideohubConnectionDefinitionSchema

@@ -112,6 +112,7 @@ export function requiresNewClient(
   next: MultiLevelRouterConnectionDefinition,
 ): boolean {
   return (
+    (current.simulated === true) !== (next.simulated === true) ||
     current.host !== next.host ||
     current.port !== next.port ||
     current.sourceLimit !== next.sourceLimit ||

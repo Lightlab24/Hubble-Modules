@@ -3,6 +3,11 @@ import type { ModuleManifestSource } from "@hubble/module-sdk/authoring";
 import { routerMatrix, routerLabels, type RouterType } from "./matrix.js";
 import { directRouteAction } from "./public-api.js";
 
+/** Device-address and timing settings that a simulated router doesn't use. */
+const hiddenWhenSimulated = {
+  visibleWhen: [{ field: "simulated", equals: true, negate: true }],
+} satisfies Pick<ModuleField, "visibleWhen">;
+
 export function routerSettings(type: RouterType): ModuleField[] {
   const automaticDimensions =
     type === "blackmagic-videohub" || type === "aja-kumo";
@@ -26,29 +31,41 @@ export function routerSettings(type: RouterType): ModuleField[] {
   });
   return [
     {
+      id: "simulated",
+      label: "Simulated",
+      type: "boolean",
+      default: false,
+      required: false,
+      description: `Runs a stand-in ${routerLabels[type]} inside Hubble. Nothing goes on the network. Buttons route it and tally lights as on a real router.`,
+    },
+    {
       id: "host",
       label: "Host or IP address",
       type: "text",
       default: "",
       required: true,
+      ...hiddenWhenSimulated,
       validation: {
         minLength: 1,
         maxLength: 253,
         message: "Enter the router hostname or IP address",
       },
     },
-    number(
-      "port",
-      "Port",
-      {
-        "ross-ultrix-ogp": 5254,
-        "evertz-quartz": 23,
-        "blackmagic-videohub": 9990,
-        "aja-kumo": 80,
-      }[type],
-      1,
-      65535,
-    ),
+    {
+      ...number(
+        "port",
+        "Port",
+        {
+          "ross-ultrix-ogp": 5254,
+          "evertz-quartz": 23,
+          "blackmagic-videohub": 9990,
+          "aja-kumo": 80,
+        }[type],
+        1,
+        65535,
+      ),
+      ...hiddenWhenSimulated,
+    },
     number(
       "sourceLimit",
       "Sources to load",
@@ -101,40 +118,50 @@ export function routerSettings(type: RouterType): ModuleField[] {
             default: "",
             required: false,
             secret: true,
+            ...hiddenWhenSimulated,
           },
         ]
       : []),
-    number(
-      "requestTimeoutMs",
-      "Request timeout (ms)",
-      {
-        "ross-ultrix-ogp": 1000,
-        "evertz-quartz": 2000,
-        "blackmagic-videohub": 1000,
-        "aja-kumo": 3000,
-      }[type],
-      100,
-      10000,
-    ),
-    number(
-      "reconnectDelayMs",
-      "Reconnect delay (ms)",
-      type === "ross-ultrix-ogp" || type === "blackmagic-videohub"
-        ? 2000
-        : 5000,
-      100,
-      60000,
-    ),
+    {
+      ...number(
+        "requestTimeoutMs",
+        "Request timeout (ms)",
+        {
+          "ross-ultrix-ogp": 1000,
+          "evertz-quartz": 2000,
+          "blackmagic-videohub": 1000,
+          "aja-kumo": 3000,
+        }[type],
+        100,
+        10000,
+      ),
+      ...hiddenWhenSimulated,
+    },
+    {
+      ...number(
+        "reconnectDelayMs",
+        "Reconnect delay (ms)",
+        type === "ross-ultrix-ogp" || type === "blackmagic-videohub"
+          ? 2000
+          : 5000,
+        100,
+        60000,
+      ),
+      ...hiddenWhenSimulated,
+    },
     ...(type === "evertz-quartz"
       ? [
-          number(
-            "refreshIntervalSeconds",
-            "Refresh interval (seconds)",
-            60,
-            0,
-            3600,
-            "0 disables the timer; otherwise use at least 10 seconds.",
-          ),
+          {
+            ...number(
+              "refreshIntervalSeconds",
+              "Refresh interval (seconds)",
+              60,
+              0,
+              3600,
+              "0 disables the timer; otherwise use at least 10 seconds.",
+            ),
+            ...hiddenWhenSimulated,
+          },
         ]
       : []),
   ];

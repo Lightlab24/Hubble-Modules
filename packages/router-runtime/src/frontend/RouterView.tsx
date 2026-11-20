@@ -321,7 +321,12 @@ export function RouterView({
           </select>
         </label>
 
-        <RouterPhaseStatus state={state} status={router.status} />
+        <div className="router-status-group">
+          {selectedConnection?.simulated === true ? (
+            <RouterSimulatedBadge />
+          ) : null}
+          <RouterPhaseStatus state={state} status={router.status} />
+        </div>
 
         <RouterZoomControl
           value={routerViewZoom}
@@ -2914,6 +2919,19 @@ function RouterActionBar({
         </div>
       ) : null}
     </footer>
+  );
+}
+
+/** Says the router on this page is the stand-in that runs inside Hubble. */
+function RouterSimulatedBadge(): React.JSX.Element {
+  return (
+    <span
+      className="router-simulated-badge"
+      title="A stand-in router inside Hubble. Nothing goes on the network."
+    >
+      <span className="router-simulated-mark" aria-hidden="true" />
+      <span>Simulated</span>
+    </span>
   );
 }
 

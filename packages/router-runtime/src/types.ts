@@ -5,6 +5,8 @@ export type RossUltrixOgpConnectionDefinition = {
   readonly type: 'ross-ultrix-ogp'
   readonly name: string
   readonly enabled: boolean
+  /** Runs a stand-in router inside the worker; nothing goes on the network. Absent means a real router. */
+  readonly simulated?: boolean | undefined
   readonly host: string
   readonly port: number
   readonly sourceLimit: number
@@ -27,6 +29,8 @@ export type EvertzQuartzConnectionDefinition = {
   readonly connectionId: string & z.core.$brand<'ConnectionId'>
   readonly name: string
   readonly enabled: boolean
+  /** Runs a stand-in router inside the worker; nothing goes on the network. Absent means a real router. */
+  readonly simulated?: boolean | undefined
   readonly host: string
   readonly port: number
   readonly sourceLimit: number
@@ -52,6 +56,8 @@ export type AjaKumoConnectionDefinition = {
   readonly connectionId: string & z.core.$brand<'ConnectionId'>
   readonly name: string
   readonly enabled: boolean
+  /** Runs a stand-in router inside the worker; nothing goes on the network. Absent means a real router. */
+  readonly simulated?: boolean | undefined
   readonly host: string
   readonly port: number
   readonly requestTimeoutMs: number
@@ -76,6 +82,8 @@ export type BlackmagicVideohubConnectionDefinition = {
   readonly type: 'blackmagic-videohub'
   readonly name: string
   readonly enabled: boolean
+  /** Runs a stand-in router inside the worker; nothing goes on the network. Absent means a real router. */
+  readonly simulated?: boolean | undefined
   readonly host: string
   readonly port: number
   readonly requestTimeoutMs: number

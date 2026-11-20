@@ -128,7 +128,9 @@ export function routerModule(
           : null;
       const documents = createModuleDocumentClient(context.services!);
       // Frontends follow this revision, so every open view shows saved routing settings.
-      const statePublisher = createRoutingStatePublisher(context.publishState);
+      const statePublisher = createRoutingStatePublisher(context.publishState, {
+        simulated: context.settings.simulated === true,
+      });
       const groupController = new RouterGroupController(
         context,
         manager,

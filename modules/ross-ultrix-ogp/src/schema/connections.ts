@@ -44,6 +44,20 @@ export const RouterHostSchema = z
     'router host must be a hostname or IP address containing 1..253 characters',
   )
 
+/** A simulated router has no address, so Host is checked only for a real one. */
+export const RouterHostSettingSchema = z.string().trim().default('')
+
+function requireRouterHostUnlessSimulated(
+  connection: { readonly host: string; readonly simulated?: boolean | undefined },
+  context: z.core.$RefinementCtx,
+): void {
+  if (connection.simulated === true) return
+  const host = RouterHostSchema.safeParse(connection.host)
+  if (!host.success)
+    for (const issue of host.error.issues)
+      context.addIssue({ code: 'custom', path: ['host'], message: issue.message })
+}
+
 export const RossUltrixOgpSourceLimitSchema = z
   .int()
   .min(ROSS_ULTRIX_OGP_SOURCE_LIMIT_MIN)
@@ -65,7 +79,8 @@ const RossUltrixOgpConnectionObjectSchema = z.strictObject({
   type: z.literal('ross-ultrix-ogp'),
   name: ConnectionNameSchema,
   enabled: z.boolean(),
-  host: RouterHostSchema,
+  simulated: z.boolean().optional(),
+  host: RouterHostSettingSchema,
   port: z.int().min(1).max(65_535),
   sourceLimit: RossUltrixOgpSourceLimitSchema,
   destinationLimit: RossUltrixOgpDestinationLimitSchema,
@@ -81,8 +96,9 @@ const RossUltrixOgpConnectionObjectSchema = z.strictObject({
   schemaVersion: z.literal(1),
 })
 
-export const RossUltrixOgpConnectionDefinitionSchema =
-  RossUltrixOgpConnectionObjectSchema.readonly()
+export const RossUltrixOgpConnectionDefinitionSchema = RossUltrixOgpConnectionObjectSchema.superRefine(
+  requireRouterHostUnlessSimulated,
+).readonly()
 
 export type RossUltrixOgpConnectionDefinition = z.infer<
   typeof RossUltrixOgpConnectionDefinitionSchema

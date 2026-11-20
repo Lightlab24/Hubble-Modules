@@ -35,3 +35,42 @@ it("adds the routing revision to state and republishes when it changes", () => {
     }),
   );
 });
+
+it("marks a simulated router's state and gives a ready one a message", () => {
+  const publish = vi.fn();
+  const simulated = createRoutingStatePublisher(publish, { simulated: true });
+  simulated.publish(state);
+  expect(publish).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      phase: "ready",
+      message: "Simulated router",
+      values: {
+        model: "Videohub",
+        routingGroupsRevision: null,
+        simulated: true,
+      },
+    }),
+  );
+  // A problem keeps its own message.
+  simulated.publish({
+    ...(state as object),
+    phase: "unavailable",
+    message: "Simulated Videohub is not connected",
+  } as never);
+  expect(publish).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      phase: "unavailable",
+      message: "Simulated Videohub is not connected",
+      values: expect.objectContaining({ simulated: true }),
+    }),
+  );
+
+  const real = vi.fn();
+  createRoutingStatePublisher(real).publish(state);
+  expect(real).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      message: null,
+      values: { model: "Videohub", routingGroupsRevision: null },
+    }),
+  );
+});

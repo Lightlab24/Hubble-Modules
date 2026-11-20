@@ -5,6 +5,7 @@ import {
   SingleLevelRouterConnectionManager,
   type SingleLevelRouterManagedClient,
 } from '@hubble/router-runtime/single-level-manager'
+import { createSimulatedSingleLevelClient } from '@hubble/router-runtime/simulated-single-level-client'
 
 export type BlackmagicVideohubManagedClient = SingleLevelRouterManagedClient
 export type BlackmagicVideohubManagedClientFactory = (
@@ -16,7 +17,10 @@ export class BlackmagicVideohubConnectionManager extends SingleLevelRouterConnec
     super('blackmagic-videohub', (definition) => {
       if (definition.type !== 'blackmagic-videohub')
         throw new Error('Invalid Videohub definition')
-      return createClient(definition)
+      // A simulated Videohub runs in the worker; it never reaches a test factory or the network.
+      return definition.simulated === true
+        ? createSimulatedSingleLevelClient(definition)
+        : createClient(definition)
     })
   }
 }

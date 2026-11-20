@@ -3,6 +3,7 @@ import {
   MultiLevelRouterConnectionManager,
   type MultiLevelRouterManagedClient,
 } from '@hubble/router-runtime/multi-level-manager'
+import { createSimulatedMultiLevelClient } from '@hubble/router-runtime/simulated-multi-level-client'
 import type { RossUltrixOgpConnectionDefinition } from './config.js'
 
 export type RossUltrixOgpManagedClient = MultiLevelRouterManagedClient
@@ -18,7 +19,10 @@ export class RossUltrixOgpConnectionManager extends MultiLevelRouterConnectionMa
     super('ross-ultrix-ogp', (definition) => {
       if (definition.type !== 'ross-ultrix-ogp')
         throw new Error('Invalid Ultrix OGP definition')
-      return createClient(definition)
+      // A simulated Ultrix runs in the worker; it never reaches a test factory or the network.
+      return definition.simulated === true
+        ? createSimulatedMultiLevelClient(definition)
+        : createClient(definition)
     })
   }
 }

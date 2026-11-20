@@ -27,6 +27,8 @@ export function connectionView(
     connectionId: definition.connectionId,
     name: definition.name,
     enabled: definition.enabled,
+    // The page shows a Simulated badge; saved connections without the setting are real routers.
+    simulated: definition.simulated === true,
     schemaVersion: definition.schemaVersion,
     type: definition.type,
     host: definition.host,

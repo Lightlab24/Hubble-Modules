@@ -96,6 +96,7 @@ export function requiresNewClient(
     (current.type === 'aja-kumo' &&
       next.type === 'aja-kumo' &&
       current.password !== next.password) ||
+    (current.simulated === true) !== (next.simulated === true) ||
     current.host !== next.host ||
     current.port !== next.port ||
     current.sourceLimit !== next.sourceLimit ||
