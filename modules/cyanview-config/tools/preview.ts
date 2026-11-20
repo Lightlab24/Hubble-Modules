@@ -1,7 +1,7 @@
 // Module-owned SDK fixture. Every device connection is redirected to a loopback simulator.
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { createConnection } from 'node:net';
+import { createConnection, type Socket } from 'node:net';
 import path from 'node:path';
 import { FakeController, FakeRemiFleet, fixture } from '../test/helpers.js';
 import { broker, closeBrokers } from '../test/control-broker.js';
@@ -18,6 +18,9 @@ let planSaves = 0, planSavePending = 0;
 let openedPages: string[] = [], openPageError = '';
 // How long a live read's answer is held back after it is worked out, as when the page hears back late.
 let liveReadDelayMs = 0;
+// Controllers switched off: their settings sockets fail and their MQTT broker stops answering.
+let fleet: FakeRemiFleet | null = null;
+const switchedOff = new Set<string>(), mqttSockets = new Map<string, Set<Socket>>();
 let sampleSetting = true, sessionOptions: Parameters<typeof fixture>[1], statePaused = false;
 const rendererState = () => session.states.at(-1) as Parameters<typeof session.context.publishState>[0];
 async function reset(sample: boolean, remi = false, gateway = false, direct = false, extra = false, live = false, wan = false, reachAll = false) {
@@ -26,6 +29,7 @@ async function reset(sample: boolean, remi = false, gateway = false, direct = fa
   releaseControlWrites?.(); releaseControlWrites = undefined;
   releasePlanWrites?.(); releasePlanWrites = undefined;
   planSaves = 0; planSavePending = 0;
+  switchedOff.clear(); mqttSockets.clear();
   openedPages = []; openPageError = ''; liveReadDelayMs = 0;
   if (session) await session.instance.dispose();
   await Promise.all(controllers.map(device => device.close()));
@@ -51,7 +55,7 @@ async function reset(sample: boolean, remi = false, gateway = false, direct = fa
     // A camera set up directly on an RCP, with no RIO in front of it.
     if (direct) controllers[1]!.config.Camera.direct = { Number:'7',Name:'Jib',Model:'Sony - Venice-IP',IP:'10.20.20.7',Port:'80',Enabled:'1' };
   }
-  const fleet = remi ? new FakeRemiFleet(controllers) : null;
+  fleet = remi ? new FakeRemiFleet(controllers) : null;
   await Promise.all(controllers.map(device => device.start()));
   const socket = (url: string, options: Parameters<typeof controller.socket>[1]) => {
     const address = new URL(url).hostname;
@@ -67,7 +71,13 @@ async function reset(sample: boolean, remi = false, gateway = false, direct = fa
     // Short enough for specs. Hubble itself holds a camera off for a second and waits up to six for it to come back online.
     cameraEnabled: { holdMs: 300, onlineWaitMs: 400 },
     openPage: async address => { if (openPageError) throw new Error(openPageError); openedPages.push(address); },
-    control: { cameraSettleMs: 400, session: (definition, changed) => new RcpSession(definition, changed, true, () => createConnection({ host: '127.0.0.1', port: mqtt.port })) },
+    control: { cameraSettleMs: 400, session: (definition, changed) => new RcpSession(definition, changed, true, () => {
+      // Nothing listens on port 9, so a switched-off controller's broker refuses the connection.
+      const socket = createConnection({ host: '127.0.0.1', port: switchedOff.has(definition.connectionId) ? 9 : mqtt.port }), open = mqttSockets.get(definition.connectionId) ?? new Set<Socket>();
+      mqttSockets.set(definition.connectionId, open.add(socket));
+      socket.once('close', () => open.delete(socket));
+      return socket;
+    }) },
     // Only the RIO answers a connection unless a spec asks for every simulated controller, as saved devices do.
     reachable: async address => ['10.192.1.10', '10.20.101.200'].includes(address) || reachAll && Boolean(fleet?.deviceAt(address)),
     discovery: { durationMs: 100,
@@ -138,6 +148,13 @@ const server = createServer(async (request, response) => {
         if (input.failPlanWrite) session.failNextWrite(session.repository.root);
         if (input.releasePlanWrites) { releasePlanWrites?.(); releasePlanWrites = undefined; }
         if (input.closeController) await controller.close();
+        // Switches one simulated controller off or back on, as when a RIO loses power.
+        if (input.power && fleet) {
+          const target = controllers[Number(input.power.device) || 0]!, id = String(target.config.Product.Serial);
+          if (input.power.on) switchedOff.delete(id); else switchedOff.add(id);
+          fleet.power(target, !!input.power.on);
+          if (!input.power.on) for (const socket of mqttSockets.get(id) ?? []) socket.destroy();
+        }
         if (input.cameraName) controller.config.Camera.wide.Name = input.cameraName;
         if (input.addCamera) { const target = controllers[Number(input.addCamera.device) || 0]!; target.config.Camera[String(input.addCamera.key)] = input.addCamera.row; target.broadcast(); }
         // A change made outside Hubble, such as in Cyanview's own page. The controller pushes it to every open socket.
