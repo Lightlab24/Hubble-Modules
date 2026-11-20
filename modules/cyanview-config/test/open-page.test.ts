@@ -6,6 +6,7 @@ import path from 'node:path';
 import manifest from '../src/manifest.js';
 import { devicePageUrl, pageLaunchers, runOpenPage, type PageLauncher } from '../src/open-page-run.js';
 import { fixture } from './helpers.js';
+import { pingPolicy } from '../src/ping-batch.js';
 
 // A stand-in for the browser: a short Node program that writes down what it was handed.
 const recorder = (file: string, exit = 0): PageLauncher => ({
@@ -79,4 +80,9 @@ test('the helper that opens pages is declared as a command, since it starts a pr
   assert.deepEqual(helper?.methods.find(method => method.id === 'open-page'), { id: 'open-page', readOnly: false, timeoutMs: 10000 });
   // The ping it already ran is unchanged.
   assert.deepEqual(helper?.methods.find(method => method.id === 'batch'), { id: 'batch', readOnly: true, timeoutMs: 10000 });
+});
+
+test('a page can be opened while Discover has a ping batch going on every worker', () => {
+  const helper = manifest.helpers?.find(item => item.id === 'icmp-probe');
+  assert.ok(helper!.maxConcurrent >= pingPolicy.workers + 4, 'Hubble refuses a call past maxConcurrent, so a search would leave no room for a link');
 });
