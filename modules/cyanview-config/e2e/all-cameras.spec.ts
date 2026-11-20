@@ -949,6 +949,7 @@ test('a camera moves to another controller while its RIO is off, and deleting it
 
   // A reload keeps the camera out of the sheets and its delete waiting.
   await page.reload();
+  await expect(f.locator('[data-role="saved-label"]')).toContainText('Workspace saved');
   await showPending(f);
   await expect(line(f, 'delete')).toContainText('Deleted from Stage RIO');
   await showMatrix(f);

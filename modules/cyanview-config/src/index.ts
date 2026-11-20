@@ -10,26 +10,36 @@ import { CameraControl } from './control/service.js';
 import { CameraEnabledOperations } from './camera-enabled.js';
 import { CyanviewClient } from './transport.js';
 import { createHostOpenPage } from './open-page.js';
+import { setupGuideStore } from './setup-guide-store.js';
+import { SimulatedRig, SimulatedRigStore } from './simulated/rig.js';
 
 export function createInstance(context: ModuleContext, options: ServiceOptions = {}): ModuleInstance {
   if (!context.services) throw new Error('Module storage is unavailable');
+  // The Simulated setting keeps its saved id, sampleData, from when it showed made-up rows. It now runs the module as it
+  // runs live, against Cyanview controllers simulated inside this worker, with its own plan, selection and choice lists,
+  // so the real setup is untouched and comes back when it is switched off.
   const sample = context.settings.sampleData === true, repository = new PlanRepository(context.services, sample), lifetime = new AbortController();
+  const rig = sample ? new SimulatedRig() : undefined;
+  // In Simulated, every way out to the network comes from the rig and only timings come from `options`.
+  const io: ServiceOptions = rig ? rig.options(options) : options;
+  const rigStore = rig ? new SimulatedRigStore(context.services, rig, message => context.log({ level: 'info', stage: 'simulated', message: message.slice(0, 500) })) : undefined;
   let stopped = false;
   let control: CameraControl | undefined;
   // A restarted worker has observed nothing, and says so from its first state.
   let serviceState: RecordValue = { observations: {} };
-  const publish = (values: RecordValue = {}) => { serviceState = { ...serviceState, ...values }; if (!stopped) context.publishState({ phase: 'ready', observedAt: new Date().toISOString(), message: sample ? 'Sample data' : null, values: { sample, ...serviceState, cameraControl: control?.state() ?? null } }); };
-  const hostPing = options.discovery?.ping ? null : createHostPing(context.services);
-  const choices = new ChoiceCatalogs(context.services);
-  const openPage = options.openPage ?? createHostOpenPage(context.services);
-  const service = new CyanviewService(repository, choices, publish, lifetime.signal, { ...options, discovery: { ...options.discovery, ping: options.discovery?.ping ?? hostPing!.sweep } });
-  control = new CameraControl(repository, context, sample, () => publish(), options.control);
+  const publish = (values: RecordValue = {}) => { serviceState = { ...serviceState, ...values }; if (!stopped) context.publishState({ phase: 'ready', observedAt: new Date().toISOString(), message: sample ? 'Simulated' : null, values: { sample, simulated: sample, ...serviceState, cameraControl: control?.state() ?? null } }); };
+  const hostPing = io.discovery?.ping ? null : createHostPing(context.services);
+  const choices = new ChoiceCatalogs(context.services, sample);
+  const openPage = io.openPage ?? createHostOpenPage(context.services);
+  const service = new CyanviewService(repository, choices, publish, lifetime.signal, { ...io, discovery: { ...io.discovery, ping: io.discovery?.ping ?? hostPing!.sweep } });
+  control = new CameraControl(repository, context, sample, () => publish(), io.control);
   // Cyanview's own Enabled on each camera, with every REMI copy following the camera it comes from.
-  const cameraEnabled = new CameraEnabledOperations(repository, options.client ?? (address => new CyanviewClient(address)), service.remi,
+  const cameraEnabled = new CameraEnabledOperations(repository, io.client ?? (address => new CyanviewClient(address)), service.remi,
     (device, number, key) => control!.cameraOnline(device, number, key), () => publish({ cameraEnabledJobs: cameraEnabled.state() }),
-    message => context.log({ level: 'info', stage: 'camera-enabled', message: message.slice(0, 500) }), lifetime.signal, options.cameraEnabled, service.held);
+    message => context.log({ level: 'info', stage: 'camera-enabled', message: message.slice(0, 500) }), lifetime.signal, io.cameraEnabled, service.held);
   service.followMqtt(id => control!.controllerDown(id));
-  if (!sample) service.observeConfig((device, before, after) => cameraEnabled.observe(device, before, after));
+  service.observeConfig((device, before, after) => cameraEnabled.observe(device, before, after));
+  const guide = setupGuideStore(() => context.runtimeDirectory);
   const transfers = new Map<string, { kind: 'save' | 'send'; revision: string | null; parts: string[]; size: number; expires: number }>();
   const imports = new Map<string, { cameras: RecordValue[]; expires: number }>();
   const reads = new Map<string, { text: string; expires: number }>();
@@ -52,9 +62,9 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
       ' in ' + Math.round(elapsed) + ' ms' + (parts.length ? ' (' + parts.join(', ') + ')' : '') +
       (failed.length ? ', ' + failed.length + ' not confirmed: ' + reason(failed[0]!.error) : '') + (copies ? ', copies not rebuilt: ' + reason(copies.remiError) : '') });
   };
-  // The page and the controller sockets follow the saved plan. Sample data opens nothing.
+  // The page and the controller sockets follow the saved plan.
   // A plan that was just read comes with its saved revision, which lets the next press act on it without reading again.
-  const followPlan = (plan: Plan, revision?: string | null) => { control!.setPlan(plan, revision); if (!sample) service.watch(plan); };
+  const followPlan = (plan: Plan, revision?: string | null) => { control!.setPlan(plan, revision); service.watch(plan); };
   const followSaved = async (signal: AbortSignal) => { const saved = await repository.read(signal); followPlan(saved.plan, saved.revision); };
   const reason = (error: unknown) => String(error instanceof Error ? error.message : error || 'no reason given').slice(0, 200);
   // A request that gives up has no result to time, and a timeout is the longest wait a page has. So it's logged here, as is one that was slow.
@@ -70,7 +80,6 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
     }
   };
   const send = async (input: RecordValue, signal: AbortSignal) => {
-    if (sample) throw new Error('Sample data does not send commands to equipment');
     const began = performance.now(), result = await watched('send-timing', 'A send', signal, () => service.send(input, signal));
     if (Array.isArray(result.results)) timing('send-timing', result.results, result.controllers, performance.now() - began, result.openMs);
     await followSaved(signal);
@@ -83,10 +92,12 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
     followPlan(saved.plan);
     publish(service.state()); return { revision: saved.revision };
   };
-  return {
+  const instance: ModuleInstance = {
     async start() {
+      // The simulated controllers are put back as they were before anything connects to them.
+      await rigStore?.load(lifetime.signal);
       await control!.start(lifetime.signal);
-      if (!sample) service.watch((await repository.read(lifetime.signal)).plan);
+      service.watch((await repository.read(lifetime.signal)).plan);
       publish(service.state());
     },
     async call(method, raw, execution) {
@@ -103,14 +114,15 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
         case 'camera-control-mutate': return control!.mutate(input, signal);
         case 'read-plan': {
           const saved = await repository.read(signal);
-          if (!sample) await service.remi.describeCameras(saved.plan, [], signal);
+          await service.remi.describeCameras(saved.plan, [], signal);
           // A saved plan holds whatever the page last showed. Only live state can say Online or Offline.
-          if (!sample) for (const row of [...saved.plan.devices, ...saved.plan.cameras]) row.online = null;
-          const plan = sample && saved.fresh ? null : saved.plan, text = JSON.stringify(plan);
-          if (text.length < 180000) return { revision: saved.revision, sample, plan };
+          for (const row of [...saved.plan.devices, ...saved.plan.cameras]) row.online = null;
+          // `sample` asks the page to show its own made-up rows and send nothing. Simulated is live to the page, so it never does.
+          const plan = saved.plan, text = JSON.stringify(plan), mode = { sample: false, simulated: sample };
+          if (text.length < 180000) return { revision: saved.revision, ...mode, plan };
           if (reads.size >= 4) reads.delete(reads.keys().next().value!);
           const token = randomUUID(); reads.set(token, { text, expires: Date.now() + 60000 });
-          return { revision: saved.revision, sample, plan: null, token, length: text.length };
+          return { revision: saved.revision, ...mode, plan: null, token, length: text.length };
         }
         case 'read-part': {
           const transfer = reads.get(input.token), offset = Number(input.offset);
@@ -123,7 +135,6 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
         case 'save-begin':
         case 'send-begin': {
           const kind = request.commandId === 'save-begin' ? 'save' : 'send';
-          if (kind === 'send' && sample) throw new Error('Sample data does not send commands to equipment');
           if (transfers.size >= 2) throw new Error('Finish the pending configuration transfers first');
           const id = randomUUID(); transfers.set(id, { kind, revision: input.revision ?? null, parts: [], size: 0, expires: Date.now() + 60000 }); return { id };
         }
@@ -142,7 +153,6 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
           return kind === 'save' ? save(transfer.revision, value, signal) : send(object(value), signal);
         }
         case 'find-rig': {
-          if (sample) return { found: [] };
           const ignore = Array.isArray(input.ignore) ? input.ignore.filter((serial: unknown): serial is string => typeof serial === 'string').slice(0, 256) : [];
           return bounded(await service.findRig(ignore, signal));
         }
@@ -161,7 +171,6 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
           return { cameras };
         }
         case 'scan': {
-          if (sample) throw new Error('Switch off sample data to discover equipment');
           const range = String(input.range ?? ''), method = input.method ?? 'ping';
           if (method === 'ping') { networkRange(range); await hostPing?.prepare(signal); }
           const started = service.startScan(range, method);
@@ -181,26 +190,18 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
           if (reads.size >= 4) reads.delete(reads.keys().next().value!);
           const token = randomUUID(); reads.set(token, { text, expires: Date.now() + 60000 }); return { token, length: text.length };
         }
-        case 'choice-catalogs': return bounded({ catalogs: sample ? {} : await choices.read(signal) });
-        case 'options': {
-          if (sample) throw new Error('Sample data uses local choices');
-          return bounded(await service.optionsFor(input, signal));
-        }
-        case 'remi-state':
-          if (sample) throw new Error('Switch off sample data to read REMI configuration');
-          return bounded(await service.remi.state(input, signal));
+        case 'choice-catalogs': return bounded({ catalogs: await choices.read(signal) });
+        case 'options': return bounded(await service.optionsFor(input, signal));
+        case 'remi-state': return bounded(await service.remi.state(input, signal));
         case 'remi-send':
-          if (sample) throw new Error('Sample data does not send commands to equipment');
           return bounded(await watched('route-timing', 'A REMI change', signal, () => service.remi.send(input, signal), 1000));
         case 'remi-route': {
-          if (sample) throw new Error('Sample data does not send commands to equipment');
           const began = performance.now(), result = await watched('route-timing', 'A REMI route', signal, () => service.remi.route(input, signal));
           timing('route-timing', result.results, result.controllers, performance.now() - began);
           return bounded(result);
         }
         case 'camera-enabled':
         case 'camera-refresh': {
-          if (sample) throw new Error('Sample data does not send commands to equipment');
           const device = String(input.device ?? ''), key = String(input.key ?? '');
           if (!device || !key) throw new Error('Choose a camera that is on its controller');
           const refresh = request.commandId === 'camera-refresh', began = performance.now();
@@ -211,8 +212,7 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
           return result;
         }
         case 'open-device-page': {
-          // Sample devices are made up, so there is no page to open.
-          if (sample) throw new Error('Sample devices have no web page to open');
+          // A simulated controller has no page, and Simulated's opener says so.
           const address = String(input.address ?? '').trim();
           if (!validIp(address)) throw new Error('This device has no address to open');
           await openPage(address, signal);
@@ -220,6 +220,8 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
           return { opened: address };
         }
         case 'send': return send(input, signal);
+        // The setup guide's progress on this Mac. Simulated is walked through apart from the real setup.
+        case 'setup-guide': return request.value == null ? guide.read(sample ? 'simulated' : 'real') : guide.write(sample ? 'simulated' : 'real', request.value);
         default: throw new Error('Unknown Cyanview command');
       }
     },
@@ -227,7 +229,19 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
     discoverChoices(query, execution) { return control!.discover(query.provider, query.draft, query.search, query.cursor, query.limit, AbortSignal.any([execution.signal, lifetime.signal])); },
     async choices(provider) { return (await control!.discover(provider, {}, '', null, 512, lifetime.signal)).choices.map(({ id, label, group }) => ({ id, label, ...(group ? { group } : {}) })); },
     subscribeFeedback(subscriptions, execution) { control!.subscribe(subscriptions, execution.signal); },
-    async dispose() { if (stopped) return; stopped = true; lifetime.abort(); service.dispose(); await control!.dispose(); transfers.clear(); imports.clear(); reads.clear(); },
+    async dispose() { if (stopped) return; stopped = true; lifetime.abort(); service.dispose(); await control!.dispose(); await rig?.dispose(); transfers.clear(); imports.clear(); reads.clear(); },
+  };
+  if (!rigStore) return instance;
+  // Simulated keeps what was sent to its controllers in a document. Hubble lets a module write one only during a
+  // command, so each page call and key press saves the rig on its way out, if anything changed.
+  const saveRig = async (signal: AbortSignal) => {
+    if (stopped) return;
+    try { await rigStore.save(signal); }
+    catch (error) { if (!signal.aborted) context.log({ level: 'info', stage: 'simulated', message: ('The simulated controllers could not be saved: ' + reason(error)).slice(0, 500) }); }
+  };
+  return { ...instance,
+    async call(method, raw, execution) { try { return await instance.call!(method, raw, execution); } finally { await saveRig(AbortSignal.any([execution.signal, lifetime.signal])); } },
+    async execute(id, fields, execution) { try { return await instance.execute!(id, fields, execution); } finally { await saveRig(AbortSignal.any([execution.signal, lifetime.signal])); } },
   };
 }
 export default { createInstance } satisfies HubbleModule;

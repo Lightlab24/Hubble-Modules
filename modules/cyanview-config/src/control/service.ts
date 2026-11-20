@@ -85,6 +85,8 @@ export class CameraControl {
   readonly selection: ControlSelection;
   private sessions = new Map<string, RcpSession>();
   private subscriptions: readonly ModuleFeedbackSubscription[] = [];
+  /** A Cyanview key has been pressed since this worker started. The page's setup guide ticks Press a key from it. */
+  private pressed = false;
   private feedbackSignal?: AbortSignal;
   private stopped = false;
   private recording: RecordingCoordinator;
@@ -130,6 +132,7 @@ export class CameraControl {
     this.recording = new RecordingCoordinator({ feedbackTimeoutMs: RECORDING_FEEDBACK_TIMEOUT_MS, changed: () => this.emit() });
   }
   async start(signal: AbortSignal) {
+    // Recording that isn't known after a restart is about real cameras, so Simulated keeps none of it in the shared file.
     if (!this.sample && this.context.runtimeDirectory) {
       this.checkpoint = recordingCheckpoint(this.context.runtimeDirectory);
       this.recording = new RecordingCoordinator({ feedbackTimeoutMs: RECORDING_FEEDBACK_TIMEOUT_MS, recovery: this.checkpoint.recovery,
@@ -245,7 +248,8 @@ export class CameraControl {
   }
   state() {
     const { enabled, singleSwitch } = this.selection.value();
-    const value = { enabled, singleSwitch, controllers: this.controllerStatuses(), cameras: this.cameraStatuses(), cameraChanges: { ...this.cameraChanges } };
+    // keys and pressed tell the page's setup guide that a key uses Cyanview and that one has been pressed.
+    const value = { enabled, singleSwitch, controllers: this.controllerStatuses(), cameras: this.cameraStatuses(), cameraChanges: { ...this.cameraChanges }, keys: this.subscriptions.length, pressed: this.pressed };
     const text = JSON.stringify(value);
     if (text !== this.stateText) { this.stateText = text; this.stateSequence += 1; }
     return { ...value, epoch: this.epoch, sequence: this.stateSequence };
@@ -300,7 +304,9 @@ export class CameraControl {
     this.emit();
   }
   private session(device: RecordValue) {
-    if (this.stopped || this.sample) throw new Error('Cyanview commands are unavailable in sample data');
+    if (this.stopped) throw new Error('Cyanview module is unavailable');
+    // Simulated always brings its own sessions to the simulated controllers, and must never fall back to a real one.
+    if (this.sample && !this.options.session) throw new Error('Simulated controllers are unavailable');
     let session = this.sessions.get(device.id);
     if (!session) {
       const definition = { connectionId: device.id, name: device.name, serial: device.serial,
@@ -358,11 +364,12 @@ export class CameraControl {
   async execute(id: string, fields: ModuleValues, execution: Pick<ModuleExecutionContext, 'signal' | 'log'> & { readonly gesture?: ModuleExecutionContext['gesture'] }) {
     try {
       execution.signal.throwIfAborted();
-      if (this.stopped || this.sample) throw new Error('Sample data does not send commands to equipment');
+      if (this.stopped) throw new Error('Cyanview module is unavailable');
       const values = id === 'camera-control' ? object(fields.values) : fields;
       if (values.enabled === false) throw new Error('This action is disabled');
       const command = (id === 'camera-control' ? values.actionType : id) as Command;
       if (!commands.some(([supported]) => command === supported)) throw new Error('Unknown Cyanview action');
+      if (!this.pressed) { this.pressed = true; this.emit(); }
       const controllerId = values['module.controllerId'] ?? values.controllerId;
       const cameraNumber = values['module.cameraNumber'] ?? values.cameraNumber;
       if (cameraCommands.includes(command) && !number(cameraNumber)) throw new Error('Enter a camera number from 1 to 999999');
@@ -683,7 +690,7 @@ export class CameraControl {
   }
   /** Every managed RCP, RIO and Gateway is watched, whether or not anything needs it yet. Watching only subscribes; it sends nothing. */
   private observe() {
-    if (this.stopped || this.sample) return;
+    if (this.stopped || (this.sample && !this.options.session)) return;
     for (const device of this.plan.devices) if (controlDevice(device)) this.session(device);
   }
   private feedback() {

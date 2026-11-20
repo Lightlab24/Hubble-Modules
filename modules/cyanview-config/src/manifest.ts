@@ -32,7 +32,9 @@ export default defineModuleManifest({
     'module-prompt-update-v1',
   ] },
   capabilities: ['host.documents', 'host.helpers', 'service.page.studio', 'state-feedback'],
-  settings: [{ id: 'sampleData', label: 'Use sample devices', type: 'boolean', required: true, default: false }],
+  // The id stays sampleData, which saved workspaces already hold.
+  settings: [{ id: 'sampleData', label: 'Simulated', type: 'boolean', required: true, default: false,
+    description: 'Runs simulated Cyanview controllers inside Hubble: a RIO and two RCPs with cameras. Nothing goes on the network. Your real Cyanview setup is kept apart and comes back when this is off.' }],
   matrix,
   actions: [{ id: 'camera-control', label: 'Cyanview', description: 'Named Cyanview routing and camera controls.',
     completion: 'response', completionAlternatives: ['local', 'state-confirmed'], timeoutMs: 120000, fields: [] }, ...controlActions],
@@ -49,6 +51,6 @@ export default defineModuleManifest({
   }],
   pages: [{ id: 'studio', label: 'Cyanview', icon: 'ui/logo.svg', layout: 'full-page', sections: [ModuleFrontendSectionSchema.parse({
     type: 'custom', id: 'frontend', label: 'Cyanview configuration', entry: 'ui/index.html',
-    commands: ['read-plan', 'read-part', 'save-plan', 'save-begin', 'save-part', 'save-commit', 'send', 'send-begin', 'send-part', 'send-commit', 'scan', 'stop-scan', 'probe', 'find-rig', 'import-device', 'import-part', 'refresh', 'choice-catalogs', 'options', 'remi-state', 'remi-send', 'remi-route', 'camera-control-state', 'camera-control-mutate', 'camera-enabled', 'camera-refresh', 'open-device-page'].map(id => ({ id, label: id })),
+    commands: ['read-plan', 'read-part', 'save-plan', 'save-begin', 'save-part', 'save-commit', 'send', 'send-begin', 'send-part', 'send-commit', 'scan', 'stop-scan', 'probe', 'find-rig', 'import-device', 'import-part', 'refresh', 'choice-catalogs', 'options', 'remi-state', 'remi-send', 'remi-route', 'camera-control-state', 'camera-control-mutate', 'camera-enabled', 'camera-refresh', 'open-device-page', 'setup-guide'].map(id => ({ id, label: id })),
   })] }],
 });

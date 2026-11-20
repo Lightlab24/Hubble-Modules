@@ -19,7 +19,7 @@ export async function buildUiAdapter() {
   replace("toast('Status refreshed · edits retained');},500);", "toast('Settings refreshed · edits retained');},500);");
   replace("  const $=role=>", "  const moduleBridge=globalThis.cyanviewModuleBridge;\n  if(moduleBridge)root.hidden=true;\n  let persistence='saved',saveSequence=0;\n  const $=role=>");
   replace("const p=window.openai?.setWidgetState?.(snapshot);", "if(moduleBridge){return persistPlan(snapshot);}const p=window.openai?.setWidgetState?.(snapshot);");
-  replace("$('saved-label').textContent='Workspace saved · '+ui.sendMode;", "$('saved-label').textContent=(moduleBridge?.preview||!moduleBridge?'Sample data · ':persistence==='saving'?'Saving… · ':persistence==='failed'?'Changes not saved · ':persistence==='draft'?'Unsaved edits · ':'Workspace saved · ')+ui.sendMode;action('add-lan').disabled=!devices.length;");
+  replace("$('saved-label').textContent='Workspace saved · '+ui.sendMode;", "$('saved-label').textContent=(moduleBridge?.preview||!moduleBridge?'Sample data · ':persistence==='saving'?'Saving… · ':persistence==='failed'?'Changes not saved · ':persistence==='draft'?'Unsaved edits · ':moduleBridge.simulated?'Simulated · ':'Workspace saved · ')+ui.sendMode;action('add-lan').disabled=!devices.length;");
   replace("    button.setAttribute('aria-label'", "    button.disabled=!ordered.length;\n    button.setAttribute('aria-label'");
   replace("    const nums=cameras.filter(c=>c.device===id)", "    if(cameras.length>=512){toast('Camera capacity reached');return;}\n    const nums=(id?cameras.filter(c=>c.device===id):cameras)");
   replace("toast('Camera row added to '+device(id).name);remember();", "toast(id?'Camera row added to '+device(id).name:'Camera added · choose its Source');remember();");
@@ -40,7 +40,7 @@ export async function buildUiAdapter() {
   replace("b.disabled=!pending||!d.online||", "b.disabled=!pending||");
   replace("<span>'+esc(d.online?'Connected at '+d.base:'Offline · edits stay pending')+'</span>", "<span data-connection-note>'+esc(connectionNote(d))+'</span>");
   replace("'Manual · edit, then Send changes.'", "'Manual · edit, then Send settings.'");
-  replace("    syncOrganization();\n  }\n  function paintItem", "    syncOrganization();syncDeviceControls();\n  }\n  function paintItem");
+  replace("    syncOrganization();\n  }\n  function paintItem", "    syncOrganization();syncDeviceControls();scheduleSetupGuide();\n  }\n  function paintItem");
   replace("openControllers:[...openControllers],", "openControllers:[...openControllers],cameraSortByDevice:JSON.parse(JSON.stringify(cameraSortByDevice)),cameraLayouts:saveCameraLayouts(),cameraSheetsByDevice:saveCameraSheets(),remiDrafts:saveRemiDrafts(),remiView:saveRemiView(),");
   replace("restoreColumnVisibility(data);", "restoreColumnVisibility(data);restoreCameraSorting(data);restoreCameraLayouts(data);restoreRemiDrafts(data);restoreRemiView(data);");
   replace("remiSharing:'Deferred until a later capture'", "remiSharing:'Managed camera sources'");
@@ -163,13 +163,14 @@ export async function buildUiAdapter() {
   // A controller's camera count is set with a number box rather than added one row at a time.
   replace("<select data-new-camera=\"'+d.id+'\" aria-label=\"Add camera to '+esc(d.name)+'\"><option value=\"\">+ Add camera…</option><option value=\"Venice-IP\">Sony · Venice-IP</option><option value=\"Alpha-USB\">Sony · Alpha-USB</option><option value=\"Alpha-IP\">Sony · Alpha-IP</option><option value=\"Choose model…\">Blank camera row</option></select>", "'+cameraCountControl(d.id)+'");
   replace("if(Array.isArray(data.deviceOrder))", "restoreCameraSheets(data);if(Array.isArray(data.deviceOrder))");
-  const hooks = (await Promise.all(['src/ui-camera-control.js','src/ui-device-workflows.js','src/ui-camera-grid-layout.js','src/ui-camera-sheets.js','src/ui-camera-sorting.js','src/ui-backend-hooks.js','src/ui-remi-workflows.js','src/ui-lens-axes.js','src/ui-camera-choices.js','src/ui-sheet-history.js','src/ui-camera-workbook.js','src/ui-camera-assignment.js','src/ui-camera-enabled.js','src/ui-rig.js','src/ui-device-sheet.js','src/ui-dropdowns.js','src/ui-camera-count.js','src/ui-text-size.js','src/ui-saved-lists.js'].map(file=>readFile(path.join(root,file),'utf8')))).join('\n');
+  const hooks = (await Promise.all(['src/ui-camera-control.js','src/ui-device-workflows.js','src/ui-camera-grid-layout.js','src/ui-camera-sheets.js','src/ui-camera-sorting.js','src/ui-backend-hooks.js','src/ui-remi-workflows.js','src/ui-lens-axes.js','src/ui-camera-choices.js','src/ui-sheet-history.js','src/ui-camera-workbook.js','src/ui-camera-assignment.js','src/ui-camera-enabled.js','src/ui-rig.js','src/ui-device-sheet.js','src/ui-dropdowns.js','src/ui-camera-count.js','src/ui-text-size.js','src/ui-saved-lists.js','src/ui-setup-guide.js'].map(file=>readFile(path.join(root,file),'utf8')))).join('\n');
   replace("  syncFilter();renderLans();renderCameras();setTab('cameras',false);restore(window.openai?.widgetState);", hooks + "\n  initializeDeviceWorkflow();syncFilter();renderLans();renderCameras();setTab('devices',false);restore(window.openai?.widgetState);\n  if(moduleBridge)void initializeBackend();else root.hidden=false;");
   const imports = [
     "import { createSpreadsheetContextMenu, mountSpreadsheetControls, mountSpreadsheetColumnGroup, mountSpreadsheetResize, mountSpreadsheetColumnEditor, mountSpreadsheetViewport } from '@hubble/module-sdk/spreadsheet-controls';",
     "import { cameraChoiceKey } from './choice-context.js';",
     "import { cyanviewCameraModels } from './camera-models.js';",
     "import { PresentationLedger } from './presentation-ledger.js';",
+    "import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideFinished, setupGuideSteps } from './setup-guide-model.js';",
   ].join('\n');
   await writeFile(path.join(root, 'src/ui-controller.js'), imports + '\n' + source);
 }

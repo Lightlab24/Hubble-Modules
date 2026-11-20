@@ -111,7 +111,7 @@ test('a camera switched off and on outside Hubble takes its copies with it, with
   } finally { await s.close(); }
 });
 
-test('a controller that refuses the change is named, and sample data sends nothing', async () => {
+test('a controller that refuses the change is named', async () => {
   const s = await chain();
   try {
     s.master.failProperty = 'enabled';
@@ -119,9 +119,4 @@ test('a controller that refuses the change is named, and sample data sends nothi
     // The source was already back on before the copy refused.
     assert.equal(s.rio.config.Camera.original.Enabled, '1');
   } finally { await s.close(); }
-  const sample = fixture({ sampleData: true });
-  try {
-    await sample.instance.start();
-    await assert.rejects(sample.call('camera-refresh', { device: 'any', key: 'any' }), /Sample data does not send/);
-  } finally { await sample.instance.dispose(); }
 });

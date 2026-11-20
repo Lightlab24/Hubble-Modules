@@ -772,9 +772,16 @@
     pendingPaintQueued = true;
     queueMicrotask(() => { pendingPaintQueued = false; paintPendingSends(); });
   }
-  function paintPendingSends() {
+  /** What Pending sends lists, and how much of it Send would send now. The setup guide reads the same counts. */
+  function pendingSendCounts() {
     const rows = pendingRows(), groups = remiDraftGroups(), networks = lanDraftGroups();
     const total = rows.reduce((count, row) => count + row.lines.length, 0) + groups.reduce((count, group) => count + group.items.length, 0) + networks.reduce((count, group) => count + group.rows.length, 0) + remiJobs.length;
+    const ready = rows.filter(row => !pendingState(row.camera).blocked).reduce((sum, row) => sum + row.lines.length, 0) + groups.filter(group => !remiGroupBlocked(group)).reduce((sum, group) => sum + group.items.length, 0) + networks.filter(group => !lanGroupBlocked(group)).reduce((sum, group) => sum + group.rows.length, 0);
+    return { rows, groups, networks, total, ready };
+  }
+  function paintPendingSends() {
+    scheduleSetupGuide();
+    const { rows, groups, networks, total, ready: readyCount } = pendingSendCounts();
     for (const count of root.querySelectorAll('[data-pending-sends-count]')) { count.textContent = total; count.hidden = !total; }
     for (const word of root.querySelectorAll('[data-pending-sends-word]')) word.textContent = total ? ' pending' : 'All sent';
     for (const toggle of root.querySelectorAll('.hc-toolbar [data-action="toggle-pending-sends"]')) { toggle.dataset.pending = String(total > 0); toggle.setAttribute('aria-expanded', String(pendingSendsOpen)); }
@@ -787,7 +794,6 @@
       $('pending-summary').textContent = everything + (everything === 1 ? ' change pending' : ' changes pending');
       $('pending-summary').classList.add('hc-changes-label');
     }
-    const ready = rows.filter(row => !pendingState(row.camera).blocked), readyCount = ready.reduce((sum, row) => sum + row.lines.length, 0) + groups.filter(group => !remiGroupBlocked(group)).reduce((sum, group) => sum + group.items.length, 0) + networks.filter(group => !lanGroupBlocked(group)).reduce((sum, group) => sum + group.rows.length, 0);
     for (const quick of root.querySelectorAll('[data-action="send-all-pending-quick"]')) {
       quick.hidden = !readyCount;
       quick.querySelector('[data-pending-quick-label]').textContent = 'Send ' + readyCount;

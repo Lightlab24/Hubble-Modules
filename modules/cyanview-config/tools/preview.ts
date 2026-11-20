@@ -22,8 +22,16 @@ let liveReadDelayMs = 0;
 let fleet: FakeRemiFleet | null = null;
 const switchedOff = new Set<string>(), mqttSockets = new Map<string, Set<Socket>>();
 let sampleSetting = true, sessionOptions: Parameters<typeof fixture>[1], statePaused = false;
-const rendererState = () => session.states.at(-1) as Parameters<typeof session.context.publishState>[0];
-async function reset(sample: boolean, remi = false, gateway = false, direct = false, extra = false, live = false, wan = false, reachAll = false) {
+// The page's own made-up rows, which it shows and saves but never sends. The worker runs Simulated underneath, so these
+// rows stay in the simulated plan, and the preview answers read-plan the way a worker once did for them.
+let pageFixtures = true;
+/** The page's made-up rows reach no controller, so what the worker says of them, all unreachable, is left out as a worker once left it. */
+const fixtureControl = (value: any) => pageFixtures && value && typeof value === 'object' ? { ...value, controllers: {}, cameras: {} } : value;
+const rendererState = () => {
+  const state = session.states.at(-1) as Parameters<typeof session.context.publishState>[0];
+  return pageFixtures && state?.values ? { ...state, values: { ...state.values, cameraControl: fixtureControl(state.values.cameraControl) } } : state;
+};
+async function reset(sample: boolean, remi = false, gateway = false, direct = false, extra = false, live = false, wan = false, reachAll = false, simulated = false) {
   statePaused = false;
   pingDelayMs = 0;
   releaseControlWrites?.(); releaseControlWrites = undefined;
@@ -63,7 +71,8 @@ async function reset(sample: boolean, remi = false, gateway = false, direct = fa
     if (!target) throw new Error('Unknown simulated address');
     return target.socket(url,options);
   };
-  sampleSetting = sample;
+  // Simulated runs the worker against the controllers simulated inside it, and the page is live to it.
+  sampleSetting = sample || simulated; pageFixtures = sample && !simulated;
   sessionOptions = {
     client: address => new CyanviewClient(address, { socket, timeout: 2000 }),
     // Held settings sockets, as in Hubble. Off unless a spec asks, since several count sockets.
@@ -88,7 +97,7 @@ async function reset(sample: boolean, remi = false, gateway = false, direct = fa
       },
       announcements: async (receive, signal) => { receive({role:'rio',serialHint:'CY-RIO-1-10',addresses:['10.192.1.10','10.20.101.200']});await new Promise<void>(resolve=>{if(signal.aborted)resolve();else signal.addEventListener('abort',()=>resolve(),{once:true});}); } },
   };
-  session = fixture({ sampleData: sample }, sessionOptions);
+  session = fixture({ sampleData: sampleSetting }, sessionOptions);
   await session.instance.start();
   if (remi) {
     const snapshots = controllers.map(device=>device.snapshot(device.config.IP.protected.IP));
@@ -121,6 +130,11 @@ let port; window.addEventListener('message', event => {
 });
 setInterval(async()=>{if(!port)return;try{const response=await fetch('/__state');port.postMessage({type:'state',value:await response.json()});}catch{}},200);
 </script></html>`;
+/** The saved plan with the page told to show its own rows until it has saved some, and to send nothing. */
+async function fixturePlan() {
+  const saved = await session.repository.read(session.signal);
+  return { revision: saved.revision, sample: true, plan: saved.fresh ? null : saved.plan };
+}
 const server = createServer(async (request, response) => {
   const url = new URL(request.url!, 'http://127.0.0.1');
   const send = (value: unknown, status = 200) => { response.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(value)); };
@@ -128,7 +142,7 @@ const server = createServer(async (request, response) => {
     if (request.method === 'POST') {
       const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk));
       const input = JSON.parse(Buffer.concat(chunks).toString() || '{}');
-      if (url.pathname === '/__reset') { await reset(input.sample !== false, input.remi === true, input.gateway === true, input.direct === true, input.extra === true, input.live === true, input.wan === true, input.reachAll === true); send({ reset: true }); return; }
+      if (url.pathname === '/__reset') { await reset(input.sample !== false && input.simulated !== true, input.remi === true, input.gateway === true, input.direct === true, input.extra === true, input.live === true, input.wan === true, input.reachAll === true, input.simulated === true); send({ reset: true }); return; }
       if (url.pathname === '/__restart') {
         // The equipment and saved documents stay, as they do when Hubble restarts a module's worker.
         const { records } = session;
@@ -168,6 +182,9 @@ const server = createServer(async (request, response) => {
         if (typeof input.liveReadDelayMs === 'number') liveReadDelayMs = Math.min(3000, Math.max(0, input.liveReadDelayMs));
         if (typeof input.optionDelayMs === 'number') controller.optionDelayMs = Math.min(3000, Math.max(0, input.optionDelayMs));
         if (typeof input.pingDelayMs === 'number') pingDelayMs = Math.min(5000,Math.max(0,input.pingDelayMs));
+        // Keys in the Button Matrix that use Cyanview, and a press of one, as Hubble passes them to the worker.
+        if (Array.isArray(input.keys)) session.instance.subscribeFeedback!(input.keys, session.execution());
+        if (input.press && typeof input.press === 'object') await session.instance.execute('camera-control', { values: { enabled: true, ...input.press } }, session.execution()).catch(() => undefined);
         send({ updated: true }); return;
       }
       if (url.pathname !== '/__rpc') { send({ error: 'Unknown fixture route' }, 404); return; }
@@ -176,7 +193,8 @@ const server = createServer(async (request, response) => {
       const planSave = ['save-plan', 'save-commit'].includes(input.commandId);
       if (planSave) { planSaves++; planSavePending++; }
       try {
-        const result = input.operation === 'state' ? rendererState() : await session.call(input.commandId, input.value);
+        const result = input.operation === 'state' ? rendererState() : pageFixtures && input.commandId === 'read-plan' ? await fixturePlan()
+          : ['camera-control-state', 'camera-control-mutate'].includes(input.commandId) ? fixtureControl(await session.call(input.commandId, input.value)) : await session.call(input.commandId, input.value);
         if (liveReadDelayMs && input.commandId === 'refresh' && input.value?.live === true) await new Promise(resolve => setTimeout(resolve, liveReadDelayMs));
         send({ result });
       }

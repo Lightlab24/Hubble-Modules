@@ -6,6 +6,7 @@ import { isStaleDraft } from './save-conflict.js';
 import './approved-ui.css';
 import './frame.css';
 import './workbook-controls.css';
+import './setup-guide.css';
 
 // The approved UI keeps its original DOM, CSS and rendering functions.
 Reflect.set(globalThis, 'lucide', {
@@ -27,7 +28,7 @@ if (window.parent !== window) {
   let tail: Promise<unknown> = Promise.resolve();
   const receipts = new Set<(plan: Record<string, unknown>) => void>();
   async function readPlan() {
-    const result = await client.call('read-plan') as { revision: string | null; sample: boolean; plan: Record<string, unknown> | null; token?: string; length?: number };
+    const result = await client.call('read-plan') as { revision: string | null; sample: boolean; simulated?: boolean; plan: Record<string, unknown> | null; token?: string; length?: number };
     if (result.token) {
       let text = '';
       for (let offset = 0; offset < result.length!; offset += 60000) text += (await client.call('read-part', { token: result.token, offset }) as { text: string }).text;
@@ -49,9 +50,11 @@ if (window.parent !== window) {
   }
   const bridge = {
     preview: false,
+    // The module is running against its simulated controllers, which the save status says.
+    simulated: false,
     async read() {
       const result = await readPlan();
-      revision = result.revision; bridge.preview = result.sample; return result.plan;
+      revision = result.revision; bridge.preview = result.sample; bridge.simulated = result.simulated === true; return result.plan;
     },
     save(plan: unknown | (() => unknown), saved?: () => void, failed?: (error: unknown) => void) {
       return enqueue(async () => {
@@ -146,6 +149,8 @@ if (window.parent !== window) {
     /** A controller's own web page, opened in the browser on the computer Hubble runs on. */
     async openDevicePage(address: string) { return client.call('open-device-page', payload({ address })); },
     async controlState() { return client.call('camera-control-state'); },
+    /** The setup guide's progress on this Mac: null reads it, a value saves it. */
+    async setupGuide(progress: unknown) { return client.call('setup-guide', progress === null ? null : payload(progress)); },
     async controlMutate(value: unknown) {
       await tail.catch(() => undefined);
       return client.call('camera-control-mutate', payload(value));

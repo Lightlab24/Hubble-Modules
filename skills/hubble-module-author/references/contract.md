@@ -71,6 +71,14 @@ module ID as the scope ID. It provides one instance per module per workspace.
 The historical `mock` scope is inert test compatibility only. Never package,
 activate or bypass the production prohibition on Mock modules.
 Each context supplies scope, settings, publishState, publishFeedback, and log.
+
+A module that runs a stand-in device instead of real equipment (a Simulated
+setting, as the routers, Cyanview and FS-HDR have) publishes `simulated: true`
+in its state `values`. Hubble then shows **Simulated**, in its own colour, where
+it would show Ready, so a simulated connection can't pass for real gear. Hosts
+before this ignore the value and show Ready. A simulated device sends nothing on
+the network, says so on the module's own page, and is never a test bypass: the
+Mock prohibition above still holds.
 Feedback with parameters includes `fields` matching its declared descriptor;
 the action's feedback rule selects the same ID and values. Invalid or stale
 feedback cannot assert a confirmed button state. Host reload clears feedback,

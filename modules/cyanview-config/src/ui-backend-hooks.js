@@ -96,7 +96,7 @@
       moduleBridge.subscribe(applyLiveState);
       if(plan?.uiState?.privateContent?.ui?.discoveryVersion!==2&&ui.discoveryMethod==='broadcast')ui.discoveryMethod='ping';
       $('discovery-method').value=['ping','broadcast'].includes(ui.discoveryMethod)?ui.discoveryMethod:'ping';
-      persistence='saved';syncSummary();preferBaseAddresses();
+      persistence='saved';syncSummary();preferBaseAddresses();void setupGuideLoadedNow();
     }catch(error){devices.splice(0);cameras=[];lans=[];renderLans();renderCameras();toast(error.message||'Configuration could not be loaded');}
     root.hidden=false;icons();
   }

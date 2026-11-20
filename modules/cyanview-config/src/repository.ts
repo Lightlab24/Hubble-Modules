@@ -6,16 +6,19 @@ import { selectionDocuments } from './control/selection.js';
 import { staleDraftMessage } from './save-conflict.js';
 
 export const ROOTS = ['plan', 'sample-plan'] as const;
+/** What has been sent to the simulated controllers Simulated runs, kept so a restarted worker finds them as they were. */
+export const SIMULATED_RIG_DOCUMENT = 'sample-rig';
 type DocumentDefinition = NonNullable<ModuleManifest['documents']>[number];
 export function documentDefinitions() {
   return [...ROOTS.flatMap((root): DocumentDefinition[] => [
-    { id: root, label: root === 'plan' ? 'Cyanview configuration' : 'Sample configuration', version: 1, defaultValue: { formatVersion: 1, devices: [], lans: [], uiState: null, cameraBank: 0, cameraCount: 0, lanCount: 0 } },
+    { id: root, label: root === 'plan' ? 'Cyanview configuration' : 'Simulated configuration', version: 1, defaultValue: { formatVersion: 1, devices: [], lans: [], uiState: null, cameraBank: 0, cameraCount: 0, lanCount: 0 } },
     { id: root + '-remi', label: 'REMI assignments and recovery', version: 1, defaultValue: { links: [], refreshes: [], creates: [] } },
     ...[0, 1].flatMap(bank => [
       ...Array.from({ length: 4 }, (_, part) => ({ id: `${root}-c${bank}-${part}`, label: 'Camera configuration', version: 1, defaultValue: [] })),
       ...Array.from({ length: 8 }, (_, part) => ({ id: `${root}-l${bank}-${part}`, label: 'Network configuration', version: 1, defaultValue: [] })),
     ]),
-  ]), ...choiceDocumentDefinitions(), ...selectionDocuments()];
+  ]), ...choiceDocumentDefinitions(), ...selectionDocuments(),
+  { id: SIMULATED_RIG_DOCUMENT, label: 'Simulated Cyanview controllers', version: 1, defaultValue: {} }];
 }
 export class PlanRepository {
   private documents: ReturnType<typeof createModuleDocumentClient>;
