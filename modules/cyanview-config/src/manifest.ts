@@ -43,7 +43,9 @@ export default defineModuleManifest({
     variants: (['darwin', 'linux'] as const).flatMap(platform => (['arm64', 'x64'] as const).map(arch => ({ platform, arch, runtime: 'node' as const, nodeMajor: 22, entry: 'helpers/ping.mjs' }))),
     // open-page starts the browser at a controller's own web page. A page can't: Hubble's frame opens no windows.
     methods: [{ id: 'batch', readOnly: true, timeoutMs: 10000 }, { id: 'open-page', readOnly: false, timeoutMs: 10000 }],
-    readinessTimeoutMs: 5000, maxConcurrent: 4, memoryMb: 64,
+    // Discover keeps one ping batch going per worker (four), so room is left beside them to open a page.
+    // At four, a link couldn't be clicked while a search ran: "Helper request capacity reached" (Nov 20, 2026).
+    readinessTimeoutMs: 5000, maxConcurrent: 8, memoryMb: 64,
   }],
   pages: [{ id: 'studio', label: 'Cyanview', icon: 'ui/logo.svg', layout: 'full-page', sections: [ModuleFrontendSectionSchema.parse({
     type: 'custom', id: 'frontend', label: 'Cyanview configuration', entry: 'ui/index.html',
