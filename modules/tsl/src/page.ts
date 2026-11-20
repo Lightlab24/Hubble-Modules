@@ -13,6 +13,7 @@ import {
 import type { TslDiscoveredDisplay, TslReceiver } from "./receiver.js";
 import {
   defaultSwitcherDocument,
+  deviceIdentity,
   ReceiverSettingsSchema,
   SWITCHER_DOCUMENT_ID,
   SwitcherDocumentSchema,
@@ -423,6 +424,11 @@ export class TslPage {
     });
   }
 
+  /** How the page's device is found on the switcher: by the name it has there, or the one it is being given. */
+  private names(document: SwitcherDocument): { deviceName: string; otherName: string } {
+    return { deviceName: deviceIdentity(document), otherName: document.name };
+  }
+
   async call(value: ModuleJsonValue, signal: AbortSignal): Promise<ModuleJsonValue> {
     const request = z
       .object({ sectionId: z.literal(PAGE_SECTION_ID), commandId: z.string(), value: z.unknown().optional() })
@@ -467,7 +473,7 @@ export class TslPage {
         const { value: document } = await this.document(signal);
         return json(
           await this.contact(document.host, "read-switcher", () =>
-            this.switcher.readSwitcher({ ...switcherTarget(document.host), deviceName: document.name, signal }),
+            this.switcher.readSwitcher({ ...switcherTarget(document.host), ...this.names(document), signal }),
           ),
         );
       }
@@ -485,16 +491,22 @@ export class TslPage {
         const sendTo = document.sendTo || (await this.switcher.routeAddress(target.host));
         if (!sendTo) throw new Error("Choose which of this computer's addresses the switcher should send to");
         const local = this.switcher.localAddresses().map((item) => item.id);
-        if (!local.includes(sendTo)) throw new Error(`${sendTo} isn't one of this computer's addresses`);
+        const notHere = () => new Error(`${sendTo} isn't one of this computer's addresses`);
+        // Only this computer's addresses, or the one the device already sends to: a device that
+        // feeds something else can have its other settings changed and still send there.
+        if (!local.includes(sendTo) && !document.device) throw notHere();
         return json(
           await this.contact(document.host, "send-switcher", async () => {
-            // Never repoint someone else's device without being told to.
-            const before = await this.switcher.readSwitcher({ ...target, deviceName: document.name, signal });
+            const before = await this.switcher.readSwitcher({ ...target, ...this.names(document), signal });
+            if (!local.includes(sendTo) && before.mine?.ip !== sendTo) throw notHere();
+            // Never change someone else's device without being told to.
             if (before.mine && !local.includes(before.mine.ip) && !adopt)
               throw new Error(`${before.mine.name} on the switcher sends to ${before.mine.ip}. Confirm before changing it`);
             return this.switcher.sendDevice({
               ...target,
               settings: wantedDevice(document, { ...this.receiverSettings(), ...receiver }, sendTo),
+              // The device as the switcher has it now, so a rename changes it rather than adding one.
+              deviceName: before.mine?.name ?? document.name,
               signal,
             });
           }),
@@ -504,7 +516,7 @@ export class TslPage {
         const { value: document } = await this.document(signal);
         return json(
           await this.contact(document.host, "delete-switcher", () =>
-            this.switcher.deleteDevice({ ...switcherTarget(document.host), deviceName: document.name, signal }),
+            this.switcher.deleteDevice({ ...switcherTarget(document.host), ...this.names(document), signal }),
           ),
         );
       }

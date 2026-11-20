@@ -52,6 +52,13 @@ table.sheet td.lamp[data-tally=amber]{background:var(--tally-amber);color:#fff}
 table.sheet td.lamp[data-tally=unknown]{color:var(--hubble-text-disabled,#7a7a7a);font-style:italic}
 table.sheet tr[data-stale=true] td{color:var(--hubble-text-disabled,#7a7a7a)}
 table.sheet tr[data-mine=true] td{background:var(--hubble-selected,#2a2b2c);color:var(--hubble-text-strong,#f4f4f4)}
+/* The switcher's devices: any row can be picked to edit, and the picked one has a bar at its start. */
+table.sheet.pick tbody tr{cursor:pointer}
+table.sheet.pick tbody tr:hover:not([data-mine=true]) td{background:var(--hubble-hover,#1d1d1d)}
+table.sheet.pick tbody tr:focus-visible{outline:none}
+table.sheet.pick tbody tr:focus-visible td{box-shadow:inset 0 1px 0 var(--hubble-focus,#8ab4f8),inset 0 -1px 0 var(--hubble-focus,#8ab4f8)}
+table.sheet.pick tr[data-mine=true] td:first-child{box-shadow:inset 3px 0 0 var(--hubble-text,#dedede)}
+table.sheet.pick[aria-disabled=true] tbody tr{cursor:default}
 table.sheet.plain{width:100%;border-top:1px solid var(--hubble-sheet-line,#3b3b3b);border-left:1px solid var(--hubble-sheet-line,#3b3b3b)}
 table.sheet.plain thead th{position:static}
 
@@ -67,6 +74,13 @@ table.sheet.plain thead th{position:static}
 .panel-head{display:flex;align-items:baseline;gap:10px;margin-bottom:12px;white-space:nowrap;overflow:hidden}
 .panel h2{margin:0;font-size:14px;font-weight:600;color:var(--hubble-text-strong,#f4f4f4)}
 .panel-sub{color:var(--hubble-text-secondary,#b2b2b2);font-size:var(--hubble-text-size-small,12px);overflow:hidden;text-overflow:ellipsis}
+.panel-sub strong{font-weight:600;color:var(--hubble-text-strong,#f4f4f4)}
+/* Always there, so the heading is the same height with or without it. */
+.panel-head .head-action{margin-left:auto;align-self:center;flex:none}
+/* A setting changed here and not sent to the switcher yet. The label turns amber; nothing moves. */
+.box[data-changed=true]{color:var(--tsl-warn)}
+.box[data-changed=true] input,.box[data-changed=true] select{border-color:var(--tsl-warn)}
+.control[data-changed=true] .hubble-control-label{color:var(--tsl-warn)}
 .fields{display:grid;gap:12px 14px;align-items:start}
 .fields.two{grid-template-columns:repeat(2,minmax(0,1fr))}
 .fields.three{grid-template-columns:repeat(3,minmax(0,1fr))}
@@ -74,6 +88,7 @@ table.sheet.plain thead th{position:static}
 .fields .wide{grid-column:1/-1}
 .box{display:flex;flex-direction:column;gap:6px;min-width:0;color:var(--hubble-text-secondary,#b2b2b2);font-size:var(--hubble-text-size-small,12px)}
 .box input,.box select{width:100%;min-height:var(--hubble-control-height-field,34px);padding:0 10px;border:1px solid var(--hubble-line-strong,#414141);border-radius:var(--hubble-radius-control,7px);background:var(--hubble-sheet,#111);color:var(--hubble-text-strong,#f4f4f4);font:var(--hubble-text-size,13px) var(--hubble-font,system-ui);font-variant-numeric:tabular-nums}
+.box select{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .box select:disabled,.box input:disabled{opacity:.45}
 .box input::placeholder,.field input::placeholder{color:var(--hubble-text-disabled,#7a7a7a)}
 .with-button{display:flex;gap:8px}.with-button input{flex:1;min-width:0}

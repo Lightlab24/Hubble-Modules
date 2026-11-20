@@ -35,16 +35,19 @@
             <div class="panel-actions"><button id="match" class="primary" type="button">Match switcher</button><span class="action-hint" id="match-hint">Listens for exactly what the switcher sends</span></div>
           </section>
           <section class="panel" aria-labelledby="devices-title">
-            <div class="panel-head"><h2 id="devices-title">TSL devices on the switcher</h2><span class="panel-sub" id="devices-sub">&nbsp;</span></div>
+            <div class="panel-head"><h2 id="devices-title">TSL devices on the switcher</h2><span class="panel-sub" id="devices-sub">&nbsp;</span><button id="new-device" class="quiet head-action" type="button">New device</button></div>
             <table id="device-grid" class="sheet plain" aria-label="TSL devices on the switcher"></table>
             <p id="devices-empty" class="none in-panel" hidden>Read the switcher to list its devices</p>
           </section>
         </div>
         <section class="panel" aria-labelledby="switcher-title">
-          <div class="panel-head"><h2 id="switcher-title">Ross switcher</h2><span class="panel-sub">What the switcher sends to this computer</span></div>
+          <div class="panel-head"><h2 id="switcher-title">Ross switcher</h2><span class="panel-sub" id="switcher-sub">What the switcher sends</span></div>
           <div class="fields three">
             <label class="box wide">Host or IP address<span class="with-button"><input id="host" type="text" autocomplete="off" spellcheck="false" placeholder="10.0.0.10"><button id="read" class="quiet tall" type="button">Read switcher</button></span></label>
             <p class="found wide" id="found" data-tone="idle"><span class="status-dot"></span><span id="found-text">Not checked</span></p>
+            <div class="control" id="sw-protocol"></div>
+            <div class="control" id="sw-transport"></div>
+            <label class="box">Port<input id="sw-port" type="number" min="1" max="65535" step="1" inputmode="numeric" autocomplete="off"></label>
             <label class="box">Send to<select id="send-to"></select></label>
             <label class="box">Device name<input id="device-name" type="text" maxlength="8" autocomplete="off" spellcheck="false"></label>
             <label class="box">Address offset<select id="offset"></select></label>

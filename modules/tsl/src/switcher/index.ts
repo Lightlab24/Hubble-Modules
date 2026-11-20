@@ -1,4 +1,4 @@
-/** Reading and setting the one TSL UMD device a Ross Carbonite switcher keeps for this computer. */
+/** Reading a Ross Carbonite switcher's devices, and setting the one TSL UMD device the page edits. */
 export {
   deleteDevice,
   readSwitcher,

@@ -14,9 +14,22 @@ export const DeviceNameSchema = z
   .regex(/^[\x21-\x7e](?:[\x20-\x7e]{0,6}[\x21-\x7e])?$/u, "Use 1 to 8 letters or numbers");
 export const SwitcherDocumentSchema = z.strictObject({
   host: z.string().trim().max(253).default(""),
+  /**
+   * The switcher device this page edits, by the name it has on the switcher. Empty until one is
+   * picked or sent: then it is the device called `name`, added if the switcher has none.
+   */
+  device: z.union([z.literal(""), DeviceNameSchema]).default(""),
+  /** The device's name as the page wants it. Differs from `device` while a rename is not sent. */
   name: DeviceNameSchema.default("HUBBLE"),
   /** Empty means the address this computer uses to reach the switcher. */
   sendTo: z.union([z.literal(""), z.ipv4()]).default(""),
+  /**
+   * What the device sends. A setup saved before 1.3.1 has none of these: its device sends what
+   * This computer listens for, as it did then.
+   */
+  protocol: z.enum(["3.1", "5.0"]).optional(),
+  transport: z.enum(["udp", "tcp"]).optional(),
+  port: z.int().min(1).max(65535).optional(),
   enabled: z.boolean().default(true),
   screen: z.int().min(0).max(65534).default(0),
   offset: z
@@ -60,18 +73,21 @@ export const ReceiverSettingsSchema = z.object({
 });
 export type ReceiverSettings = z.infer<typeof ReceiverSettingsSchema>;
 
-/** The device Hubble wants on the switcher: the page's choices plus what this computer listens for. */
+/** The name the page's device has on the switcher, which is how it is found there. */
+export const deviceIdentity = (document: Pick<SwitcherDocument, "device" | "name">): string => document.device || document.name;
+
+/** The device as the page wants it on the switcher. A setup from before 1.3.1 sends what this computer listens for. */
 export function wantedDevice(
   document: SwitcherDocument,
-  receiver: ReceiverLink,
+  receiver: Pick<ReceiverLink, "protocol" | "transport" | "port">,
   sendTo: string,
 ): SwitcherDeviceSettings {
   return {
     name: document.name,
     ip: sendTo,
-    port: receiver.port,
-    protocol: receiver.protocol,
-    transport: receiver.transport,
+    port: document.port ?? receiver.port,
+    protocol: document.protocol ?? receiver.protocol,
+    transport: document.transport ?? receiver.transport,
     enabled: document.enabled,
     screen: document.screen,
     offset: document.offset,
@@ -85,20 +101,67 @@ export function wantedDevice(
   };
 }
 
+/** The page's setup taken from a device as the switcher has it. Nothing else in the setup changes. */
+export function documentFromDevice(document: SwitcherDocument, settings: SwitcherDeviceSettings): SwitcherDocument {
+  return {
+    ...document,
+    device: settings.name,
+    name: settings.name,
+    sendTo: settings.ip,
+    protocol: settings.protocol,
+    transport: settings.transport,
+    port: settings.port,
+    enabled: settings.enabled,
+    center: settings.center,
+    fsfc: settings.fsfc,
+    busName: settings.busName,
+    umdId: settings.umdId,
+    oneSecond: settings.oneSecond,
+    // A TSL 3.1 device has none of these, so the page keeps what it had.
+    ...(settings.protocol === "5.0"
+      ? {
+          screen: settings.screen,
+          offset: settings.offset as SwitcherDocument["offset"],
+          brightness: settings.brightness,
+          header: settings.header,
+        }
+      : {}),
+  };
+}
+
+/** What the switcher's list already says about a device, before its form is read. */
+export function documentFromRow(document: SwitcherDocument, row: SwitcherDeviceRow): SwitcherDocument {
+  const ip = z.ipv4().safeParse(row.ip);
+  const port = z.int().min(1).max(65535).safeParse(row.port);
+  return {
+    ...document,
+    device: row.name,
+    name: row.name,
+    sendTo: ip.success ? ip.data : "",
+    protocol: /^TSL\s*5/iu.test(row.driver) ? "5.0" : "3.1",
+    ...(port.success ? { port: port.data } : {}),
+    enabled: row.enabled,
+  };
+}
+
 export type Tone = "ok" | "idle" | "warn" | "bad";
 export interface LinkStatus {
   readonly tone: Tone;
   readonly title: string;
   readonly text: string;
-  /** What Match switcher would set on this computer, when the two ends differ there. */
-  readonly match: Pick<ReceiverLink, "protocol" | "transport" | "port"> | null;
+  /**
+   * What Match switcher would set on this computer: only for a device that sends here, and only
+   * where this computer listens for something else.
+   */
+  readonly match: Pick<ReceiverLink, "protocol" | "transport" | "port" | "bindAddress"> | null;
 }
 const format = (link: Pick<ReceiverLink, "protocol" | "transport">) =>
   `TSL ${link.protocol} over ${link.transport.toUpperCase()}`;
 
 /**
  * Whether the switcher's device and this computer's receiver agree. A reading is what the
- * switcher last told us; nothing here reaches the switcher.
+ * switcher last told us; nothing here reaches the switcher. Matching is offered only for a
+ * device that sends to this computer: one that sends elsewhere is someone else's to follow.
  */
 export function linkStatus(input: {
   readonly receiver: ReceiverLink;
@@ -106,67 +169,93 @@ export function linkStatus(input: {
   readonly readError: string | null;
   readonly localAddresses: readonly string[];
   readonly listening: boolean;
+  /** The device the page edits, for the words when the switcher has none by that name. */
+  readonly deviceName?: string;
 }): LinkStatus {
   const none = (tone: Tone, title: string, text: string): LinkStatus => ({ tone, title, text, match: null });
   if (input.readError) return none("bad", "Switcher offline", input.readError);
   if (!input.reading) return none("idle", "Not checked", "Read the switcher to see what it sends");
   const mine = input.reading.mine;
-  if (!mine) return none("idle", "Not set up", "The switcher has no device for this computer. Send to switcher adds one");
+  if (!mine)
+    return none(
+      "idle",
+      "Not set up",
+      input.deviceName
+        ? `The switcher has no device named ${input.deviceName}. Pick one from its list, or send to add it`
+        : "The switcher has no device for this computer. Send to switcher adds one",
+    );
   if (!mine.settings)
     return none("idle", "Not checked", "Someone is editing devices on the switcher, so its settings couldn't be read");
   const theirs = mine.settings;
   const receiver = input.receiver;
+  if (!input.localAddresses.includes(theirs.ip))
+    return none(
+      "warn",
+      "Not matched",
+      `${mine.name} sends to ${theirs.ip} : ${theirs.port}, which isn't this computer. Point it here and send, then match`,
+    );
   const differs =
     theirs.protocol !== receiver.protocol || theirs.transport !== receiver.transport || theirs.port !== receiver.port;
-  if (differs)
+  const elsewhere = receiver.bindAddress !== "0.0.0.0" && receiver.bindAddress !== theirs.ip;
+  if (differs || elsewhere)
     return {
       tone: "warn",
       title: "Not matched",
-      text: `The switcher sends ${format(theirs)} to port ${theirs.port}. This computer listens for ${format(receiver)} on port ${receiver.port}`,
-      match: { protocol: theirs.protocol, transport: theirs.transport, port: theirs.port },
+      text: differs
+        ? `${mine.name} sends ${format(theirs)} to port ${theirs.port}. This computer listens for ${format(receiver)} on port ${receiver.port}`
+        : `${mine.name} sends to ${theirs.ip}, but this computer listens only on ${receiver.bindAddress}`,
+      match: {
+        protocol: theirs.protocol,
+        transport: theirs.transport,
+        port: theirs.port,
+        bindAddress: elsewhere ? theirs.ip : receiver.bindAddress,
+      },
     };
-  if (!input.localAddresses.includes(theirs.ip))
-    return none("warn", "Not matched", `The switcher sends to ${theirs.ip}, which isn't one of this computer's addresses`);
-  if (receiver.bindAddress !== "0.0.0.0" && receiver.bindAddress !== theirs.ip)
-    return none("warn", "Not matched", `The switcher sends to ${theirs.ip}, but this computer listens only on ${receiver.bindAddress}`);
-  if (!theirs.enabled) return none("warn", "Not matched", "The device is switched off on the switcher");
+  if (!theirs.enabled) return none("warn", "Not matched", `${mine.name} is switched off on the switcher`);
   if (!input.listening) return none("warn", "Not listening", "The settings match, but this computer isn't listening");
   return none(
     "ok",
     "Matched",
-    `The switcher sends ${format(theirs)} to ${theirs.ip} : ${theirs.port}, and this computer is listening for it`,
+    `${mine.name} sends ${format(theirs)} to ${theirs.ip} : ${theirs.port}, and this computer is listening for it`,
   );
 }
 
 const SENT_FIELDS = [
-  "ip", "port", "protocol", "transport", "enabled", "screen", "offset", "brightness",
+  "name", "ip", "port", "protocol", "transport", "enabled", "screen", "offset", "brightness",
   "center", "fsfc", "busName", "umdId", "oneSecond", "header",
 ] as const satisfies readonly (keyof SwitcherDeviceSettings)[];
+export type SentField = (typeof SENT_FIELDS)[number];
 
 /** A TSL 3.1 device has none of these on the switcher, so they are neither sent nor compared. */
 export const TSL_5_ONLY = ["screen", "offset", "brightness", "header"] as const satisfies readonly (keyof SwitcherDeviceSettings)[];
 
-/** Where this computer's device stands on the switcher, for the line beside Send to switcher. */
+/** The settings the page holds that the switcher's device doesn't have yet. */
+export function unsentFields(wanted: SwitcherDeviceSettings | null, kept: SwitcherDeviceSettings | null | undefined): SentField[] {
+  if (!wanted || !kept) return [];
+  return SENT_FIELDS.filter(
+    (field) =>
+      !(wanted.protocol === "3.1" && (TSL_5_ONLY as readonly string[]).includes(field)) && kept[field] !== wanted[field],
+  );
+}
+
+/** Where the page's device stands on the switcher, for the line beside Send to switcher. */
 export function deviceState(input: {
   readonly reading: SwitcherReading | null;
   readonly wanted: SwitcherDeviceSettings | null;
-}): { tone: Tone; text: string; onSwitcher: boolean; unsent: boolean } {
+}): { tone: Tone; text: string; onSwitcher: boolean; unsent: boolean; fields: SentField[] } {
   const mine = input.reading?.mine;
-  if (!input.reading) return { tone: "idle", text: "Not checked", onSwitcher: false, unsent: false };
-  if (!mine) return { tone: "idle", text: "Not on the switcher yet", onSwitcher: false, unsent: false };
-  const unsent =
-    !!mine.settings &&
-    !!input.wanted &&
-    SENT_FIELDS.some(
-      (field) =>
-        !(input.wanted?.protocol === "3.1" && (TSL_5_ONLY as readonly string[]).includes(field)) &&
-        mine.settings?.[field] !== input.wanted?.[field],
-    );
+  if (!input.reading) return { tone: "idle", text: "Not checked", onSwitcher: false, unsent: false, fields: [] };
+  if (!mine) return { tone: "idle", text: "Not on the switcher yet", onSwitcher: false, unsent: false, fields: [] };
+  const fields = unsentFields(input.wanted, mine.settings);
+  const count = fields.length;
   return {
-    tone: unsent ? "warn" : "ok",
-    text: unsent ? `On the switcher in slot ${mine.slot} · changes here are not sent yet` : `On the switcher in slot ${mine.slot}`,
+    tone: count ? "warn" : "ok",
+    text: count
+      ? `Slot ${mine.slot} · ${count === 1 ? "1 change" : `${count} changes`} not sent`
+      : `On the switcher in slot ${mine.slot}`,
     onSwitcher: true,
-    unsent,
+    unsent: count > 0,
+    fields,
   };
 }
 

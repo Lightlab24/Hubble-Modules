@@ -9,17 +9,22 @@ import {
 } from "@hubble/module-sdk/controls";
 import type { LiveReply, PageSnapshot, TallyRow } from "./page.js";
 import {
+  defaultSwitcherDocument,
   DeviceNameSchema,
+  deviceIdentity,
   deviceLine,
   deviceState,
+  documentFromDevice,
+  documentFromRow,
   linkStatus,
   listenerProblem,
   OFFSETS,
   wantedDevice,
   type ReceiverSettings,
+  type SentField,
   type SwitcherDocument,
 } from "./setup.js";
-import type { SwitcherReading } from "./switcher/index.js";
+import type { SwitcherDeviceRow, SwitcherDeviceSettings, SwitcherReading } from "./switcher/index.js";
 import "./frontend.css";
 
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -33,6 +38,26 @@ const RESTART_WAIT_MS = 10_000;
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const IPV4 = /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/u;
 const clock = (time: number) => new Date(time).toLocaleTimeString([], { hour12: false });
+const format = (link: { protocol: string; transport: string }) => `TSL ${link.protocol} over ${link.transport.toUpperCase()}`;
+/** Where each setting of the switcher's device is on the page, for marking one not sent yet. */
+const FIELD_ELEMENTS: Record<SentField, string> = {
+  name: "device-name",
+  ip: "send-to",
+  port: "sw-port",
+  protocol: "sw-protocol",
+  transport: "sw-transport",
+  enabled: "enabled",
+  screen: "screen",
+  offset: "offset",
+  brightness: "brightness",
+  center: "center",
+  fsfc: "fsfc",
+  busName: "bus-name",
+  umdId: "umd-id",
+  oneSecond: "one-second",
+  header: "header",
+};
+type Contact = { reading: SwitcherReading | null; readAt: number | null; readError: string | null };
 
 function toast(kind: "failure" | "success", title: string) {
   // Hubble's own fading toast, so a message never moves the page.
@@ -67,7 +92,10 @@ try {
   let saved: ReceiverSettings = structuredClone(snapshot.receiver);
   let switcher: SwitcherDocument = structuredClone(snapshot.switcher.value);
   let revision = snapshot.switcher.revision;
-  let reading: SwitcherReading | null = snapshot.reading;
+  /** A reading speaks for the page's device only while that is still the device it found. */
+  const own = (from: SwitcherReading | null): SwitcherReading | null =>
+    from?.mine && from.mine.name !== deviceIdentity(switcher) && from.mine.name !== switcher.name ? { ...from, mine: null } : from;
+  let reading: SwitcherReading | null = own(snapshot.reading);
   let readAt = snapshot.readAt;
   let readError = snapshot.readError;
   let routeAddress = snapshot.routeAddress;
@@ -173,15 +201,38 @@ try {
   // ----- Setup: whether the two ends agree -----
   const sendTo = () => switcher.sendTo || routeAddress || "";
   const wanted = () => (sendTo() ? wantedDevice(switcher, receiver, sendTo()) : null);
+  /** What the page's device sends, as the page shows it. */
+  const device = () => wantedDevice(switcher, receiver, sendTo());
+  /** Screen, Address offset, Brightness and TSL header exist on the switcher only for TSL 5.0. */
+  const fiveOnlyOff = () => device().protocol === "3.1";
+  /** A device just picked from the list, while its form is read, and what was changed here meanwhile. */
+  let picking: { name: string; edits: Partial<SwitcherDocument> } | null = null;
   let match: ReturnType<typeof linkStatus>["match"] = null;
   const drawLink = () => {
-    const status = linkStatus({ receiver, reading, readError, localAddresses, listening: live.listener.phase === "listening" });
+    const status = picking
+      ? { tone: "idle" as const, title: "Reading", text: `Reading ${picking.name} from the switcher…`, match: null }
+      : linkStatus({
+          receiver,
+          reading,
+          readError,
+          localAddresses,
+          listening: live.listener.phase === "listening",
+          deviceName: deviceIdentity(switcher),
+        });
     match = status.match;
     el("link").dataset.tone = status.tone;
     el("link-title").textContent = status.title;
     el("link-text").textContent = status.text;
     el<HTMLButtonElement>("match").disabled = !status.match;
+    const mine = picking ? null : reading?.mine;
+    const who = mine?.name ?? "the switcher";
+    el("match-hint").textContent = status.match
+      ? `Listen for what ${who} sends: ${format(status.match)}, port ${status.match.port}${status.match.bindAddress !== receiver.bindAddress ? `, on ${status.match.bindAddress}` : ""}`
+      : mine?.settings && !localAddresses.includes(mine.settings.ip)
+        ? `${mine.name} doesn't send to this computer yet`
+        : `Listens for exactly what ${who} sends`;
   };
+  const deviceGrid = el<HTMLTableElement>("device-grid");
   const drawSwitcher = () => {
     el("found").dataset.tone = readError ? "bad" : reading ? "ok" : "idle";
     el("found-text").textContent = readError
@@ -189,30 +240,65 @@ try {
       : reading
         ? `Online · ${reading.product} · software ${reading.software}${readAt ? ` · read ${clock(readAt)}` : ""}`
         : "Not checked";
-    const state = deviceState({ reading, wanted: wanted() });
+    const mine = reading?.mine ?? null;
+    const state = picking
+      ? { tone: "idle" as const, text: `Reading ${picking.name}…`, onSwitcher: true, unsent: false, fields: [] as SentField[] }
+      : deviceState({ reading, wanted: wanted() });
     el("device-state").dataset.tone = state.tone;
     el("device-state-text").textContent = state.text;
-    // No switcher request while Hubble is restarting the module: the restart would cut it short.
-    const away = busy || restarting;
-    el<HTMLButtonElement>("delete").disabled = away || !state.onSwitcher;
-    el<HTMLButtonElement>("send").disabled = away || !switcher.host;
-    el<HTMLButtonElement>("read").disabled = away || !switcher.host;
-    const lines = (reading?.devices ?? []).filter((row) => row.type === "TSL UMD").map((row) => deviceLine(row, row.name === switcher.name));
-    const deviceBody = document.createElement("tbody");
-    for (const line of lines) {
-      const row = deviceBody.insertRow();
-      row.dataset.mine = String(line.mine);
-      row.append(cell(line.slot, "num"), cell(line.name), cell(line.format), cell(line.sendsTo, "quiet"), cell(line.enabled));
+    for (const [field, id] of Object.entries(FIELD_ELEMENTS)) {
+      const node = el(id);
+      (node.closest<HTMLElement>(".box") ?? node).dataset.changed = String(state.fields.includes(field as SentField));
     }
-    el("device-grid").replaceChildren(head([["Slot", "num", 46], ["Name", ""], ["Format", "", 78], ["Sends to", "", 170], ["Enabled", "", 72]]), deviceBody);
-    el("devices-empty").hidden = lines.length > 0;
+    // No switcher request while Hubble is restarting the module: the restart would cut it short.
+    const away = busy || restarting || !!picking;
+    el<HTMLButtonElement>("delete").disabled = away || !state.onSwitcher;
+    // Nothing to send while the switcher already has every setting shown here.
+    el<HTMLButtonElement>("send").disabled = away || !switcher.host || (state.onSwitcher && !!mine?.settings && !state.unsent);
+    el<HTMLButtonElement>("read").disabled = busy || restarting || !switcher.host;
+    // A new device is already what the page edits until it is sent.
+    el<HTMLButtonElement>("new-device").disabled = away || !state.onSwitcher;
+
+    const rows = (reading?.devices ?? []).filter((row) => row.type === "TSL UMD");
+    const focused = document.activeElement instanceof HTMLTableRowElement && deviceGrid.contains(document.activeElement) ? document.activeElement.dataset.slot : undefined;
+    const deviceBody = document.createElement("tbody");
+    for (const row of rows) {
+      const line = deviceLine(row, row.slot === mine?.slot);
+      const tr = deviceBody.insertRow();
+      tr.dataset.mine = String(line.mine);
+      tr.dataset.slot = line.slot;
+      tr.tabIndex = 0;
+      tr.setAttribute("aria-selected", String(line.mine));
+      tr.append(cell(line.slot, "num"), cell(line.name), cell(line.format), cell(line.sendsTo, "quiet"), cell(line.enabled));
+    }
+    deviceGrid.replaceChildren(head([["Slot", "num", 46], ["Name", ""], ["Format", "", 78], ["Sends to", "", 170], ["Enabled", "", 72]]), deviceBody);
+    deviceGrid.setAttribute("aria-disabled", String(away));
+    if (focused !== undefined) deviceBody.querySelector<HTMLElement>(`tr[data-slot="${focused}"]`)?.focus();
+    el("devices-empty").hidden = rows.length > 0;
     el("devices-empty").textContent = reading ? "No TSL devices yet" : "Read the switcher to list its devices";
-    el("devices-sub").textContent = lines.some((line) => line.mine) ? "The highlighted one is this computer's" : "Sending adds one for this computer";
-    el<HTMLSelectElement>("offset").disabled = receiver.protocol === "3.1";
+    el("devices-sub").textContent = rows.length ? "Click a device to edit it" : "\u00a0";
+
+    const sub = el("switcher-sub");
+    const name = document.createElement("strong");
+    if (picking) {
+      name.textContent = picking.name;
+      sub.replaceChildren(name, " · reading it from the switcher…");
+    } else if (mine) {
+      name.textContent = mine.name;
+      sub.replaceChildren(name, ` · slot ${mine.slot} · as the switcher has it${state.unsent ? ", with your changes" : ""}`);
+    } else if (reading) {
+      name.textContent = switcher.name;
+      sub.replaceChildren(name, " · new device, not on the switcher yet");
+    } else sub.textContent = "What the switcher sends";
+
+    el<HTMLSelectElement>("offset").disabled = fiveOnlyOff();
+    const target = sendTo();
     el("link-note").textContent =
-      receiver.protocol === "3.1"
-        ? "TSL 3.1 has no Screen, Address offset, Brightness or TSL header"
-        : "Send to switcher uses this computer's TSL version, transport and port";
+      target && !localAddresses.includes(target)
+        ? `${target} isn't this computer, so this device's tally doesn't come here`
+        : fiveOnlyOff()
+          ? "TSL 3.1 has no Screen, Address offset, Brightness or TSL header"
+          : "\u00a0";
     drawLink();
   };
 
@@ -274,7 +360,7 @@ try {
       switcher = structuredClone(fresh.switcher.value);
       revision = fresh.switcher.revision;
     }
-    reading = fresh.reading;
+    reading = own(fresh.reading);
     readAt = fresh.readAt;
     readError = fresh.readError;
     routeAddress = fresh.routeAddress;
@@ -445,6 +531,7 @@ try {
     if (!match) return;
     port.value = String(match.port);
     port.setAttribute("aria-invalid", "false");
+    if (document.activeElement !== bind) bind.value = match.bindAddress;
     setReceiver(match, true);
   });
 
@@ -475,11 +562,23 @@ try {
     })();
     return saving;
   };
-  /** Screen, Address offset, Brightness and TSL header exist on the switcher only for TSL 5.0. */
-  const fiveOnlyOff = () => receiver.protocol === "3.1";
   const sendToSelect = el<HTMLSelectElement>("send-to");
-  const fillSendTo = () =>
-    fill(sendToSelect, [{ id: "", label: routeAddress ? `Automatic (${routeAddress})` : "Automatic" }, ...snapshot.addresses], switcher.sendTo);
+  const fillSendTo = () => {
+    // Never the list in use.
+    if (document.activeElement === sendToSelect) return;
+    // Where a device already sends, when that isn't here, stays a choice: its other settings can
+    // change while it keeps feeding what it feeds.
+    const elsewhere = [...new Set([switcher.sendTo, reading?.mine?.ip ?? ""])].filter((ip) => IPV4.test(ip) && !localAddresses.includes(ip));
+    fill(
+      sendToSelect,
+      [
+        { id: "", label: routeAddress ? `Automatic (${routeAddress})` : "Automatic" },
+        ...snapshot.addresses,
+        ...elsewhere.map((ip) => ({ id: ip, label: `${ip} · not here` })),
+      ],
+      switcher.sendTo,
+    );
+  };
   const setSwitcher = (change: Partial<SwitcherDocument>) => {
     if (change.host !== undefined && change.host !== switcher.host) {
       // A reading belongs to the address it came from.
@@ -490,19 +589,44 @@ try {
       fillSendTo();
     }
     switcher = { ...switcher, ...change };
+    // A change made while a picked device is read wins over what the switcher says.
+    if (picking) Object.assign(picking.edits, change);
     drawSwitcher();
     void saveSwitcher();
   };
+  /** Version, transport and port go together: changing one stops all three following This computer. */
+  const setFormat = (change: Partial<Pick<SwitcherDocument, "protocol" | "transport" | "port">>) => {
+    const now = device();
+    setSwitcher({ protocol: now.protocol, transport: now.transport, port: now.port, ...change });
+  };
+  /** The page's setup becomes the device as the switcher has it, keeping what was changed here and not sent. */
+  const load = (settings: SwitcherDeviceSettings, edits: Partial<SwitcherDocument>) => {
+    const automatic = switcher.sendTo === "" && settings.ip === routeAddress;
+    switcher = { ...documentFromDevice(switcher, settings), ...(automatic ? { sendTo: "" } : {}), ...edits };
+    void saveSwitcher();
+  };
+  /** The page's changes the switcher doesn't have, as setup values. */
+  const unsentEdits = (): Partial<SwitcherDocument> => {
+    const now = wanted();
+    const edits: Record<string, unknown> = {};
+    for (const field of deviceState({ reading, wanted: now }).fields)
+      if (field === "ip") edits.sendTo = switcher.sendTo;
+      else edits[field] = now?.[field];
+    return edits as Partial<SwitcherDocument>;
+  };
   const host = el<HTMLInputElement>("host");
-  host.value = switcher.host;
+  show(host, () => switcher.host);
   box("host", (raw) => (raw.length <= 253 && !/\s/u.test(raw) ? raw : undefined), (value) => setSwitcher({ host: value }));
   fillSendTo();
   sendToSelect.addEventListener("change", () => setSwitcher({ sendTo: sendToSelect.value }));
-  el<HTMLInputElement>("device-name").value = switcher.name;
+  show(el<HTMLInputElement>("device-name"), () => switcher.name);
   box("device-name", (raw) => (DeviceNameSchema.safeParse(raw).success ? raw : undefined), (value) => setSwitcher({ name: value }));
   const offset = el<HTMLSelectElement>("offset");
   fill(offset, OFFSETS.map((value) => ({ id: String(value), label: String(value) })), String(switcher.offset));
+  show(offset, () => String(switcher.offset));
   offset.addEventListener("change", () => setSwitcher({ offset: Number(offset.value) as SwitcherDocument["offset"] }));
+  show(el<HTMLInputElement>("sw-port"), () => String(device().port));
+  box("sw-port", whole(1, 65535), (value) => setFormat({ port: value }));
   const toggle = (id: string, label: string, key: "enabled" | "center" | "fsfc" | "busName" | "umdId" | "oneSecond" | "header") =>
     mountSwitch({
       root: el(id),
@@ -511,6 +635,18 @@ try {
       onCheckedChange: (checked) => setSwitcher({ [key]: checked }),
     });
   controls.push(
+    await mountSegmented({
+      root: el("sw-protocol"),
+      label: "TSL version",
+      getState: () => ({ value: device().protocol, options: [{ value: "3.1", label: "3.1" }, { value: "5.0", label: "5.0" }] }),
+      onValueChange: (value) => setFormat({ protocol: value as "3.1" | "5.0" }),
+    }),
+    await mountSegmented({
+      root: el("sw-transport"),
+      label: "Transport",
+      getState: () => ({ value: device().transport, options: [{ value: "udp", label: "UDP" }, { value: "tcp", label: "TCP" }] }),
+      onValueChange: (value) => setFormat({ transport: value as "udp" | "tcp" }),
+    }),
     await mountSegmented({
       root: el("brightness"),
       label: "Brightness",
@@ -533,7 +669,14 @@ try {
   );
 
   // ----- Setup: talking to the switcher. One request at a time; a button keeps its label while it works. -----
-  const contact = async (button: string, working: string, done: (at: number) => string, command: string, value: unknown = {}) => {
+  const contact = async (
+    button: string,
+    working: string,
+    done: (at: number) => string,
+    command: string,
+    value: unknown = {},
+    onReply?: (reply: Contact) => void,
+  ) => {
     if (busy || restarting) return;
     busy = true;
     el(button).dataset.busy = "true";
@@ -542,10 +685,11 @@ try {
     drawSwitcher();
     try {
       await saving;
-      const reply = (await client.call(command, value as never)) as unknown as { reading: SwitcherReading | null; readAt: number | null; readError: string | null };
-      reading = reply.reading;
+      const reply = (await client.call(command, value as never)) as unknown as Contact;
       readAt = reply.readAt;
       readError = reply.readError;
+      onReply?.(reply);
+      reading = own(reply.reading);
       say(done(reply.readAt ?? Date.now()));
     } catch (error) {
       const message = text(error, "The switcher could not be reached");
@@ -564,14 +708,87 @@ try {
         // Which of this computer's addresses reaches the switcher: worked out by the backend.
         const fresh = (await client.call("snapshot").catch(() => null)) as unknown as PageSnapshot | null;
         routeAddress = fresh?.routeAddress ?? null;
-        fillSendTo();
       }
-      drawSwitcher();
+      redraw();
     }
   };
-  const idle = () => !busy && !restarting;
+  const idle = () => !busy && !restarting && !picking;
+  /** Moving to another device drops changes not sent to the switcher, so it asks first. */
+  const dropUnsent = async (confirmLabel: string): Promise<boolean> => {
+    const fields = deviceState({ reading, wanted: wanted() }).fields;
+    if (!fields.length) return true;
+    const name = reading?.mine?.name ?? switcher.name;
+    return confirm({
+      title: `Drop the changes to ${name}?`,
+      message: `${fields.length === 1 ? "1 change" : `${fields.length} changes`} to ${name} ${fields.length === 1 ? "isn't" : "aren't"} sent to the switcher.`,
+      confirmLabel,
+    });
+  };
+  /** Edit another device on the switcher: what its list line says shows at once, its form follows. */
+  const pick = (row: SwitcherDeviceRow) => {
+    if (!idle() || reading?.mine?.slot === row.slot) return;
+    void hold(async () => {
+      if (!(await dropUnsent(`Edit ${row.name}`)) || !idle() || !reading) return;
+      const edits: Partial<SwitcherDocument> = {};
+      picking = { name: row.name, edits };
+      switcher = documentFromRow(switcher, row);
+      reading = { ...reading, mine: { ...row, settings: null } };
+      redraw();
+      void saveSwitcher();
+      try {
+        await contact("read", `Reading ${row.name}…`, (at) => `Read ${row.name} ${clock(at)}`, "read-switcher", {}, (reply) => {
+          picking = null;
+          const mine = reply.reading?.mine;
+          if (mine?.settings && mine.name === row.name) load(mine.settings, edits);
+        });
+      } finally {
+        picking = null;
+        redraw();
+      }
+    });
+  };
+  const rowAt = (target: EventTarget | null) => {
+    const tr = target instanceof Element ? target.closest<HTMLTableRowElement>("tbody tr") : null;
+    const slot = tr ? Number(tr.dataset.slot) : Number.NaN;
+    return reading?.devices.find((row) => row.slot === slot && row.type === "TSL UMD") ?? null;
+  };
+  deviceGrid.addEventListener("click", (event) => {
+    const row = rowAt(event.target);
+    if (row) pick(row);
+  });
+  deviceGrid.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const row = rowAt(event.target);
+    if (!row) return;
+    event.preventDefault();
+    pick(row);
+  });
+  el("new-device").addEventListener("click", () => {
+    if (!idle()) return;
+    void hold(async () => {
+      if (!(await dropUnsent("New device")) || !idle()) return;
+      // A name the switcher doesn't have yet, so sending adds a device rather than changing one.
+      const used = new Set((reading?.devices ?? []).map((row) => row.name));
+      let name = "HUBBLE";
+      for (let n = 2; used.has(name); n++) name = `HUBBLE${n}`;
+      const { protocol, transport, port: listenPort } = receiver;
+      switcher = { ...defaultSwitcherDocument(), host: switcher.host, name, protocol, transport, port: listenPort };
+      if (reading) reading = { ...reading, mine: null };
+      redraw();
+      void saveSwitcher();
+      say(`New device ${name} · Send to switcher adds it`);
+    });
+  });
   el("read").addEventListener("click", () => {
-    if (idle()) void hold(() => contact("read", "Reading the switcher…", (at) => `Read the switcher ${clock(at)}`, "read-switcher"));
+    if (!idle()) return;
+    void hold(async () => {
+      // Changes not sent stay; everything else becomes what the switcher has now.
+      const edits = unsentEdits();
+      await contact("read", "Reading the switcher…", (at) => `Read the switcher ${clock(at)}`, "read-switcher", {}, (reply) => {
+        const mine = reply.reading?.mine;
+        if (mine?.settings && (mine.name === deviceIdentity(switcher) || mine.name === switcher.name)) load(mine.settings, edits);
+      });
+    });
   });
   el("send").addEventListener("click", () => {
     if (!idle()) return;
@@ -579,31 +796,48 @@ try {
       const mine = reading?.mine;
       let adopt = false;
       if (mine && !localAddresses.includes(mine.ip)) {
+        const target = sendTo();
         adopt = await confirm({
           title: `Change ${mine.name} on the switcher?`,
-          message: `${mine.name} now sends to ${mine.ip} : ${mine.port}, which isn't this computer. Sending points it at ${sendTo() || "this computer"}.`,
+          message:
+            target === mine.ip
+              ? `${mine.name} sends to ${mine.ip} : ${mine.port}, which isn't this computer. Sending changes its settings on the switcher, and it keeps sending there.`
+              : `${mine.name} now sends to ${mine.ip} : ${mine.port}, which isn't this computer. Sending points it at ${target || "this computer"}.`,
           confirmLabel: "Send to switcher",
         });
         if (!adopt) return;
       }
-      // The switcher gets what this page shows for This computer, saved yet or not.
+      // A device saved before 1.3.1 sends what this page shows for This computer, saved yet or not.
       const { protocol, transport, port: listenPort } = receiver;
-      await contact("send", "Sending to the switcher…", (at) => `Sent to the switcher ${clock(at)}`, "send-switcher", {
+      const name = switcher.name;
+      await contact("send", "Sending to the switcher…", (at) => `Sent ${name} to the switcher ${clock(at)}`, "send-switcher", {
         adopt,
         receiver: { protocol, transport, port: listenPort },
+      }, (reply) => {
+        // The device is now known on the switcher by the name it was sent with.
+        const sent = reply.reading?.mine;
+        if (sent && switcher.device !== sent.name) {
+          switcher = { ...switcher, device: sent.name };
+          void saveSwitcher();
+        }
       });
     });
   });
   el("delete").addEventListener("click", () => {
     if (!idle()) return;
     void hold(async () => {
+      const mine = reading?.mine;
+      const name = mine?.name ?? switcher.name;
       const yes = await confirm({
-        title: `Delete ${switcher.name} from the switcher?`,
-        message: "The switcher stops sending tally to this computer. Its other devices aren't changed.",
+        title: `Delete ${name} from the switcher?`,
+        message:
+          mine && !localAddresses.includes(mine.ip)
+            ? `${name} sends tally to ${mine.ip} : ${mine.port}, which isn't this computer. Deleting it stops that. The switcher's other devices aren't changed.`
+            : "The switcher stops sending tally to this computer. Its other devices aren't changed.",
         confirmLabel: "Delete from switcher",
         danger: true,
       });
-      if (yes) await contact("delete", "Deleting from the switcher…", (at) => `Deleted from the switcher ${clock(at)}`, "delete-switcher");
+      if (yes) await contact("delete", "Deleting from the switcher…", (at) => `Deleted ${name} from the switcher ${clock(at)}`, "delete-switcher");
     });
   });
 

@@ -458,13 +458,21 @@ async function readDetail(client: OgpBinaryClient, enabled: boolean): Promise<Fo
   return { slot, type, name, ip, port, driverLabel, settings };
 }
 
-function findMine(rows: readonly SwitcherDeviceRow[], deviceName: string): SwitcherDeviceRow | null {
+function findNamed(rows: readonly SwitcherDeviceRow[], deviceName: string): SwitcherDeviceRow | null {
   const matches = rows.filter((row) => row.name === deviceName);
   if (matches.length > 1)
     throw new SwitcherError(
       `Two devices on the switcher are named ${deviceName}. Rename one in DashBoard, or choose another device name`,
     );
   return matches[0] ?? null;
+}
+
+/**
+ * The module's device: the one called `deviceName`, or else the one already called `otherName`.
+ * The second covers a rename the switcher took but the page had not yet recorded.
+ */
+function findMine(rows: readonly SwitcherDeviceRow[], deviceName: string, otherName?: string): SwitcherDeviceRow | null {
+  return findNamed(rows, deviceName) ?? (otherName && otherName !== deviceName ? findNamed(rows, otherName) : null);
 }
 
 const notTslDevice = (row: SwitcherDeviceRow): string =>
@@ -716,7 +724,7 @@ async function addDevice(
   await save(session);
 }
 
-/** Not yet run on a real switcher: load the row, write only what differs, save. */
+/** Loads the row, writes only what differs, saves. */
 async function updateDevice(
   session: Session,
   mine: SwitcherDeviceRow,
@@ -748,15 +756,16 @@ async function startWrite(session: Session): Promise<SwitcherDeviceRow[]> {
 
 /** Reads the switcher's devices. Chooses a row only to read this module's own device, then chooses none again. */
 export async function readSwitcher(
-  input: SwitcherTarget & { deviceName: string },
+  input: SwitcherTarget & { deviceName: string; otherName?: string | undefined },
 ): Promise<SwitcherReading> {
   const deviceName = checkName(input.deviceName);
+  const otherName = input.otherName === undefined ? undefined : checkName(input.otherName);
   return withSwitcher(input, async (session) => {
     const { client } = session;
     const about = await identify(client);
     const devices = await readRows(client);
     const formBusy = await formStaysBusy(client);
-    const row = findMine(devices, deviceName);
+    const row = findMine(devices, deviceName, otherName);
     if (!row) return { ...about, devices, mine: null, formBusy };
     if (formBusy || row.type !== TYPE_TSL_UMD_LABEL)
       return { ...about, devices, mine: { ...row, settings: null }, formBusy };
@@ -766,20 +775,26 @@ export async function readSwitcher(
 }
 
 /**
- * Adds the device named in `settings`, or changes it if the switcher already has one with
- * that name. Every field is read back before saving; if one doesn't match, the form is
- * cancelled and nothing changes. No other device is touched.
+ * Changes the device called `deviceName` (or, without one, the device named in `settings`),
+ * renaming it if the names differ; adds the device when the switcher has neither. Every field
+ * is read back before saving; if one doesn't match, the form is cancelled and nothing changes.
+ * No other device is touched.
  */
 export async function sendDevice(
-  input: SwitcherTarget & { settings: SwitcherDeviceSettings },
+  input: SwitcherTarget & { settings: SwitcherDeviceSettings; deviceName?: string | undefined },
 ): Promise<SwitcherReading> {
   const settings = { ...input.settings };
   checkSettings(settings);
+  const deviceName = checkName(input.deviceName ?? settings.name);
   return withSwitcher(input, async (session) => {
     const about = await identify(session.client);
     const before = await startWrite(session);
-    const mine = findMine(before, settings.name);
+    const mine = findMine(before, deviceName, settings.name);
     if (mine && mine.type !== TYPE_TSL_UMD_LABEL) throw new SwitcherError(notTslDevice(mine));
+    // A rename may not take a name another device already has: the switcher would then hold two.
+    const taken = before.find((row) => row.name === settings.name && row.slot !== mine?.slot);
+    if (mine && taken)
+      throw new SwitcherError(`Another device on the switcher is already named ${settings.name}. Choose another device name`);
     if (mine) await updateDevice(session, mine, settings);
     else await addDevice(session, before, settings);
     const saved = await confirmSaved(session, before, mine, settings);
@@ -789,23 +804,24 @@ export async function sendDevice(
 
 /** Deletes the device with this name, after checking the form shows that device. Does nothing if there is none. */
 export async function deleteDevice(
-  input: SwitcherTarget & { deviceName: string },
+  input: SwitcherTarget & { deviceName: string; otherName?: string | undefined },
 ): Promise<SwitcherReading> {
   const deviceName = checkName(input.deviceName);
+  const otherName = input.otherName === undefined ? undefined : checkName(input.otherName);
   return withSwitcher(input, async (session) => {
     const { client } = session;
     const about = await identify(client);
     const before = await startWrite(session);
-    const mine = findMine(before, deviceName);
+    const mine = findMine(before, deviceName, otherName);
     if (!mine) return { ...about, devices: before, mine: null, formBusy: false };
     if (mine.type !== TYPE_TSL_UMD_LABEL) throw new SwitcherError(notTslDevice(mine));
     await openRow(session, mine);
     await client.set(SWITCHER_OID.deleteDevice, int32(DELETE_DEVICE));
     const after = await readRowsUntil(
       client,
-      (list) => !list.some((row) => row.name === deviceName || row.slot === mine.slot),
+      (list) => !list.some((row) => row.name === mine.name || row.slot === mine.slot),
     );
-    if (after.some((row) => row.name === deviceName || row.slot === mine.slot))
+    if (after.some((row) => row.name === mine.name || row.slot === mine.slot))
       throw new SwitcherError(NOT_KEPT);
     checkOthersUnchanged(before, after, mine, null);
     return { ...about, devices: after, mine: null, formBusy: false };

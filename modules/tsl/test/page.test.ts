@@ -7,7 +7,7 @@ import { TslPage, switcherTarget, type LiveReply, type PageSnapshot } from "../s
 import type { TslDiscoveredDisplay, TslReceiver } from "../src/receiver.js";
 import { defaultSwitcherDocument, SWITCHER_DOCUMENT_ID, type SwitcherDocument } from "../src/setup.js";
 import type { SwitcherReading } from "../src/switcher/index.js";
-import { FakeSwitcher, FAKE_DRIVER, FAKE_OID } from "./fixtures/fake-switcher.js";
+import { FakeSwitcher, FAKE_DRIVER, FAKE_OID, realDevices as realDevicesForPage } from "./fixtures/fake-switcher.js";
 
 const cleanups: (() => Promise<unknown> | unknown)[] = [];
 afterEach(async () => {
@@ -295,6 +295,47 @@ describe("the switcher", () => {
     const sent = await call<Contact>("send-switcher", { adopt: true });
     expect(sent.reading?.mine).toMatchObject({ slot: 1, name: "ADAM", ip: "127.0.0.1", port: 5727 });
     expect(fake.devices).toHaveLength(3);
+  });
+
+  it("edits a picked device with the version, transport and port the page gives it", async () => {
+    const fake = await fakeSwitcher();
+    const { call, setDocument } = await world({ fake, settings: { protocol: "5.0", transport: "udp", port: 9821 } });
+    setDocument({ device: "ADAM", name: "ADAM", sendTo: "127.0.0.1", protocol: "3.1", transport: "udp", port: 6000 });
+    const sent = await call<Contact>("send-switcher", { adopt: true, receiver: { protocol: "5.0", transport: "tcp", port: 9821 } });
+    expect(sent.reading?.mine).toMatchObject({ slot: 1, name: "ADAM", ip: "127.0.0.1", port: 6000, settings: { protocol: "3.1", transport: "udp" } });
+    expect(fake.devices).toHaveLength(3);
+  });
+
+  it("changes a device that feeds something else and keeps it sending there, once told to", async () => {
+    const fake = await fakeSwitcher();
+    const { call, setDocument } = await world({ fake });
+    setDocument({ device: "RTR TALL", name: "RTR TALL", sendTo: "10.20.50.50", protocol: "3.1", transport: "udp", port: 4490, center: true });
+    await expect(call("send-switcher", {})).rejects.toThrow("RTR TALL on the switcher sends to 10.20.50.50. Confirm before changing it");
+    expect(fake.devices[2]).toMatchObject({ center: 0 });
+    const sent = await call<Contact>("send-switcher", { adopt: true });
+    expect(sent.reading?.mine).toMatchObject({ slot: 2, name: "RTR TALL", ip: "10.20.50.50", port: 4490, settings: { center: true } });
+    expect(fake.devices[2]).toMatchObject({ ip: "10.20.50.50", port: 4490, center: 1 });
+    expect(fake.devices.slice(0, 2)).toEqual(realDevicesForPage().slice(0, 2));
+    // Only where it already sends: any other address that isn't this computer's is refused after
+    // reading the device and before changing anything.
+    const before = fake.writes.length;
+    setDocument({ sendTo: "10.20.50.51" });
+    await expect(call("send-switcher", { adopt: true })).rejects.toThrow("10.20.50.51 isn't one of this computer's addresses");
+    expect(fake.writes.slice(before).map((write) => write.oid)).toEqual([FAKE_OID.selectedRow, FAKE_OID.selectedRow]);
+    expect(fake.devices[2]).toMatchObject({ ip: "10.20.50.50" });
+  });
+
+  it("renames a picked device in place and still finds it before the page records the name", async () => {
+    const fake = await fakeSwitcher();
+    const { call, setDocument } = await world({ fake });
+    setDocument({ device: "ADAM", name: "CAM 1", sendTo: "127.0.0.1", protocol: "3.1", transport: "tcp", port: 5727 });
+    const sent = await call<Contact>("send-switcher", { adopt: true });
+    expect(sent.reading?.mine).toMatchObject({ slot: 1, name: "CAM 1" });
+    expect(fake.devices.map((device) => device.name)).toEqual(["CP", "CAM 1", "RTR TALL"]);
+    expect((await call<Contact>("read-switcher")).reading?.mine).toMatchObject({ slot: 1, name: "CAM 1", settings: { ip: "127.0.0.1" } });
+    // Deleting it works the same way.
+    expect((await call<Contact>("delete-switcher")).reading?.mine).toBeNull();
+    expect(fake.devices.map((device) => device.name)).toEqual(["CP", "RTR TALL"]);
   });
 
   it("will not send to an address that isn't this computer's, or to nowhere", async () => {

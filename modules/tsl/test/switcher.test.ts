@@ -375,6 +375,60 @@ describe("sending this computer's device", () => {
   });
 });
 
+describe("editing a device the switcher already has", () => {
+  const adamAsRead = async (fake: FakeSwitcher) => {
+    const read = await readSwitcher({ ...at(fake), deviceName: "ADAM" });
+    fake.writes.length = 0;
+    return read.mine!.settings!;
+  };
+
+  it("changes only what differs on the device it was pointed at, in its own slot", async () => {
+    const fake = await start();
+    const adam = await adamAsRead(fake);
+    expect(adam).toMatchObject({ name: "ADAM", ip: "10.20.100.236", port: 5727, protocol: "3.1", transport: "tcp", enabled: true });
+    const reading = await sendDevice({ ...at(fake), deviceName: "ADAM", settings: { ...adam, ip: "10.20.100.235", center: true } });
+    expect(fake.writes).toEqual([
+      w(FAKE_OID.selectedRow, 2),
+      w(FAKE_OID.ip, "10.20.100.235"),
+      w(FAKE_OID.center, 1),
+      w(FAKE_OID.changes, 1),
+      w(FAKE_OID.selectedRow, 0),
+    ]);
+    expect(reading.mine).toMatchObject({ slot: 1, name: "ADAM", ip: "10.20.100.235", settings: { center: true } });
+    const [cp, , router] = realDevices();
+    expect(fake.devices).toEqual([cp, { ...realDevices()[1], ip: "10.20.100.235", center: 1 }, router]);
+    expect(fake.formIsIdle).toBe(true);
+  });
+
+  it("renames it in place rather than adding another", async () => {
+    const fake = await start();
+    const adam = await adamAsRead(fake);
+    const reading = await sendDevice({ ...at(fake), deviceName: "ADAM", settings: { ...adam, name: "CAM 1" } });
+    expect(fake.writes).toEqual([w(FAKE_OID.selectedRow, 2), w(FAKE_OID.name, "CAM 1"), w(FAKE_OID.changes, 1), w(FAKE_OID.selectedRow, 0)]);
+    expect(fake.devices.map((device) => [device.slot, device.name])).toEqual([[0, "CP"], [1, "CAM 1"], [2, "RTR TALL"]]);
+    expect(reading.mine).toMatchObject({ slot: 1, name: "CAM 1" });
+    // Until the page records the new name it still asks for ADAM, and finds the device by the name it gave it.
+    expect((await readSwitcher({ ...at(fake), deviceName: "ADAM", otherName: "CAM 1" })).mine).toMatchObject({ slot: 1, name: "CAM 1" });
+    expect((await readSwitcher({ ...at(fake), deviceName: "ADAM" })).mine).toBeNull();
+  });
+
+  it("won't give it a name another device has, and writes nothing", async () => {
+    const fake = await start();
+    const adam = await adamAsRead(fake);
+    await expect(sendDevice({ ...at(fake), deviceName: "ADAM", settings: { ...adam, name: "RTR TALL" } })).rejects.toThrow(
+      "Another device on the switcher is already named RTR TALL. Choose another device name",
+    );
+    expect(fake.writes).toEqual([]);
+    expect(fake.devices).toEqual(realDevices());
+  });
+
+  it("deletes the device by the name it has, or the one it is being given", async () => {
+    const fake = await start();
+    const reading = await deleteDevice({ ...at(fake), deviceName: "GONE", otherName: "RTR TALL" });
+    expect(reading.devices.map((device) => device.name)).toEqual(["CP", "ADAM"]);
+  });
+});
+
 describe("deleting this computer's device", () => {
   it("deletes only its own device, after the form shows that device", async () => {
     const [cp, adam, router] = realDevices();
