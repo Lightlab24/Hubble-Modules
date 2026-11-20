@@ -1,6 +1,6 @@
 {
   "name": "@hubble-module/ping",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "description": "Pings network devices, keeps a timeline of each one and alerts when one drops or slows",
@@ -19,7 +19,7 @@
     "build": "hubble-module build .",
     "test": "hubble-module test .",
     "typecheck": "tsc --noEmit",
-    "package": "hubble-module build . && hubble-module test . && hubble-module pack . ../../artifacts/ping-0.1.1.hubble-module",
+    "package": "hubble-module build . && hubble-module test . && hubble-module pack . ../../artifacts/ping-0.1.2.hubble-module",
     "preview": "tsx tools/preview.ts"
   },
   "dependencies": {

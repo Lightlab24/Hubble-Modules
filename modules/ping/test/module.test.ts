@@ -104,7 +104,7 @@ function backend(devices: DeviceRow[], options: BackendOptions & { connectionEna
 
 describe("the manifest", () => {
   it("is a valid workspace module with one full page", () => {
-    const manifest = ModuleManifestSchema.parse({ ...source, id: "network-ping", name: "Ping", version: "0.1.1", entry: "module.mjs", files: ["module.mjs", "ui/index.html", "ui/app.js", "ui/ping.svg"] });
+    const manifest = ModuleManifestSchema.parse({ ...source, id: "network-ping", name: "Ping", version: "0.1.2", entry: "module.mjs", files: ["module.mjs", "ui/index.html", "ui/app.js", "ui/ping.svg"] });
     expect(manifest.instanceScope).toBe("workspace");
     expect(manifest.pages?.[0]?.layout).toBe("full-page");
     expect(manifest.matrix?.triggers?.map((trigger) => trigger.id)).toEqual(["offline", "slow", "online"]);

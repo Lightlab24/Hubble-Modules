@@ -1,6 +1,6 @@
 # Ping
 
-Module ID `network-ping`, version 0.1.1. Pings network devices, keeps a timeline of each one, and
+Module ID `network-ping`, version 0.1.2. Pings network devices, keeps a timeline of each one, and
 alerts when a device stops answering or answers slowly. It is a workspace module: add it once, and
 its **Ping** page lists every device. It needs a Hubble with `module-page-badges-v1` and
 `module-controls-inline-v1` (2.3.1).
@@ -73,6 +73,9 @@ PING_PREVIEW_DEVICES="This Mac=127.0.0.1,Nobody=192.0.2.1" pnpm preview
 pings, in the same kind of sandboxed frame Hubble uses. `PING_RENDERER_ASSETS` points it at a
 folder of Hubble's control bundles; it defaults to the installed Hubble. `/__inspect` shows the
 saved document, log lines, alerts and feedback, and `/__simulate` holds, releases or fails saves.
+
+`tools/flash-check.mjs` watches the timeline frame by frame across each Show last switch, against a
+running preview, and reports any earlier picture that comes back.
 
 ## Not checked yet
 

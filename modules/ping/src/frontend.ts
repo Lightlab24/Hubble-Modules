@@ -51,6 +51,10 @@ try {
   let live: LiveReply = { sequence: 0, now: Date.now(), problem: "", devices: {}, timeline: null };
   let selectedId: string | undefined = store.document.devices[0]?.id;
   let fetching = false;
+  /** Counts every change to what the timeline should show: its stretch of time, or its device. */
+  let windowVersion = 0;
+  /** Whether the timeline results held were asked for by the newest window. */
+  let timelineFresh = false;
   let fetchAgain = false;
 
   const settings = () => store.document.settings;
@@ -96,7 +100,10 @@ try {
   });
   const timeline = createTimeline({
     canvas: el<HTMLCanvasElement>("chart"),
-    onWindow: () => fetchNow(),
+    onWindow: () => {
+      windowVersion++;
+      void fetchNow();
+    },
     onHover: (text) => {
       el("tl-hint").textContent = text ?? "Pinch to zoom · two fingers to move through time";
     },
@@ -105,7 +112,7 @@ try {
     },
   });
   timeline.setPingTime(settings().intervalMs);
-  timeline.showLast(spanOf(view().span).ms);
+  timeline.showLast(spanOf(view().span).ms, true);
   el("tl-live").addEventListener("click", () => timeline.backToNow());
   const span = await mountSegmented({
     root: el("span"),
@@ -141,8 +148,9 @@ try {
     onSelect(rowId) {
       if (rowId === selectedId) return;
       selectedId = rowId;
+      windowVersion++;
       updateTimeline();
-      fetchNow();
+      void fetchNow();
     },
     onError: report,
   });
@@ -183,7 +191,8 @@ try {
     el("tl-stats").innerHTML = summary && summary.state !== "not-checked"
       ? stat("Now", summary.now) + stat("Average", summary.average) + stat("Best", summary.best) + stat("Worst", summary.worst) + stat("Lost", summary.lostPct, true)
       : "";
-    timeline.setData(row && live.timeline?.deviceId === row.id ? live.timeline : undefined, limit);
+    timeline.setData(row && live.timeline?.deviceId === row.id ? live.timeline : undefined, limit, timelineFresh);
+    timelineFresh = false;
   }
 
   function update() {
@@ -274,14 +283,23 @@ try {
   });
   el("empty-add").addEventListener("click", () => insert(null));
 
-  function request(after: number): LiveRequest {
+  /** A request, with what it was asked for, so its answer can be told from a later one's. */
+  function request(after: number) {
     const wanted = timeline.window();
-    return { after, span: view().span, ...(selectedId ? { timeline: { deviceId: selectedId, ...wanted } } : {}) };
+    const body: LiveRequest = { after, span: view().span, ...(selectedId ? { timeline: { deviceId: selectedId, ...wanted } } : {}) };
+    return { body, span: view().span, version: windowVersion };
   }
-  function adopt(reply: LiveReply) {
-    // A reply for another device or an older moment never replaces a newer one.
-    if (reply.sequence < live.sequence) return;
-    live = reply.timeline || !selectedId ? reply : { ...reply, timeline: live.timeline?.deviceId === selectedId ? live.timeline : null };
+  /**
+   * Takes an answer. The worker holds a request open until there is a new ping, so an answer can
+   * arrive after the time frame, the zoom or the device has changed. Such an answer is for a view
+   * that is gone: its table numbers are dropped if the time frame changed, and its timeline is
+   * always dropped, or the bars would jump back to the old view and forward again.
+   */
+  function adopt(reply: LiveReply, asked: { span: string; version: number }) {
+    if (reply.sequence < live.sequence || asked.span !== view().span) return;
+    const current = asked.version === windowVersion && (!selectedId || reply.timeline?.deviceId === selectedId);
+    live = current ? reply : { ...reply, timeline: live.timeline };
+    if (current) timelineFresh = true;
     grid.refreshLive();
     update();
   }
@@ -296,7 +314,8 @@ try {
     try {
       do {
         fetchAgain = false;
-        adopt((await client.call("live", ModuleFrontendValueSchema.parse(request(0)))) as unknown as LiveReply);
+        const asked = request(0);
+        adopt((await client.call("live", ModuleFrontendValueSchema.parse(asked.body))) as unknown as LiveReply, asked);
       } while (fetchAgain);
     } catch {
       /* The follow loop reports a lost connection. */
@@ -311,9 +330,10 @@ try {
     const mine = ++run;
     while (mine === run && document.visibilityState === "visible") {
       try {
-        const reply = (await client.call("live", ModuleFrontendValueSchema.parse(request(live.sequence)))) as unknown as LiveReply;
+        const asked = request(live.sequence);
+        const reply = (await client.call("live", ModuleFrontendValueSchema.parse(asked.body))) as unknown as LiveReply;
         if (mine !== run) return;
-        adopt(reply);
+        adopt(reply, asked);
       } catch {
         await new Promise((resolve) => setTimeout(resolve, 2000));
       }

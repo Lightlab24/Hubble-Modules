@@ -92,6 +92,11 @@ export function createTimeline(options: TimelineOptions) {
   let series: Series | undefined;
   let limit: number | null = null;
   let dragging: { x: number; end: number } | undefined;
+  /**
+   * A Show last choice that is waiting for its own results. The view keeps the old stretch and its
+   * bars until they arrive, then both change in one frame, so nothing is drawn at the wrong scale.
+   */
+  let pending: { spanMs: number; timer: ReturnType<typeof setTimeout> } | undefined;
   let frame = 0;
 
   const plotWidth = () => Math.max(50, canvas.clientWidth - LEFT - RIGHT);
@@ -242,7 +247,21 @@ export function createTimeline(options: TimelineOptions) {
     }
   }
 
+  /** Makes a waiting Show last choice the view. */
+  function commit() {
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    spanMs = pending.spanMs;
+    pending = undefined;
+    const was = end;
+    end = null;
+    if (was !== null) options.onFollow(true);
+    schedule();
+  }
+
   function zoomAbout(fraction: number, factor: number) {
+    // A pinch or a scroll is about what is on screen now, so a waiting choice takes effect first.
+    commit();
     const to = right();
     const at = to - spanMs + fraction * spanMs;
     const next = clamp(spanMs * factor, minSpan(), MAX_SPAN_MS);
@@ -253,6 +272,7 @@ export function createTimeline(options: TimelineOptions) {
   }
   function panBy(ms: number) {
     if (!ms) return;
+    commit();
     setEnd(right() + ms);
     changed();
   }
@@ -328,9 +348,11 @@ export function createTimeline(options: TimelineOptions) {
   const api = {
     /** The stretch of time to ask the worker for. */
     window(): TimelineWindow {
-      const to = right();
+      // A waiting Show last choice asks for the stretch it is about to show.
+      const span = pending?.spanMs ?? spanMs;
+      const to = pending ? clock() : right();
       // A little past each edge, so a small move has something to show before the next answer arrives.
-      return { from: to - spanMs * 1.25, to: to + spanMs * 0.25, points: Math.round(plotWidth() / 2) * 1.5 };
+      return { from: to - span * 1.25, to: to + span * 0.25, points: Math.round(plotWidth() / 2) * 1.5 };
     },
     /** The ping time, which sets how far in the view can zoom. */
     setPingTime(ms: number) {
@@ -343,18 +365,23 @@ export function createTimeline(options: TimelineOptions) {
     },
     following: () => end === null,
     spanMs: () => spanMs,
-    setData(next: Series | undefined, nextLimit: number | null) {
+    /**
+     * New results to draw. `forWindow` says they answer the newest window(), which is what lets a
+     * waiting Show last choice take effect together with them.
+     */
+    setData(next: Series | undefined, nextLimit: number | null, forWindow = false) {
       series = next;
       limit = nextLimit;
+      if (forWindow) commit();
       schedule();
     },
-    /** Shows the last `ms` up to the present. */
-    showLast(ms: number) {
-      spanMs = clamp(ms, minSpan(), MAX_SPAN_MS);
-      const was = end;
-      end = null;
-      if (was !== null) options.onFollow(true);
-      changed();
+    /** Shows the last `ms` up to the present, once its results arrive or after half a second. */
+    showLast(ms: number, now = false) {
+      if (pending) clearTimeout(pending.timer);
+      pending = { spanMs: clamp(ms, minSpan(), MAX_SPAN_MS), timer: setTimeout(commit, 500) };
+      if (now) commit();
+      options.onHover(null);
+      options.onWindow();
     },
     backToNow() {
       if (end === null) return;
@@ -367,6 +394,7 @@ export function createTimeline(options: TimelineOptions) {
       if (end === null) schedule();
     },
     dispose() {
+      if (pending) clearTimeout(pending.timer);
       controller.abort();
       resized.disconnect();
       cancelAnimationFrame(frame);
