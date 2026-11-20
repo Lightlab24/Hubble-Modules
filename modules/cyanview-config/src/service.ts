@@ -1,5 +1,5 @@
 import { CyanviewClient } from './transport.js';
-import { ConfigurationOperations, type ClientFactory } from './operations.js';
+import { ConfigurationOperations, lentSocket, ownSocket, type ClientFactory, type HeldControllers } from './operations.js';
 import { PlanRepository } from './repository.js';
 import { Discovery, type DiscoveryMethod, type DiscoveryOptions } from './discovery.js';
 import { normalizeSnapshot, optionEntries } from './normalize.js';
@@ -17,6 +17,10 @@ export type ServiceOptions = { client?: ClientFactory; reachable?: (address: str
   /** Each managed controller's held settings socket. False holds none, for tests that count sockets. */
   liveConfig?: LiveConfigOptions | false;
   cameraEnabled?: CameraEnabledOptions;
+  /** How long after work on a socket of its own ends before the held socket is lent again. */
+  ownSettleMs?: number;
+  /** How long a watched controller with no held socket may take to answer a look for REMI copies. */
+  lookReachMs?: number;
   /** Opens a controller's own web page. Tests record the address and open nothing. */
   openPage?: OpenDevicePage };
 /** A Cyanview serial carries its own base address: CY-RCP-1-20 is 10.192.1.20. */
@@ -41,10 +45,32 @@ export class CyanviewService {
   private discovery: Discovery;
   private live?: LiveConfig;
   private stopped = false;
+  private mqttDown: (id: string) => boolean = () => false;
+  /** Sockets that work has opened for itself on each controller, and until when the held one may be behind them. */
+  private ownSockets = new Map<string, { open: number; settledAt: number }>();
+  /**
+   * The settings socket held on each controller, for sends, switches and lists to use instead of opening their own
+   * beside it. With nothing held, as in tests that count sockets, each opens its own as before.
+   */
+  readonly held: HeldControllers = {
+    lend: device => {
+      const own = this.ownSockets.get(String(device.id));
+      return own && (own.open > 0 || Date.now() < own.settledAt) ? undefined : this.live?.lend(String(device.id));
+    },
+    opened: device => {
+      const id = String(device.id), own = this.ownSockets.get(id) ?? { open: 0, settledAt: 0 };
+      this.ownSockets.set(id, own); own.open++;
+      let done = false;
+      // A controller took about 0.4 s to report a change to its other sockets (RCP 1, Nov 12 2026). A second covers it.
+      return () => { if (done) return; done = true; own.open--; own.settledAt = Date.now() + (this.options.ownSettleMs ?? 1000); };
+    },
+    watched: device => !!this.live?.watching(String(device.id)),
+    down: device => !!this.live?.watching(String(device.id)) && !this.live.connection(String(device.id)) && this.mqttDown(String(device.id)),
+  };
   constructor(private repository: PlanRepository, private choiceCatalogs: ChoiceCatalogs, private publish: (values: RecordValue) => void, private lifetime: AbortSignal, private options: ServiceOptions = {}) {
     this.client = options.client ?? (address => new CyanviewClient(address));
-    this.remi = new RemiOperations(repository, this.client);
-    this.operations = new ConfigurationOperations(repository, this.client, this.remi);
+    this.remi = new RemiOperations(repository, this.client, this.held, options.lookReachMs);
+    this.operations = new ConfigurationOperations(repository, this.client, this.remi, this.held);
     if (options.liveConfig !== false) this.live = new LiveConfig(this.client, () => this.emit(), options.liveConfig);
     this.discovery = new Discovery(async (address, signal) => {
       const snapshot = await this.snapshot(address, signal, false);
@@ -69,12 +95,14 @@ export class CyanviewService {
     });
   }
   state() { return { observations: this.observations, discovery: this.discovery.progress, lookupResults: [...this.lookups.values()], configChanges: this.live?.state() ?? null }; }
+  /** Says whether a controller's MQTT link is down, which with no settings socket either means it isn't answering at all. */
+  followMqtt(down: (id: string) => boolean) { this.mqttDown = down; }
   /** Keeps a settings socket open on each managed controller, so a change made anywhere shows up without Refresh all. */
   watch(plan: Plan) { if (!this.stopped) this.live?.setPlan(plan); }
   /** Each configuration a held socket reports, with the one before it. Nothing is reported without held sockets. */
   observeConfig(observer: ConfigObserver) { return this.live?.observe(observer); }
   forgetManagedDevices(ids: string[]) {
-    for (const id of ids) { this.generations.set(id, (this.generations.get(id) || 0) + 1); delete this.observations[id]; }
+    for (const id of ids) { this.ownSockets.delete(id); this.generations.set(id, (this.generations.get(id) || 0) + 1); delete this.observations[id]; }
   }
   private emit() { if (!this.stopped) this.publish(this.state()); }
   private rememberCandidate(input: RecordValue) {
@@ -89,21 +117,26 @@ export class CyanviewService {
   }
   /** What an open socket says the controller has now. */
   private async read(client: CyanviewClient, signal: AbortSignal, catalog = true, endpoints = true) {
-    const snapshot = normalizeSnapshot(client.config, client.address);
-    this.noteNeighbours(client.config);
-    // A camera whose model's port the controller doesn't list (a Burano's 22) shows the port its endpoint
-    // holds. A read on the held socket after each change opens nothing else, so it leaves the port the page
-    // already has rather than blanking it.
-    const unlisted = snapshot.cameras.filter(camera => !('Port' in object(object(client.config.Camera)[String(camera.elementKey)])));
-    if (unlisted.length && endpoints) {
-      const ports = await client.readEndpointPorts(signal);
-      for (const camera of unlisted) if (ports.has(String(camera.elementKey))) camera.port = ports.get(String(camera.elementKey))!;
-    } else for (const camera of unlisted) Reflect.deleteProperty(camera, 'port');
-    if (catalog) await this.remi.readCameraReferences(snapshot, client, signal);
-    if (catalog && snapshot.cameras[0]) {
-      try { snapshot.device.modelCatalog = optionEntries(await client.option(snapshot.cameras[0].elementKey, 'Model', signal)).map(entry => ({ label: entry.label, id: object(entry.request).update?.changes?.model ?? '' })); } catch { /* The verified snapshot remains usable if option discovery is unavailable. */ }
+    for (let attempt = 0; ; attempt++) {
+      const config = client.config, snapshot = normalizeSnapshot(config, client.address);
+      this.noteNeighbours(config);
+      // A camera whose model's port the controller doesn't list (a Burano's 22) shows the port its endpoint
+      // holds. A read on the held socket after each change opens nothing else, so it leaves the port the page
+      // already has rather than blanking it.
+      const unlisted = snapshot.cameras.filter(camera => !('Port' in object(object(config.Camera)[String(camera.elementKey)])));
+      if (unlisted.length && endpoints) {
+        const ports = await client.readEndpointPorts(signal);
+        for (const camera of unlisted) if (ports.has(String(camera.elementKey))) camera.port = ports.get(String(camera.elementKey))!;
+      } else for (const camera of unlisted) Reflect.deleteProperty(camera, 'port');
+      if (catalog) await this.remi.readCameraReferences(snapshot, client, signal);
+      if (catalog && snapshot.cameras[0]) {
+        try { snapshot.device.modelCatalog = optionEntries(await client.option(snapshot.cameras[0].elementKey, 'Model', signal)).map(entry => ({ label: entry.label, id: object(entry.request).update?.changes?.model ?? '' })); } catch { /* The verified snapshot remains usable if option discovery is unavailable. */ }
+      }
+      // The questions above wait their turn on the socket, behind a send that is using it. If the controller
+      // reported a change meanwhile, what was read at the start is already old, so it is read again: what
+      // goes back is what the controller has now.
+      if (client.config === config || attempt === 2) return snapshot;
     }
-    return snapshot;
   }
   private noteNeighbours(config: RecordValue) {
     for (const raw of Object.values(object(config.Remi))) {
@@ -223,10 +256,10 @@ export class CyanviewService {
     if (!isCameraChoiceField(field)) throw new Error('Unsupported option field');
     const { plan } = await this.repository.read(signal), device = plan.devices.find(row => row.id === input.device), row = plan.cameras.find(row => row.id === input.rowId && row.device === input.device);
     if (!device || !row?.elementKey) throw new Error('Camera configuration is unavailable on this controller');
-    const client = this.client(device.address || device.base);
+    // A list is asked for over the socket already held on the controller, where there is one.
+    const client = lentSocket(this.held, device) ?? await ownSocket(this.held, this.client, device, signal);
     let catalog;
     try {
-      await client.connect(signal);
       if (client.serial !== device.serial) throw new Error('Controller identity changed');
       const observed = client.config.Camera?.[row.elementKey];
       if (!observed) throw new Error('Camera configuration is unavailable on this controller');

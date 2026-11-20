@@ -27,7 +27,8 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
   // Cyanview's own Enabled on each camera, with every REMI copy following the camera it comes from.
   const cameraEnabled = new CameraEnabledOperations(repository, options.client ?? (address => new CyanviewClient(address)), service.remi,
     (device, number, key) => control!.cameraOnline(device, number, key), () => publish({ cameraEnabledJobs: cameraEnabled.state() }),
-    message => context.log({ level: 'info', stage: 'camera-enabled', message: message.slice(0, 500) }), lifetime.signal, options.cameraEnabled);
+    message => context.log({ level: 'info', stage: 'camera-enabled', message: message.slice(0, 500) }), lifetime.signal, options.cameraEnabled, service.held);
+  service.followMqtt(id => control!.controllerDown(id));
   if (!sample) service.observeConfig((device, before, after) => cameraEnabled.observe(device, before, after));
   const transfers = new Map<string, { kind: 'save' | 'send'; revision: string | null; parts: string[]; size: number; expires: number }>();
   const imports = new Map<string, { cameras: RecordValue[]; expires: number }>();

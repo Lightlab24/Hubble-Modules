@@ -158,6 +158,10 @@ export class CameraControl {
     for (const id of this.results.keys()) if (!cameras.has(id)) this.results.delete(id);
     this.selection.setPlan(plan);
   }
+  /** True once a controller's MQTT link has been tried and isn't up. False while it is up, untried or not watched. */
+  controllerDown(deviceId: string): boolean {
+    return this.sessions.get(deviceId)?.snapshot().reachable === false;
+  }
   /** Whether a controller's camera reports itself online over MQTT, or null while nothing has said. */
   cameraOnline(deviceId: string, number: number, key: string): boolean | null {
     const session = this.sessions.get(deviceId);

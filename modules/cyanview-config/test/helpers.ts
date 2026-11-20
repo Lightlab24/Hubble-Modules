@@ -114,12 +114,16 @@ export class FakeController {
   origins: string[] = [];
   options: string[] = [];
   opened = 0;
+  /** The path of every socket opened, in order: `/ws/ui` is a settings socket, `/ws` a read of the element list. */
+  paths: string[] = [];
   failProperty = '';
   dropCreateReply = false;
   dropDeleteReply = false;
   wrongIdentity = false;
   replyDelayProperty = '';
   replyDelayMs = 0;
+  /** How long the controller takes to answer a question about a setting's choices. */
+  optionDelayMs = 0;
   /** A controller answers a write at once and pushes its changed configuration a little later. */
   pushDelayMs = 0;
   holdAction = '';
@@ -144,7 +148,7 @@ export class FakeController {
       const url = new URL(request.url!, 'http://localhost'), address = url.searchParams.get('device');
       if (!Object.values(object(this.config.IP)).some(row => object(row).IP === address)) { socket.destroy(); return; }
       this.wss.handleUpgrade(request, socket, head, ws => {
-        this.sockets.add(ws); this.opened++; this.origins.push(String(request.headers.origin));
+        this.sockets.add(ws); this.opened++; this.paths.push(url.pathname); this.origins.push(String(request.headers.origin));
         ws.once('close', () => this.sockets.delete(ws));
         if (url.pathname === '/ws' && (this.remiFleet || this.endpointElements)) {
           ws.send(JSON.stringify({ elements: [...(this.remiFleet?.elements(this) ?? []), ...(this.endpointElements?.() ?? [])], version: 1 })); return;
@@ -157,7 +161,9 @@ export class FakeController {
           const message = JSON.parse(raw.toString());
           if (message.type === 'option_request') {
             this.options.push(message.request[1]);
-            ws.send(JSON.stringify({ type: 'option_reply', request: message.request, payload: this.option(message.request) })); return;
+            const answer = () => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'option_reply', request: message.request, payload: this.option(message.request) })); };
+            if (this.optionDelayMs) setTimeout(answer, this.optionDelayMs); else answer();
+            return;
           }
           if (message.type !== 'action_request') return;
           this.actions.push(structuredClone(message.request)); this.onAction?.(structuredClone(message.request));

@@ -1,6 +1,6 @@
 import { object, stable, validIp, type Plan, type RecordValue } from './model.js';
 import { normalizeSnapshot } from './normalize.js';
-import type { ClientFactory } from './operations.js';
+import { lentSocket, ownSocket, type ClientFactory, type HeldControllers } from './operations.js';
 import type { PlanRepository } from './repository.js';
 import {
   describeRemiOrigins, isRemiModel, remiAddresses, remiCamera, remiEntries, remiLabel, remiTagRelay, samePeer,
@@ -22,7 +22,11 @@ const isImported = (entry: RemiEntry, config: RecordValue) =>
 export class RemiOperations {
   private tail: Promise<unknown> = Promise.resolve();
 
-  constructor(private repository: PlanRepository, private factory: ClientFactory) {}
+  /**
+   * `lookReachMs` is how long a watched controller with no held socket is given to answer when it is only being
+   * looked at for copies. One on the network opens in about a tenth of a second.
+   */
+  constructor(private repository: PlanRepository, private factory: ClientFactory, private held?: HeldControllers, private lookReachMs = 1500) {}
 
   private enqueue<T>(run: () => Promise<T>) {
     const task = this.tail.catch(() => undefined).then(run);
@@ -36,10 +40,12 @@ export class RemiOperations {
     return device;
   }
 
-  private async connect(device: RecordValue, signal: AbortSignal) {
-    const client = this.factory(device.address || device.base);
+  /** The socket already held on a controller, or a new one. `reachMs` limits only how long a new one may take to answer. */
+  private async connect(device: RecordValue, signal: AbortSignal, reachMs?: number) {
+    const lent = lentSocket(this.held, device);
+    if (lent) return lent;
+    const client = await ownSocket(this.held, this.factory, device, reachMs === undefined ? signal : AbortSignal.any([signal, AbortSignal.timeout(reachMs)]));
     try {
-      await client.connect(signal);
       if (client.serial !== device.serial) throw new Error('Controller identity changed. Refresh before sending.');
       return client;
     } catch (error) {
@@ -77,8 +83,8 @@ export class RemiOperations {
     describeRemiOrigins(rows, available, plan.cameras, devices, links ?? (await this.repository.readRemi(signal)).data.links);
   }
 
-  private async observe(device: RecordValue, signal: AbortSignal): Promise<Observed> {
-    const client = await this.connect(device, signal);
+  private async observe(device: RecordValue, signal: AbortSignal, reachMs?: number): Promise<Observed> {
+    const client = await this.connect(device, signal, reachMs);
     try {
       const entries = remiEntries(client.config);
       const selectors = entries.some(entry => entry.enabled) ? await this.selectors(client, signal) : new Map();
@@ -607,8 +613,11 @@ export class RemiOperations {
 
   /**
    * Every REMI copy of a camera, however many hops away, each listed after the copy it was made from.
-   * Every managed controller is read afresh, so a copy made by hand is found too. A controller that
-   * can't be read is named in `unread`, since a copy on it can't be reached either.
+   * Every managed controller is looked at, so a copy made by hand is found too: over the socket already held
+   * on it, which always has what the controller last reported, or over a new one where none is held. A
+   * controller that can't be read is named in `unread`, since a copy on it can't be reached either. One that
+   * answers on neither its settings socket nor MQTT is named at once, and one with no held socket gets a short
+   * time to answer, so a controller that is switched off doesn't hold up the cameras on the others.
    */
   async copiesOf(sourceId: string, key: string, signal: AbortSignal) {
     const { plan } = await this.repository.read(signal);
@@ -616,7 +625,10 @@ export class RemiOperations {
     const inventory = new Map<string, Observed>();
     for (let start = 0; start < plan.devices.length; start += 8) {
       await Promise.all(plan.devices.slice(start, start + 8).map(async device => {
-        try { inventory.set(device.id, await this.observe(device, signal)); }
+        const other = device.id !== sourceId;
+        if (other && this.held?.down(device)) return;
+        // A watched controller with no held socket has not been answering, so it is not waited on for long.
+        try { inventory.set(device.id, await this.observe(device, signal, other && this.held?.watched(device) ? this.lookReachMs : undefined)); }
         catch { signal.throwIfAborted(); }
       }));
     }

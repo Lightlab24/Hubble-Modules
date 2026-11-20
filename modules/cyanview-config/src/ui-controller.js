@@ -3655,18 +3655,35 @@ import { PresentationLedger } from './presentation-ledger.js';
     if (autoReads.size) scheduleAutoRead(30);
   }
   function scheduleAutoRead(wait) { autoReadTimer ??= setTimeout(runAutoRead, wait); }
+  // Every change this page asks a controller for is counted as it starts and as it ends. A read that was out
+  // while one started or ended may hold what the controller had before it, even when that change has finished
+  // by the time the read comes back, so it is read again and never shown.
+  let controllerWork = 0;
+  if (moduleBridge) for (const name of ['send', 'remiSend', 'remiRoute', 'cameraEnabled', 'cameraRefresh']) {
+    const ask = moduleBridge[name].bind(moduleBridge);
+    moduleBridge[name] = (...values) => {
+      controllerWork++;
+      const settled = () => { controllerWork++; };
+      let reply;
+      try { reply = ask(...values); } catch (error) { settled(); throw error; }
+      Promise.resolve(reply).then(settled, settled);
+      return reply;
+    };
+  }
   // A send reports its own results, and a read partway through one would show half a change.
   const autoReadWaits = () => sendsRunning || cameras.some(camera => camera.jobs > 0 || camera.deleting) || [...remiPanels.values()].some(state => state.busy);
   async function runAutoRead() {
     autoReadTimer = null;
     if (!autoReads.size) return;
     if (autoReadWaits()) { scheduleAutoRead(500); return; }
-    const ids = [...autoReads];
+    const ids = [...autoReads], workBefore = controllerWork;
     autoReads.clear();
     try {
       const reply = await moduleBridge.refresh(ids, true);
       // A send that began during the read may already have changed what it read. The send's own change reads again after it.
       if (autoReadWaits()) { for (const id of ids) autoReads.add(id); scheduleAutoRead(500); return; }
+      // So may one that began and finished while the read was out.
+      if (controllerWork !== workBefore) { for (const id of ids) autoReads.add(id); scheduleAutoRead(30); return; }
       for (const snapshot of reply.snapshots || []) mergeSnapshot(snapshot);
       renderLans();
       renderCameras();

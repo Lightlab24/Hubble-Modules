@@ -16,6 +16,8 @@ let releasePlanWrites: (() => void) | undefined;
 let planSaves = 0, planSavePending = 0;
 // The addresses the page asked to open in a browser. The preview opens nothing.
 let openedPages: string[] = [], openPageError = '';
+// How long a live read's answer is held back after it is worked out, as when the page hears back late.
+let liveReadDelayMs = 0;
 let sampleSetting = true, sessionOptions: Parameters<typeof fixture>[1], statePaused = false;
 const rendererState = () => session.states.at(-1) as Parameters<typeof session.context.publishState>[0];
 async function reset(sample: boolean, remi = false, gateway = false, direct = false, extra = false, live = false, wan = false, reachAll = false) {
@@ -24,7 +26,7 @@ async function reset(sample: boolean, remi = false, gateway = false, direct = fa
   releaseControlWrites?.(); releaseControlWrites = undefined;
   releasePlanWrites?.(); releasePlanWrites = undefined;
   planSaves = 0; planSavePending = 0;
-  openedPages = []; openPageError = '';
+  openedPages = []; openPageError = ''; liveReadDelayMs = 0;
   if (session) await session.instance.dispose();
   await Promise.all(controllers.map(device => device.close()));
   await closeBrokers();
@@ -146,6 +148,8 @@ const server = createServer(async (request, response) => {
         if (typeof input.pauseState === 'boolean') statePaused = input.pauseState;
         if (input.closeBroker) await closeBrokers();
         if (typeof input.openPageError === 'string') openPageError = input.openPageError;
+        if (typeof input.liveReadDelayMs === 'number') liveReadDelayMs = Math.min(3000, Math.max(0, input.liveReadDelayMs));
+        if (typeof input.optionDelayMs === 'number') controller.optionDelayMs = Math.min(3000, Math.max(0, input.optionDelayMs));
         if (typeof input.pingDelayMs === 'number') pingDelayMs = Math.min(5000,Math.max(0,input.pingDelayMs));
         send({ updated: true }); return;
       }
@@ -154,7 +158,11 @@ const server = createServer(async (request, response) => {
       if (input.operation !== 'state' && !declaredCommands.has(input.commandId)) { send({ error: 'Module page command is not declared: ' + input.commandId }); return; }
       const planSave = ['save-plan', 'save-commit'].includes(input.commandId);
       if (planSave) { planSaves++; planSavePending++; }
-      try { send({ result: input.operation === 'state' ? rendererState() : await session.call(input.commandId, input.value) }); }
+      try {
+        const result = input.operation === 'state' ? rendererState() : await session.call(input.commandId, input.value);
+        if (liveReadDelayMs && input.commandId === 'refresh' && input.value?.live === true) await new Promise(resolve => setTimeout(resolve, liveReadDelayMs));
+        send({ result });
+      }
       catch (error) { send({ error: error instanceof Error ? error.message : 'Preview request failed' }); }
       finally { if (planSave) planSavePending--; }
       return;

@@ -10,6 +10,8 @@ export type LiveConfigOptions = {
   settleMs?: number;
   /** How long reaching one address may take before the next is tried. */
   connectMs?: number;
+  /** A held socket is only lent while its controller has been heard from within this long. The heartbeat is every 3 s. */
+  lendQuietMs?: number;
 };
 type Watch = { id: string; serial: string; hosts: string[]; stop: AbortController; client?: CyanviewClient; text: string; config?: RecordValue; timer?: ReturnType<typeof setTimeout> };
 /** Each configuration a controller reports that differs from the last, with the one before it. None before the first. */
@@ -21,8 +23,9 @@ const hostsOf = (device: RecordValue) => [...new Set([device.base, device.addres
 /**
  * Holds one settings socket open on every managed RCP, RIO and Gateway. A controller sends its whole
  * configuration to every open socket after every change, whoever made it, so each change counts up here
- * and an open page reads that controller again. Watching only listens: nothing goes to the controller but
- * the heartbeat its own web page sends.
+ * and an open page reads that controller again. Watching itself only listens: it sends the controller nothing
+ * but the heartbeat its own web page sends. Settings work borrows the same socket with `lend`, the way
+ * Cyanview's page does its own work over its one socket, rather than opening another beside it.
  */
 export class LiveConfig {
   private watches = new Map<string, Watch>();
@@ -48,6 +51,16 @@ export class LiveConfig {
     const client = this.watches.get(id)?.client;
     return client?.connected ? client : undefined;
   }
+  /**
+   * The held socket, lent to a piece of work so it need not open another. Only one whose controller has answered
+   * lately is lent: a socket that has gone quiet may be dead, and the work then opens its own, as it always did.
+   */
+  lend(id: string) {
+    const client = this.connection(id);
+    return client && client.quietMs <= (this.options.lendQuietMs ?? 7000) ? client.lend() : undefined;
+  }
+  /** Whether a controller is one this holds, or keeps trying to hold, a socket on. */
+  watching(id: string) { return this.watches.has(id); }
   dispose() { this.stopped = true; for (const id of [...this.watches.keys()]) this.forget(id); }
   private forget(id: string) {
     const watch = this.watches.get(id);
