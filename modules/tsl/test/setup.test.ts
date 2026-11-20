@@ -4,6 +4,7 @@ import {
   deviceLine,
   deviceState,
   linkStatus,
+  listenerProblem,
   SwitcherDocumentSchema,
   wantedDevice,
   type ReceiverLink,
@@ -150,5 +151,25 @@ describe("where this computer's device stands", () => {
     expect(deviceLine(row, true)).toEqual({ slot: "3", name: "HUBBLE", format: "TSL 5.0", sendsTo: "10.20.100.235 : 9821", enabled: "On", mine: true });
     expect(deviceLine({ ...row, driver: "TSL 3.1", enabled: false }, false)).toMatchObject({ format: "TSL 3.1", enabled: "Off", mine: false });
     expect(deviceLine({ ...row, type: "RossTalk", driver: "", ip: "" }, false)).toMatchObject({ format: "RossTalk", sendsTo: "" });
+  });
+});
+
+describe("a listener that could not start", () => {
+  const local = ["192.168.1.100"];
+  it("says so in the operator's words", () => {
+    // The saved address belongs to a network this computer is no longer on.
+    expect(
+      listenerProblem({ error: "listen EADDRNOTAVAIL: address not available 10.20.100.236:5727", bindAddress: "10.20.100.236", port: 5727, localAddresses: local }),
+    ).toBe("10.20.100.236 isn't one of this computer's addresses");
+    expect(listenerProblem({ error: "listen EADDRINUSE: address already in use 0.0.0.0:5727", bindAddress: "0.0.0.0", port: 5727, localAddresses: local })).toBe(
+      "port 5727 is in use by something else",
+    );
+    expect(listenerProblem({ error: "listen EACCES: permission denied 0.0.0.0:80", bindAddress: "0.0.0.0", port: 80, localAddresses: local })).toBe(
+      "this computer doesn't allow port 80",
+    );
+  });
+  it("passes on what it does not recognise, and never an empty reason", () => {
+    expect(listenerProblem({ error: "socket hung up", bindAddress: "192.168.1.100", port: 5727, localAddresses: local })).toBe("socket hung up");
+    expect(listenerProblem({ error: null, bindAddress: "0.0.0.0", port: 5727, localAddresses: local })).toBe("the port could not be opened");
   });
 });

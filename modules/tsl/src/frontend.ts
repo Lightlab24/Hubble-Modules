@@ -13,6 +13,7 @@ import {
   deviceLine,
   deviceState,
   linkStatus,
+  listenerProblem,
   OFFSETS,
   wantedDevice,
   type ReceiverSettings,
@@ -90,7 +91,7 @@ try {
     el("listener").dataset.tone = listener.phase === "error" ? "bad" : listener.phase === "listening" && fresh ? "ok" : "idle";
     el("listener-text").textContent =
       listener.phase === "error"
-        ? `Not listening · ${listener.error ?? "the port could not be opened"}`
+        ? `Not listening · ${listenerProblem({ error: listener.error, bindAddress: saved.bindAddress, port: saved.port, localAddresses })}`
         : listener.phase !== "listening"
           ? "Not listening"
           : `${fresh ? "Receiving" : "Listening"} · ${where}`;

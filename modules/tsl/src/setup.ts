@@ -181,3 +181,17 @@ export function deviceLine(row: SwitcherDeviceRow, mine: boolean) {
     mine,
   };
 }
+
+/** Why the listener could not start, in the operator's words rather than the system's. */
+export function listenerProblem(input: {
+  error: string | null;
+  bindAddress: string;
+  port: number;
+  localAddresses: readonly string[];
+}): string {
+  if (input.bindAddress !== "0.0.0.0" && !input.localAddresses.includes(input.bindAddress))
+    return `${input.bindAddress} isn't one of this computer's addresses`;
+  if (/EADDRINUSE/u.test(input.error ?? "")) return `port ${input.port} is in use by something else`;
+  if (/EACCES/u.test(input.error ?? "")) return `this computer doesn't allow port ${input.port}`;
+  return input.error ?? "the port could not be opened";
+}
