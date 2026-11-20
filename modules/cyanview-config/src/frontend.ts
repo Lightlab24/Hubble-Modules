@@ -143,6 +143,8 @@ if (window.parent !== window) {
     async cameraEnabled(device: string, key: string, enabled: boolean) { return client.call('camera-enabled', payload({ device, key, enabled })); },
     /** Switches a camera off and on again, then each REMI copy made from it. */
     async cameraRefresh(device: string, key: string) { return client.call('camera-refresh', payload({ device, key })); },
+    /** A controller's own web page, opened in the browser on the computer Hubble runs on. */
+    async openDevicePage(address: string) { return client.call('open-device-page', payload({ address })); },
     async controlState() { return client.call('camera-control-state'); },
     async controlMutate(value: unknown) {
       await tail.catch(() => undefined);

@@ -11,11 +11,14 @@ import { cameraChoiceKey, isCameraChoiceField, type CameraChoice } from './choic
 import type { ControlOptions } from './control/service.js';
 import type { CameraEnabledOptions } from './camera-enabled.js';
 import { LiveConfig, type ConfigObserver, type LiveConfigOptions } from './live-config.js';
+import type { OpenDevicePage } from './open-page.js';
 
 export type ServiceOptions = { client?: ClientFactory; reachable?: (address: string, signal: AbortSignal) => Promise<boolean>; discovery?: DiscoveryOptions; neighbors?: (signal: AbortSignal) => Promise<string[]>; control?: ControlOptions;
   /** Each managed controller's held settings socket. False holds none, for tests that count sockets. */
   liveConfig?: LiveConfigOptions | false;
-  cameraEnabled?: CameraEnabledOptions };
+  cameraEnabled?: CameraEnabledOptions;
+  /** Opens a controller's own web page. Tests record the address and open nothing. */
+  openPage?: OpenDevicePage };
 /** A Cyanview serial carries its own base address: CY-RCP-1-20 is 10.192.1.20. */
 export const baseFromSerial = (serial: string) => {
   const parts = /^cy-[a-z0-9]+-(\d{1,3})-(\d{1,3})$/i.exec(serial.trim());

@@ -21,6 +21,31 @@
     return { lan: rows.filter(row => row.type !== 'WAN' && !row.readOnly), wan: rows.find(row => row.type === 'WAN' && !row.readOnly) };
   }
   const plainAddress = value => String(value ?? '').split('/')[0];
+  // A controller's own web page, opened in Safari from its address. A module page can't open a window
+  // itself, so it asks the module to. An address that isn't one yet stays plain text.
+  const openableAddress = value => { const address = plainAddress(value).trim(); return moduleBridge?.openDevicePage && ipv4(address) ? address : ''; };
+  // An address that is only shown is the link.
+  function pageLink(value, name) {
+    const address = openableAddress(value);
+    if (!address) return '<span class="hc-mono hc-muted">' + esc(value || '') + '</span>';
+    return '<button type="button" class="hc-ip-link hc-mono" data-action="open-device-page" data-address="' + esc(address) + '" aria-label="' + esc('Open ' + name + ' at ' + address + ' in Safari') + '" title="' + esc('Open ' + address + ' in Safari') + '">' + esc(address) + '</button>';
+  }
+  // An address that can be typed over keeps its box. A small button beside it opens the address the device has now.
+  // The button never takes the keyboard: Tab still goes from one box to the next, and a box being typed in keeps its caret.
+  function pageOpener(row, name) {
+    const address = openableAddress(row?.current);
+    return address ? '<button type="button" class="hc-ip-open" tabindex="-1" data-action="open-device-page" data-address="' + esc(address) + '" aria-label="' + esc('Open ' + name + ' at ' + address + ' in Safari') + '" title="' + esc('Open ' + address + ' in Safari') + '">' + icon('external-link') + '</button>' : '';
+  }
+  root.addEventListener('mousedown', event => { if (event.target.closest?.('.hc-ip-open')) event.preventDefault(); });
+  const pagesOpening = new Set();
+  async function openDevicePage(address) {
+    // A second click while Safari is still coming up would open the page twice.
+    if (!openableAddress(address) || pagesOpening.has(address)) return;
+    pagesOpening.add(address);
+    try { await moduleBridge.openDevicePage(address); }
+    catch (error) { toast(error.message || 'Could not open ' + address); }
+    finally { pagesOpening.delete(address); }
+  }
   function deviceConnectedOn(d) {
     const address = d.address || d.base;
     if (d.online === false || d.online == null) return '—';
@@ -90,13 +115,13 @@
       case 'type': return cell(quiet(d.kind));
       case 'serial': return cell('<span class="hc-mono hc-muted">' + esc(d.serial) + '</span>');
       case 'status': return cell(status(d.online), false, ' data-device-status="' + id + '"');
-      case 'base': return cell('<span class="hc-mono hc-muted">' + esc(d.base || '') + '</span>');
-      case 'lan1': return cell(input('lan1', net.lan[0]?.planned, 'LAN IP', busy) + (deviceSheet.lanOpen ? '' : waiting(net.lan.slice(1))), !!net.lan[0]?.pending);
-      case 'lan2': return cell(input('lan2', net.lan[1]?.planned, 'LAN IP 2', busy) + waiting(net.lan.slice(2)), !!net.lan[1]?.pending);
+      case 'base': return cell(pageLink(d.base, d.name));
+      case 'lan1': return cell(input('lan1', net.lan[0]?.planned, 'LAN IP', busy) + pageOpener(net.lan[0], d.name) + (deviceSheet.lanOpen ? '' : waiting(net.lan.slice(1))), !!net.lan[0]?.pending);
+      case 'lan2': return cell(input('lan2', net.lan[1]?.planned, 'LAN IP 2', busy) + pageOpener(net.lan[1], d.name) + waiting(net.lan.slice(2)), !!net.lan[1]?.pending);
       // Folded away, the WAN shows what it will be once sent.
       case 'wan': return cell(net.wan ? (net.wan.dhcp || net.wan.planned ? esc(net.wan.dhcp ? 'DHCP' : net.wan.planned) : quiet('Not set')) + waiting([net.wan]) : quiet('—'), !!net.wan?.pending);
       case 'wanMode': return cell(net.wan ? '<select class="hc-cell-input" data-device-cell="' + id + ':wanMode" aria-label="' + esc('WAN mode for ' + d.name) + '"' + (busy ? ' disabled' : '') + '>' + options(['DHCP', 'Static'], held('wanMode') ?? (net.wan.dhcp ? 'DHCP' : 'Static')) + '</select>' : quiet('—'), !!net.wan?.dirty.has('dhcp'));
-      case 'wanIp': return cell(net.wan ? input('wanIp', net.wan.dhcp ? '' : net.wan.planned, 'WAN IP', busy || net.wan.dhcp) : '', !!net.wan && !net.wan.dhcp && net.wan.dirty.has('planned'));
+      case 'wanIp': return cell(net.wan ? input('wanIp', net.wan.dhcp ? '' : net.wan.planned, 'WAN IP', busy || net.wan.dhcp) + pageOpener(net.wan, d.name) : '', !!net.wan && !net.wan.dhcp && net.wan.dirty.has('planned'));
       case 'gateway': case 'dns1': case 'dns2': return cell(net.wan ? input(column.id, net.wan[column.id], column.label, busy || net.wan.dhcp) : '', !!net.wan?.dirty.has(column.id));
       case 'connected': return cell(quiet(deviceConnectedOn(d)), false, ' data-device-connected="' + id + '"');
       case 'cameras': return cell(deviceCamerasMarkup(d), false, ' data-device-cameras="' + id + '"');
@@ -137,7 +162,7 @@
     const span = columns.length - 7;
     // Saved devices a search is checking come first, in the order they were saved.
     const saved = savedSearchRows(), savedSerials = new Set(saved.map(row => savedKey(row.item.serial)));
-    const foundRows = saved.map(row => savedSearchRowMarkup(row, span)).join('') + found.filter(candidate => !savedSerials.has(savedKey(candidate.serial))).map(candidate => '<tr class="hc-device-found" data-device-found="' + esc(candidate.id) + '"><td><span class="hc-muted">+</span></td><td>' + esc(candidate.name || candidate.serial) + '</td><td></td><td><span class="hc-muted">' + esc(candidate.kind || '') + '</span></td><td><span class="hc-mono hc-muted">' + esc(candidate.serial) + '</span></td><td><span class="hc-found-tag">Found</span></td><td><span class="hc-mono hc-muted">' + esc(candidate.base || candidate.address || '') + '</span></td><td colspan="' + span + '"><button type="button" class="hc-primary hc-add-found" data-action="add-found-device" data-id="' + esc(candidate.id) + '" aria-label="Add ' + esc(candidate.name || candidate.serial) + '"' + (deviceAddBusy ? ' disabled' : '') + '>' + icon('plus') + 'Add</button></td></tr>').join('');
+    const foundRows = saved.map(row => savedSearchRowMarkup(row, span)).join('') + found.filter(candidate => !savedSerials.has(savedKey(candidate.serial))).map(candidate => '<tr class="hc-device-found" data-device-found="' + esc(candidate.id) + '"><td><span class="hc-muted">+</span></td><td>' + esc(candidate.name || candidate.serial) + '</td><td></td><td><span class="hc-muted">' + esc(candidate.kind || '') + '</span></td><td><span class="hc-mono hc-muted">' + esc(candidate.serial) + '</span></td><td><span class="hc-found-tag">Found</span></td><td>' + pageLink(candidate.base || candidate.address, candidate.name || candidate.serial) + '</td><td colspan="' + span + '"><button type="button" class="hc-primary hc-add-found" data-action="add-found-device" data-id="' + esc(candidate.id) + '" aria-label="Add ' + esc(candidate.name || candidate.serial) + '"' + (deviceAddBusy ? ' disabled' : '') + '>' + icon('plus') + 'Add</button></td></tr>').join('');
     const addRow = '<tr class="hc-device-add"><td><span class="hc-muted">+</span></td><td colspan="5"><span class="hc-muted">New device</span></td><td><input class="hc-cell-input hc-mono" data-device-add placeholder="Type an IP" aria-label="IP address of a device to add" spellcheck="false" autocomplete="off"' + (deviceAddBusy ? ' disabled' : '') + '></td><td colspan="' + span + '"><span class="hc-muted" data-role="device-add-note">' + esc(deviceAddNote || 'Type or paste an IP and press Enter. Hubble finds the device and fills in the row.') + '</span></td></tr>';
     const markup = '<div class="hc-sheet"><div class="hc-scroll"><table class="hc-grid" data-device-sheet aria-label="Devices" style="width:' + columns.reduce((total, column) => total + column.width, 0) + 'px">' + deviceSheetHeader(columns) + '<tbody>' + rows + foundRows + addRow + '</tbody></table></div></div>';
     const keeping = deviceSheetKept(host), twin = redrawAround(host, markup, keeping?.kept, keeping?.find ?? (() => null));
@@ -480,6 +505,7 @@
     else if (data.action === 'add-all-found') void addAllFound();
     else if (data.action === 'add-found-device') { deviceAddBusy = true; renderDeviceSheet(); void addFoundDevice(data.id).catch(error => toast(error.message)).finally(() => { deviceAddBusy = false; renderLans(); }); }
     else if (data.action === 'clear-device-cameras' && device(data.id)) reviewDeviceClear(data.id);
+    else if (data.action === 'open-device-page') void openDevicePage(data.address);
     else if (data.clearDeviceConfirm) { $('modal-layer').hidden = true; void clearDeviceCameras(data.clearDeviceConfirm); }
   });
   root.addEventListener('focusin', event => {

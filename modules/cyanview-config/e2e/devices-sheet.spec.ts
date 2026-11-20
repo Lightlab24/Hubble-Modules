@@ -529,3 +529,57 @@ test('finding devices is one line in the toolbar, and a found device lists as a 
   await expect(rows(f)).toHaveCount(3);
   await expect(found).toHaveCount(0);
 });
+
+const openedPages = async (request: APIRequestContext) => (await (await request.get('/__inspect')).json()).openedPages as string[];
+
+test('a controller’s address opens its own web page: the Base IP is the link, a typed address has a button', async ({ page, request }) => {
+  const f = await open(page, request);
+  const base = row(f, MASTER).locator('[data-device-column="base"] button');
+  await expect(base).toHaveText('10.192.1.20');
+  await expect(base).toHaveAttribute('title', 'Open 10.192.1.20 in Safari');
+  await base.click();
+  await expect.poll(() => openedPages(request)).toEqual(['10.192.1.20']);
+  // The click also picks the row, as any click in it does.
+  await expect(row(f, MASTER)).toHaveClass(/hc-device-selected/);
+
+  // A LAN address stays a box to type in. Its button only shows with the pointer or the keyboard in the cell.
+  const lan = row(f, RIO).locator('[data-device-column="lan1"]'), opener = lan.locator('button.hc-ip-open');
+  await expect(opener).toBeHidden();
+  await cell(f, RIO, 'lan1').click();
+  await expect(cell(f, RIO, 'lan1')).toBeFocused();
+  expect(await openedPages(request)).toEqual(['10.192.1.20']);
+  await expect(opener).toBeVisible();
+  await expect(opener).toHaveAttribute('title', 'Open 10.20.101.200 in Safari');
+  await opener.click();
+  await expect.poll(() => openedPages(request)).toEqual(['10.192.1.20', '10.20.101.200']);
+  // Opening it leaves the keyboard in the box, and Tab goes on to the next box as it always has.
+  await expect(cell(f, RIO, 'lan1')).toBeFocused();
+  await page.keyboard.press('Tab');
+  expect(await f.locator('body').evaluate(() => (document.activeElement as HTMLElement)?.className ?? '')).not.toContain('hc-ip-open');
+
+  // The keyboard reaches the link too.
+  await row(f, LEAF).locator('[data-device-column="base"] button').focus();
+  await page.keyboard.press('Enter');
+  await expect.poll(() => openedPages(request)).toEqual(['10.192.1.20', '10.20.101.200', '10.192.1.30']);
+  // Nothing was sent to a controller and nothing waits to be.
+  await expect(panel(f)).toBeHidden();
+  expect((await fleet(request)).flatMap(device => device.actions)).toEqual([]);
+});
+
+test('an address that is typed but not sent yet opens the one the device still has, and a browser that won’t open says so', async ({ page, request }) => {
+  const f = await open(page, request);
+  await cell(f, RIO, 'lan1').fill('10.20.101.250/16');
+  await cell(f, RIO, 'name').click();
+  await expect(row(f, RIO).locator('[data-device-column="lan1"]')).toHaveClass(/hc-changed/);
+  await row(f, RIO).locator('[data-device-column="lan1"]').hover();
+  await row(f, RIO).locator('[data-device-column="lan1"] button.hc-ip-open').click();
+  await expect.poll(() => openedPages(request)).toEqual(['10.20.101.200']);
+
+  await request.post('/__simulate', { data: { openPageError: 'The browser could not be opened' } });
+  await row(f, MASTER).locator('[data-device-column="base"] button').click();
+  await expect(f.locator('[data-role="toast"]')).toHaveText('The browser could not be opened');
+  expect(await openedPages(request)).toEqual(['10.20.101.200']);
+  // The sheet is as it was: the typed address still waits, and the link is still there.
+  await expect(cell(f, RIO, 'lan1')).toHaveValue('10.20.101.250/16');
+  await expect(row(f, MASTER).locator('[data-device-column="base"] button')).toHaveText('10.192.1.20');
+});

@@ -14,6 +14,8 @@ let mqtt: Awaited<ReturnType<typeof broker>>;
 let releaseControlWrites: (() => void) | undefined;
 let releasePlanWrites: (() => void) | undefined;
 let planSaves = 0, planSavePending = 0;
+// The addresses the page asked to open in a browser. The preview opens nothing.
+let openedPages: string[] = [], openPageError = '';
 let sampleSetting = true, sessionOptions: Parameters<typeof fixture>[1], statePaused = false;
 const rendererState = () => session.states.at(-1) as Parameters<typeof session.context.publishState>[0];
 async function reset(sample: boolean, remi = false, gateway = false, direct = false, extra = false, live = false, wan = false, reachAll = false) {
@@ -22,6 +24,7 @@ async function reset(sample: boolean, remi = false, gateway = false, direct = fa
   releaseControlWrites?.(); releaseControlWrites = undefined;
   releasePlanWrites?.(); releasePlanWrites = undefined;
   planSaves = 0; planSavePending = 0;
+  openedPages = []; openPageError = '';
   if (session) await session.instance.dispose();
   await Promise.all(controllers.map(device => device.close()));
   await closeBrokers();
@@ -61,6 +64,7 @@ async function reset(sample: boolean, remi = false, gateway = false, direct = fa
     liveConfig: live ? { retryMs: [200, 1000], settleMs: 50 } : false,
     // Short enough for specs. Hubble itself holds a camera off for a second and waits up to six for it to come back online.
     cameraEnabled: { holdMs: 300, onlineWaitMs: 400 },
+    openPage: async address => { if (openPageError) throw new Error(openPageError); openedPages.push(address); },
     control: { cameraSettleMs: 400, session: (definition, changed) => new RcpSession(definition, changed, true, () => createConnection({ host: '127.0.0.1', port: mqtt.port })) },
     // Only the RIO answers a connection unless a spec asks for every simulated controller, as saved devices do.
     reachable: async address => ['10.192.1.10', '10.20.101.200'].includes(address) || reachAll && Boolean(fleet?.deviceAt(address)),
@@ -141,6 +145,7 @@ const server = createServer(async (request, response) => {
         if (input.mqttControls) Object.assign(mqtt.controls, input.mqttControls);
         if (typeof input.pauseState === 'boolean') statePaused = input.pauseState;
         if (input.closeBroker) await closeBrokers();
+        if (typeof input.openPageError === 'string') openPageError = input.openPageError;
         if (typeof input.pingDelayMs === 'number') pingDelayMs = Math.min(5000,Math.max(0,input.pingDelayMs));
         send({ updated: true }); return;
       }
@@ -159,7 +164,7 @@ const server = createServer(async (request, response) => {
       if (statePaused) { response.writeHead(204); response.end(); return; }
       send(rendererState()); return;
     }
-    if (url.pathname === '/__inspect') { send({ planSaves, planSavePending, opened: controllers.map(device => device.opened), openSockets: controllers.map(device => device.sockets.size), mqttConnections: mqtt.connections, actions: controller.actions, heldReplies: controller.heldActionReplies.length, config: controller.config, records: [...session.records], traces: session.traces, states: session.states.slice(-1), fleet:controllers.map(device=>({config:device.config,actions:device.actions})) }); return; }
+    if (url.pathname === '/__inspect') { send({ planSaves, planSavePending, openedPages, opened: controllers.map(device => device.opened), openSockets: controllers.map(device => device.sockets.size), mqttConnections: mqtt.connections, actions: controller.actions, heldReplies: controller.heldActionReplies.length, config: controller.config, records: [...session.records], traces: session.traces, states: session.states.slice(-1), fleet:controllers.map(device=>({config:device.config,actions:device.actions})) }); return; }
     if (url.pathname === '/') { response.writeHead(200, { 'Content-Type': 'text/html' }); response.end(html); return; }
     if (url.pathname === runtimePath) {
       response.writeHead(200, { 'Content-Type': 'text/javascript', 'Access-Control-Allow-Origin': '*' });

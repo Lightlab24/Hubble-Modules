@@ -242,6 +242,15 @@ body:has(#cyanview-design .hc-veil:not([hidden])) .hubble-column-resize-handles 
 #cyanview-design .hc-grid[data-device-sheet] tr.hc-device-found .hc-button { font-style: normal; font-size: 11px; padding: 3px 8px; }
 #cyanview-design .hc-grid[data-device-sheet] .hc-row-remove-button { display: inline-grid; place-items: center; min-height: 0; width: 26px; height: 24px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--hc-secondary); cursor: pointer; }
 #cyanview-design .hc-grid[data-device-sheet] .hc-row-remove-button:hover { background: light-dark(#f3dede, #3a2222); color: var(--hc-red); }
+/* A controller's own web page, one click from its address. A shown address is the link; a typed one gets a button beside it. */
+#cyanview-design .hc-grid[data-device-sheet] .hc-ip-link { min-height: 0; padding: 0; border: 0; border-radius: 2px; background: none; color: var(--hc-secondary); font-size: var(--hc-sheet-text-size, 13px); line-height: 1.35; cursor: pointer; text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 35%, transparent); text-underline-offset: 3px; }
+#cyanview-design .hc-grid[data-device-sheet] .hc-ip-link:is(:hover, :focus-visible) { color: var(--hc-focus); text-decoration-color: currentColor; }
+#cyanview-design .hc-grid[data-device-sheet] td:has(> .hc-ip-open) { position: relative; }
+#cyanview-design .hc-grid[data-device-sheet] .hc-ip-open { position: absolute; top: 50%; right: 4px; translate: 0 -50%; display: none; place-items: center; min-height: 0; width: 24px; height: 22px; padding: 0; border: 0; border-radius: 4px; background: var(--hc-surface); color: var(--hc-secondary); cursor: pointer; }
+#cyanview-design .hc-grid[data-device-sheet] td:is(:hover, :focus-within) > .hc-ip-open { display: inline-grid; }
+#cyanview-design .hc-grid[data-device-sheet] td:has(> .hc-device-waiting) > .hc-ip-open { right: 82px; }
+#cyanview-design .hc-grid[data-device-sheet] .hc-ip-open:is(:hover, :focus-visible) { color: var(--hc-focus); }
+#cyanview-design .hc-grid[data-device-sheet] .hc-ip-open .hc-icon { width: 14px; height: 14px; }
 #cyanview-design .hc-danger-solid { padding: 6px 12px; border: 1px solid currentColor; border-radius: 6px; }
 /* What Hubble didn't configure: keep it as it is, or clear it. */
 #cyanview-design .hc-controller-tools .hc-foreign-review { font-weight: 600; padding: 4px 10px; }

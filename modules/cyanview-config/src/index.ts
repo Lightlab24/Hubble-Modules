@@ -2,13 +2,14 @@ import { randomUUID } from 'node:crypto';
 import type { HubbleModule, ModuleContext, ModuleInstance } from '@hubble/module-sdk';
 import { PlanRepository } from './repository.js';
 import { CyanviewService, type ServiceOptions } from './service.js';
-import { object, validatePlan, type Plan, type RecordValue } from './model.js';
+import { object, validIp, validatePlan, type Plan, type RecordValue } from './model.js';
 import { createHostPing } from './ping.js';
 import { networkRange } from './discovery.js';
 import { ChoiceCatalogs } from './choice-catalogs.js';
 import { CameraControl } from './control/service.js';
 import { CameraEnabledOperations } from './camera-enabled.js';
 import { CyanviewClient } from './transport.js';
+import { createHostOpenPage } from './open-page.js';
 
 export function createInstance(context: ModuleContext, options: ServiceOptions = {}): ModuleInstance {
   if (!context.services) throw new Error('Module storage is unavailable');
@@ -20,6 +21,7 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
   const publish = (values: RecordValue = {}) => { serviceState = { ...serviceState, ...values }; if (!stopped) context.publishState({ phase: 'ready', observedAt: new Date().toISOString(), message: sample ? 'Sample data' : null, values: { sample, ...serviceState, cameraControl: control?.state() ?? null } }); };
   const hostPing = options.discovery?.ping ? null : createHostPing(context.services);
   const choices = new ChoiceCatalogs(context.services);
+  const openPage = options.openPage ?? createHostOpenPage(context.services);
   const service = new CyanviewService(repository, choices, publish, lifetime.signal, { ...options, discovery: { ...options.discovery, ping: options.discovery?.ping ?? hostPing!.sweep } });
   control = new CameraControl(repository, context, sample, () => publish(), options.control);
   // Cyanview's own Enabled on each camera, with every REMI copy following the camera it comes from.
@@ -206,6 +208,15 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
           context.log({ level: 'info', stage: 'camera-enabled', message: (refresh ? 'Refreshed' : input.enabled === true ? 'Switched on' : 'Switched off') + ' camera ' + key + ' on ' + device +
             ' and ' + result.copies + (result.copies === 1 ? ' copy' : ' copies') + ' in ' + Math.round(performance.now() - began) + ' ms' + (result.unread.length ? ', could not read ' + result.unread.join(', ') : '') });
           return result;
+        }
+        case 'open-device-page': {
+          // Sample devices are made up, so there is no page to open.
+          if (sample) throw new Error('Sample devices have no web page to open');
+          const address = String(input.address ?? '').trim();
+          if (!validIp(address)) throw new Error('This device has no address to open');
+          await openPage(address, signal);
+          context.log({ level: 'info', stage: 'open-page', message: 'Opened http://' + address + '/ in the browser' });
+          return { opened: address };
         }
         case 'send': return send(input, signal);
         default: throw new Error('Unknown Cyanview command');
