@@ -87,6 +87,10 @@ let failNextSave = false;
 let failNextSettings = false;
 /** Hubble takes a moment to save a setting and restart the module. Zero unless a check asks. */
 let settingsDelayMs = 0;
+/** While the module is between two runs, Hubble answers a page's calls with this. */
+let restartingNow = false;
+/** What the stopped run was still being asked ends there, as it does in Hubble. */
+let running = new AbortController();
 let generation = 0;
 const logs: unknown[] = [];
 let state: unknown = null;
@@ -135,6 +139,27 @@ const startInstance = async () => {
 };
 await startInstance();
 
+/** A saved setting: Hubble stops the run, starts the next with the new values, and says so. */
+let noticeDue = false;
+const restartWith = async (values: Record<string, unknown>) => {
+  Object.assign(settings, values);
+  restartingNow = true;
+  running.abort(new Error("Module is restarting"));
+  running = new AbortController();
+  try {
+    await instance.dispose();
+    if (settingsDelayMs) await new Promise((resolve) => setTimeout(resolve, settingsDelayMs));
+    await startInstance();
+  } finally {
+    restartingNow = false;
+  }
+};
+const notice = () => {
+  if (!noticeDue || restartingNow) return {};
+  noticeDue = false;
+  return { restarted: true };
+};
+
 const manifest = JSON.parse(await readFile(path.resolve("dist/hubble-module.json"), "utf8"));
 const section = manifest.pages[0].sections[0] as { commands: { id: string }[]; settings?: string[] };
 const declared = new Set<string>(section.commands.map((command) => command.id));
@@ -142,11 +167,12 @@ const pagePath = "/api/module-pages/" + "a".repeat(43);
 const html = `<!doctype html><html lang="en"><meta charset="utf-8"><title>TSL Tally preview</title><style>html,body{margin:0;height:100%;overflow:hidden;background:#060606}iframe{display:block;width:100%;height:100dvh;border:0}</style><iframe title="TSL Tally" sandbox="allow-scripts" src="${pagePath}/ui/index.html"></iframe><script>
 let port; window.addEventListener('message', event => {
   const frame=document.querySelector('iframe');if(event.source!==frame.contentWindow||event.data?.type!=='hubble.module.frontend.ready.v1')return;
-  port?.close();const channel=new MessageChannel();port=channel.port1;
+  window.__loads=(window.__loads||0)+1;port?.close();const channel=new MessageChannel();port=channel.port1;
   port.onmessage=async event=>{const message=event.data;try{const response=await fetch('/__rpc',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(message)});const value=await response.json();
-    // A saved setting restarts the module, and Hubble then reloads the page. So does this.
-    if(value.reload){window.__reloads=(window.__reloads||0)+1;frame.src=frame.src;return;}
-    port.postMessage(value.error?{type:'error',id:message.id,message:value.error}:{type:'result',id:message.id,value:value.result});}catch{port.postMessage({type:'error',id:message.id,message:'Preview bridge disconnected'});}};
+    port.postMessage(value.error?{type:'error',id:message.id,message:value.error}:{type:'result',id:message.id,value:value.result});
+    // A saved setting restarts the module. The page asked to stay open, so Hubble keeps it and
+    // tells it once the module answers again. So does this.
+    if(value.restarted){window.__restarts=(window.__restarts||0)+1;port.postMessage({type:'restarted'});}}catch{port.postMessage({type:'error',id:message.id,message:'Preview bridge disconnected'});}};
   port.start();frame.contentWindow.postMessage({type:'hubble.module.frontend.connect.v1',id:event.data.id},'*',[channel.port2]);
 });
 </script></html>`;
@@ -180,9 +206,10 @@ const server = createServer(async (request, response) => {
         if (input.holdSwitcher) fake.hold();
         if (input.releaseSwitcher) fake.release();
         if (input.settings) {
-          Object.assign(settings, input.settings);
-          await instance.dispose();
-          await startInstance();
+          // A save made somewhere else, such as Module Connections. The open page hears of the
+          // restart with the next thing Hubble sends it.
+          await restartWith(input.settings);
+          noticeDue = true;
         }
         return send({ updated: true });
       }
@@ -195,22 +222,27 @@ const server = createServer(async (request, response) => {
           failNextSettings = false;
           return send({ error: "The workspace refused this save." });
         }
-        if (settingsDelayMs) await new Promise((resolve) => setTimeout(resolve, settingsDelayMs));
-        Object.assign(settings, input.values);
-        await instance.dispose();
-        await startInstance();
-        return send({ result: null, reload: true });
+        await restartWith(input.values);
+        return send({ result: null, restarted: true });
       }
       // Hubble passes a page only the commands its manifest declares, and so does the preview.
       if (!declared.has(input.commandId)) return send({ error: `Module page command is not declared: ${input.commandId}` });
+      if (restartingNow) return send({ error: "Module is restarting" });
       const abort = new AbortController();
       response.on("close", () => abort.abort());
+      const run = running.signal;
+      const stopped = () => abort.abort();
+      run.addEventListener("abort", stopped, { once: true });
       const serving = instance;
       try {
-        return send({ result: await serving.call!(`page.${PAGE_ID}`, { sectionId: PAGE_SECTION_ID, commandId: input.commandId, value: input.value ?? null } as never, { signal: abort.signal, log: () => undefined } as never) });
+        const result = await serving.call!(`page.${PAGE_ID}`, { sectionId: PAGE_SECTION_ID, commandId: input.commandId, value: input.value ?? null } as never, { signal: abort.signal, log: () => undefined } as never);
+        return send({ result, ...notice() });
       } catch (error) {
+        if (run.aborted) return send({ error: "Module is restarting" });
         if (abort.signal.aborted) return void response.end();
-        return send({ error: error instanceof Error ? error.message : "Preview request failed" });
+        return send({ error: error instanceof Error ? error.message : "Preview request failed", ...notice() });
+      } finally {
+        run.removeEventListener("abort", stopped);
       }
     }
     if (url.pathname === "/") {

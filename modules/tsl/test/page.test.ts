@@ -153,6 +153,34 @@ describe("live tally", () => {
     expect(await call<LiveReply>("live", { after: first.version + 99 })).toMatchObject({ full: true, rows: [expect.objectContaining({ address: 1 })] });
   });
 
+  it("gives a page that kept its place from the last run everything at once", async () => {
+    // The module restarted under an open page. Both runs have counted the same number of changes.
+    const before = await world();
+    const after = await world();
+    before.displays.push(display(1));
+    after.displays.push(display(1), display(2));
+    const kept = await before.call<LiveReply>("live", { after: 0 });
+    const fresh = await after.call<LiveReply>("live", { after: 0 });
+    expect(kept.version).toBe(fresh.version);
+    expect(kept.run).not.toBe(fresh.run);
+    // Asked with the old run's place, the new run answers now, not after a wait for a change.
+    const answer = await after.call<LiveReply>("live", { after: kept.version, run: kept.run });
+    expect(answer).toMatchObject({ full: true, run: fresh.run });
+    expect(answer.rows.map((row) => row.address)).toEqual([1, 2]);
+    // With its own place it waits, as before.
+    const gone = new AbortController();
+    const waiting = after.call<LiveReply>("live", { after: answer.version, run: answer.run }, gone.signal);
+    let settled = false;
+    void waiting.then(
+      () => (settled = true),
+      () => (settled = true),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(settled).toBe(false);
+    gone.abort();
+    await expect(waiting).rejects.toThrow();
+  });
+
   it("shows a 3.1 address as four lamps and an address that went stale as stale", async () => {
     const { call, displays } = await world({ settings: { protocol: "3.1" } });
     displays.push(display(5, { protocol: "3.1", flags: [true, false, false, true], fresh: false, label: "  PGM  " }));

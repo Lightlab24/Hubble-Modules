@@ -1,4 +1,4 @@
-import { connectModuleFrontend } from "@hubble/module-sdk/frontend";
+import { connectModuleFrontend, MODULE_RESTARTING_MESSAGE } from "@hubble/module-sdk/frontend";
 import {
   confirm,
   mountSegmented,
@@ -27,8 +27,9 @@ const WORDS = ["Off", "Red", "Green", "Amber"] as const;
 /** 3.1 lamps are only on or off. Tally 2 is program on a Ross switcher, tally 1 preview. */
 const TALLY_31 = ["green", "red", "amber", "amber"] as const;
 const SETTINGS_SAVE_DELAY_MS = 600;
-/** How long to wait for Hubble's reload after a save before letting the page carry on as it is. */
-const RELOAD_WAIT_MS = 5000;
+/** How long the module may take to come back after a save before the page says it did not. */
+const RESTART_WAIT_MS = 10_000;
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const IPV4 = /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/u;
 const clock = (time: number) => new Date(time).toLocaleTimeString([], { hour12: false });
 
@@ -59,7 +60,10 @@ const head = (labels: readonly (readonly [string, string, number?])[]) => {
 try {
   const client = await connectModuleFrontend(window);
   const snapshot = (await client.call("snapshot")) as unknown as PageSnapshot;
+  /** What the page shows for This computer: what the module runs with, plus changes on their way. */
   const receiver: ReceiverSettings = structuredClone(snapshot.receiver);
+  /** What the module runs with. */
+  let saved: ReceiverSettings = structuredClone(snapshot.receiver);
   let switcher: SwitcherDocument = structuredClone(snapshot.switcher.value);
   let revision = snapshot.switcher.revision;
   let reading: SwitcherReading | null = snapshot.reading;
@@ -108,8 +112,9 @@ try {
   const body = document.createElement("tbody");
   const drawn = new Map<string, HTMLTableRowElement>();
   let drawnOrder: string | undefined;
-  const five = receiver.protocol === "5.0";
-  const lampCount = five ? 3 : 4;
+  // The sheet shows what the listener receives, so its columns follow the version it runs with.
+  let five = saved.protocol === "5.0";
+  let lampCount = five ? 3 : 4;
   const paint = (row: HTMLTableRowElement, item: TallyRow, index: number) => {
     row.dataset.stale = String(!item.fresh);
     const cells = row.cells;
@@ -151,11 +156,17 @@ try {
     el("tally-empty").hidden = sorted.length > 0;
     el("tally-none").hidden = sorted.length === 0 || shown.length > 0;
   };
-  const lampHeads = five ? ["Left", "Text", "Right"] : ["Tally 1", "Tally 2", "Tally 3", "Tally 4"];
-  grid.replaceChildren(
-    head([["", "row-number", 44], ["Address", "num", 92], ["Name", "", 300], ...lampHeads.map((label) => [label, "", 96] as const), ["Sender", "", 170]]),
-    body,
-  );
+  const headTally = () => {
+    five = saved.protocol === "5.0";
+    lampCount = five ? 3 : 4;
+    const lampHeads = five ? ["Left", "Text", "Right"] : ["Tally 1", "Tally 2", "Tally 3", "Tally 4"];
+    drawnOrder = undefined;
+    grid.replaceChildren(
+      head([["", "row-number", 44], ["Address", "num", 92], ["Name", "", 300], ...lampHeads.map((label) => [label, "", 96] as const), ["Sender", "", 170]]),
+      body,
+    );
+  };
+  headTally();
   el("find").addEventListener("input", drawTally);
 
   // ----- Setup: whether the two ends agree -----
@@ -217,7 +228,7 @@ try {
   const follow = async () => {
     while (!disposed) {
       try {
-        const reply = (await client.call("live", { after: live.version })) as unknown as LiveReply;
+        const reply = (await client.call("live", { after: live.version, run: live.run })) as unknown as LiveReply;
         if (disposed) return;
         if (reply.full) rows.clear();
         for (const key of reply.removed) rows.delete(key);
@@ -226,63 +237,99 @@ try {
         scheduleTally();
       } catch {
         if (disposed) return;
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        await pause(restarting ? 100 : 1000);
       }
     }
   };
 
   // ----- Setup: this computer. Hubble saves these settings, then restarts the listener. -----
-  // A save ends with Hubble restarting the module and reloading this page. So a save never runs
-  // beside a switcher request, and it waits while a box holds text that hasn't been entered yet.
+  // The page stays open through that restart (`restart: "keep-open"`): nothing is reloaded, a
+  // box in use is left alone, and a change made meanwhile is saved next. A save never runs
+  // beside a switcher request, because the restart would cut the request short.
   let waiting: Partial<ReceiverSettings> = {};
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
-  /** Hubble has a save and is about to reload this page. */
+  /** Hubble has a save and the module is on its way back. */
   let restarting = false;
-  /** What the module runs with is the snapshot's, until Hubble has taken a save from this page. */
-  let savedIsSnapshot = true;
   let held = 0;
-  let typingIn: EventTarget | null = null;
-  /** A box that was taken off the page or left without a word no longer counts. */
-  const typing = () => typingIn instanceof HTMLElement && typingIn.isConnected && document.activeElement === typingIn;
+  /** Asks the backend, and asks again while the module is between two runs. */
+  const ask = async (command: string, value?: unknown): Promise<unknown> => {
+    const deadline = Date.now() + RESTART_WAIT_MS;
+    for (;;) {
+      try {
+        return await client.call(command, value as never);
+      } catch (error) {
+        if (disposed || text(error, "") !== MODULE_RESTARTING_MESSAGE || Date.now() > deadline) throw error;
+        await pause(100);
+      }
+    }
+  };
+  /** The backend as it stands now, taken into the page without touching what is being edited. */
+  const take = (fresh: PageSnapshot) => {
+    const versionChanged = fresh.receiver.protocol !== saved.protocol;
+    saved = structuredClone(fresh.receiver);
+    Object.assign(receiver, fresh.receiver, waiting);
+    // The switcher setup is the page's own while a change to it is still being saved.
+    if (!saving && !unsaved) {
+      switcher = structuredClone(fresh.switcher.value);
+      revision = fresh.switcher.revision;
+    }
+    reading = fresh.reading;
+    readAt = fresh.readAt;
+    readError = fresh.readError;
+    routeAddress = fresh.routeAddress;
+    rows.clear();
+    for (const row of fresh.live.rows) rows.set(row.key, row);
+    live = fresh.live;
+    if (versionChanged) headTally();
+    redraw();
+  };
+  /** Waits for the module to answer again with these settings, then takes what it says. */
+  const back = async (values: Partial<ReceiverSettings>) => {
+    const deadline = Date.now() + RESTART_WAIT_MS;
+    for (;;) {
+      const fresh = (await client.call("snapshot").catch((error: unknown) => {
+        if (disposed) throw error;
+        return null;
+      })) as unknown as PageSnapshot | null;
+      if (fresh && Object.entries(values).every(([id, value]) => fresh.receiver[id as keyof ReceiverSettings] === value)) return take(fresh);
+      if (Date.now() > deadline) throw new Error("The listener did not come back with these settings");
+      await pause(100);
+    }
+  };
   const flushSettings = () => {
     clearTimeout(saveTimer);
     saveTimer = undefined;
-    if (held || disposed || !Object.keys(waiting).length) return;
-    if (typing() && !restarting) {
-      saveTimer = setTimeout(flushSettings, SETTINGS_SAVE_DELAY_MS);
-      return;
-    }
+    if (held || restarting || disposed) return;
     // A change put back before it was saved is nothing to save, and Hubble would not restart for it.
     const values = Object.fromEntries(
-      Object.entries(waiting).filter(([id, value]) => !savedIsSnapshot || snapshot.receiver[id as keyof ReceiverSettings] !== value),
+      Object.entries(waiting).filter(([id, value]) => saved[id as keyof ReceiverSettings] !== value),
     ) as Partial<ReceiverSettings>;
     waiting = {};
     if (!Object.keys(values).length) return;
     restarting = true;
-    savedIsSnapshot = false;
     say("Saving, then restarting the listener…");
     drawSwitcher();
-    // Hubble reloads the page once the listener has restarted, so nothing waits on success.
-    // Hubble closing this page for that reload is the expected end, not a failure to report.
-    client.saveSettings(values).then(
-      () => {
-        setTimeout(() => {
-          if (disposed) return;
-          restarting = false;
-          say("");
-          drawSwitcher();
-          flushSettings();
-        }, RELOAD_WAIT_MS);
-      },
-      (error: unknown) => {
-        if (disposed || /^Module page (?:closed|reloaded)/u.test(text(error, ""))) return;
-        restarting = false;
-        savedIsSnapshot = true;
+    void (async () => {
+      try {
+        await client.saveSettings(values);
+        await back(values);
+        say("");
+      } catch (error) {
+        if (disposed) return;
+        // What Hubble refused goes back to what the listener runs with, unless changed again since.
+        for (const id of Object.keys(values) as (keyof ReceiverSettings)[])
+          if (!(id in waiting)) Object.assign(receiver, { [id]: saved[id] });
         say(text(error, "These settings could not be saved"), true);
-        drawSwitcher();
         toast("failure", text(error, "These settings could not be saved"));
-      },
-    );
+      } finally {
+        restarting = false;
+        if (!disposed) {
+          redraw();
+          // Changes made while the listener restarted are next.
+          flushSettings();
+        }
+      }
+    })();
   };
   /** Keeps a save back until the switcher request (and any question before it) is over. */
   const hold = async (work: () => Promise<void>) => {
@@ -303,19 +350,40 @@ try {
     drawSwitcher();
     for (const control of controls) control.refresh();
     clearTimeout(saveTimer);
-    // Once Hubble is about to reload the page, a later change has to reach it before that.
-    if (now || restarting) flushSettings();
+    if (now) flushSettings();
     else saveTimer = setTimeout(flushSettings, SETTINGS_SAVE_DELAY_MS);
   };
-  // Typed text that hasn't been entered would be lost in the reload, so the save waits for it.
-  document.addEventListener("input", (event) => {
-    if (event.target instanceof HTMLInputElement && event.target.id !== "find") typingIn = event.target;
-  }, true);
-  for (const done of ["change", "focusout"])
-    document.addEventListener(done, (event) => {
-      if (event.target === typingIn) typingIn = null;
-    }, true);
+  // The module restarted for a reason of its own, such as a save made in Module Connections.
+  client.onRestart(() => {
+    if (restarting || disposed) return;
+    void ask("snapshot").then(
+      (fresh) => {
+        if (!disposed && !restarting) take(fresh as PageSnapshot);
+      },
+      () => undefined,
+    );
+  });
   /** A box keeps what was typed and turns red when it can't be used; nothing is saved until it can. */
+  const shown: (() => void)[] = [];
+  /** Shows a value in its box or list again, unless that is where the person is working. */
+  const show = (input: HTMLInputElement | HTMLSelectElement, value: () => string) => {
+    const write = () => {
+      // Never the box in use, and never one still holding an entry that could not be used.
+      if (document.activeElement === input || input.getAttribute("aria-invalid") === "true") return;
+      input.value = value();
+    };
+    shown.push(write);
+    write();
+  };
+  /** Everything drawn again from what the page holds now. */
+  const redraw = () => {
+    drawStatus();
+    drawSwitcher();
+    drawTally();
+    fillSendTo();
+    for (const control of controls) control.refresh();
+    for (const write of shown) write();
+  };
   const box = <T>(id: string, read: (raw: string) => T | undefined, write: (value: T) => void) => {
     const input = el<HTMLInputElement>(id);
     input.addEventListener("change", () => {
@@ -347,7 +415,7 @@ try {
     }),
   );
   const port = el<HTMLInputElement>("port");
-  port.value = String(receiver.port);
+  show(port, () => String(receiver.port));
   box("port", whole(1, 65535), (value) => setReceiver({ port: value }));
   const bind = el<HTMLSelectElement>("bind");
   fill(
@@ -362,13 +430,15 @@ try {
     ],
     receiver.bindAddress,
   );
+  show(bind, () => receiver.bindAddress);
   bind.addEventListener("change", () => setReceiver({ bindAddress: bind.value }));
-  el<HTMLInputElement>("sender").value = receiver.sourceAddress;
+  show(el<HTMLInputElement>("sender"), () => receiver.sourceAddress);
   box("sender", (raw) => (raw === "" || IPV4.test(raw) ? raw : undefined), (value) => setReceiver({ sourceAddress: value }));
-  el<HTMLInputElement>("stale").value = String(receiver.staleAfterMs);
+  show(el<HTMLInputElement>("stale"), () => String(receiver.staleAfterMs));
   box("stale", (raw) => (raw === "0" ? 0 : whole(1000, 3_600_000)(raw)), (value) => setReceiver({ staleAfterMs: value }));
   const peer = el<HTMLSelectElement>("peer");
   fill(peer, [{ id: "", label: "Automatic (the only TALLY Switch)" }, ...snapshot.peers], receiver.routingPeer);
+  show(peer, () => receiver.routingPeer);
   peer.addEventListener("change", () => setReceiver({ routingPeer: peer.value }));
   el("match").addEventListener("click", () => {
     if (!match) return;
@@ -387,10 +457,10 @@ try {
         while (unsaved && !disposed) {
           unsaved = false;
           const value = structuredClone(switcher);
-          let reply = (await client.call("save-switcher", { value, revision })) as unknown as { status: string; revision: string | null };
+          let reply = (await ask("save-switcher", { value, revision })) as unknown as { status: string; revision: string | null };
           // Someone else saved in between. This edit is the newer one, so it goes on top.
           if (reply.status === "conflict")
-            reply = (await client.call("save-switcher", { value, revision: reply.revision })) as unknown as typeof reply;
+            reply = (await ask("save-switcher", { value, revision: reply.revision })) as unknown as typeof reply;
           if (reply.status !== "saved") throw new Error("The switcher setup changed elsewhere. Try again");
           revision = reply.revision;
         }
@@ -553,7 +623,7 @@ try {
         tab = value as "tally" | "setup";
         showTab();
         // Remembered on this computer, so the page comes back to the same tab after a restart.
-        void client.call("view", { tab }).catch(() => undefined);
+        void ask("view", { tab }).catch(() => undefined);
       },
     }),
   );

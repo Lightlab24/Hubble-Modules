@@ -27,6 +27,8 @@ export default defineModuleManifest({
       "module-custom-pages-full-page-v1",
       // The page saves this module's own receiver settings.
       "module-frontend-settings-v1",
+      // And it stays open while the listener restarts for them.
+      "module-frontend-restart-v1",
       "module-theme-v1",
       "module-controls-v1",
       // The Tally and Setup tabs sit on one line in the toolbar.
@@ -189,6 +191,8 @@ export default defineModuleManifest({
           height: 560,
           commands: PAGE_COMMANDS.map((command) => ({ ...command })),
           settings: [...PAGE_SETTINGS],
+          // Saving one of them restarts the listener. The page stays as it is meanwhile.
+          restart: "keep-open",
         },
       ],
     },

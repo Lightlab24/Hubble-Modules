@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import dgram from "node:dgram";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -59,6 +60,11 @@ export interface TallyRow {
   readonly fresh: boolean;
 }
 export interface LiveReply {
+  /**
+   * Which run of the module counted `version`. The page hands both back; a place kept from a
+   * run that has stopped means nothing to the next one, even when the numbers happen to agree.
+   */
+  readonly run: string;
   readonly version: number;
   /** True when rows is the whole list, false when it is only what changed. */
   readonly full: boolean;
@@ -177,6 +183,7 @@ export function routeAddress(host: string, timeoutMs = 800): Promise<string | nu
 export class TslPage {
   private rows = new Map<string, { row: TallyRow; signature: string; version: number }>();
   private removed = new Map<string, number>();
+  private readonly run = randomUUID();
   private version = 0;
   private fullBefore = 0;
   private waiters = new Set<() => void>();
@@ -241,9 +248,13 @@ export class TslPage {
     for (const wake of [...this.waiters]) wake();
   }
 
-  private live(after: number): LiveReply {
+  /** A page that is starting, is behind, or kept its place from another run gets everything. */
+  private behind(after: number, run: string | undefined): boolean {
+    return (run !== undefined && run !== this.run) || after <= 0 || after > this.version;
+  }
+  private live(after: number, run?: string): LiveReply {
     const state = this.receiver()?.snapshot();
-    const full = after <= 0 || after < this.fullBefore || after > this.version;
+    const full = this.behind(after, run) || after < this.fullBefore;
     const rows = [...this.rows.values()].filter((entry) => full || entry.version > after).map((entry) => entry.row);
     let lastPacketAt: number | null = null;
     let lastSender: string | null = null;
@@ -253,6 +264,7 @@ export class TslPage {
         lastSender = display.sourceAddress;
       }
     return {
+      run: this.run,
       version: this.version,
       full,
       rows,
@@ -267,11 +279,11 @@ export class TslPage {
     };
   }
 
-  private async waitLive(after: number, signal: AbortSignal): Promise<LiveReply> {
+  private async waitLive(after: number, run: string | undefined, signal: AbortSignal): Promise<LiveReply> {
     // A page that already went away must not hold a wait open.
     signal.throwIfAborted();
     // A page that is starting, or is behind, gets everything as it stands right now.
-    if (after <= 0 || after > this.version) this.collectNow();
+    if (this.behind(after, run)) this.collectNow();
     else if (after === this.version && !this.closed)
       await new Promise<void>((resolve) => {
         const wake = () => {
@@ -286,7 +298,7 @@ export class TslPage {
         this.waiters.add(wake);
       });
     signal.throwIfAborted();
-    return this.live(after);
+    return this.live(after, run);
   }
 
   private load(): Promise<void> {
@@ -421,8 +433,8 @@ export class TslPage {
       case "snapshot":
         return json(await this.snapshot(signal));
       case "live": {
-        const { after } = z.object({ after: z.int().min(0) }).parse(request.value);
-        return json(await this.waitLive(after, signal));
+        const { after, run } = z.object({ after: z.int().min(0), run: z.string().max(64).optional() }).parse(request.value);
+        return json(await this.waitLive(after, run, signal));
       }
       case "view": {
         const { tab } = z.object({ tab: z.enum(["tally", "setup"]) }).parse(request.value);

@@ -13,8 +13,11 @@ its tally to this computer.
 - **Setup** holds every setting of the link in one place:
   - **This computer** is the receiver. These are the module's own settings; the page saves
     them through Hubble (`settings` on the custom section, `module-frontend-settings-v1`),
-    which restarts the listener and reloads the page. The open tab and the last switcher
-    reading are kept in the runtime directory so the page comes back where it was.
+    which restarts the listener. The page stays open meanwhile (`restart: "keep-open"`,
+    `module-frontend-restart-v1`): it then reads everything again and redraws in place,
+    leaving the box in use alone. A change made during the restart is saved next. The open
+    tab and the last switcher reading are kept in the runtime directory, so they are still
+    there after Hubble itself restarts.
   - **Ross switcher** is the one TSL UMD device the switcher keeps for this computer. Its
     settings are saved in the `switcher` document, with the workspace, and reach the
     switcher only on **Send to switcher**.
