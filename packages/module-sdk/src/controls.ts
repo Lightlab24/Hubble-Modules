@@ -6,6 +6,16 @@
 import type { ModuleTimecodeFrameRate } from "./timecode.js";
 
 export const MODULE_CONTROLS_FEATURE = "module-controls-v1";
+/** The one-line toolbar layout for a switch or a segmented control. */
+export const MODULE_CONTROLS_INLINE_FEATURE = "module-controls-inline-v1";
+
+/**
+ * How a control sits beside its label. `stacked` is the form layout. `inline` puts the
+ * label, the control and its value on one line for a toolbar, and floats any status text
+ * under it so an error never changes the toolbar's height. A Hubble without
+ * module-controls-inline-v1 ignores it and draws the control stacked.
+ */
+export type ControlLayout = "stacked" | "inline";
 
 /** What the device last confirmed, and whether a command is on its way. Shared by inputs. */
 export interface ControlFeedback<T> {
@@ -41,6 +51,7 @@ export interface SwitchState extends ControlFeedback<boolean> {
   readonly offLabel?: string | undefined;
 }
 export interface SwitchOptions extends MountBase<SwitchState> {
+  readonly layout?: ControlLayout | undefined;
   /** Fires once per flip. Update the value getState() returns immediately. */
   onCheckedChange(checked: boolean): void;
 }
@@ -55,6 +66,7 @@ export interface SegmentedState extends ControlFeedback<string> {
   readonly options: readonly SegmentedOption[];
 }
 export interface SegmentedOptions extends MountBase<SegmentedState> {
+  readonly layout?: ControlLayout | undefined;
   onValueChange(value: string): void;
 }
 

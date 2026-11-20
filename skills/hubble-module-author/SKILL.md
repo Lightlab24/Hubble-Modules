@@ -26,6 +26,11 @@ under `ui/` that is listed in `files` (at most 256 KB) and require `module-page-
 Hubble fits it into the 16-pixel icon slot in full colour, so prefer an SVG or a PNG of at
 least 128 pixels so it stays sharp when HubDash is zoomed. The operator can still pick their
 own icon for the tab.
+To show a count on a page's sidebar tab, such as alerts waiting, set `pages[].badge` to
+`{ value: "<name>" }` and require `module-page-badges-v1`. Hubble reads the published state
+value with that name and shows it while it is a whole number above zero; zero, a missing
+value or a module that isn't running shows no badge. `tone` is `alert` (red, the default)
+or `info`. The count follows the module's published state, so publish when it changes.
 A page can also set `pages[].wideIcon`, a wide logo such as a wordmark, with the same file
 rules, requiring `module-page-wide-icons-v1`. Hubble shows it beside the label in the expanded
 sidebar, fitted into 44 by 16 pixels, and `icon` when the sidebar is collapsed.

@@ -152,6 +152,35 @@ state. `getState` is read again after every callback. The runtime comes from the
 `/api/module-controls/controls-v1.js`, adds nothing to your package and needs no extra
 frame permissions.
 
+## One line in a toolbar
+
+A switch or a segmented control normally stacks: the label sits above a row of buttons,
+and On or Off sits under the switch's track. In a toolbar that makes one control taller
+than its neighbours. Pass `layout: "inline"` to `mountSwitch` or `mountSegmented` to put
+the label, the control and its value on one line:
+
+```ts
+await mountSegmented({
+  root: element,
+  label: "Show last",
+  layout: "inline",
+  getState: () => ({ value, options }),
+  onValueChange: (next) => {
+    value = next;
+  },
+});
+```
+
+- The switch keeps room for the longer of its two labels, so flipping it moves nothing
+  beside it.
+- Status and error text floats under the control instead of adding a line, so an error
+  never changes the toolbar's height.
+- `layout: "stacked"` is the default and is what every existing page gets.
+
+This needs `module-controls-inline-v1` (Hubble 2.3.1). A Hubble without it ignores the
+option and draws the control stacked, so a page that only looks better with it need not
+require the feature. Require it when the page's layout depends on the single line.
+
 ## Who owns what
 
 Each control owns presentation and interaction. It shows a change at once without

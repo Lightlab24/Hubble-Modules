@@ -282,6 +282,17 @@ export const ModulePageSchema = z.strictObject({
       /^ui\/(?:[A-Za-z0-9_][A-Za-z0-9_.-]*\/)*[A-Za-z0-9_][A-Za-z0-9_.-]*\.(?:svg|png|jpe?g|webp)$/u,
     )
     .optional(),
+  /**
+   * A count on the page's sidebar tab, such as alerts waiting. Hubble reads the published state value named by
+   * `value` and shows it while it is a whole number above zero; anything else shows no badge. `tone` is `alert`
+   * (the default, red) or `info`. Requires module-page-badges-v1.
+   */
+  badge: z
+    .strictObject({
+      value: z.string().min(1).max(96),
+      tone: z.enum(["alert", "info"]).optional(),
+    })
+    .optional(),
   sections: z
     .array(
       z.discriminatedUnion("type", [
@@ -1009,6 +1020,20 @@ export const ModuleManifestSchema = z
             path: ["pages", pageIndex, "navigation"],
             message: "Page composition requires module-page-navigation-v1",
           });
+        if (page.badge !== undefined) {
+          if (!features.includes("module-page-badges-v1"))
+            ctx.addIssue({
+              code: "custom",
+              path: ["pages", pageIndex, "badge"],
+              message: "A page badge requires module-page-badges-v1",
+            })
+          if (page.placement === "module-settings")
+            ctx.addIssue({
+              code: "custom",
+              path: ["pages", pageIndex, "badge"],
+              message: "Only sidebar pages show a badge",
+            })
+        }
         if (page.wideIcon !== undefined) {
           if (!features.includes("module-page-wide-icons-v1"))
             ctx.addIssue({
