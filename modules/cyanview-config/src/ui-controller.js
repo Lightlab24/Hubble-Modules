@@ -302,7 +302,7 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideFinished, se
   function renderCameras(){
     const scrolls=new Map([...root.querySelectorAll('[data-controller]')].map(el=>[el.dataset.controller,el.querySelector('.hc-scroll')?.scrollLeft||0]));
     $('controllers').innerHTML=orderedDevices().map(d=>{
-      const rows=cameras.filter(c=>c.device===d.id),open=openControllers.has(d.id),selection=cellSelections.get(d.id)||['C2',rows[0]?.name||''];
+      const rows=cameras.filter(c=>c.device===d.id&&!c.leftBehind),open=openControllers.has(d.id),selection=cellSelections.get(d.id)||['C2',rows[0]?.name||''];
       return '<section class="hc-controller" data-controller="'+d.id+'"><div class="hc-controller-header"><button class="hc-controller-handle" draggable="true" data-reorder-handle="'+d.id+'" aria-label="Reorder '+esc(d.name)+'" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" data-tooltip="Drag to reorder; Alt + up/down also moves this device">'+icon('grip-vertical')+'</button><button class="hc-controller-expander" data-action="toggle-controller" data-id="'+d.id+'" aria-expanded="'+open+'" aria-controls="hc-controller-'+d.id+'">'+icon(open?'chevron-down':'chevron-right')+'<strong>'+esc(d.name)+'</strong><span class="hc-device-type">'+d.kind+'</span><span class="hc-controller-serial">'+esc(d.serial)+'</span></button><span class="hc-controller-camera-count">'+rows.length+' camera'+(rows.length===1?'':'s')+'</span>'+cameraControlCount(d)+status(d.online)+'<span class="hc-controller-pending" data-controller-pending></span></div><div id="hc-controller-'+d.id+'"'+(!open?' hidden':'')+'><div class="hc-controller-tools">'+cameraCountControl(d.id)+'<button class="hc-danger" data-action="delete-controller" data-id="'+d.id+'" disabled>'+icon('trash-2')+'<span data-camera-delete-label>Delete camera</span></button>'+cameraControlTools(d)+'<span class="hc-right"></span><button class="hc-danger" data-action="clear-device-cameras" data-id="'+d.id+'"'+(rows.length?'':' disabled')+'>'+icon('eraser')+'Clear all cameras</button><button class="hc-danger" data-action="remove-device" data-id="'+d.id+'" aria-label="Remove '+esc(d.name)+' from managed list">'+icon('trash-2')+'Remove device</button><button class="hc-button" data-action="send-controller" data-id="'+d.id+'">'+icon('send')+'Send changes <span>0</span></button>'+cameraSelectionStrip(d.id)+'</div><div class="hc-sheet"><div class="hc-scroll"><table class="hc-grid" role="grid" data-camera-device="'+d.id+'" aria-label="Camera and lens spreadsheet for '+esc(d.name)+'">'+cameraGrid(rows,d.id)+'</table></div></div><span class="hc-visually-hidden" data-connection-note>'+esc(connectionNote(d))+'</span></div></section>';
     }).join('');syncSummary();icons();
     for(const [id,left] of scrolls){const scroll=root.querySelector('[data-controller="'+id+'"] .hc-scroll');if(scroll)scroll.scrollLeft=left;}
@@ -1936,7 +1936,7 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideFinished, se
       if (!fields.length) continue;
       // What it was before the first edit since the last send, which is what Cancel goes back to.
       const row = rows.find(item => item.id === old.id);
-      for (const field of fields) if (!['routeDraft', 'device', 'remiMaster', 'removeStaged'].includes(field) && !(field in (row.sentValues ??= {}))) row.sentValues[field] = old.values[field] ?? null;
+      for (const field of fields) if (!['routeDraft', 'device', 'remiMaster', 'removeStaged', 'leftBehind'].includes(field) && !(field in (row.sentValues ??= {}))) row.sentValues[field] = old.values[field] ?? null;
       // Undo belongs to the sheet the edit was made on.
       const id = virtualSheet(tab) ?? row.device;
       if (!byDevice.has(id)) byDevice.set(id, []);
@@ -2012,22 +2012,23 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideFinished, se
 
   function reviewCameraDeletion(camera) {
     if (!camera || camera.deleting) return;
-    if (importedCamera(camera) && !camera.remi) {
-      toast('Refresh the REMI assignment before removing this camera');
+    if (importedCamera(camera) && !camera.elementKey) {
+      toast('Refresh this controller before removing this copy');
       return;
     }
     showReview([camera], 'camera', true);
     $('modal-layer').querySelector('.hc-modal-foot [data-action="close-modal"]').focus();
   }
 
+  // A copy whose source is off or gone isn't imported any more, so its controller deletes it on its own.
   function deleteReviewedCamera(camera) {
     if (!camera || camera.deleting) return;
     if (!importedCamera(camera)) {
       void sendItems([camera], 'camera', true);
-    } else if (camera.remi) {
+    } else if (camera.elementKey) {
       remiStage(camera.device, [{
         id: 'remove:' + camera.elementKey, kind: 'remove', key: camera.elementKey, enable: false,
-        selector: camera.remi.selector, connection: camera.remi.connection, label: camera.name,
+        ...(camera.remi ? { selector: camera.remi.selector, connection: camera.remi.connection } : {}), label: camera.name,
       }]);
     }
   }
@@ -2607,10 +2608,26 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideFinished, se
   // A copy whose source isn't in this workspace keeps its own row, since nothing else can show it.
   function assignmentRows() {
     const { parents } = routeTree();
-    return cameras.filter(camera => !movesInFlight.has(camera) && (!importedCamera(camera) || !parents.has(camera)));
+    return cameras.filter(camera => !movesInFlight.has(camera) && !camera.leftBehind && (!importedCamera(camera) || !parents.has(camera)));
   }
   function sheetCameras(id) {
-    return id === cameraSetupSheet ? assignmentRows() : id === allCamerasSheet ? matrixRows() : cameras.filter(camera => camera.device === id);
+    return id === cameraSetupSheet ? assignmentRows() : id === allCamerasSheet ? matrixRows() : cameras.filter(camera => camera.device === id && !camera.leftBehind);
+  }
+  // A camera deleted or moved while its controller was off is out of the workspace, but that controller still
+  // has it. Its delete waits in Pending sends until the controller is back.
+  function leaveBehind(camera) {
+    camera.removeStaged = true;
+    camera.leftBehind = true;
+    delete camera.routeDraft;
+    routeErrors.delete(camera.id);
+    if (camera.result === 'Error') camera.result = 'In sync';
+    routeTreeMemo = null;
+  }
+  // Cancelling that delete keeps the camera where it is, so it is back in the sheets.
+  function keepLeftBehind(camera) {
+    delete camera.removeStaged;
+    delete camera.leftBehind;
+    routeTreeMemo = null;
   }
   function matrixRows() { return assignmentRows().filter(camera => !unassigned(camera)); }
   // The camera a copy was made from, however many copies away.
@@ -2981,9 +2998,15 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideFinished, se
       }
     }
     const ready = rows.filter(camera => !stuck.has(camera) && cameras.includes(camera));
-    if (!ready.length) return;
-    await sendItems(ready, 'camera', true);
-    for (const camera of ready) if (cameras.includes(camera)) routeErrors.set(camera.id, 'Not deleted from ' + controllerName(camera.device) + '.');
+    // A controller that is off can't delete its camera yet. Its copies are already off, so the camera leaves
+    // the workspace and the delete waits for that controller.
+    const away = ready.filter(camera => !camera.leftBehind && device(camera.device)?.online === false);
+    for (const camera of away) { leaveBehind(camera); paintItem(camera); }
+    if (away.length) toast(away.length === 1 ? 'Camera ' + away[0].number + ' is out of the workspace. Deleting it from ' + controllerName(away[0].device) + ' waits until it is back online.' : away.length + ' cameras are out of the workspace. Deleting them waits until their controllers are back online.');
+    const reachable = ready.filter(camera => !away.includes(camera));
+    if (!reachable.length) return;
+    await sendItems(reachable, 'camera', true);
+    for (const camera of reachable) if (cameras.includes(camera)) routeErrors.set(camera.id, 'Not deleted from ' + controllerName(camera.device) + '.');
   }
 
   // Everything the sheet shows travels with the camera. A lens connection is a physical port on the
@@ -3051,9 +3074,13 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideFinished, se
       return;
     }
     delete camera.routeDraft;
-    await sendItems([camera], 'camera', true);
+    // The old controller may be off, which is often why the camera is moving. It keeps the camera until it is
+    // back, and deleting it there waits in Pending sends.
+    const oldAway = device(camera.device)?.online === false;
+    if (oldAway) leaveBehind(camera);
+    else await sendItems([camera], 'camera', true);
     movesInFlight.delete(moved);
-    if (cameras.includes(camera)) {
+    if (!oldAway && cameras.includes(camera)) {
       fail('Camera ' + camera.number + ' is now on both ' + target.name + ' and ' + oldName + ': it could not be deleted from the old controller.');
       renderCameras();
       return;
@@ -3064,7 +3091,7 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideFinished, se
     if (routeHasChanges(moved)) await runRoutes([moved]);
     renderCameras();
     remember();
-    toast(lensKept ? 'Camera moved to ' + target.name : 'Camera moved to ' + target.name + ' · choose its lens connection there');
+    toast('Camera moved to ' + target.name + (lensKept ? '' : ' · choose its lens connection there') + (oldAway ? ' · deleting it from ' + oldName + ' waits until it is back online' : ''));
   }
 
   function describeRoute({ source, links }) {
@@ -3109,23 +3136,36 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideFinished, se
   }
   function pendingLines(camera) {
     if (importedCamera(camera) || unassigned(camera)) return [];
+    if (camera.leftBehind) return [{ id: 'delete', label: 'Delete camera', change: 'Deleted from ' + controllerName(camera.device), note: 'It is out of the workspace. Cancel puts it back.' }];
     if (camera.removeStaged) {
       const copies = Object.keys(actualRoute(camera).links).map(controllerName);
       return [{ id: 'delete', label: 'Delete camera', change: 'Deleted from ' + controllerName(camera.device), note: copies.length ? 'Its REMI copies on ' + copies.join(' and ') + ' come off first.' : '' }];
     }
     return [...routeLines(camera), ...settingLines(camera)];
   }
+  // Taking copies off only touches the controllers that hold them, so the camera's own controller can be off.
+  function onlyTakesCopiesOff(camera) {
+    if (!routeHasChanges(camera) || isMove(camera) || camera.pending) return false;
+    const actual = actualRoute(camera).links;
+    return Object.entries(wantedRoute(camera).links).every(([rcp, parent]) => actual[rcp] === parent);
+  }
+  // A delete or a move can go ahead with the camera's own controller off: everything else is done, and the
+  // camera waits to be deleted there. Every other controller it involves has to be on.
+  const ownMayBeOff = camera => !camera.leftBehind && !!camera.elementKey && (!!camera.removeStaged || isMove(camera) || onlyTakesCopiesOff(camera));
   function pendingState(camera) {
     if (camera.deleting || camera.jobs) return { text: 'Sending…', kind: 'active', blocked: true };
     if (queuedSends.has(camera)) return { text: 'Queued', kind: 'active', blocked: true };
     const wanted = wantedRoute(camera), actual = actualRoute(camera);
-    const offline = [...new Set([camera.device, wanted.source, ...Object.keys(actual.links), ...Object.keys(wanted.links)])].filter(id => device(id)?.online === false);
+    const involved = [...new Set([camera.device, wanted.source, ...Object.keys(actual.links), ...Object.keys(wanted.links)])].filter(id => device(id)?.online === false);
+    const ownOff = ownMayBeOff(camera) && involved.includes(camera.device), offline = ownOff ? involved.filter(id => id !== camera.device) : involved;
     const error = routeErrors.get(camera.id) ?? (['Pending', 'Verified', 'In sync', 'Queued', 'Sending', 'Verifying', 'Error'].includes(camera.result) ? '' : camera.result);
     if (error) return { text: error, kind: 'failed', blocked: !!offline.length };
+    if (camera.leftBehind && offline.length) return { text: 'Waits until ' + controllerName(camera.device) + ' is back online', kind: 'offline', blocked: true };
     if (offline.length) return { text: 'Won’t send while ' + offline.map(controllerName).join(' and ') + (offline.length === 1 ? ' is' : ' are') + ' offline', kind: 'offline', blocked: true };
+    if (ownOff) return { text: controllerName(camera.device) + ' is offline. ' + (camera.removeStaged ? 'Its REMI copies come off now and deleting it there waits until it is back.' : isMove(camera) ? 'The camera moves now and deleting it there waits until it is back.' : 'Its REMI copies can still come off.'), kind: 'offline', blocked: false };
     return { text: camera.result === 'Error' ? 'Could not be confirmed' : '', kind: camera.result === 'Error' ? 'failed' : '', blocked: false };
   }
-  const pendingRows = () => sortCameraRows(assignmentRows(), allCamerasSheet).flatMap(camera => { const lines = pendingLines(camera); return lines.length ? [{ camera, lines }] : []; });
+  const pendingRows = () => sortCameraRows([...assignmentRows(), ...cameras.filter(camera => camera.leftBehind)], allCamerasSheet).flatMap(camera => { const lines = pendingLines(camera); return lines.length ? [{ camera, lines }] : []; });
   // REMI changes staged per controller have no camera row to sit on, but they still wait to be sent.
   const remiDraftGroups = () => [...remiPanels].filter(([id, state]) => device(id) && state.drafts.size).map(([id, state]) => ({ id, state, items: [...state.drafts.values()] }));
   const remiDraftLabel = item => item.kind === 'tag' ? (item.enable ? 'Add REMI tag' : 'Remove REMI tag') : item.enable ? 'Import REMI camera' : 'Remove REMI copy';
@@ -3329,7 +3369,7 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideFinished, se
   }
   function cancelLine(camera, line) {
     if (line === 'new') { cameras = cameras.filter(row => row !== camera); queuedSends.delete(camera); return false; }
-    if (line === 'delete') { delete camera.removeStaged; routeErrors.delete(camera.id); if (camera.result === 'Error') camera.result = camera.pending ? 'Pending' : 'In sync'; return false; }
+    if (line === 'delete') { keepLeftBehind(camera); routeErrors.delete(camera.id); if (camera.result === 'Error') camera.result = camera.pending ? 'Pending' : 'In sync'; return false; }
     const unknown = line.startsWith('setting:') && cancelSetting(camera, line.slice(8));
     if (!line.startsWith('setting:')) cancelRouteLine(camera, line);
     camera.pending = !!camera.isNew || camera.dirty.size > 0;
@@ -3390,7 +3430,7 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideFinished, se
   }
   // Refresh all starts again from what the controllers say, so nothing is left waiting to be sent.
   function clearPendingSends() {
-    const cleared = pendingRows().reduce((count, row) => count + row.lines.length, 0) + pendingLans().length + [...remiPanels.values()].reduce((count, state) => count + state.drafts.size, 0);
+    const cleared = pendingRows().filter(row => !row.camera.leftBehind).reduce((count, row) => count + row.lines.length, 0) + pendingLans().length + [...remiPanels.values()].reduce((count, state) => count + state.drafts.size, 0);
     queuedSends.clear();
     routeErrors.clear();
     routeQueue = Promise.resolve();
@@ -3400,6 +3440,8 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideFinished, se
       if (unassigned(camera)) continue;
       // A create with an unknown outcome: the read shows whether it happened.
       if (camera.createState) { cameras = cameras.filter(row => row !== camera); continue; }
+      // A camera already out of the workspace stays out. Its controller still has it, and a read can't change that.
+      if (camera.leftBehind) continue;
       delete camera.routeDraft;
       delete camera.removeStaged;
       // A camera that never reached a controller keeps what was typed, and goes back to having no Source.

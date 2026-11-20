@@ -18,6 +18,17 @@ const sameEntry = (a: RemiEntry, b: RemiEntry) => a.selector === b.selector && a
   a.importer === b.importer && a.peer === b.peer;
 const isImported = (entry: RemiEntry, config: RecordValue) =>
   entry.enabled && !!entry.localKey && isRemiModel(config.Camera?.[entry.localKey]?.Model);
+/**
+ * A copy nothing imports any more. A controller stops listing a source's cameras while that source is off or
+ * gone, and keeps the copies it made from them. A copy names the controller it came from, and one that names
+ * another is not the copy being looked for.
+ */
+const leftBehind = (config: RecordValue, key: string, from?: RecordValue) => {
+  const row = config.Camera?.[key];
+  if (!isRemiModel(row?.Model) || remiEntries(config).some(entry => entry.enabled && entry.localKey === key)) return false;
+  const named = /^\(D\)(cy-[a-z0-9-]+)$/i.exec(String(object(row.Interface).device ?? ''))?.[1];
+  return !from || !named || samePeer(named, from);
+};
 
 export class RemiOperations {
   private tail: Promise<unknown> = Promise.resolve();
@@ -352,12 +363,10 @@ export class RemiOperations {
       touched.add(receiver);
       const entry = remiEntries(target.config).find(candidate => candidate.localKey === key && isImported(candidate, target.config));
       if (!entry) {
-        // Already taken off by hand. Anything else under that key is not this copy.
-        if (target.config.Camera?.[key]) throw stale();
-        if (store.data.links.some(link => link.receiver === receiver && link.entry.localKey === key)) {
-          store.data.links = store.data.links.filter(link => link.receiver !== receiver || link.entry.localKey !== key);
-          await this.repository.writeRemi(store, signal);
-        }
+        // Already taken off by hand, or left behind because its source is off or gone and nothing imports it
+        // any more. Anything else under that key is not this copy.
+        if (target.config.Camera?.[key] && !leftBehind(target.config, key, parent)) throw stale();
+        await this.deleteLeftover(target, receiver, key, store, signal);
         continue;
       }
       if (!samePeer(entry.peer, parent)) throw stale();
@@ -567,10 +576,30 @@ export class RemiOperations {
   }
 
   private async removeRow(target: CyanviewClient, receiver: RecordValue, item: RecordValue, store: Receipt, signal: AbortSignal) {
-    const entry = remiEntries(target.config).find(row => row.localKey === item.key && row.selector === item.selector &&
-      row.connection === item.connection && isImported(row, target.config));
-    if (!entry) throw new Error('The REMI assignment changed. Refresh before removing it.');
-    await this.remove(target, receiver.id, entry, store, signal);
+    const key = String(item.key ?? '');
+    if (!key) throw new Error('Choose a REMI copy to remove');
+    const imports = remiEntries(target.config).filter(row => row.localKey === key && isImported(row, target.config));
+    // A page that no longer knows the import asks with the key alone, and the one import feeding that key is it.
+    const entry = imports.find(row => row.selector === item.selector && row.connection === item.connection) ??
+      (!item.selector && imports.length === 1 ? imports[0] : undefined);
+    if (entry) { await this.remove(target, receiver.id, entry, store, signal); return; }
+    // With its source off or gone, nothing imports the copy any more and it is deleted on its own. One that
+    // something still imports was changed since the page read it.
+    if (target.config.Camera?.[key] && !leftBehind(target.config, key)) {
+      throw new Error(isRemiModel(target.config.Camera[key].Model) ? 'The REMI assignment changed. Refresh before removing it.' : 'This camera is set up on ' + receiver.name + ' itself, not copied to it');
+    }
+    await this.deleteLeftover(target, receiver.id, key, store, signal);
+  }
+
+  private async deleteLeftover(target: CyanviewClient, receiver: string, key: string, store: Receipt, signal: AbortSignal) {
+    if (target.config.Camera?.[key]) {
+      await target.action({ delete: [key] }, signal);
+      await target.waitFor(config => !config.Camera?.[key], signal);
+    }
+    if (store.data.links.some(link => link.receiver === receiver && link.entry.localKey === key)) {
+      store.data.links = store.data.links.filter(link => link.receiver !== receiver || link.entry.localKey !== key);
+      await this.repository.writeRemi(store, signal);
+    }
   }
 
   private async remove(target: CyanviewClient, receiver: string, entry: RemiEntry, store: Receipt, signal: AbortSignal) {

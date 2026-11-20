@@ -900,7 +900,7 @@ test('its layout and the open list come back after a reload', async ({ page, req
   await expect(config(f, RIO).locator('[data-field-header="source"]')).toHaveCount(0);
 });
 
-test('a copy whose source is not known yet says so, and deleting it still asks first', async ({ page, request }) => {
+test('a copy whose source is not known yet says so, and deleting it asks first, then Send takes it off', async ({ page, request }) => {
   const f = await open(page, request);
   const rpc = rpcOf(request);
   const { revision, plan } = await rpc('read-plan');
@@ -913,5 +913,136 @@ test('a copy whose source is not known yet says so, and deleting it still asks f
   await expect(circle(copy, LEAF)).toHaveCount(0);
   await cell(copy, 'name').click();
   await matrix(f).locator('[data-action="delete-controller"]').click();
-  await expect(f.locator('[data-role="toast"]')).toContainText('Refresh the REMI assignment');
+  await expect(f.getByRole('dialog')).toContainText('Remove REMI camera');
+  await f.getByRole('dialog').getByRole('button', { name: 'Stage removal' }).click();
+  await showPending(f);
+  await expect(panel(f).locator('[data-pending-remi-line="remove:copy"]')).toContainText('Remove REMI copy');
+  await sendAll(f);
+  await settle(f);
+  await expect(row(f, 'Old copy')).toHaveCount(0);
+});
+
+// Nov 20, 2026: a RIO went off with camera 8 REMI'd from it. Its copy stayed on the Gateway, and once the RIO
+// was out of Devices nothing could delete the copy.
+test('a copy left on an RCP by a RIO that went off comes off from Pending sends', async ({ page, request }) => {
+  const f = await open(page, request);
+  await circle(row(f, 'Wide'), MASTER).click();
+  await sendAll(f);
+  await settle(f);
+  expect(names((await fleet(request))[1]!)).toEqual(['Wide']);
+  await request.post('/__simulate', { data: { power: { device: 0, on: false } } });
+  // The RIO is taken out of Devices, and the copy's source is no longer known.
+  const rpc = rpcOf(request);
+  const { revision, plan } = await rpc('read-plan');
+  plan.devices = plan.devices.filter((device: { id: string }) => device.id !== RIO);
+  plan.cameras = plan.cameras.filter((camera: { device: string }) => camera.device !== RIO).map(({ remi: _remi, ...camera }: Record<string, unknown>) => camera);
+  await rpc('save-plan', { revision, plan });
+  await page.reload();
+  // A copy has no circles, so the matrix is open once its row is there.
+  await f.locator('[data-tab="assignment"]').click();
+  await f.locator('.hc-panel:not([hidden]) [data-remi-view="matrix"]').click();
+  const copy = row(f, 'Wide');
+  await expect(copy).toHaveCount(1);
+  await cell(copy, 'name').click();
+  await matrix(f).locator('[data-action="delete-controller"]').click();
+  await f.getByRole('dialog').getByRole('button', { name: 'Stage removal' }).click();
+  await sendAll(f);
+  await settle(f);
+  await expect(row(f, 'Wide')).toHaveCount(0);
+  expect(names((await fleet(request))[1]!)).toEqual([]);
+  await expect(f.locator('[data-role="toast"]')).not.toContainText('Refresh');
+});
+
+test('a camera moves to another controller while its RIO is off, and deleting it from the RIO waits for the RIO', async ({ page, request }) => {
+  const f = await open(page, request, { extra: true });
+  await setMaster(f, 'Wide', 'Master RCP');
+  await circle(row(f, 'Wide'), LEAF).click();
+  await sendAll(f);
+  await settle(f);
+  let devices = await fleet(request);
+  expect(names(devices[1]!)).toEqual(['Wide']);
+  expect(names(devices[2]!)).toEqual(['Wide']);
+
+  await request.post('/__simulate', { data: { power: { device: 0, on: false } } });
+  await setSource(f, 'Wide', 'Truck RCP');
+  await showPending(f);
+  await expect(panel(f).locator('.hc-pending-status')).toContainText('Stage RIO is offline. The camera moves now', { timeout: 20000 });
+  await expect(panel(f).locator('[data-action="send-all-pending"]')).toBeEnabled();
+  await sendAll(f);
+  await expect(line(f, 'delete')).toContainText('Deleted from Stage RIO', { timeout: 20000 });
+  await expect(panel(f).locator('.hc-pending-status')).toContainText('Waits until Stage RIO is back online');
+  await expect(panel(f).locator('[data-action="send-all-pending"]')).toBeDisabled();
+
+  // Created on Truck RCP with its settings, and REMI'd again the same way: through Master RCP to Downstream RCP.
+  devices = await fleet(request);
+  const moved = Object.values(devices[3]!.config.Camera).find(camera => camera.Name === 'Wide')!;
+  expect([moved.Number, moved.IP, moved.Port, moved.Model]).toEqual(['1', '10.20.20.1', '80', 'Sony - Venice-IP']);
+  expect(Object.values(devices[1]!.config.Camera).map(camera => camera.Interface?.device)).toEqual(['(D)cy-rcp-1-40']);
+  expect(Object.values(devices[2]!.config.Camera).map(camera => camera.Interface?.device)).toEqual(['(D)cy-rcp-1-20']);
+  // The RIO is off, so it still has the camera.
+  expect(realNames(devices[0]!)).toEqual(['Wide']);
+  await showMatrix(f);
+  await expect(row(f, 'Wide')).toHaveCount(1);
+  await expect(cell(row(f, 'Wide'), 'source')).toHaveText('Truck RCP');
+  await expect(cell(row(f, 'Wide'), 'remiMaster')).toHaveText('Master RCP');
+  await expect(circle(row(f, 'Wide'), LEAF)).toBeChecked();
+  await showSetup(f);
+  await expect(named(setup(f), 'Wide')).toHaveCount(1);
+  await showConfig(f);
+  await expect(named(config(f, RIO), 'Wide')).toHaveCount(0);
+
+  // A reload keeps the camera out of the sheets and its delete waiting.
+  await page.reload();
+  await expect(f.locator('[data-role="saved-label"]')).toContainText('Workspace saved');
+  await showPending(f);
+  await expect(line(f, 'delete')).toContainText('Deleted from Stage RIO');
+  await showMatrix(f);
+  await expect(row(f, 'Wide')).toHaveCount(1);
+
+  // Back online, the delete goes when it is sent.
+  await request.post('/__simulate', { data: { power: { device: 0, on: true } } });
+  await expect(panel(f).locator('[data-action="send-all-pending"]')).toBeEnabled({ timeout: 20000 });
+  await sendAll(f);
+  await settle(f);
+  devices = await fleet(request);
+  expect(realNames(devices[0]!)).toEqual([]);
+  expect(realNames(devices[3]!)).toEqual(['Wide']);
+});
+
+test('a camera deleted while its RIO is off loses its copies now, and Cancel puts it back', async ({ page, request }) => {
+  const f = await open(page, request);
+  await circle(row(f, 'Wide'), MASTER).click();
+  await sendAll(f);
+  await settle(f);
+  await request.post('/__simulate', { data: { power: { device: 0, on: false } } });
+  await cell(row(f, 'Wide'), 'name').click();
+  await matrix(f).locator('[data-action="delete-controller"]').click();
+  await showPending(f);
+  await expect(panel(f).locator('.hc-pending-status')).toContainText('Stage RIO is offline. Its REMI copies come off now', { timeout: 20000 });
+  await sendAll(f);
+  await expect(panel(f).locator('.hc-pending-status')).toContainText('Waits until Stage RIO is back online', { timeout: 20000 });
+  expect(names((await fleet(request))[1]!)).toEqual([]);
+  await expect(row(f, 'Wide')).toHaveCount(0);
+  // Cancel keeps it on the RIO, so it is back in the sheets, without its copy.
+  await group(f, '1 · Wide').getByRole('button', { name: 'Cancel all changes' }).click();
+  await expect(row(f, 'Wide')).toHaveCount(1);
+  await expect(circle(row(f, 'Wide'), MASTER)).not.toBeChecked();
+  await settle(f);
+});
+
+test('a circle can come off while the RIO it starts from is off', async ({ page, request }) => {
+  const f = await open(page, request);
+  await circle(row(f, 'Wide'), MASTER).click();
+  await sendAll(f);
+  await settle(f);
+  await request.post('/__simulate', { data: { power: { device: 0, on: false } } });
+  await circle(row(f, 'Wide'), MASTER).click();
+  await showPending(f);
+  await expect(panel(f).locator('.hc-pending-status')).toContainText('Its REMI copies can still come off', { timeout: 20000 });
+  await sendAll(f);
+  await settle(f);
+  expect(names((await fleet(request))[1]!)).toEqual([]);
+  // Putting a copy back needs the RIO.
+  await circle(row(f, 'Wide'), MASTER).click();
+  await expect(panel(f).locator('.hc-pending-status')).toContainText('Won’t send while Stage RIO is offline');
 });

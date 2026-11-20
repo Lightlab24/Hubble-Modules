@@ -41,7 +41,7 @@ test('Simulated: Discover finds the simulated rig, which is added, reads Online 
   await expect(wide.locator('[data-field="name"]')).toHaveValue('Wide simulated');
   await expect(wide.locator('[data-column="sync"]')).toContainText('In sync');
   await expect(f.locator('[data-role="saved-label"]')).toContainText('Simulated');
-  await page.screenshot({ path: 'artifacts/cyanview-0.1.92-simulated.png' });
+  await page.screenshot({ path: 'artifacts/cyanview-simulated.png' });
   // The preview's own loopback controller was never reached.
   expect((await (await request.get('/__inspect')).json()).actions).toHaveLength(0);
   expect(errors).toEqual([]);
