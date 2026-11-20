@@ -5164,6 +5164,7 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideFinished, se
     simulatedPill.hidden = !facts.simulated;
     setupGuideToggle.setAttribute('aria-pressed', String(open));
     setupGuidePanel.hidden = !open;
+    queueMicrotask(followPointer);
     if (!open) { setupGuidePainted = ''; return; }
     const steps = setupGuideSteps(facts, setupGuideProgress);
     const finished = setupGuideFinished(steps), current = steps.find(step => step.status === 'current')?.id ?? null;
@@ -5253,6 +5254,121 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideFinished, se
   }
   setupGuidePanel.addEventListener('click', onSetupGuideClick);
   setupGuideToggle.addEventListener('click', onSetupGuideClick);
+
+  // Pointers: a pulsing ring on the control the open step needs next, an arrow and a label, in the
+  // Setup Guide's own blue. They follow the step that is open in the panel (or the current one) and
+  // glide to the next control as each part is done. They show only while the panel is open, never
+  // take a click, and keep still for anyone who asked macOS for reduced motion.
+  const pointer = document.createElement('div');
+  pointer.className = 'cv-coach';
+  pointer.setAttribute('aria-hidden', 'true');
+  pointer.hidden = true;
+  pointer.innerHTML = '<div class="cv-coach-ring"></div>' +
+    '<svg class="cv-coach-lines"><defs><marker id="cv-coach-tip" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"/></marker></defs>' +
+    '<g class="cv-coach-lead"><path marker-end="url(#cv-coach-tip)"/></g></svg><div class="cv-coach-bubble"></div>';
+  document.body.append(pointer);
+  const pointerRing = pointer.querySelector('.cv-coach-ring'), pointerLine = pointer.querySelector('.cv-coach-lead path'), pointerLead = pointer.querySelector('.cv-coach-lead'), pointerBubble = pointer.querySelector('.cv-coach-bubble');
+  let pointerKey = '', pointerTimer = null;
+  const shown = el => !!el && !el.hidden && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
+  const openPanel = () => root.querySelector('.hc-panel:not([hidden])');
+  const tabButton = id => root.querySelector('.hc-tabs [data-tab="' + id + '"]');
+  // Where the open step happens next, in the words of the step.
+  function pointerTarget(step) {
+    switch (step.id) {
+      case 'find': {
+        if (tab !== 'devices') return { el: tabButton('devices'), text: 'Open Devices' };
+        if (shown(root.querySelector('[data-action="stop-scan"]'))) return null;
+        const add = root.querySelector('[data-action="add-all-found"]');
+        if (shown(add)) return { el: add, text: 'Add them to Devices' };
+        const range = $('scan-range');
+        if (range?.value) return { el: action('scan'), text: 'Press Discover' };
+        return { el: range?.nextElementSibling?.matches('.hc-dropdown') ? range.nextElementSibling : range, text: 'Pick the network they’re on' };
+      }
+      case 'name': {
+        const d = devices.find(item => !setupGuideNamed(item));
+        if (!d) return null;
+        if (tab !== 'devices') return { el: tabButton('devices'), text: 'Open Devices' };
+        return { el: root.querySelector('[data-device-cell="' + CSS.escape(d.id + ':name') + '"]')?.closest('td'), text: 'Type the name your crew uses' };
+      }
+      case 'cameras': {
+        if (tab !== 'setup') return { el: tabButton('setup'), text: 'Open Camera Configuration' };
+        const sheet = root.querySelector('[data-controller="' + cameraSetupSheet + '"]');
+        const loose = cameras.find(c => c.device === '' && !c.deleting);
+        if (loose) return { el: sheet?.querySelector('tr[data-id="' + CSS.escape(loose.id) + '"] [data-column="source"]'), text: 'Pick the controller it’s plugged into' };
+        if (!cameras.some(c => c.device)) return { el: sheet?.querySelector('[data-count-step="1"]'), text: 'Add a camera' };
+        return null;
+      }
+      case 'send': {
+        if (!pendingSendCounts().total) return null;
+        const panel = openPanel();
+        const quick = panel?.querySelector('[data-action="send-all-pending-quick"]');
+        if (shown(quick)) return { el: quick, text: 'Send them to the controllers' };
+        return { el: panel?.querySelector('.hc-toolbar [data-action="toggle-pending-sends"]') ?? tabButton('setup'), text: 'Open Pending sends' };
+      }
+      case 'remi': {
+        if (tab !== 'assignment' && tab !== 'cameras') return { el: tabButton('assignment'), text: 'Open REMI Matrix' };
+        if (remiByController) return { el: openPanel()?.querySelector('[data-remi-view="matrix"]'), text: 'Show the Matrix' };
+        const box = root.querySelector('[data-controller="' + allCamerasSheet + '"] tbody tr[data-id] [data-column^="remi:"] [role="checkbox"][aria-checked="false"]');
+        return box ? { el: box.closest('[data-column]'), text: 'Fill a circle to send it to that RCP' } : null;
+      }
+    }
+    return null;
+  }
+  // A control that is scrolled away or under something else gets no pointer until it can be clicked.
+  function reachable(el) {
+    if (!shown(el)) return false;
+    const r = el.getBoundingClientRect();
+    if (r.bottom < 0 || r.top > innerHeight || r.right < 0 || r.left > innerWidth) return false;
+    const hit = document.elementFromPoint(Math.min(innerWidth - 1, Math.max(0, r.left + r.width / 2)), Math.min(innerHeight - 1, Math.max(0, r.top + r.height / 2)));
+    return !!hit && (el === hit || el.contains(hit) || hit.contains(el));
+  }
+  function paintPointer(steps) {
+    const open = steps.find(step => step.id === setupGuideExpanded.id && step.status !== 'done');
+    const step = open ?? steps.find(item => item.status === 'current');
+    const found = setupGuideProgress.open && step ? pointerTarget(step) : null;
+    if (!found || !reachable(found.el)) { pointer.hidden = true; pointerKey = ''; return; }
+    pointer.hidden = false;
+    const r = found.el.getBoundingClientRect(), number = steps.indexOf(step) + 1;
+    Object.assign(pointerRing.style, { left: r.left - 5 + 'px', top: r.top - 5 + 'px', width: r.width + 10 + 'px', height: r.height + 10 + 'px' });
+    const key = number + found.text;
+    if (key !== pointerKey) {
+      pointerBubble.innerHTML = '<b>' + number + '</b>' + esc(found.text);
+      pointerBubble.classList.remove('cv-coach-fresh'); void pointerBubble.offsetWidth; pointerBubble.classList.add('cv-coach-fresh');
+      pointerKey = key;
+    }
+    const w = pointerBubble.offsetWidth, h = pointerBubble.offsetHeight, mid = r.left + r.width / 2;
+    let left, top, from, to, route = '';
+    if (found.el.matches('.hc-tab')) {
+      // A tab: the label waits in the empty end of the tab row, and its arrow runs just under the
+      // row and up into the tab, so it crosses no other tab's name.
+      const tabs = found.el.closest('.hc-tabs').getBoundingClientRect(), last = [...found.el.parentElement.querySelectorAll('.hc-tab')].pop().getBoundingClientRect();
+      left = Math.min(last.right + 48, innerWidth - w - 12); top = tabs.top + tabs.height / 2 - h / 2;
+      const under = tabs.bottom + 12, start = left + 18;
+      route = 'M ' + start + ' ' + (top + h + 2) + ' V ' + under + ' H ' + mid + ' V ' + (r.bottom + 9);
+      from = [start, top + h]; to = [mid, r.bottom + 9];
+    } else {
+      // Otherwise under the sheet it points into, so it covers no row; above the control when that won't fit.
+      const sheet = [...(found.el.closest('.hc-panel')?.querySelectorAll('table') ?? [])].find(shown);
+      const sheetBottom = sheet?.getBoundingClientRect().bottom ?? 0;
+      const candidates = [sheetBottom > r.top ? sheetBottom + 58 : r.bottom + 44, r.bottom + 44];
+      top = candidates.find(y => y + h < innerHeight - 8);
+      left = Math.min(Math.max(12, mid - w / 2), innerWidth - w - 12);
+      if (top === undefined) { top = r.top - 44 - h; from = [Math.min(Math.max(mid, left + 16), left + w - 16), top + h + 2]; to = [mid, r.top - 9]; }
+      else { from = [Math.min(Math.max(mid, left + 16), left + w - 16), top - 2]; to = [mid, r.bottom + 9]; }
+    }
+    Object.assign(pointerBubble.style, { left: left + 'px', top: top + 'px' });
+    pointerLine.setAttribute('d', route || 'M ' + from[0] + ' ' + from[1] + ' L ' + to[0] + ' ' + to[1]);
+    pointerLead.dataset.direction = to[1] < from[1] ? 'up' : 'down';
+  }
+  function pointerSteps() { return setupGuideSteps(setupGuideFacts(), setupGuideProgress); }
+  // Layout moves under the pointer as sheets scroll and rows change, so it is redrawn a few times a second while the panel is open.
+  function followPointer() {
+    const open = setupGuideProgress.open && setupGuideLoaded;
+    if (open && pointerTimer === null) pointerTimer = setInterval(() => paintPointer(pointerSteps()), 150);
+    if (!open && pointerTimer !== null) { clearInterval(pointerTimer); pointerTimer = null; }
+    if (!open) { pointer.hidden = true; pointerKey = ''; }
+    else paintPointer(pointerSteps());
+  }
 
   initializeDeviceWorkflow();syncFilter();renderLans();renderCameras();setTab('devices',false);restore(window.openai?.widgetState);
   if(moduleBridge)void initializeBackend();else root.hidden=false;

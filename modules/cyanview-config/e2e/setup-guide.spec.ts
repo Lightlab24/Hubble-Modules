@@ -1,4 +1,4 @@
-import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
+import { test, expect, type Page, type APIRequestContext, type Locator } from '@playwright/test';
 
 // The setup guide is a side panel beside whichever tab is open, drawn like HubDash's Guided setup.
 // These drive it with real clicks against the preview's simulated controllers.
@@ -107,4 +107,99 @@ test('keys that use Cyanview and a press tick the last two steps', async ({ page
   // It opened by itself on this new setup and nobody closed it, so it is still open.
   await expect(panel(page)).toBeVisible();
   await expect(step(page, 'press')).toHaveAttribute('data-status', 'done');
+});
+
+// The pointers: a ring on the control the open step needs next, with an arrow and a label.
+const ring = (page: Page) => ui(page).locator('.cv-coach-ring');
+const label = (page: Page) => ui(page).locator('.cv-coach-bubble');
+async function ringsAround(page: Page, target: Locator) {
+  // The ring sits 5 px outside its control once it has glided there.
+  await expect.poll(async () => {
+    const [a, b] = await Promise.all([ring(page).boundingBox(), target.boundingBox()]);
+    if (!a || !b) return Infinity;
+    return Math.max(Math.abs(a.x + 5 - b.x), Math.abs(a.y + 5 - b.y), Math.abs(a.width - 10 - b.width), Math.abs(a.height - 10 - b.height));
+  }, { timeout: 5000 }).toBeLessThan(2);
+}
+async function simulatedSetup(page: Page, request: APIRequestContext) {
+  await request.post('/__reset', { data: { simulated: true } });
+  await page.goto('/');
+  await expect(ui(page).locator('[data-role="saved-label"]')).toContainText('Simulated');
+  await expect(panel(page)).toBeVisible();
+}
+async function findRig(page: Page) {
+  const f = ui(page);
+  await f.getByRole('button', { name: 'Network range', exact: true }).click();
+  await f.getByRole('listbox', { name: 'Network range' }).getByRole('option', { name: '10.192.0.0/16', exact: true }).click();
+  await f.getByRole('button', { name: 'Discover', exact: true }).click();
+  await f.locator('[data-action="add-all-found"]').click();
+  await expect(f.locator('[data-role="device-count"]')).toHaveText('3');
+}
+
+test('pointers lead through finding and naming the controllers, and glide on as each part is done', async ({ page, request }) => {
+  await simulatedSetup(page, request);
+  const f = ui(page);
+  await expect(label(page)).toHaveText('1Pick the network they’re on');
+  await ringsAround(page, f.getByRole('button', { name: 'Network range', exact: true }));
+  await f.getByRole('button', { name: 'Network range', exact: true }).click();
+  await f.getByRole('listbox', { name: 'Network range' }).getByRole('option', { name: '10.192.0.0/16', exact: true }).click();
+  await expect(label(page)).toHaveText('1Press Discover');
+  await ringsAround(page, f.getByRole('button', { name: 'Discover', exact: true }));
+  // The ring takes no click: the control under it is pressed through it.
+  await f.getByRole('button', { name: 'Discover', exact: true }).click();
+  await expect(label(page)).toHaveText('1Add them to Devices');
+  await ringsAround(page, f.locator('[data-action="add-all-found"]'));
+  await f.locator('[data-action="add-all-found"]').click();
+  // Step 2 is open now, and its label carries its number.
+  await expect(label(page)).toHaveText('2Type the name your crew uses');
+  const names = f.locator('input.hc-device-name');
+  await ringsAround(page, names.nth(0).locator('xpath=ancestor::td[1]'));
+  await names.nth(0).fill('Stage RIO'); await names.nth(0).press('Enter');
+  await ringsAround(page, names.nth(1).locator('xpath=ancestor::td[1]'));
+  // The label never sits on the sheet's rows.
+  const [sheet, bubble] = await Promise.all([f.locator('[data-role="device-sheet"] table, table:has(input.hc-device-name)').first().boundingBox(), label(page).boundingBox()]);
+  expect(bubble!.y).toBeGreaterThan(sheet!.y + sheet!.height);
+});
+
+test('a step opened from the panel is pointed at, its tab first', async ({ page, request }) => {
+  await simulatedSetup(page, request);
+  const f = ui(page);
+  await step(page, 'cameras').getByRole('button', { name: /Add your cameras/ }).click();
+  await expect(label(page)).toHaveText('3Open Camera Configuration');
+  await ringsAround(page, f.locator('.hc-tabs [data-tab="setup"]'));
+  await f.locator('.hc-tabs [data-tab="setup"]').click();
+  await expect(label(page)).toHaveText('3Add a camera');
+  await ringsAround(page, f.locator('[data-controller="__camera-setup__"] [data-count-step="1"]'));
+  await step(page, 'remi').getByRole('button', { name: /Share cameras with REMI/ }).click();
+  await expect(label(page)).toHaveText('5Open REMI Matrix');
+  await ringsAround(page, f.locator('.hc-tabs [data-tab="assignment"]'));
+});
+
+test('an edit waiting to send is pointed at Send, and the pointer goes once it is sent', async ({ page, request }) => {
+  await simulatedSetup(page, request);
+  const f = ui(page);
+  await findRig(page);
+  await step(page, 'name').getByRole('button', { name: 'Skip for now' }).click();
+  // Nothing on the page is left for the steps after, so there is no pointer.
+  await expect(ui(page).locator('.cv-coach')).toBeHidden();
+  await f.locator('[data-tab="assignment"]').click().then(() => f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
+  const rio = f.locator('[data-controller="CY-RIO-1-10"]'), wide = rio.locator('tr[data-id]').first();
+  if (!await wide.isVisible()) await rio.locator('[data-action="toggle-controller"]').click();
+  await wide.locator('[data-field="name"]').fill('Wide practice'); await wide.locator('[data-field="name"]').press('Enter');
+  await expect(label(page)).toHaveText('4Send them to the controllers');
+  const quick = f.locator('.hc-panel:not([hidden]) [data-action="send-all-pending-quick"]');
+  await ringsAround(page, quick);
+  await quick.click();
+  await expect(wide.locator('[data-column="sync"]')).toContainText('In sync');
+  await expect(ui(page).locator('.cv-coach')).toBeHidden();
+});
+
+test('no pointer while the panel is shut, and a still one for reduced motion', async ({ page, request }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await simulatedSetup(page, request);
+  await expect(label(page)).toBeVisible();
+  await expect(ring(page)).toHaveCSS('animation-name', 'none');
+  await panel(page).getByRole('button', { name: 'Close setup guide' }).click();
+  await expect(ui(page).locator('.cv-coach')).toBeHidden();
+  await ui(page).getByRole('button', { name: 'Setup guide', exact: true }).click();
+  await expect(label(page)).toHaveText('1Pick the network they’re on');
 });
