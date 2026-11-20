@@ -365,67 +365,23 @@ test('the bin marks a camera for deleting, and Send deletes it with its copies',
   expect(names(after[2]!)).toEqual([]);
 });
 
-test('Clear from view forgets a camera here only, and a read brings it back to clear or delete again', async ({ page, request }) => {
+// Nov 20, 2026: the user asked to remove hide. The bin is the one way to take a camera out.
+test('a camera can only be deleted, not hidden: no Clear from view on its row, the toolbar or right-click', async ({ page, request }) => {
   const f = await open(page, request, { direct: true });
-  await circle(row(f, 'Jib'), LEAF).click();
-  await sendAll(f);
-  await settle(f);
-  const before = (await fleet(request)).map(device => device.actions.length);
   await showSetup(f);
   const jib = named(setup(f), 'Jib');
-  await jib.locator('[data-action="clear-from-view"]').click();
-  await expect(jib).toHaveCount(0);
-  // Its copy lives in its row, so it doesn't turn up as a row of its own.
-  await expect(setup(f).locator('tbody tr[data-id]')).toHaveCount(1);
-  await expect(f.locator('[data-role="toast"]')).toContainText('cleared from view');
-  await settle(f);
-  expect((await fleet(request)).map(device => device.actions.length)).toEqual(before);
-  expect(names((await fleet(request))[1]!)).toEqual(['Jib']);
-
-  // Undo restores it, copy included.
-  await cell(named(setup(f), 'Wide'), 'name').click();
-  await gridOf(named(setup(f), 'Wide')).press('Meta+z');
-  await expect(named(setup(f), 'Jib')).toHaveCount(1);
-  await showMatrix(f);
-  await expect(circle(row(f, 'Jib'), LEAF)).toBeChecked();
-
-  await showSetup(f);
-  await named(setup(f), 'Jib').locator('[data-action="clear-from-view"]').click();
-  await expect(f.locator('[data-role="saved-label"]')).toContainText('Workspace saved');
-  await page.reload();
-  await showSetup(f);
-  await expect(named(setup(f), 'Jib')).toHaveCount(0);
-  await expect.poll(async () => (await rpcOf(request)('read-plan')).plan.cameras.map((camera: { name: string }) => camera.name)).toEqual(['Wide']);
-
-  // The controller still has it, so a read brings it back to delete for real.
-  await f.locator('[data-action="refresh-all"]').click();
-  await expect(named(setup(f), 'Jib')).toHaveCount(1);
-  await expect(setup(f).locator('tbody tr[data-id]')).toHaveCount(2);
-  await named(setup(f), 'Jib').locator('[data-action="stage-remove"]').click();
+  await expect(jib.locator('td.hc-row-remove button')).toHaveCount(1);
+  await expect(jib.locator('[data-action="stage-remove"]')).toBeVisible();
+  await expect(f.locator('[data-action="clear-from-view"], [data-action="clear-selected"]')).toHaveCount(0);
+  await expect(f.getByText('Clear from view')).toHaveCount(0);
+  await cell(jib, 'name').click({ button: 'right' });
+  await expect(f.getByRole('menuitem', { name: 'Delete camera' })).toBeVisible();
+  await expect(f.getByRole('menuitem', { name: 'Clear from view' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await jib.locator('[data-action="stage-remove"]').click();
+  await expect(jib).toHaveClass(/hc-remove-staged/);
+  await showPending(f);
   await expect(line(f, 'delete')).toBeVisible();
-  await sendAll(f);
-  await settle(f);
-  expect(names((await fleet(request))[1]!)).toEqual([]);
-  expect(names((await fleet(request))[2]!)).toEqual([]);
-});
-
-test('several selected cameras clear together, and a copy with no known source can be cleared', async ({ page, request }) => {
-  const f = await open(page, request, { direct: true });
-  const rpc = rpcOf(request), { revision, plan } = await rpc('read-plan');
-  plan.cameras.push({ id: 'old-copy', device: MASTER, elementKey: 'copy', number: '5', name: 'Old copy', model: 'Cyan - Imported', modelLabel: 'Cyan - Imported', dirty: [], isNew: false, result: 'In sync' });
-  await rpc('save-plan', { revision, plan });
-  await page.reload();
-  await showSetup(f);
-  const copy = named(setup(f), 'Old copy'), clear = setup(f).locator('[data-action="clear-selected"]');
-  await expect(clear).toBeDisabled();
-  await copy.locator('[data-action="clear-from-view"]').click();
-  await expect(copy).toHaveCount(0);
-  await cell(named(setup(f), 'Wide'), 'name').click();
-  await gridOf(named(setup(f), 'Wide')).press('Shift+ArrowDown');
-  await expect(clear).toHaveText('Clear 2 from view');
-  await clear.click();
-  await expect(setup(f).locator('tbody tr[data-id]')).toHaveCount(0);
-  expect((await fleet(request)).map(names)).toEqual([['Wide'], ['Jib'], []]);
 });
 
 test('Refresh all clears everything waiting to be sent and shows what the controllers have', async ({ page, request }) => {

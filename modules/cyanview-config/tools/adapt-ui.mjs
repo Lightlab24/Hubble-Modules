@@ -29,7 +29,7 @@ export async function buildUiAdapter() {
   replaceBetween("  function sendItems(", "  function showReview(", await readFile(path.join(root, 'src/ui-send-workflows.js'), 'utf8'));
   replace("group.querySelector('[data-action=\"delete-controller\"]').disabled=!cameras.some(c=>c.device===d.id&&selectedCameras.has(c.id));", "syncCameraDeleteButton(group);");
   // A camera deleted or moved while its controller was off is out of the workspace, though that controller still has it.
-  replace("const rows=cameras.filter(c=>c.device===d.id),open=openControllers.has(d.id)", "const rows=cameras.filter(c=>c.device===d.id&&!c.leftBehind),open=openControllers.has(d.id)");
+  replace("const rows=cameras.filter(c=>c.device===d.id),open=openControllers.has(d.id)", "const rows=cameras.filter(c=>c.device===d.id&&!c.leftBehind&&!c.foreign),open=openControllers.has(d.id)");
   replace("    syncSummary();icons();\n  }\n  function inputCell", "    if(item.deleting&&row)row.querySelectorAll('[data-field],input[data-lens-axis]').forEach(el=>el.disabled=true);\n    paintCameraColumn(item);\n    paintIrisSwap(item);\n    syncSummary();icons();\n  }\n  function inputCell");
   replace("row.querySelectorAll('input[data-field],select[data-field]')", "row.querySelectorAll('[data-field]')");
   replace("+' for '+(device(row.device)?.name||'new row'))+'\"'+(disabled?' disabled':'')", "+' for '+(device(row.device)?.name||'new row'))+'\"'+(disabled||row.deleting?' disabled':'')");
@@ -54,7 +54,7 @@ export async function buildUiAdapter() {
     // columns keep the delete button on screen however far the sheet scrolls.
     if (deviceId !== allCamerasSheet) {
       columns.splice(columns.findIndex(column => column.id === 'password') + 1, 0, deviceId === cameraSetupSheet ? { id: 'source', label: 'Source', width: 140 } : { id: 'remiMaster', label: 'Master RCP', width: 130 });
-      columns.splice(columns.findIndex(column => column.id === 'name') + 1, 0, { id: 'remove', label: '', width: 62, tool: true, frozen: 0 });
+      columns.splice(columns.findIndex(column => column.id === 'name') + 1, 0, { id: 'remove', label: '', width: 34, tool: true, frozen: 0 });
     }
     columns.push({ id: 'sync', label: 'Sync', width: 70 });
     if (deviceId === allCamerasSheet) columns = arrangeAllCameraColumns(columns);

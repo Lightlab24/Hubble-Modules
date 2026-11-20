@@ -18,12 +18,6 @@
   }
 
   function syncCameraDeleteButton(group) {
-    const clear = group.querySelector('[data-action="clear-selected"]');
-    if (clear) {
-      const count = selectedCameras(group.querySelector('table[data-camera-device]')).length, text = count > 1 ? 'Clear ' + count + ' from view' : 'Clear from view', label = clear.querySelector('[data-camera-clear-label]');
-      if (label.textContent !== text) label.textContent = text;
-      clear.disabled = !count;
-    }
     const button = group.querySelector('[data-action="delete-controller"]');
     const camera = activeCamera(group.querySelector('table[data-camera-device]'));
     const label = button.querySelector('[data-camera-delete-label]');

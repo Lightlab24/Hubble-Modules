@@ -13,7 +13,19 @@ const matrix = (f: FrameLocator) => f.locator('[data-controller="__all-cameras__
 const cell = (r: Locator, column: string) => r.locator('td[data-column="' + column + '"]');
 const circle = (r: Locator, id: string) => cell(r, 'remi:' + id).locator('[role="checkbox"]');
 const toast = (f: FrameLocator) => f.locator('[data-role="toast"]');
-const review = (f: FrameLocator) => f.locator('[data-action="review-foreign"]');
+// Cameras Cyanview has that Hubble didn't set up, listed apart from yours until they are moved in.
+const outside = (f: FrameLocator) => f.locator('[data-role="outside"]');
+const outsideRows = (f: FrameLocator) => outside(f).locator('tbody tr');
+async function showPending(f: FrameLocator) {
+  const panel = f.locator('[data-role="pending-sends"]');
+  if (await panel.isHidden()) await f.locator('.hc-panel:not([hidden]) .hc-toolbar [data-action="toggle-pending-sends"]').click();
+  return panel;
+}
+async function sendAll(f: FrameLocator) {
+  const panel = await showPending(f);
+  await panel.locator('[data-action="send-all-pending"]').click();
+  await expect(panel).toContainText('Nothing is waiting to send');
+}
 
 // A rig built by hand on the controllers: the RIO's camera REMI'd on to RCPs. Hubble is only given some of it.
 async function prebuilt(page: Page, request: APIRequestContext, tree: Record<string, string>, keep: string[], data: Record<string, unknown> = {}) {
@@ -41,17 +53,25 @@ test('Refresh all brings in the rest of a rig set up outside Hubble, by reading 
   await expect(deviceRows(f)).toHaveCount(3);
   expect(await written()).toEqual(before);
 
-  // The camera comes in once, with its settings, its real Source and where it goes.
+  // The camera comes in once, with its settings and its real Source, apart from the cameras Hubble set up.
   await f.locator('[data-tab="setup"]').click();
+  await expect(setup(f)).toHaveCount(0);
+  await expect(outsideRows(f)).toHaveCount(1);
+  await expect(outsideRows(f).first()).toContainText('10.20.20.1');
+  await expect(outsideRows(f).first()).toContainText(RIO);
+  await expect(outside(f).locator('[data-role="outside-summary"]')).toHaveText('1 camera');
+  await f.locator('[data-tab="assignment"]').click();
+  await expect(matrix(f)).toHaveCount(0);
+  // Moved in, it is one of yours, with where it goes, and nothing is sent.
+  await f.locator('[data-tab="setup"]').click();
+  await outside(f).getByRole('button', { name: 'Move 1 Wide to my cameras' }).click();
+  await expect(outside(f)).toBeHidden();
   await expect(setup(f)).toHaveCount(1);
   await expect(cell(setup(f).first(), 'ip').locator('input')).toHaveValue('10.20.20.1');
-  await expect(cell(setup(f).first(), 'source')).toContainText(RIO);
-  // It wasn't configured here, so Hubble says so, once, for the camera and its copies together.
-  await expect(review(f)).toHaveText('Review 1 item');
-  await expect(f.locator('[data-role="foreign-note"]')).toHaveText('1 thing on this rig wasn’t configured by Hubble');
   await f.locator('[data-tab="assignment"]').click();
   await expect(matrix(f)).toHaveCount(1);
   await expect(circle(matrix(f).first(), LEAF)).toBeChecked();
+  expect(await written()).toEqual(before);
 
   // Removed by hand, a controller is not brought back by the next read, here or after the page is opened again.
   await f.locator('[data-tab="devices"]').click();
@@ -71,89 +91,87 @@ test('Refresh all brings in the rest of a rig set up outside Hubble, by reading 
   await expect(deviceRows(f)).toHaveCount(2);
 });
 
-test('what a read turns up is asked about once, and Keep as is changes nothing', async ({ page, request }) => {
+test('what a read turns up waits apart, Move makes it yours without sending anything, and it stays yours', async ({ page, request }) => {
   const { f } = await prebuilt(page, request, { [MASTER]: RIO, [LEAF]: MASTER }, [MASTER]);
   await f.locator('[data-action="refresh-all"]').click();
   await expect(toast(f)).toContainText('Added 2 controllers found on the network');
   await f.locator('[data-tab="setup"]').click();
   const written = async () => (await fleet(request)).map(device => device.actions.length), before = await written();
-  await review(f).click();
-  const dialog = f.getByRole('dialog', { name: 'Not configured by Hubble' });
-  await expect(dialog).toContainText('This wasn’t configured by Hubble');
-  await expect(dialog).toContainText('1 Wide · set up on ' + RIO);
-  await expect(dialog).toContainText('Also on Master RCP and ' + LEAF + ' as REMI copies.');
-  await expect(dialog.getByRole('button', { name: 'Keep as is' })).toHaveAttribute('aria-pressed', 'true');
-
-  // Not now leaves the question open.
-  await dialog.getByRole('button', { name: 'Not now' }).click();
-  await expect(review(f)).toHaveText('Review 1 item');
-
-  await review(f).click();
-  await dialog.getByRole('button', { name: 'Apply' }).click();
-  await expect(toast(f)).toContainText('Kept 1 as it is');
-  await expect(review(f)).toBeHidden();
+  const row = outsideRows(f).first();
+  await expect(row).toContainText('Wide');
+  await expect(row).toContainText(RIO);
+  await expect(row.getByRole('button', { name: 'Clear 1 Wide' })).toBeVisible();
+  await outside(f).getByRole('button', { name: 'Move all to my cameras' }).click();
+  await expect(toast(f)).toContainText('1 Wide is now one of your cameras');
+  await expect(outside(f)).toBeHidden();
   expect(await written()).toEqual(before);
   await expect(setup(f)).toHaveCount(1);
 
-  // It isn't asked about again, by another read or after the page is opened again.
+  // It isn't listed apart again, by another read or after the page is opened again.
   await f.locator('[data-action="refresh-all"]').click();
   await expect(toast(f)).toContainText('Settings refreshed');
-  await expect(review(f)).toBeHidden();
+  await expect(outside(f)).toBeHidden();
   await expect(f.locator('[data-role="saved-label"]')).toContainText('Workspace saved');
   await page.reload();
   await expect(f.locator('[data-role="saved-label"]')).toContainText('Workspace saved');
   await f.locator('[data-tab="setup"]').click();
   await expect(setup(f)).toHaveCount(1);
-  await expect(review(f)).toBeHidden();
+  await expect(outside(f)).toBeHidden();
 });
 
-test('Clear deletes what wasn’t configured by Hubble from its controller, with its copies', async ({ page, request }) => {
+test('Clear marks what Hubble didn’t set up, Keep takes that back, and Send deletes it from its controller with its copies', async ({ page, request }) => {
   const { f } = await prebuilt(page, request, { [MASTER]: RIO, [LEAF]: MASTER }, [MASTER]);
   await f.locator('[data-action="refresh-all"]').click();
   await expect(toast(f)).toContainText('Added 2 controllers found on the network');
   await f.locator('[data-tab="setup"]').click();
-  await review(f).click();
-  const dialog = f.getByRole('dialog', { name: 'Not configured by Hubble' });
-  await dialog.getByRole('button', { name: 'Clear' }).click();
-  await expect(dialog.getByRole('button', { name: 'Clear' })).toHaveAttribute('aria-pressed', 'true');
-  await dialog.getByRole('button', { name: 'Apply' }).click();
-  await expect(toast(f)).toContainText('Cleared 1');
+  const written = async () => (await fleet(request)).map(device => device.actions.length), before = await written();
+  const row = outsideRows(f).first();
+  await row.getByRole('button', { name: 'Clear 1 Wide' }).click();
+  await expect(row).toHaveClass(/hc-remove-staged/);
+  await expect(row.getByRole('button', { name: 'Move 1 Wide to my cameras' })).toBeDisabled();
+  await row.getByRole('button', { name: 'Keep 1 Wide' }).click();
+  await expect(row).not.toHaveClass(/hc-remove-staged/);
+  await outside(f).getByRole('button', { name: 'Clear all' }).click();
+  await expect(row).toHaveClass(/hc-remove-staged/);
+  // It waits in Pending sends like any delete.
+  await showPending(f);
+  await expect(f.locator('[data-role="pending-sends"] [data-pending-line="delete"]')).toContainText('Deleted from ' + RIO);
+  expect(await written()).toEqual(before);
+  await sendAll(f);
   for (const serial of [RIO, MASTER, LEAF]) expect(names(await on(request, serial))).toEqual([]);
+  await expect(outside(f)).toBeHidden();
   await expect(setup(f)).toHaveCount(0);
-  await expect(review(f)).toBeHidden();
   // The controllers themselves stay in Devices.
   await f.locator('[data-tab="devices"]').click();
   await expect(deviceRows(f)).toHaveCount(3);
 });
 
-test('a copy someone made by hand of a camera Hubble has is its own item, and clearing it takes off only that copy', async ({ page, request }) => {
+test('a copy someone made by hand of a camera Hubble has is listed apart, and Clear takes off only that copy', async ({ page, request }) => {
   await request.post('/__reset', { data: { sample: false, remi: true } });
   await page.goto('/');
   const f = ui(page), rpc = rpcOf(request);
   await expect(f.locator('[data-role="saved-label"]')).toContainText('Workspace saved');
   await f.locator('[data-tab="setup"]').click();
   await expect(setup(f)).toHaveCount(1);
-  await expect(review(f)).toBeHidden();
+  await expect(outside(f)).toBeHidden();
   // Made on the controllers, not through this page.
   const read = await rpc('read-plan'), key = read.plan.cameras.find((camera: any) => camera.device === RIO).elementKey;
   expect((await rpc('remi-route', { items: [{ id: 'x', camera: RIO, key, tree: { [MASTER]: RIO }, expected: {} }] })).results[0].verified).toBe(true);
   await f.locator('[data-action="refresh-all"]').click();
   await expect(toast(f)).toContainText('Settings refreshed');
-  await expect(review(f)).toHaveText('Review 1 item');
-  await review(f).click();
-  const dialog = f.getByRole('dialog', { name: 'Not configured by Hubble' });
-  await expect(dialog).toContainText('1 Wide on Master RCP · REMI copy');
-  await expect(dialog).toContainText('A copy of 1 Wide from Stage RIO.');
-  await dialog.getByRole('button', { name: 'Clear' }).click();
-  await dialog.getByRole('button', { name: 'Apply' }).click();
-  await expect(toast(f)).toContainText('Cleared 1');
+  await expect(outsideRows(f)).toHaveCount(1);
+  await expect(outsideRows(f).first()).toContainText('Copy on Master RCP · of 1 Wide');
+  await outsideRows(f).first().getByRole('button', { name: 'Clear 1 Wide' }).click();
+  await showPending(f);
+  await expect(f.locator('[data-role="pending-sends"] [data-pending-line="remi:' + MASTER + '"]')).toContainText('On → Off');
+  await sendAll(f);
   expect(names(await on(request, MASTER))).toEqual([]);
   expect(names(await on(request, RIO))).toEqual(['Wide']);
   await expect(setup(f)).toHaveCount(1);
-  await expect(review(f)).toBeHidden();
+  await expect(outside(f)).toBeHidden();
 });
 
-test('what Hubble sends itself is never asked about', async ({ page, request }) => {
+test('what Hubble sends itself is never listed apart', async ({ page, request }) => {
   await request.post('/__reset', { data: { sample: false, remi: true } });
   await page.goto('/');
   const f = ui(page), panel = f.locator('[data-role="pending-sends"]');
@@ -166,9 +184,33 @@ test('what Hubble sends itself is never asked about', async ({ page, request }) 
   await expect(panel).toContainText('Nothing is waiting to send');
   expect(names(await on(request, MASTER))).toEqual(['Wide']);
   await f.locator('[data-tab="setup"]').click();
-  await expect(review(f)).toBeHidden();
+  await expect(outside(f)).toBeHidden();
   await f.locator('[data-action="refresh-all"]').click();
   await expect(toast(f)).toContainText('Settings refreshed');
   await page.waitForTimeout(800);
-  await expect(review(f)).toBeHidden();
+  await expect(outside(f)).toBeHidden();
+});
+
+test('a camera someone adds on an RCP Hubble manages is listed apart and left out of the counts until it is moved in', async ({ page, request }) => {
+  await request.post('/__reset', { data: { sample: false, remi: true } });
+  await page.goto('/');
+  const f = ui(page);
+  await expect(f.locator('[data-role="saved-label"]')).toContainText('Workspace saved');
+  await f.locator('[data-tab="setup"]').click();
+  await expect(setup(f)).toHaveCount(1);
+  // Added in Cyanview's own page, not here.
+  await request.post('/__simulate', { data: { addCamera: { device: 1, key: 'crane', row: { Number: '7', Name: 'Crane', Model: 'Sony - Venice-IP', IP: '10.20.30.7', Port: '80', Enabled: '1' } } } });
+  await f.locator('[data-action="refresh-all"]').click();
+  await expect(toast(f)).toContainText('Settings refreshed');
+  await expect(outsideRows(f)).toHaveCount(1);
+  await expect(outsideRows(f).first()).toContainText('Crane');
+  await expect(outsideRows(f).first()).toContainText('Master RCP');
+  await expect(setup(f)).toHaveCount(1);
+  await expect(f.locator('[data-tab="setup"] .hc-tab-count')).toHaveText('1');
+  await expect(f.locator('[data-tab="assignment"] .hc-tab-count')).toHaveText('1');
+  await outsideRows(f).first().getByRole('button', { name: 'Move 7 Crane to my cameras' }).click();
+  await expect(outside(f)).toBeHidden();
+  await expect(setup(f)).toHaveCount(2);
+  await expect(f.locator('[data-tab="setup"] .hc-tab-count')).toHaveText('2');
+  expect(names(await on(request, MASTER))).toEqual(['Crane']);
 });

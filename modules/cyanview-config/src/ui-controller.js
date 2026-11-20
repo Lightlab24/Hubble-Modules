@@ -247,7 +247,7 @@ import { PresentationLedger } from './presentation-ledger.js';
     // columns keep the delete button on screen however far the sheet scrolls.
     if (deviceId !== allCamerasSheet) {
       columns.splice(columns.findIndex(column => column.id === 'password') + 1, 0, deviceId === cameraSetupSheet ? { id: 'source', label: 'Source', width: 140 } : { id: 'remiMaster', label: 'Master RCP', width: 130 });
-      columns.splice(columns.findIndex(column => column.id === 'name') + 1, 0, { id: 'remove', label: '', width: 62, tool: true, frozen: 0 });
+      columns.splice(columns.findIndex(column => column.id === 'name') + 1, 0, { id: 'remove', label: '', width: 34, tool: true, frozen: 0 });
     }
     columns.push({ id: 'sync', label: 'Sync', width: 70 });
     if (deviceId === allCamerasSheet) columns = arrangeAllCameraColumns(columns);
@@ -301,7 +301,7 @@ import { PresentationLedger } from './presentation-ledger.js';
   function renderCameras(){
     const scrolls=new Map([...root.querySelectorAll('[data-controller]')].map(el=>[el.dataset.controller,el.querySelector('.hc-scroll')?.scrollLeft||0]));
     $('controllers').innerHTML=orderedDevices().map(d=>{
-      const rows=cameras.filter(c=>c.device===d.id&&!c.leftBehind),open=openControllers.has(d.id),selection=cellSelections.get(d.id)||['C2',rows[0]?.name||''];
+      const rows=cameras.filter(c=>c.device===d.id&&!c.leftBehind&&!c.foreign),open=openControllers.has(d.id),selection=cellSelections.get(d.id)||['C2',rows[0]?.name||''];
       return '<section class="hc-controller" data-controller="'+d.id+'"><div class="hc-controller-header"><button class="hc-controller-handle" draggable="true" data-reorder-handle="'+d.id+'" aria-label="Reorder '+esc(d.name)+'" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" data-tooltip="Drag to reorder; Alt + up/down also moves this device">'+icon('grip-vertical')+'</button><button class="hc-controller-expander" data-action="toggle-controller" data-id="'+d.id+'" aria-expanded="'+open+'" aria-controls="hc-controller-'+d.id+'">'+icon(open?'chevron-down':'chevron-right')+'<strong>'+esc(d.name)+'</strong><span class="hc-device-type">'+d.kind+'</span><span class="hc-controller-serial">'+esc(d.serial)+'</span></button><span class="hc-controller-camera-count">'+rows.length+' camera'+(rows.length===1?'':'s')+'</span>'+cameraControlCount(d)+status(d.online)+'<span class="hc-controller-pending" data-controller-pending></span></div><div id="hc-controller-'+d.id+'"'+(!open?' hidden':'')+'><div class="hc-controller-tools">'+cameraCountControl(d.id)+'<button class="hc-danger" data-action="delete-controller" data-id="'+d.id+'" disabled>'+icon('trash-2')+'<span data-camera-delete-label>Delete camera</span></button>'+cameraControlTools(d)+'<span class="hc-right"></span><button class="hc-danger" data-action="clear-device-cameras" data-id="'+d.id+'"'+(rows.length?'':' disabled')+'>'+icon('eraser')+'Clear all cameras</button><button class="hc-danger" data-action="remove-device" data-id="'+d.id+'" aria-label="Remove '+esc(d.name)+' from managed list">'+icon('trash-2')+'Remove device</button><button class="hc-button" data-action="send-controller" data-id="'+d.id+'">'+icon('send')+'Send changes <span>0</span></button>'+cameraSelectionStrip(d.id)+'</div><div class="hc-sheet"><div class="hc-scroll"><table class="hc-grid" role="grid" data-camera-device="'+d.id+'" aria-label="Camera and lens spreadsheet for '+esc(d.name)+'">'+cameraGrid(rows,d.id)+'</table></div></div><span class="hc-visually-hidden" data-connection-note>'+esc(connectionNote(d))+'</span></div></section>';
     }).join('');syncSummary();icons();
     for(const [id,left] of scrolls){const scroll=root.querySelector('[data-controller="'+id+'"] .hc-scroll');if(scroll)scroll.scrollLeft=left;}
@@ -1949,8 +1949,7 @@ import { PresentationLedger } from './presentation-ledger.js';
     const entry = from.at(-1);
     if (!entry) return;
     const source = forward ? 'before' : 'after', target = forward ? 'after' : 'before';
-    if (entry.kind === 'cleared') setClearedRows(entry.rows, forward);
-    else if (entry.kind === 'layout') {
+    if (entry.kind === 'layout') {
       if (JSON.stringify(cameraPresentation(id)) !== JSON.stringify(entry[source])) { toast('The sheet layout has changed; this history entry is no longer available'); return; }
       entry.epoch = changeCameraPresentation(id, () => applyCameraPresentation(id, entry[target], forward ? entry.activeAfter : entry.activeBefore), true, false);
     } else {
@@ -1994,12 +1993,6 @@ import { PresentationLedger } from './presentation-ledger.js';
   }
 
   function syncCameraDeleteButton(group) {
-    const clear = group.querySelector('[data-action="clear-selected"]');
-    if (clear) {
-      const count = selectedCameras(group.querySelector('table[data-camera-device]')).length, text = count > 1 ? 'Clear ' + count + ' from view' : 'Clear from view', label = clear.querySelector('[data-camera-clear-label]');
-      if (label.textContent !== text) label.textContent = text;
-      clear.disabled = !count;
-    }
     const button = group.querySelector('[data-action="delete-controller"]');
     const camera = activeCamera(group.querySelector('table[data-camera-device]'));
     const label = button.querySelector('[data-camera-delete-label]');
@@ -2511,7 +2504,7 @@ import { PresentationLedger } from './presentation-ledger.js';
     configTab.after(button);
     const toggle = pendingSendsToggle();
     const viewSwitch = '<div class="hc-segment hc-remi-view" role="group" aria-label="REMI Matrix view"><button type="button" data-remi-view="matrix" aria-pressed="true">Matrix</button><button type="button" data-remi-view="controllers" aria-pressed="false">By controller</button></div>';
-    const deleteButton = id => '<button class="hc-button" data-action="clear-selected" disabled title="Forget the selected cameras here. Nothing is sent to a controller.">' + icon('eye-off') + '<span data-camera-clear-label>Clear from view</span></button><button class="hc-danger" data-action="delete-controller" data-id="' + id + '" disabled>' + icon('trash-2') + '<span data-camera-delete-label>Delete camera</span></button>';
+    const deleteButton = id => '<button class="hc-danger" data-action="delete-controller" data-id="' + id + '" disabled>' + icon('trash-2') + '<span data-camera-delete-label>Delete camera</span></button>';
     const setup = document.createElement('section');
     Object.assign(setup, { id: 'hc-setup', className: 'hc-panel', hidden: true });
     setup.setAttribute('role', 'tabpanel');
@@ -2605,12 +2598,13 @@ import { PresentationLedger } from './presentation-ledger.js';
     return routeTreeMemo;
   }
   // A copy whose source isn't in this workspace keeps its own row, since nothing else can show it.
+  // Something Hubble didn't set up is listed apart, under Not set up by Hubble, until it is moved in.
   function assignmentRows() {
     const { parents } = routeTree();
-    return cameras.filter(camera => !movesInFlight.has(camera) && !camera.leftBehind && (!importedCamera(camera) || !parents.has(camera)));
+    return cameras.filter(camera => !movesInFlight.has(camera) && !camera.leftBehind && !camera.foreign && (!importedCamera(camera) || !parents.has(camera)));
   }
   function sheetCameras(id) {
-    return id === cameraSetupSheet ? assignmentRows() : id === allCamerasSheet ? matrixRows() : cameras.filter(camera => camera.device === id && !camera.leftBehind);
+    return id === cameraSetupSheet ? assignmentRows() : id === allCamerasSheet ? matrixRows() : cameras.filter(camera => camera.device === id && !camera.leftBehind && !camera.foreign);
   }
   // A camera deleted or moved while its controller was off is out of the workspace, but that controller still
   // has it. Its delete waits in Pending sends until the controller is back.
@@ -2849,40 +2843,13 @@ import { PresentationLedger } from './presentation-ledger.js';
     renderCameras();
     remember();
   }
-  // Clearing only forgets a camera here. Nothing goes to a controller, so the next read of one that
-  // still has it brings it back. Its copies live in its row, so they go with it.
-  function clearFromView(rows) {
-    const { children } = routeTree(), gone = new Set();
-    const add = row => { if (gone.has(row)) return; gone.add(row); for (const copy of children.get(row) ?? []) if (importedCamera(copy)) add(copy); };
-    for (const camera of rows) if (!camera.jobs && !camera.deleting) add(camera);
-    if (!gone.size) return;
-    const saved = [...gone].map(row => copyPresentation(plainRow(row)));
-    cameras = cameras.filter(row => !gone.has(row));
-    for (const row of gone) { queuedSends.delete(row); routeErrors.delete(row.id); }
-    recordCameraHistory(virtualSheet(tab) ?? [...gone][0].device, { kind: 'cleared', rows: saved });
-    routeTreeMemo = null;
-    renderCameras();
-    remember();
-    toast((rows.length === 1 ? 'Camera ' + rows[0].number : rows.length + ' cameras') + ' cleared from view. Anything still on a controller comes back on the next read.');
-  }
-  function setClearedRows(rows, gone) {
-    const ids = new Set(rows.map(row => row.id));
-    if (gone) cameras = cameras.filter(row => !ids.has(row.id));
-    // A read may have brought it back already.
-    else for (const saved of rows) if (!cameras.some(row => row.id === saved.id || row.elementKey && row.device === saved.device && row.elementKey === saved.elementKey)) cameras.push(restoredRow(copyPresentation(saved)));
-    routeTreeMemo = null;
-    renderCameras();
-    remember();
-  }
   function cameraMenuItems(camera, cameraById) {
     const staged = removalStaged(camera);
-    return [{ id: 'refresh-camera', label: 'Refresh camera', disabled: !camera.elementKey || !!camera.deleting || !!camera.jobs || cameraEnabledSent.has(camera.id) || !!cameraEnabledJob(camera), run: () => runCameraEnabled(cameraById.get(camera.id) ?? camera, 'refresh') }, { id: 'clear-camera', label: 'Clear from view', disabled: !!camera.deleting || !!camera.jobs, run: () => clearFromView([cameraById.get(camera.id) ?? camera]) }, { id: 'delete-camera', label: staged ? 'Keep camera' : importedCamera(camera) ? 'Remove REMI copy' : 'Delete camera', icon: staged ? undefined : 'delete', danger: !staged, disabled: !!camera.deleting || !!camera.jobs, run: () => reviewCameraDeletion(cameraById.get(camera.id) ?? camera) }];
+    return [{ id: 'refresh-camera', label: 'Refresh camera', disabled: !camera.elementKey || !!camera.deleting || !!camera.jobs || cameraEnabledSent.has(camera.id) || !!cameraEnabledJob(camera), run: () => runCameraEnabled(cameraById.get(camera.id) ?? camera, 'refresh') }, { id: 'delete-camera', label: staged ? 'Keep camera' : importedCamera(camera) ? 'Remove REMI copy' : 'Delete camera', icon: staged ? undefined : 'delete', danger: !staged, disabled: !!camera.deleting || !!camera.jobs, run: () => reviewCameraDeletion(cameraById.get(camera.id) ?? camera) }];
   }
   function removeCell(camera, column) {
     const staged = removalStaged(camera), label = (staged ? 'Keep camera ' : importedCamera(camera) ? 'Remove the REMI copy of camera ' : 'Delete camera ') + camera.number;
-    const busy = camera.deleting || camera.jobs ? ' disabled' : '', clearLabel = 'Clear camera ' + camera.number + ' from view';
-    const clear = camera.elementKey || importedCamera(camera) ? '<button type="button" class="hc-row-remove-button" data-action="clear-from-view" data-clear-row="' + esc(camera.id) + '" aria-label="' + esc(clearLabel) + '" title="' + esc(clearLabel) + '. Nothing is sent to a controller."' + busy + '>' + icon('eye-off') + '</button>' : '';
-    return '<td class="hc-camera-frozen hc-row-remove" style="left:' + column.frozen + 'px">' + clear + '<button type="button" class="hc-row-remove-button" data-action="stage-remove" data-remove-row="' + esc(camera.id) + '" aria-label="' + esc(label) + '" title="' + esc(label) + '"' + (camera.deleting || camera.jobs ? ' disabled' : '') + '>' + icon(staged ? 'undo-2' : 'trash-2') + '</button></td>';
+    return '<td class="hc-camera-frozen hc-row-remove" style="left:' + column.frozen + 'px"><button type="button" class="hc-row-remove-button" data-action="stage-remove" data-remove-row="' + esc(camera.id) + '" aria-label="' + esc(label) + '" title="' + esc(label) + '"' + (camera.deleting || camera.jobs ? ' disabled' : '') + '>' + icon(staged ? 'undo-2' : 'trash-2') + '</button></td>';
   }
 
   const requestFailure = (items, error) => ({ results: items.map(item => ({ id: item.id, error: error.message || 'REMI changes could not be confirmed' })), refresh: true });
@@ -3164,7 +3131,7 @@ import { PresentationLedger } from './presentation-ledger.js';
     if (ownOff) return { text: controllerName(camera.device) + ' is offline. ' + (camera.removeStaged ? 'Its REMI copies come off now and deleting it there waits until it is back.' : isMove(camera) ? 'The camera moves now and deleting it there waits until it is back.' : 'Its REMI copies can still come off.'), kind: 'offline', blocked: false };
     return { text: camera.result === 'Error' ? 'Could not be confirmed' : '', kind: camera.result === 'Error' ? 'failed' : '', blocked: false };
   }
-  const pendingRows = () => sortCameraRows([...assignmentRows(), ...cameras.filter(camera => camera.leftBehind)], allCamerasSheet).flatMap(camera => { const lines = pendingLines(camera); return lines.length ? [{ camera, lines }] : []; });
+  const pendingRows = () => sortCameraRows([...assignmentRows(), ...cameras.filter(camera => camera.leftBehind || camera.foreign && !importedCamera(camera))], allCamerasSheet).flatMap(camera => { const lines = pendingLines(camera); return lines.length ? [{ camera, lines }] : []; });
   // REMI changes staged per controller have no camera row to sit on, but they still wait to be sent.
   const remiDraftGroups = () => [...remiPanels].filter(([id, state]) => device(id) && state.drafts.size).map(([id, state]) => ({ id, state, items: [...state.drafts.values()] }));
   const remiDraftLabel = item => item.kind === 'tag' ? (item.enable ? 'Add REMI tag' : 'Remove REMI tag') : item.enable ? 'Import REMI camera' : 'Remove REMI copy';
@@ -3686,8 +3653,6 @@ import { PresentationLedger } from './presentation-ledger.js';
     if (data.remiView) { remiByController = data.remiView === 'controllers'; setTab(remiByController ? 'cameras' : 'assignment'); }
     else if (data.action === 'toggle-pending-sends') setPendingSendsOpen(!pendingSendsOpen);
     else if (data.action === 'stage-remove' && row(data.removeRow)) reviewCameraDeletion(row(data.removeRow));
-    else if (data.action === 'clear-from-view' && row(data.clearRow)) clearFromView([row(data.clearRow)]);
-    else if (data.action === 'clear-selected') clearFromView(selectedCameras(button.closest('[data-controller]').querySelector('table[data-camera-device]')));
     else if (data.action === 'send-all-pending' || data.action === 'send-all-pending-quick') void sendAllPending();
     else if (data.pendingJobRetry) void settleRemiJob(data.pendingJobRetry, 'retry');
     else if (data.pendingJobDismiss) void settleRemiJob(data.pendingJobDismiss, 'dismiss');
@@ -3832,9 +3797,17 @@ import { PresentationLedger } from './presentation-ledger.js';
   }
   const mergeBeforeRig = mergeSnapshot;
   mergeSnapshot = function(snapshot) {
-    const known = ownMerge ? null : new Set(cameras);
+    const known = ownMerge ? null : new Set(cameras), id = snapshot.device?.id;
+    const ours = known ? cameras.filter(camera => camera.device === id && camera.elementKey && !camera.foreign) : [];
     mergeBeforeRig(snapshot);
-    if (known) for (const camera of cameras) if (!known.has(camera) && camera.elementKey && camera.device === snapshot.device?.id) camera.foreign = true;
+    if (!known) return;
+    // A camera of ours deleted and added back under a new key, with the same number, is still ours.
+    const replaced = ours.filter(camera => !cameras.includes(camera)).map(camera => String(camera.number));
+    for (const camera of cameras) if (!known.has(camera) && camera.elementKey && camera.device === id) {
+      const at = replaced.indexOf(String(camera.number));
+      if (at >= 0) replaced.splice(at, 1);
+      else camera.foreign = true;
+    }
   };
   const copyLabel = camera => (String(camera.number ?? '') + ' ' + String(camera.name ?? '')).trim() || 'Camera';
   const listed = names => names.length < 2 ? names.join('') : names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
@@ -3854,103 +3827,88 @@ import { PresentationLedger } from './presentation-ledger.js';
     }
     return items;
   }
-  function paintForeignReview() {
-    const tools = root.querySelector('[data-role="setup-group"] .hc-controller-tools');
-    if (!tools) return;
-    let button = tools.querySelector('[data-action="review-foreign"]'), note = tools.querySelector('[data-role="foreign-note"]');
-    if (!button) {
-      (tools.querySelector('.hc-count-hint') ?? tools.querySelector('[data-camera-count]')).insertAdjacentHTML('afterend', '<button type="button" class="hc-primary hc-foreign-review" data-action="review-foreign" hidden></button><span class="hc-caption hc-foreign-note" data-role="foreign-note" hidden></span>');
-      button = tools.querySelector('[data-action="review-foreign"]');
-      note = tools.querySelector('[data-role="foreign-note"]');
-    }
-    const count = foreignItems().length;
-    button.hidden = note.hidden = !count;
-    button.disabled = sendsRunning > 0;
-    button.textContent = 'Review ' + count + (count === 1 ? ' item' : ' items');
-    note.textContent = count + (count === 1 ? ' thing on this rig wasn’t' : ' things on this rig weren’t') + ' configured by Hubble';
+  // Listed apart from the cameras Hubble set up, with Move and Clear on each. Move makes it one of yours and
+  // sends nothing. Clear marks it like a delete, and it goes from Pending sends like every other delete.
+  root.querySelector('[data-role="setup-group"]').insertAdjacentHTML('afterend',
+    '<div class="hc-outside" data-role="outside" hidden><div class="hc-outside-title"><div class="hc-toolbar-title"><h3>Not set up by Hubble</h3><span data-role="outside-summary"></span></div></div>' +
+    '<section class="hc-controller" data-role="outside-group"><div class="hc-controller-tools"><span class="hc-outside-note">Cyanview has these, but Hubble didn’t set them up. Move one into your cameras to manage it here, or clear it from its controller.</span><span class="hc-right"></span>' +
+    '<button type="button" class="hc-button" data-action="outside-move-all">' + icon('plus') + 'Move all to my cameras</button><button type="button" class="hc-danger" data-action="outside-clear-all">' + icon('trash-2') + 'Clear all</button></div>' +
+    '<div class="hc-sheet"><div class="hc-scroll"><table class="hc-grid hc-outside-grid" aria-label="Not set up by Hubble"></table></div></div></section></div>');
+  const outsideDraft = item => remiPanels.get(item.camera.device)?.drafts.get('remove:' + item.camera.elementKey);
+  // Whether Clear has marked it: a camera to delete, a copy whose circle is off, or a copy with no known source to remove.
+  function outsideCleared(item) {
+    if (item.kind === 'camera') return !!item.camera.removeStaged;
+    return item.source && cameras.includes(item.source) ? copyRemoval(item.camera) : !!outsideDraft(item);
   }
-  const renderBeforeRig = renderCameras;
-  renderCameras = function() { renderBeforeRig(); paintForeignReview(); };
-  // The button waits for a send that is running, so it is painted again when one ends.
-  const paintPendingBeforeRig = paintPendingSends;
-  paintPendingSends = function() { paintPendingBeforeRig(); paintForeignReview(); };
-  function reviewForeign() {
-    const items = foreignItems();
-    if (!items.length) return;
-    const rows = items.map(item => '<div class="hc-change-item hc-review-item"><div class="hc-review-text"><div><strong>' + esc(item.title) + '</strong></div><small>' + esc(item.detail) + '</small></div>' +
-      '<div class="hc-segment" role="group" aria-label="' + esc(item.title) + '" data-review-item="' + esc(item.id) + '"><button type="button" data-review-choice="keep" aria-pressed="true">Keep as is</button><button type="button" data-review-choice="clear" aria-pressed="false">Clear</button></div></div>');
-    $('modal-layer').innerHTML = '<section class="hc-modal hc-review-modal" role="dialog" aria-modal="true" aria-label="Not configured by Hubble"><div class="hc-modal-head"><div><h3>' + (items.length === 1 ? 'This wasn’t' : 'These weren’t') + ' configured by Hubble</h3><p>' + (items.length === 1 ? 'It is' : 'They are') + ' already on your controllers, so ' + (items.length === 1 ? 'it shows' : 'they show') + ' up here. Nothing has been changed.</p></div><button data-action="close-modal" aria-label="Close">' + icon('x') + '</button></div>' +
-      '<div class="hc-modal-body">' + rows.join('') +
-      '<div class="hc-change-item"><small><strong>Keep as is</strong> leaves it exactly as it is and stops asking about it.<br><strong>Clear</strong> deletes it from its controller, along with any REMI copies of it. That can’t be undone from Hubble.</small></div></div>' +
-      '<div class="hc-modal-foot"><button class="hc-button" data-action="close-modal">Not now</button><button class="hc-primary" data-review-apply>Apply</button></div></section>';
-    $('modal-layer').hidden = false;
-    icons();
-    $('modal-layer').querySelector('.hc-modal-foot [data-action="close-modal"]').focus();
-  }
-  function applyForeignReview(choices) {
-    const items = foreignItems().filter(item => choices.has(item.id));
-    const kept = items.filter(item => choices.get(item.id) !== 'clear'), clearing = items.filter(item => choices.get(item.id) === 'clear');
-    for (const item of kept) for (const row of item.rows) delete row.foreign;
-    const said = (cleared, problems) => {
-      const parts = [];
-      if (kept.length) parts.push('Kept ' + kept.length + (kept.length === 1 ? ' as it is' : ' as they are'));
-      if (cleared) parts.push('Cleared ' + cleared);
-      toast(problems.length ? problems[0] : parts.join(' · '));
-    };
-    if (!clearing.length) { renderCameras(); remember(); said(0, []); return; }
-    if (!moduleBridge || moduleBridge.preview) { renderCameras(); remember(); toast(sampleRouteMessage); return; }
-    return enqueueSend(async () => {
-      let cleared = 0;
-      const problems = [];
-      // A camera goes with its copies, which come off first.
-      const own = clearing.filter(item => item.kind === 'camera').map(item => item.camera).filter(camera => cameras.includes(camera));
-      if (own.length) {
-        try { await removeCameras(own); } catch (error) { problems.push(error.message || 'A camera could not be cleared'); }
-        for (const camera of own) {
-          if (!cameras.includes(camera)) cleared++;
-          else problems.push(routeErrors.get(camera.id) || copyLabel(camera) + ' could not be cleared from ' + controllerName(camera.device) + '.');
-        }
-      }
-      for (const item of clearing.filter(item => item.kind === 'copy')) {
-        const copy = item.camera, where = controllerName(copy.device), label = copyLabel(copy);
-        if (!cameras.includes(copy)) continue;
-        try {
-          if (item.source && cameras.includes(item.source)) {
-            // The copy comes off, with anything that was made from it.
-            const actual = actualRoute(item.source), tree = { ...actual.links }, gone = new Set([copy.device]);
-            for (let grew = true; grew;) { grew = false; for (const [receiver, parent] of Object.entries(tree)) if (!gone.has(receiver) && gone.has(parent)) { gone.add(receiver); grew = true; } }
-            for (const receiver of gone) delete tree[receiver];
-            const result = (await requestRoutes([{ id: item.source.id, camera: item.source.device, key: item.source.elementKey, tree, expected: actual.links, copies: actual.keys }])).results?.[0];
-            if (!result?.verified) throw new Error(label + ' could not be cleared from ' + where + ': ' + (result?.error || 'no answer'));
-          } else {
-            let removed;
-            if (copy.remi) removed = await moduleBridge.remiSend({ receiver: copy.device, items: [{ id: 'remove:' + copy.elementKey, kind: 'remove', key: copy.elementKey, enable: false, selector: copy.remi.selector, connection: copy.remi.connection, label: copy.name }] });
-            else removed = await moduleBridge.send({ items: [{ kind: 'camera', deleting: true, orphan: true, item: plainRow(copy), fields: [] }] });
-            const result = removed.results?.[0];
-            if (!result || result.error) throw new Error(label + ' could not be cleared from ' + where + ': ' + (result?.error || 'no answer'));
-            cameras = cameras.filter(camera => camera !== copy);
-            if (removed.snapshot) mergeOwn(removed.snapshot);
-          }
-          cleared++;
-        } catch (error) { problems.push(error.message || label + ' could not be cleared'); }
-      }
-      routeTreeMemo = null;
+  const outsideBusy = item => item.rows.some(row => row.jobs || row.deleting);
+  function clearOutside(item, on) {
+    if (outsideBusy(item) || outsideCleared(item) === on) return;
+    const camera = item.camera;
+    if (item.kind === 'camera') stageRemoval([camera], on);
+    // A copy of a camera here comes off by clearing its circle, which waits in Pending sends.
+    else if (item.source && cameras.includes(item.source)) reviewCameraDeletion(camera);
+    else {
+      const state = remiPanelState(camera.device), id = 'remove:' + camera.elementKey;
+      if (on) state.drafts.set(id, { id, kind: 'remove', key: camera.elementKey, enable: false, ...(camera.remi ? { selector: camera.remi.selector, connection: camera.remi.connection } : {}), label: camera.name });
+      else state.drafts.delete(id);
       renderCameras();
       remember();
-      said(cleared, problems);
-    }).finally(paintForeignReview);
-  }
-  root.addEventListener('click', event => {
-    const target = event.target.closest?.('[data-action="review-foreign"], [data-review-choice], [data-review-apply]');
-    if (!target) return;
-    if (target.dataset.action === 'review-foreign') { reviewForeign(); return; }
-    if (target.dataset.reviewChoice) {
-      for (const button of target.parentElement.querySelectorAll('[data-review-choice]')) button.setAttribute('aria-pressed', String(button === target));
-      return;
     }
-    const choices = new Map([...$('modal-layer').querySelectorAll('[data-review-item]')].map(group => [group.dataset.reviewItem, group.querySelector('[aria-pressed="true"]')?.dataset.reviewChoice || 'keep']));
-    $('modal-layer').hidden = true;
-    void applyForeignReview(choices);
+  }
+  function moveOutside(items) {
+    items = items.filter(item => !outsideBusy(item) && !outsideCleared(item));
+    if (!items.length) return;
+    for (const item of items) for (const row of item.rows) delete row.foreign;
+    routeTreeMemo = null;
+    renderCameras();
+    remember();
+    toast(items.length === 1 ? copyLabel(items[0].camera) + ' is now one of your cameras' : items.length + ' cameras moved to your cameras');
+  }
+  function outsideRow(item) {
+    const camera = item.camera, copy = item.kind === 'copy', cleared = outsideCleared(item), busy = outsideBusy(item), id = esc(item.id), label = esc(copyLabel(camera));
+    const source = copy ? 'Copy on ' + controllerName(camera.device) + (item.source ? ' · of ' + copyLabel(item.source) : '') : controllerName(camera.device);
+    const address = camera.model === 'Alpha-USB' ? camera.usb : camera.ip;
+    const enabled = camera.cameraEnabled === true ? 'On' : camera.cameraEnabled === false ? 'Off' : '';
+    const tools = '<button type="button" class="hc-button" data-outside-move="' + id + '" aria-label="Move ' + label + ' to my cameras" title="Move to my cameras. Nothing is sent."' + (busy || cleared ? ' disabled' : '') + '>Move</button>' +
+      '<button type="button" class="' + (cleared ? 'hc-button' : 'hc-danger') + '" data-outside-clear="' + id + '" aria-label="' + (cleared ? 'Keep ' : 'Clear ') + label + '" title="' + (cleared ? 'Keep it on ' + esc(controllerName(camera.device)) : 'Delete it from ' + esc(controllerName(camera.device)) + ' when you send it') + '"' + (busy ? ' disabled' : '') + '>' + (cleared ? 'Keep' : 'Clear') + '</button>';
+    return '<tr data-outside-row="' + id + '"' + (cleared ? ' class="hc-remove-staged"' : '') + '><td class="hc-num">' + esc(camera.number) + '</td><td>' + esc(camera.name) + '</td><td class="hc-outside-tools">' + tools + '</td>' +
+      '<td>' + esc(importedCamera(camera) ? remiModelName(camera) : camera.model) + '</td><td class="hc-mono">' + esc(address ?? '') + '</td><td class="hc-mono">' + esc(copy ? '' : camera.port ?? '') + '</td><td>' + esc(copy ? '' : camera.login ?? '') + '</td>' +
+      '<td>' + esc(source) + '</td><td>' + status(camera.online) + '</td><td>' + esc(enabled) + '</td></tr>';
+  }
+  const outsideColumns = [['#', 42], ['Camera name', 160], ['', 132], ['Camera model', 120], ['Camera IP / interface', 150], ['Port', 60], ['Username', 110], ['Source', 200], ['Control', 110], ['Camera Enabled', 120]];
+  let paintedOutside = '';
+  function paintOutside() {
+    const host = root.querySelector('[data-role="outside"]');
+    if (!host) return;
+    const items = foreignItems().sort((a, b) => (Number(a.camera.number) || 0) - (Number(b.camera.number) || 0) || String(a.camera.name).localeCompare(String(b.camera.name)));
+    host.hidden = !items.length || tab !== 'setup';
+    const summary = items.length + (items.length === 1 ? ' camera' : ' cameras');
+    host.querySelector('[data-role="outside-summary"]').textContent = summary;
+    host.querySelector('[data-action="outside-move-all"]').disabled = !items.some(item => !outsideBusy(item) && !outsideCleared(item));
+    const clearAll = host.querySelector('[data-action="outside-clear-all"]');
+    clearAll.disabled = !items.some(item => !outsideBusy(item) && !outsideCleared(item));
+    const markup = '<colgroup>' + outsideColumns.map(([, width]) => '<col style="width:' + width + 'px">').join('') + '</colgroup><thead><tr>' + outsideColumns.map(([label]) => '<th>' + esc(label) + '</th>').join('') + '</tr></thead><tbody>' + items.map(outsideRow).join('') + '</tbody>';
+    // Painting it again only when it changed keeps a pressed button under the pointer.
+    if (markup === paintedOutside) return;
+    paintedOutside = markup;
+    host.querySelector('table').innerHTML = markup;
+    icons();
+  }
+  const renderBeforeRig = renderCameras;
+  renderCameras = function() { renderBeforeRig(); paintOutside(); };
+  // A send that ends can take a row away or free its buttons.
+  const paintPendingBeforeRig = paintPendingSends;
+  paintPendingSends = function() { paintPendingBeforeRig(); paintOutside(); };
+  const setTabBeforeRig = setTab;
+  setTab = function(...args) { setTabBeforeRig(...args); paintOutside(); };
+  root.addEventListener('click', event => {
+    const button = event.target.closest?.('[data-outside-move], [data-outside-clear], [data-action="outside-move-all"], [data-action="outside-clear-all"]');
+    if (!button || button.disabled) return;
+    const items = foreignItems(), item = id => items.find(entry => entry.id === id);
+    if (button.dataset.outsideMove && item(button.dataset.outsideMove)) moveOutside([item(button.dataset.outsideMove)]);
+    else if (button.dataset.outsideClear && item(button.dataset.outsideClear)) { const entry = item(button.dataset.outsideClear); clearOutside(entry, !outsideCleared(entry)); }
+    else if (button.dataset.action === 'outside-move-all') moveOutside(items);
+    else if (button.dataset.action === 'outside-clear-all') for (const entry of items) clearOutside(entry, true);
   });
 
   // The Devices tab as one sheet: a row per controller with its addresses as columns. LAN and WAN

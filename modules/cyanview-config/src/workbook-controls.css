@@ -252,13 +252,6 @@ body:has(#cyanview-design .hc-veil:not([hidden])) .hubble-column-resize-handles 
 #cyanview-design .hc-grid[data-device-sheet] .hc-ip-open .hc-icon { width: 14px; height: 14px; }
 #cyanview-design .hc-danger-solid { padding: 6px 12px; border: 1px solid currentColor; border-radius: 6px; }
 /* What Hubble didn't configure: keep it as it is, or clear it. */
-#cyanview-design .hc-controller-tools .hc-foreign-review { font-weight: 600; padding: 4px 10px; }
-#cyanview-design .hc-controller-tools .hc-foreign-note { color: var(--hc-amber); }
-#cyanview-design .hc-review-modal { width: min(720px, 92vw); max-width: none; }
-#cyanview-design .hc-review-item { display: flex; align-items: center; gap: 16px; }
-#cyanview-design .hc-review-item .hc-review-text { flex: 1; min-width: 0; }
-#cyanview-design .hc-review-item .hc-segment { flex: none; }
-#cyanview-design .hc-review-item [data-review-choice="clear"][aria-pressed="true"] { color: var(--hc-red); }
 
 /* One toolbar per sheet: its view controls sit at the end of the row. The hints that used to sit
    above and below the sheets are gone; the counts stay in the footer. */
@@ -368,3 +361,14 @@ body:has(#cyanview-design .hc-veil:not([hidden])) .hubble-column-resize-handles 
   --hc-secondary: light-dark(#626262, var(--hubble-text-secondary, #aaaaaa));
 }
 #cyanview-design :is(button, input, select):focus-visible { outline-color: var(--hubble-focus, var(--hc-focus)); }
+/* Not set up by Hubble: cameras Cyanview has that Hubble didn't make, apart from yours until moved in. */
+#cyanview-design .hc-outside { margin-top: 22px; display: grid; gap: 10px; }
+#cyanview-design .hc-outside[hidden] { display: none; }
+#cyanview-design .hc-outside .hc-controller-tools { border-top: 0; border-bottom: 1px solid var(--hc-grid); }
+#cyanview-design .hc-outside-title { display: flex; align-items: center; }
+#cyanview-design .hc-outside-note { color: var(--hc-text); font-size: 12px; }
+#cyanview-design .hc-controller .hc-outside-grid tbody td { height: 36px; padding-top: 0; padding-bottom: 0; font-size: 13px; }
+#cyanview-design .hc-controller .hc-outside-grid thead th { height: 36px; font-size: 12.5px; font-weight: 500; }
+#cyanview-design .hc-outside-grid td.hc-outside-tools { padding: 0 6px; }
+#cyanview-design .hc-outside-grid td.hc-outside-tools button { min-height: 0; height: 24px; line-height: 22px; padding: 0 10px; margin-right: 6px; font-size: 12px; vertical-align: middle; }
+#cyanview-design .hc-outside-grid tr.hc-remove-staged td:not(.hc-outside-tools) { color: var(--hc-faint); text-decoration: line-through; }

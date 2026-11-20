@@ -236,6 +236,8 @@ test('a camera deleted and added back on the controller appears with no Refresh 
   await expect(row).toHaveCount(1);
   await expect(rio.locator('tr[data-id]')).toHaveCount(1);
   await expect(row.locator('[data-field="controlEnabled"] [role="checkbox"]')).toBeChecked();
+  // Same number on the same controller, so it is still the camera Hubble had, not one to list apart.
+  await expect(ui.locator('[data-role="outside"] tbody tr')).toHaveCount(0);
   expect((await inspect(request)).opened[0]).toBe(before[0]+1);
   // Noticing a change isn't Refresh all, so nothing waiting to send is thrown away.
   const name=row.locator('[data-field="name"]');
