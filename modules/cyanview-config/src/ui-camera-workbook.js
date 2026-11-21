@@ -19,6 +19,7 @@
 
   function syncCameraDeleteButton(group) {
     const button = group.querySelector('[data-action="delete-controller"]');
+    if (!button) return;
     const camera = activeCamera(group.querySelector('table[data-camera-device]'));
     const label = button.querySelector('[data-camera-delete-label]');
     const text = !camera?.number ? 'Delete camera' : (removalStaged(camera) ? 'Keep camera ' : 'Delete camera ') + camera.number;

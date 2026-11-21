@@ -314,6 +314,9 @@ test('a Gateway is watched over MQTT like an RCP, and its cameras can be ticked'
   await ui.locator('[data-device-add]').fill('10.192.1.10');
   await ui.locator('[data-device-add]').press('Enter');
   await expect(ui.locator('[data-role="device-count"]')).toHaveText('1');
+  // What is already on a controller added by hand is listed under Not set up by Hubble until it is moved in.
+  await ui.locator('[data-tab="setup"]').click();
+  await ui.locator('[data-role="outside"]').getByRole('button', { name: 'Move all to my cameras' }).click();
   await show();
   // Its broker answers, as an RCP's does.
   await expect(mark(group)).toHaveText('Online');await expect(control).toHaveText('Online');await expect(note).toHaveText('Connected at 10.192.1.10');

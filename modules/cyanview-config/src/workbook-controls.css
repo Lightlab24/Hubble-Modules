@@ -164,6 +164,8 @@ body:has(#cyanview-design .hc-veil:not([hidden])) .hubble-column-resize-handles 
 #cyanview-design .hc-grid[data-camera-device] :is(td, th).hc-row-remove { padding: 0; text-align: right; white-space: nowrap; }
 #cyanview-design .hc-grid[data-camera-device] .hc-row-remove-button { display: inline-grid; place-items: center; min-height: 0; width: 26px; height: 24px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--hc-secondary); cursor: pointer; }
 #cyanview-design .hc-grid[data-camera-device] .hc-row-remove-button:hover { background: light-dark(#f3dede, #3a2222); color: var(--hc-red); }
+/* The eye only takes a camera out of the workspace, so it doesn't turn red like the bin. */
+#cyanview-design .hc-grid[data-camera-device] .hc-row-hide-button:hover:not(:disabled) { background: var(--hc-selected); color: var(--hc-strong); }
 #cyanview-design .hc-grid[data-camera-device] tr.hc-remove-staged td:not(.hc-row-remove) { color: var(--hc-faint); text-decoration: line-through; }
 #cyanview-design .hc-grid[data-camera-device] tr.hc-remove-staged :is(input, .hc-choice-cell) { text-decoration: line-through; }
 #cyanview-design .hc-grid[data-camera-device] tr.hc-remove-staged .hc-row-remove-button { color: var(--hc-text); }

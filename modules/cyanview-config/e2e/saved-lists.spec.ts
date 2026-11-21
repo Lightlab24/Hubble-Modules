@@ -167,12 +167,15 @@ test('every added device is saved by serial with no name, and Discover lists sav
   await f.locator('[data-role="scan-bar"] [data-action="scan"]').click();
   await expect(f.locator('[data-role="scan-label"]')).toContainText('Discovery complete');
   const order = await sheet(f).locator('tr.hc-device-found').evaluateAll(list => list.map(row => (row as HTMLElement).dataset.deviceSaved ?? 'sweep'));
-  // In the order they were saved: Spare RIO was on the list before this page added the others.
-  expect(order.slice(0, 3)).toEqual(['CY-RIO-1-99', RIO, LEAF]);
+  // In the order they were saved. Spare RIO was saved first but didn't answer, so it stays in Saved devices
+  // and isn't on the sheet (Nov 21, 2026).
+  expect(order.slice(0, 2)).toEqual([RIO, LEAF]);
   await expect(savedRow(f, LEAF).locator('.hc-found-tag')).toHaveText('Found');
-  await expect(savedRow(f, 'CY-RIO-1-99')).toContainText('Not found');
-  await expect(savedRow(f, 'CY-RIO-1-99')).toContainText('stays on the saved list');
-  await expect(savedRow(f, 'CY-RIO-1-99')).not.toContainText('Spare RIO');
+  await expect(savedRow(f, 'CY-RIO-1-99')).toHaveCount(0);
+  await open_.click();
+  await expect(saved(f).locator('tr[data-saved-device="CY-RIO-1-99"] [data-saved-check]')).toHaveText('Didn’t answer');
+  await expect(saved(f).locator('tr[data-saved-device="' + LEAF + '"] [data-saved-check]')).toHaveText('Found · add it on the sheet');
+  await saved(f).press('Escape');
   // Added from its saved row, it takes the name the device has now, not one from the saved list.
   const reported = (await savedRow(f, LEAF).locator('td').nth(1).innerText()).trim();
   await savedRow(f, LEAF).getByRole('button', { name: 'Add ' + reported }).click();
@@ -189,7 +192,7 @@ test('every added device is saved by serial with no name, and Discover lists sav
   expect((await call('read-plan')).plan.savedDevices.map((row: any) => row.serial).sort()).toEqual(['CY-RCP-1-20', 'CY-RCP-1-30', 'CY-RIO-1-10']);
 });
 
-test('saved devices show as Checking the moment Discover is pressed', async ({ page, request }) => {
+test('Saved devices says Checking the moment Discover is pressed, and the sheet lists one once it answers', async ({ page, request }) => {
   const f = await open(page, request, { reachAll: true });
   await f.locator('[data-tab="devices"]').click();
   await deviceRow(f, LEAF).getByRole('button', { name: /Remove/ }).click();
@@ -200,8 +203,10 @@ test('saved devices show as Checking the moment Discover is pressed', async ({ p
   await range.click();
   await f.locator('.hc-dropdown-menu').getByRole('option', { name: '10.192.0.0/16' }).click();
   await f.locator('[data-role="scan-bar"] [data-action="scan"]').click();
-  await expect(savedRow(f, LEAF)).toContainText('Checking…');
-  await expect(savedRow(f, LEAF)).toContainText(LEAF);
+  await f.getByRole('button', { name: /^Saved devices/ }).click();
+  // Saved devices says so; the sheet lists it only once it answers.
+  await expect(saved(f).locator('tr[data-saved-device="' + LEAF + '"] [data-saved-check]')).toHaveText('Checking…');
+  await expect(savedRow(f, LEAF)).toHaveCount(0);
   await request.post('/__simulate', { data: { pauseState: false } });
   await expect(savedRow(f, LEAF).locator('.hc-found-tag')).toHaveText('Found');
 });

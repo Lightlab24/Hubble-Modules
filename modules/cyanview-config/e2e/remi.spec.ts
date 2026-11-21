@@ -84,11 +84,9 @@ test('adding and renaming a RIO camera updates a chain in Camera Configuration',
 
   const downstream = sheet('CY-RCP-1-30');
   await downstream.locator('[data-column="model"]').last().click({ button: 'right' });
-  await ui.getByRole('menuitem', { name: 'Remove REMI copy', exact: true }).click();
-  await openPending(ui);
-  await expect(ui.locator('[data-pending-line="remi:CY-RCP-1-30"]')).toContainText('On → Off');
-  await expect(ui.locator('[data-pending-line="master"]')).toHaveCount(0);
-  await (await openPending(ui)).locator('[data-action="send-all-pending"]').click();
+  // Clear from RCP takes the copy off at once, after a check, and leaves the master's.
+  await ui.getByRole('menuitem', { name: 'Clear from RCP', exact: true }).click();
+  await ui.getByRole('dialog').getByRole('button', { name: /^Clear from / }).click();
   await expect(downstream.locator('tr[data-id]')).toHaveCount(0);
   await expectImported('CY-RCP-1-20','Stage Left');
   await expect(sheet('CY-RIO-1-10').locator('input[data-field="name"]')).toHaveValue('Stage wide');

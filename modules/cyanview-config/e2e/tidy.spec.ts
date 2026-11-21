@@ -55,12 +55,12 @@ test('the camera count adds rows at the end and takes them off the end, and noth
   await expect(setupRows(f)).toHaveCount(2);
   await expect(pendingButton(f)).toHaveText(/All sent/);
   await expect(quickSend(f)).toBeHidden();
-  // A camera deleted with its own bin stays deleted; raising the count makes a new row instead.
-  await setup(f).locator('tbody tr[data-id]:has(input[data-field="name"][value="Jib"]) [data-action="stage-remove"]').click();
+  // A camera cleared with its own eye stays cleared; raising the count makes a new row instead, numbered on
+  // from the cameras still in the workspace.
+  await setup(f).locator('tbody tr[data-id]:has(input[data-field="name"][value="Jib"]) [data-action="clear-workspace-row"]').click();
   await expect(count(f).locator('input')).toHaveValue('1');
   await count(f).getByRole('button', { name: 'One camera more' }).click();
-  await expect(setup(f).locator('tbody tr.hc-remove-staged input[data-field="name"]')).toHaveValue('Jib');
-  expect(await names(setupRows(f))).toEqual(['Wide', 'Jib', 'Camera 8']);
+  expect(await names(setupRows(f))).toEqual(['Wide', 'Camera 2']);
   expect((await fleet(request)).map(device => device.actions.length)).toEqual(before);
 });
 

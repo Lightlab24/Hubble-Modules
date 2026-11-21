@@ -103,14 +103,16 @@
   }
   function savedDevicesMarkup() {
     const managed = new Set(devices.map(d => savedKey(d.serial)));
+    const checks = new Map(savedSearchRows().map(row => [savedKey(row.item.serial), row]));
+    const checkText = row => !row ? '' : row.candidate ? 'Found · add it on the sheet' : { checking: 'Checking…', missing: 'Didn’t answer', found: 'Found' }[row.state] ?? '';
     const rows = savedDeviceList().map(item => {
-      const inList = managed.has(savedKey(item.serial)), name = item.serial;
-      return '<tr data-saved-device="' + esc(item.serial) + '"><td class="hc-mono">' + esc(item.serial) + '</td><td class="hc-muted">' + esc(item.kind) + '</td><td class="hc-mono hc-muted">' + esc(item.address || item.base) + '</td>' +
-        '<td class="hc-muted">' + (inList ? 'In this sheet' : '') + '</td>' +
+      const inList = managed.has(savedKey(item.serial)), name = item.serial, check = inList ? null : checks.get(savedKey(item.serial));
+      return '<tr data-saved-device="' + esc(item.serial) + '"' + (check ? ' data-saved-state="' + esc(check.candidate ? 'found' : check.state) + '"' : '') + '><td class="hc-mono">' + esc(item.serial) + '</td><td class="hc-muted">' + esc(item.kind) + '</td><td class="hc-mono hc-muted">' + esc(item.address || item.base) + '</td>' +
+        '<td class="hc-muted" data-saved-check>' + (inList ? 'In this sheet' : esc(checkText(check))) + '</td>' +
         '<td class="hc-list-remove"><button type="button" class="hc-row-remove-button" data-action="forget-saved-device" data-serial="' + esc(item.serial) + '" aria-label="Forget ' + esc(name) + '" title="' + (inList ? 'Remove ' + esc(name) + ' from the sheet first' : 'Forget ' + esc(name) + '. Nothing changes on the device.') + '"' + (inList ? ' disabled' : '') + '>' + icon('trash-2') + '</button></td></tr>';
     }).join('');
     return '<header><h3 id="hc-saved-devices-title">Saved devices</h3><button type="button" class="hc-list-close" data-action="close-list-popover" aria-label="Close">' + icon('x') + '</button></header>' +
-      '<p>Every device you add is saved here by its serial. Discover checks these first, whichever network you pick, and lists the ones that aren’t in the sheet straight away.</p>' +
+      '<p>Every device you add is saved here by its serial. Discover checks these first, whichever network you pick. One that answers is listed on the sheet to add; one that doesn’t stays here.</p>' +
       (rows ? '<table class="hc-list-table"><thead><tr><th>Serial</th><th>Type</th><th>Address</th><th></th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' : '<div class="hc-list-empty">No saved devices yet. Every device you add is saved here.</div>') +
       '<footer class="hc-caption">Forget removes a device from this list only. Nothing changes on the device.</footer>';
   }
@@ -143,15 +145,23 @@
   const startLiveScanBeforeSaved = startLiveScan;
   startLiveScan = function() {
     const range = $('scan-range').value === 'custom' ? $('custom-range').value.trim() : $('scan-range').value;
-    // The saved devices show at once, before the first word back from the search.
-    if (range) savedScan = { id: '', state: 'scanning', checks: new Map() };
+    // Saved devices says Checking at once, before the first word back from the search.
+    if (range) { savedScan = { id: '', state: 'scanning', checks: new Map() }; renderSavedPopover(); }
     return startLiveScanBeforeSaved();
   };
   const applyLiveStateBeforeSaved = applyLiveState;
   applyLiveState = function(values) {
     const scan = values?.discovery;
-    if (scan && Array.isArray(scan.saved)) savedScan = { id: scan.id, state: scan.state, checks: new Map(scan.saved.map(item => [savedKey(item.serial), item.state])) };
-    return applyLiveStateBeforeSaved(values);
+    let changed = false;
+    if (scan && Array.isArray(scan.saved)) {
+      const next = { id: scan.id, state: scan.state, checks: new Map(scan.saved.map(item => [savedKey(item.serial), item.state])) };
+      changed = JSON.stringify([savedScan?.id, savedScan?.state, [...(savedScan?.checks ?? [])]]) !== JSON.stringify([next.id, next.state, [...next.checks]]);
+      savedScan = next;
+    }
+    const applied = applyLiveStateBeforeSaved(values);
+    // Saved devices, open, says how each check is going.
+    if (changed) renderSavedPopover();
+    return applied;
   };
 
   // ----- The pop-up the two lists share -----

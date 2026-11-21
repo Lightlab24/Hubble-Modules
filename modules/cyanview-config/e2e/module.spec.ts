@@ -104,19 +104,19 @@ test('camera deletion targets the active cell or the right-clicked row after con
 
   await selectCameraCell(rows.first().locator('[data-field="name"]'));
   await expect(deleteButton).toHaveText('Delete camera 1');
+  // Marked with the toolbar's Delete, right-click keeps it; Clear from RCP deletes it at once after a check.
   const rightClick = rows.last().locator('[data-column="name"]');
-  const menuItem = f.getByRole('menuitem', { name: 'Delete camera', exact: true });
-  await rightClick.click({ button: 'right' });
-  await menuItem.click();
+  await selectCameraCell(rows.last().locator('[data-field="name"]'));
+  await deleteButton.click();
   await expect(rows.last()).toHaveClass(/hc-remove-staged/);
   await rightClick.click({ button: 'right' });
   await f.getByRole('menuitem', { name: 'Keep camera', exact: true }).click();
   await expect(rows.last()).not.toHaveClass(/hc-remove-staged/);
   expect(sends).toHaveLength(2);
-  await rightClick.click({ button: 'right' });
-  await menuItem.click();
   await request.post('/__simulate', { data: { holdAction: '' } });
-  await pending.locator('[data-action="send-all-pending"]').click();
+  await rightClick.click({ button: 'right' });
+  await f.getByRole('menuitem', { name: 'Clear from RCP', exact: true }).click();
+  await f.getByRole('dialog').getByRole('button', { name: /^Clear from / }).click();
   await expect(rows).toHaveCount(1);
   expect(sends[2].items).toMatchObject([{ deleting: true, item: { number: '3' } }]);
   await expect.poll(async () => (await saved(request))?.cameras?.map((row: any) => row.number)).toEqual(['1']);

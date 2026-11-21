@@ -34,6 +34,13 @@ async function showMatrix(f: FrameLocator) {
   await f.locator('.hc-panel:not([hidden]) [data-remi-view="matrix"]').click();
   await expect(matrix(f).locator('[role="checkbox"]').first()).toBeVisible();
 }
+// The matrix's Delete still marks a camera for Pending sends. A row's bin clears it from its controller at once.
+async function stageDelete(f: FrameLocator, name: string) {
+  await showMatrix(f);
+  await cell(row(f, name), 'name').click();
+  await matrix(f).locator('[data-action="delete-controller"]').click();
+  await expect(row(f, name)).toHaveClass(/hc-remove-staged/);
+}
 async function showSetup(f: FrameLocator) {
   await f.locator('[data-tab="setup"]').click();
   await expect(setup(f).locator('table[role="grid"]')).toBeVisible();
@@ -108,7 +115,8 @@ test('Camera Configuration is one list of every camera with its settings and Sou
   await expect(cell(named(setup(f), 'Wide'), 'source')).toHaveText('Stage RIO');
   await expect(cell(named(setup(f), 'Jib'), 'source')).toHaveText('Master RCP');
   await expect(cell(named(setup(f), 'Jib'), 'ip').locator('input')).toHaveValue('10.20.20.7');
-  await expect(named(setup(f), 'Jib').locator('[data-action="stage-remove"]')).toBeVisible();
+  await expect(named(setup(f), 'Jib').locator('[data-action="clear-workspace-row"]')).toBeVisible();
+  await expect(named(setup(f), 'Jib').locator('[data-action="clear-rcp-row"]')).toBeVisible();
   // The sheets of each controller are no longer a tab of their own.
   await expect(f.locator('[data-tab="cameras"]')).toHaveCount(0);
   const jib = named(setup(f), 'Jib');
@@ -273,7 +281,7 @@ test('the matrix lists every camera once with its source, master and a circle pe
   await showConfig(f);
   const jib = named(config(f, MASTER), 'Jib');
   await expect(cell(jib, 'remiMaster')).toHaveText('None');
-  await expect(jib.locator('[data-action="stage-remove"]')).toBeVisible();
+  await expect(jib.locator('[data-action="clear-rcp-row"]')).toBeVisible();
   expect(await jib.locator('[data-field="controlEnabled"] [role="checkbox"]').evaluate(element => getComputedStyle(element).borderTopLeftRadius)).toBe('3px');
 });
 
@@ -342,7 +350,7 @@ test('a RIO camera goes RIO, master, then each RCP, and with no master straight 
   expect(names(after[4]!)).toEqual(['Wide']);
 });
 
-test('the bin marks a camera for deleting, and Send deletes it with its copies', async ({ page, request }) => {
+test('the bin clears a camera from its controller with its copies after a check, and the matrix still marks one for Pending sends', async ({ page, request }) => {
   const f = await open(page, request, { direct: true });
   await circle(row(f, 'Jib'), LEAF).click();
   await sendAll(f);
@@ -351,48 +359,52 @@ test('the bin marks a camera for deleting, and Send deletes it with its copies',
 
   await showConfig(f);
   const jib = named(config(f, MASTER), 'Jib');
-  await jib.locator('[data-action="stage-remove"]').click();
-  await expect(jib).toHaveClass(/hc-remove-staged/);
-  await expect(cell(jib, 'sync')).toHaveText('Delete');
+  await jib.locator('[data-action="clear-rcp-row"]').click();
+  const dialog = f.getByRole('dialog');
+  await expect(dialog.locator('h3')).toHaveText('Clear camera 7 from Master RCP?');
+  await expect(dialog).toContainText('Its REMI copy on Downstream RCP comes off first.');
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  expect((await fleet(request)).map(device => device.actions.length)).toEqual(before);
+
+  // The matrix's Delete marks it, and the row's bin then keeps it.
+  await stageDelete(f, 'Jib');
+  await expect(cell(row(f, 'Jib'), 'sync')).toHaveText('Delete');
   await expect(line(f, 'delete')).toContainText('Deleted from Master RCP');
   await expect(line(f, 'delete')).toContainText('REMI copies on Downstream RCP come off first');
-  expect((await fleet(request)).map(device => device.actions.length)).toEqual(before);
-  // The same button keeps it.
+  await showConfig(f);
   await expect(jib.locator('[data-action="stage-remove"]')).toHaveAttribute('aria-label', 'Keep camera 7');
   await jib.locator('[data-action="stage-remove"]').click();
   await expect(jib).not.toHaveClass(/hc-remove-staged/);
   await expect(line(f, 'delete')).toHaveCount(0);
+  expect((await fleet(request)).map(device => device.actions.length)).toEqual(before);
 
-  // The matrix's Delete button and right-click do the same.
-  await showMatrix(f);
-  await cell(row(f, 'Jib'), 'name').click();
-  await matrix(f).locator('[data-action="delete-controller"]').click();
-  await expect(row(f, 'Jib')).toHaveClass(/hc-remove-staged/);
-  await sendAll(f);
-  await settle(f);
-  await expect(row(f, 'Jib')).toHaveCount(0);
+  await jib.locator('[data-action="clear-rcp-row"]').click();
+  await f.getByRole('dialog').getByRole('button', { name: 'Clear from Master RCP' }).click();
+  await expect(jib).toHaveCount(0);
   const after = await fleet(request);
   expect(names(after[1]!)).toEqual([]);
   expect(names(after[2]!)).toEqual([]);
+  await showMatrix(f);
+  await expect(row(f, 'Jib')).toHaveCount(0);
 });
 
-// Nov 20, 2026: the user asked to remove hide. The bin is the one way to take a camera out.
-test('a camera can only be deleted, not hidden: no Clear from view on its row, the toolbar or right-click', async ({ page, request }) => {
+// Nov 20, 2026 the user had hide taken out. Nov 21 they asked for it back as Clear from workspace: an eye on every
+// row beside the bin, and a camera it clears is listed under Not set up by Hubble when a read finds it again.
+test('every camera row has the eye and the bin, and right-click offers both', async ({ page, request }) => {
   const f = await open(page, request, { direct: true });
   await showSetup(f);
   const jib = named(setup(f), 'Jib');
-  await expect(jib.locator('td.hc-row-remove button')).toHaveCount(1);
-  await expect(jib.locator('[data-action="stage-remove"]')).toBeVisible();
-  await expect(f.locator('[data-action="clear-from-view"], [data-action="clear-selected"]')).toHaveCount(0);
+  await expect(jib.locator('td.hc-row-remove button')).toHaveCount(2);
+  await expect(jib.locator('[data-action="clear-workspace-row"]')).toHaveAttribute('aria-label', 'Clear camera 7 from the workspace');
+  await expect(jib.locator('[data-action="clear-rcp-row"]')).toHaveAttribute('aria-label', 'Clear camera 7 from Master RCP');
   await expect(f.getByText('Clear from view')).toHaveCount(0);
   await cell(jib, 'name').click({ button: 'right' });
-  await expect(f.getByRole('menuitem', { name: 'Delete camera' })).toBeVisible();
-  await expect(f.getByRole('menuitem', { name: 'Clear from view' })).toHaveCount(0);
-  await page.keyboard.press('Escape');
-  await jib.locator('[data-action="stage-remove"]').click();
-  await expect(jib).toHaveClass(/hc-remove-staged/);
+  await expect(f.getByRole('menuitem', { name: 'Clear from workspace' })).toBeVisible();
+  await expect(f.getByRole('menuitem', { name: 'Clear from RCP' })).toBeVisible();
+  await f.getByRole('menuitem', { name: 'Clear from workspace' }).click();
+  await expect(jib).toHaveCount(0);
   await showPending(f);
-  await expect(line(f, 'delete')).toBeVisible();
+  await expect(panel(f)).toContainText('Nothing is waiting to send');
 });
 
 test('Refresh all clears everything waiting to be sent and shows what the controllers have', async ({ page, request }) => {
@@ -401,7 +413,8 @@ test('Refresh all clears everything waiting to be sent and shows what the contro
   await circle(row(f, 'Jib'), LEAF).click();
   await setMaster(f, 'Wide', 'Master RCP');
   await showSetup(f);
-  await named(setup(f), 'Jib').locator('[data-action="stage-remove"]').click();
+  await stageDelete(f, 'Jib');
+  await showSetup(f);
   await cell(named(setup(f), 'Wide'), 'name').locator('input').fill('Renamed here');
   await cell(named(setup(f), 'Wide'), 'name').locator('input').press('Enter');
   await showConfig(f);
@@ -501,7 +514,12 @@ test('a large delete goes out over one socket per controller', async ({ page, re
   await settle(f);
   expect(names((await fleet(request))[1]!)).toHaveLength(8);
   const rows = setup(f).locator('tbody tr[data-id]:has(input[data-field="name"][value^="Camera "])');
-  for (let index = 0; index < 8; index++) await rows.nth(index).locator('[data-action="stage-remove"]').click();
+  await showMatrix(f);
+  const listed = matrix(f).locator('tbody tr[data-id]:has(input[data-field="name"][value^="Camera "])');
+  for (let index = 0; index < 8; index++) {
+    await cell(listed.nth(index), 'name').click();
+    await matrix(f).locator('[data-action="delete-controller"]').click();
+  }
   await expect(line(f, 'delete')).toHaveCount(8);
   const inspect = async () => (await (await request.get('/__inspect')).json()) as { opened: number[] };
   const opened = (await inspect()).opened;
@@ -514,23 +532,26 @@ test('a large delete goes out over one socket per controller', async ({ page, re
   expect((await rpc('read-plan')).plan.cameras.map((camera: { name: string }) => camera.name)).toEqual(['Wide']);
 });
 
-test('deleting a copy on Camera Configuration clears its circle and waits for Send', async ({ page, request }) => {
+test('clearing a copy from its RCP takes its circle off at once, after a check', async ({ page, request }) => {
   const f = await open(page, request, { direct: true });
   await circle(row(f, 'Jib'), LEAF).click();
   await sendAll(f);
   await settle(f);
-  await f.locator('[data-action="send-mode"][data-mode="Auto send"]').click();
   await showConfig(f);
   const copy = config(f, LEAF).locator('tbody tr[data-id]').first();
   await cell(copy, 'name').click({ button: 'right' });
-  await f.getByRole('menuitem', { name: 'Remove REMI copy', exact: true }).click();
-  await expect(copy).toHaveClass(/hc-remove-staged/);
-  await expect(line(f, on(LEAF))).toContainText('On → Off');
+  await f.getByRole('menuitem', { name: 'Clear from RCP', exact: true }).click();
+  const dialog = f.getByRole('dialog');
+  await expect(dialog.locator('h3')).toHaveText('Clear the REMI copy of camera 7 from Downstream RCP?');
+  await expect(dialog).toContainText('Its camera stays on Master RCP.');
   expect(names((await fleet(request))[2]!)).toEqual(['Jib']);
-  await sendAll(f);
-  await settle(f);
+  await dialog.getByRole('button', { name: 'Clear from Downstream RCP' }).click();
   await expect(config(f, LEAF).locator('tbody tr[data-id]')).toHaveCount(0);
   expect(names((await fleet(request))[2]!)).toEqual([]);
+  expect(names((await fleet(request))[1]!)).toEqual(['Jib']);
+  await showMatrix(f);
+  await expect(circle(row(f, 'Jib'), LEAF)).not.toBeChecked();
+  await settle(f);
 });
 
 test('each change can be cancelled, and each camera sent on its own', async ({ page, request }) => {
@@ -653,9 +674,7 @@ test('an edit shows at once and a second can follow while the first save is held
   await expect(circle(wide, LEAF)).toBeChecked();
   await circle(wide, TRUCK).click();
   await expect(circle(wide, TRUCK)).toBeChecked();
-  await showConfig(f);
-  await named(config(f, RIO), 'Wide').locator('[data-action="stage-remove"]').click();
-  await expect(named(config(f, RIO), 'Wide')).toHaveClass(/hc-remove-staged/);
+  await stageDelete(f, 'Wide');
   await request.post('/__simulate', { data: { releasePlanWrites: true } });
   await expect(f.locator('[data-role="saved-label"]')).toContainText('Workspace saved');
   await page.reload();
@@ -677,7 +696,8 @@ test('undo takes back a circle, a master and a delete', async ({ page, request }
   await showConfig(f);
   const configured = named(config(f, MASTER), 'Jib');
   await expect(cell(configured, 'remiMaster')).toHaveText('Downstream RCP');
-  await configured.locator('[data-action="stage-remove"]').click();
+  await cell(configured, 'number').click();
+  await config(f, MASTER).locator('[data-action="delete-controller"]').click();
   await expect(configured).toHaveClass(/hc-remove-staged/);
   await cell(configured, 'number').click();
   const grid = gridOf(configured);
@@ -700,8 +720,7 @@ test('Auto send sends a circle at once, and a master, move or delete waits to be
   await setMaster(f, 'Jib', 'Truck RCP');
   await showPending(f);
   await expect(line(f, 'master')).toBeVisible();
-  await showSetup(f);
-  await named(setup(f), 'Jib').locator('[data-action="stage-remove"]').click();
+  await stageDelete(f, 'Jib');
   await expect(line(f, 'delete')).toBeVisible();
   const after = await fleet(request);
   expect(names(after[1]!)).toEqual(['Jib']);
@@ -757,7 +776,7 @@ test('a camera added on Camera Configuration is listed as new, and its bin takes
   await showConfig(f);
   const sheet = config(f, MASTER);
   const newName = await addCamera(f, sheet);
-  await named(sheet, newName).locator('[data-action="stage-remove"]').click();
+  await named(sheet, newName).locator('[data-action="clear-rcp-row"]').click();
   await expect(named(sheet, newName)).toHaveCount(0);
   await addCamera(f, sheet);
   await showPending(f);

@@ -158,15 +158,14 @@ test('cameras in columns keep lens setup, sorting, sizes and camera deletion', a
   await expect(again.locator('th[data-camera-header="cam1"]')).toHaveCount(1);
   expect(await again.locator('th[data-camera-header="cam1"]').evaluate(element => (element as HTMLElement).offsetWidth)).toBe(width);
 
+  // Right-click on a camera's column offers both clears. Clear from RCP asks first.
   await again.locator('th[data-camera-header="cam3"]').click({ button: 'right' });
-  await frame(page).getByRole('menuitem', { name: 'Delete camera' }).click();
-  // Pending sends doesn't open by itself any more; its button counts the delete.
-  await expect(frame(page).locator('.hc-panel:not([hidden]) .hc-toolbar [data-action="toggle-pending-sends"]')).toHaveText(/\d+\s*pending/);
-  await frame(page).locator('.hc-panel:not([hidden]) .hc-toolbar [data-action="toggle-pending-sends"]').click();
-  const staged = frame(page).locator('[data-pending-line="delete"]');
-  await expect(staged).toContainText('Deleted from');
-  await staged.getByRole('button').click();
-  await expect(staged).toHaveCount(0);
+  await frame(page).getByRole('menuitem', { name: 'Clear from RCP' }).click();
+  await expect(frame(page).getByRole('dialog').locator('h3')).toContainText('Clear camera');
+  await frame(page).getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
+  await again.locator('th[data-camera-header="cam3"]').click({ button: 'right' });
+  await frame(page).getByRole('menuitem', { name: 'Clear from workspace' }).click();
+  await expect(again.locator('th[data-camera-header="cam3"]')).toHaveCount(0);
   expect((await inspect(request)).actions).toEqual([]);
 });
 

@@ -248,7 +248,7 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from
     // columns keep the delete button on screen however far the sheet scrolls.
     if (deviceId !== allCamerasSheet) {
       columns.splice(columns.findIndex(column => column.id === 'password') + 1, 0, deviceId === cameraSetupSheet ? { id: 'source', label: 'Source', width: 140 } : { id: 'remiMaster', label: 'Master RCP', width: 130 });
-      columns.splice(columns.findIndex(column => column.id === 'name') + 1, 0, { id: 'remove', label: '', width: 34, tool: true, frozen: 0 });
+      columns.splice(columns.findIndex(column => column.id === 'name') + 1, 0, { id: 'remove', label: '', width: 58, tool: true, frozen: 0 });
     }
     columns.push({ id: 'sync', label: 'Sync', width: 70 });
     if (deviceId === allCamerasSheet) columns = arrangeAllCameraColumns(columns);
@@ -1456,7 +1456,10 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from
     try{for(const candidate of results.filter(item=>selectedResults.has(item.id)&&!devices.some(d=>d.serial===item.serial))){
       if(devices.length>=128)throw new Error('Controller capacity reached');
       const snapshot=await moduleBridge.importDevice(candidate);if(cameras.length+snapshot.cameras.length>512)throw new Error('Camera capacity reached');
-      devices.push(snapshot.device);cameras.push(...snapshot.cameras.map(restoredRow));lans.push(...snapshot.lans.map(restoredRow));selectedResults.delete(candidate.id);count++;
+      devices.push(snapshot.device);
+      // Adding a controller doesn't make what is already on it yours: its cameras are listed under Not set up by Hubble (Nov 21, 2026).
+      // The Simulated rig is the exception, since it stands in for a rig already set up and its tour counts those cameras as yours.
+      const foreign=!moduleBridge?.simulated;cameras.push(...snapshot.cameras.map(row=>({...restoredRow(row),...(foreign?{foreign:true}:{})})));lans.push(...snapshot.lans.map(restoredRow));selectedResults.delete(candidate.id);count++;
     }}catch(error){toast(error.message);}
     if(count)await restoreCameraChoiceCatalogs();
     addingDiscovered=false;syncFilter();renderResults();renderLans();renderCameras();if(count)toast(count+' devices added');remember();
@@ -2135,6 +2138,7 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from
 
   function syncCameraDeleteButton(group) {
     const button = group.querySelector('[data-action="delete-controller"]');
+    if (!button) return;
     const camera = activeCamera(group.querySelector('table[data-camera-device]'));
     const label = button.querySelector('[data-camera-delete-label]');
     const text = !camera?.number ? 'Delete camera' : (removalStaged(camera) ? 'Keep camera ' : 'Delete camera ') + camera.number;
@@ -2656,7 +2660,7 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from
       '<div class="hc-assignment-body" data-pending-host="setup"><div class="hc-controller-list"><section class="hc-controller" data-role="setup-group">' +
         '<div class="hc-controller-tools">' +
           cameraCountControl(cameraSetupSheet) + '<span class="hc-caption hc-count-hint">New rows join the end</span>' +
-          '<span class="hc-right"></span>' + deleteButton(cameraSetupSheet) +
+          '<span class="hc-right"></span><button class="hc-button" data-action="clear-workspace" title="Clear every camera from this workspace. Nothing on the controllers changes, and ⌘Z puts them back." disabled>' + icon('eye-off') + 'Clear workspace</button>' +
         '</div>' +
         '<div data-role="setup-sheet"></div>' +
       '</section></div></div>' +
@@ -2986,11 +2990,18 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from
   }
   function cameraMenuItems(camera, cameraById) {
     const staged = removalStaged(camera);
-    return [{ id: 'refresh-camera', label: 'Refresh camera', disabled: !camera.elementKey || !!camera.deleting || !!camera.jobs || cameraEnabledSent.has(camera.id) || !!cameraEnabledJob(camera), run: () => runCameraEnabled(cameraById.get(camera.id) ?? camera, 'refresh') }, { id: 'delete-camera', label: staged ? 'Keep camera' : importedCamera(camera) ? 'Remove REMI copy' : 'Delete camera', icon: staged ? undefined : 'delete', danger: !staged, disabled: !!camera.deleting || !!camera.jobs, run: () => reviewCameraDeletion(cameraById.get(camera.id) ?? camera) }];
+    return [{ id: 'refresh-camera', label: 'Refresh camera', disabled: !camera.elementKey || !!camera.deleting || !!camera.jobs || cameraEnabledSent.has(camera.id) || !!cameraEnabledJob(camera), run: () => runCameraEnabled(cameraById.get(camera.id) ?? camera, 'refresh') }, { id: 'clear-workspace', label: 'Clear from workspace', disabled: !!camera.deleting || !!camera.jobs, run: () => { const row = cameraById.get(camera.id) ?? camera; clearFromWorkspace([row], virtualSheet(tab) ?? row.device); } }, { id: 'clear-rcp', label: staged ? 'Keep camera' : 'Clear from RCP', icon: staged ? undefined : 'delete', danger: !staged, disabled: !!camera.deleting || !!camera.jobs, run: () => reviewClearFromRcp(cameraById.get(camera.id) ?? camera) }];
   }
+  // The eye clears a camera from the workspace only and the bin clears it from its controller; see ui-camera-clear.js.
   function removeCell(camera, column) {
-    const staged = removalStaged(camera), label = (staged ? 'Keep camera ' : importedCamera(camera) ? 'Remove the REMI copy of camera ' : 'Delete camera ') + camera.number;
-    return '<td class="hc-camera-frozen hc-row-remove" style="left:' + column.frozen + 'px"><button type="button" class="hc-row-remove-button" data-action="stage-remove" data-remove-row="' + esc(camera.id) + '" aria-label="' + esc(label) + '" title="' + esc(label) + '"' + (camera.deleting || camera.jobs ? ' disabled' : '') + '>' + icon(staged ? 'undo-2' : 'trash-2') + '</button></td>';
+    const staged = removalStaged(camera), copy = importedCamera(camera), busy = camera.deleting || camera.jobs, number = esc(camera.number), where = esc(controllerName(camera.device) || 'its controller'), id = esc(camera.id);
+    const hide = 'Clear camera ' + number + ' from the workspace. Nothing on ' + where + ' changes, and if Hubble reads it there again it is listed under Not set up by Hubble.';
+    const binLabel = staged ? 'Keep camera ' + number : (copy ? 'Clear the REMI copy of camera ' : 'Clear camera ') + number + ' from ' + where;
+    const binTitle = staged ? binLabel : copy ? binLabel + '. The camera it copies stays where it is.' : binLabel + '. It is deleted there, with its REMI copies.';
+    const disabled = busy ? ' disabled' : '';
+    return '<td class="hc-camera-frozen hc-row-remove" style="left:' + column.frozen + 'px">' +
+      '<button type="button" class="hc-row-remove-button hc-row-hide-button" data-action="clear-workspace-row" data-clear-row="' + id + '" aria-label="Clear camera ' + number + ' from the workspace" title="' + hide + '"' + disabled + '>' + icon('eye-off') + '</button>' +
+      '<button type="button" class="hc-row-remove-button" data-action="' + (staged ? 'stage-remove' : 'clear-rcp-row') + '" data-remove-row="' + id + '" data-clear-row="' + id + '" aria-label="' + binLabel + '" title="' + binTitle + '"' + disabled + '>' + icon(staged ? 'undo-2' : 'trash-2') + '</button></td>';
   }
 
   const requestFailure = (items, error) => ({ results: items.map(item => ({ id: item.id, error: error.message || 'REMI changes could not be confirmed' })), refresh: true });
@@ -3634,13 +3645,14 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from
     if (save) remember();
   };
   const saveRemiView = () => ({ panelOpen: pendingSendsOpen, byController: remiByController, unassigned: cameras.filter(unassigned).map(plainRow), devices: { ...deviceSheet },
-    ignored: [...ignoredControllers].filter(serial => !devices.some(d => d.serial === serial)).slice(0, 256) });
+    ignored: [...ignoredControllers].filter(serial => !devices.some(d => d.serial === serial)).slice(0, 256), cleared: saveClearedFromWorkspace() });
   function restoreRemiView(data) {
     const view = data.remiView, saved = Array.isArray(view?.unassigned) ? view.unassigned.filter(row => typeof row?.id === 'string' && row.device === '') : [];
     pendingSendsOpen = view?.panelOpen === true;
     remiByController = view?.byController === true;
     ignoredControllers.clear();
     for (const serial of Array.isArray(view?.ignored) ? view.ignored : []) if (typeof serial === 'string' && serial && serial.length <= 160) ignoredControllers.add(serial);
+    restoreClearedFromWorkspace(view?.cleared);
     const sheet = view?.devices ?? {};
     Object.assign(deviceSheet, { lanOpen: sheet.lanOpen === true, wanOpen: sheet.wanOpen === true,
       sort: deviceSortable.has(sheet.sort?.field) && ['asc', 'desc'].includes(sheet.sort.direction) ? { field: sheet.sort.field, direction: sheet.sort.direction } : null });
@@ -4225,7 +4237,9 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from
     const rows = list.map((d, index) => '<tr data-device-row="' + esc(d.id) + '"' + (d.id === selectedDeviceId ? ' class="hc-device-selected"' : '') + '>' + columns.map(column => deviceCell(d, column, index)).join('') + '</tr>').join('');
     const span = columns.length - 7;
     // Saved devices a search is checking come first, in the order they were saved.
-    const saved = savedSearchRows(), savedSerials = new Set(saved.map(row => savedKey(row.item.serial)));
+    // A saved device shows here only once it answers, to be added. Until then it stays in Saved devices, which
+    // says how its check went (Nov 21, 2026).
+    const saved = savedSearchRows().filter(row => row.candidate), savedSerials = new Set(saved.map(row => savedKey(row.item.serial)));
     const foundRows = saved.map(row => savedSearchRowMarkup(row, span)).join('') + found.filter(candidate => !savedSerials.has(savedKey(candidate.serial))).map(candidate => '<tr class="hc-device-found" data-device-found="' + esc(candidate.id) + '"><td><span class="hc-muted">+</span></td><td>' + esc(candidate.name || candidate.serial) + '</td><td></td><td><span class="hc-muted">' + esc(candidate.kind || '') + '</span></td><td><span class="hc-mono hc-muted">' + esc(candidate.serial) + '</span></td><td><span class="hc-found-tag">Found</span></td><td>' + pageLink(candidate.base || candidate.address, candidate.name || candidate.serial) + '</td><td colspan="' + span + '"><button type="button" class="hc-primary hc-add-found" data-action="add-found-device" data-id="' + esc(candidate.id) + '" aria-label="Add ' + esc(candidate.name || candidate.serial) + '"' + (deviceAddBusy ? ' disabled' : '') + '>' + icon('plus') + 'Add</button></td></tr>').join('');
     const addRow = '<tr class="hc-device-add"><td><span class="hc-muted">+</span></td><td colspan="5"><span class="hc-muted">New device</span></td><td><input class="hc-cell-input hc-mono" data-device-add placeholder="Type an IP" aria-label="IP address of a device to add" spellcheck="false" autocomplete="off"' + (deviceAddBusy ? ' disabled' : '') + '></td><td colspan="' + span + '"><span class="hc-muted" data-role="device-add-note">' + esc(deviceAddNote || 'Type or paste an IP and press Enter. Hubble finds the device and fills in the row.') + '</span></td></tr>';
     const markup = '<div class="hc-sheet"><div class="hc-scroll"><table class="hc-grid" data-device-sheet aria-label="Devices" style="width:' + columns.reduce((total, column) => total + column.width, 0) + 'px">' + deviceSheetHeader(columns) + '<tbody>' + rows + foundRows + addRow + '</tbody></table></div></div>';
@@ -5068,6 +5082,223 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from
     if (event.target.matches?.('[data-count-input]')) queueMicrotask(paintCameraCounts);
   });
 
+  // ── Clear from workspace and Clear from RCP ──────────────────────────────────
+  // Every camera row has two buttons. The eye clears the camera from this workspace only: nothing is sent,
+  // so it works with every controller off, and ⌘Z puts it back. The bin clears it from its controller,
+  // after a check, at once and whatever the Send mode. Clear workspace does what the eye does to every
+  // camera on Camera Configuration. A camera cleared from the workspace that a later read finds on its
+  // controller is listed under Not set up by Hubble (asked for Nov 21, 2026).
+
+  // Where each camera cleared from the workspace was, as 'device\nkey'. A read that finds one again lists it
+  // apart, even the read that follows one of Hubble's own sends, which would otherwise take it back in.
+  const clearedFromWorkspace = new Set();
+  const clearedLimit = 1024;
+  const clearedId = camera => camera.device + '\n' + camera.elementKey;
+  const clearBusy = camera => !!camera.jobs || !!camera.deleting || queuedSends.has(camera) || movesInFlight.has(camera);
+
+  // A row and every copy made from it, however many copies away.
+  function withCopies(rows) {
+    const { children } = routeTree(), out = [], seen = new Set();
+    const walk = row => { if (seen.has(row)) return; seen.add(row); out.push(row); for (const copy of children.get(row) ?? []) walk(copy); };
+    for (const row of rows) walk(row);
+    return out;
+  }
+  const cameraLabel = camera => 'camera ' + (camera.number || '') + (camera.name ? ' · ' + camera.name : '');
+  function forgetRemiDrafts(camera) {
+    if (!camera.elementKey) return;
+    const state = remiPanels.get(camera.device);
+    if (!state?.drafts) return;
+    for (const [id, item] of [...state.drafts]) if (item.key === camera.elementKey) state.drafts.delete(id);
+  }
+  // Takes the rows, and the copies made from them, out of the workspace. Nothing is sent.
+  function removeFromWorkspace(rows) {
+    const gone = withCopies(rows.filter(camera => cameras.includes(camera) && !clearBusy(camera))).filter(camera => !clearBusy(camera));
+    if (!gone.length) return [];
+    const entries = gone.map(camera => ({ camera, index: cameras.indexOf(camera) }));
+    cameras = cameras.filter(camera => !gone.includes(camera));
+    for (const camera of gone) {
+      countMarked.delete(camera);
+      routeErrors.delete(camera.id);
+      forgetRemiDrafts(camera);
+      if (camera.elementKey) clearedFromWorkspace.add(clearedId(camera));
+    }
+    while (clearedFromWorkspace.size > clearedLimit) clearedFromWorkspace.delete(clearedFromWorkspace.values().next().value);
+    routeTreeMemo = null;
+    return entries;
+  }
+  function clearFromWorkspace(rows, sheetId) {
+    const shown = rows.filter(camera => cameras.includes(camera) && !clearBusy(camera));
+    const entries = removeFromWorkspace(shown);
+    if (!entries.length) { if (rows.length) toast('Wait for its send to finish'); return; }
+    recordCameraHistory(sheetId, { kind: 'cleared', entries });
+    renderCameras();
+    schedulePendingSends();
+    remember();
+    const where = [...new Set(shown.map(camera => camera.device))];
+    toast(shown.length === 1
+      ? 'Camera ' + shown[0].number + ' cleared from the workspace. Nothing on ' + (where[0] && device(where[0]) ? controllerName(where[0]) : 'the RCPs') + ' changed · ⌘Z puts it back'
+      : shown.length + ' cameras cleared from the workspace. Nothing on the RCPs changed · ⌘Z puts them back');
+  }
+  // ⌘Z puts cleared cameras back where they were. One a read has already found again under Not set up by
+  // Hubble goes back as it was before it was cleared.
+  function restoreToWorkspace(entries) {
+    for (const { camera, index } of [...entries].sort((a, b) => a.index - b.index)) {
+      if (cameras.includes(camera)) continue;
+      const found = cameras.findIndex(row => row.id === camera.id || camera.elementKey && row.device === camera.device && row.elementKey === camera.elementKey);
+      if (found >= 0) cameras.splice(found, 1);
+      cameras.splice(Math.min(index, cameras.length), 0, camera);
+      if (camera.elementKey) clearedFromWorkspace.delete(clearedId(camera));
+    }
+    routeTreeMemo = null;
+  }
+  const historyStepBeforeClear = cameraHistoryStep;
+  cameraHistoryStep = function(id, direction) {
+    const history = cameraHistory(id), forward = direction === 'redo', from = history[forward ? 'redo' : 'undo'], to = history[forward ? 'undo' : 'redo'];
+    const entry = from.at(-1);
+    if (entry?.kind !== 'cleared') return historyStepBeforeClear(id, direction);
+    if (forward) {
+      const rows = entry.entries.map(item => item.camera).filter(camera => cameras.includes(camera));
+      if (rows.some(clearBusy)) { toast('Wait for its send to finish'); return; }
+      removeFromWorkspace(rows);
+    } else restoreToWorkspace(entry.entries);
+    from.pop();
+    to.push(entry);
+    renderCameras();
+    schedulePendingSends();
+    remember();
+  };
+
+  // A read that finds a cleared camera on its controller lists it under Not set up by Hubble, and one the
+  // controller no longer has is forgotten.
+  const mergeBeforeClear = mergeSnapshot;
+  mergeSnapshot = function(snapshot) {
+    mergeBeforeClear(snapshot);
+    const id = snapshot?.device?.id;
+    if (!clearedFromWorkspace.size || !id || !Array.isArray(snapshot.cameras)) return;
+    const listed = new Set(snapshot.cameras.map(row => id + '\n' + row.elementKey));
+    for (const camera of cameras) {
+      if (camera.device !== id || !camera.elementKey || !clearedFromWorkspace.has(clearedId(camera))) continue;
+      camera.foreign = true;
+      clearedFromWorkspace.delete(clearedId(camera));
+    }
+    for (const value of [...clearedFromWorkspace]) if (value.startsWith(id + '\n') && !listed.has(value)) clearedFromWorkspace.delete(value);
+    routeTreeMemo = null;
+  };
+  const saveClearedFromWorkspace = () => [...clearedFromWorkspace].slice(-clearedLimit);
+  function restoreClearedFromWorkspace(values) {
+    clearedFromWorkspace.clear();
+    for (const value of Array.isArray(values) ? values : []) if (typeof value === 'string' && value.includes('\n') && value.length <= 400) clearedFromWorkspace.add(value);
+  }
+
+  // ── Clear from RCP ──
+  // What clearing a row from its controller takes with it, and what stops it now.
+  function rcpClearPlan(camera) {
+    const rows = withCopies([camera]), source = importedCamera(camera) ? sourceRowOf(camera) : null;
+    const involved = [...new Set([camera.device, ...rows.map(row => row.device)])];
+    const offline = involved.filter(id => device(id)?.online === false);
+    const unread = rows.filter(row => !row.elementKey);
+    const copies = rows.filter(row => row !== camera).map(row => controllerName(row.device));
+    return { rows, source, offline, unread, copies };
+  }
+  function reviewClearFromRcp(camera) {
+    if (!camera || clearBusy(camera)) return;
+    // The bin on a camera marked for delete takes that back, as it always has.
+    if (removalStaged(camera)) { reviewCameraDeletion(camera); return; }
+    // A camera that never reached its controller has nothing to delete there.
+    if (!importedCamera(camera) && camera.isNew && !camera.elementKey && !camera.createState) { clearFromWorkspace([camera], virtualSheet(tab) ?? camera.device); return; }
+    const plan = rcpClearPlan(camera), where = controllerName(camera.device), copy = importedCamera(camera);
+    const title = copy ? 'Clear the REMI copy of camera ' + esc(camera.number) + ' from ' + esc(where) + '?' : 'Clear camera ' + esc(camera.number) + ' from ' + esc(where) + '?';
+    const lines = [];
+    if (copy) lines.push(plan.source ? 'Its camera stays on ' + esc(controllerName(plan.source.device)) + '.' : 'The camera it copies isn’t in this workspace and stays where it is.');
+    if (plan.copies.length) lines.push('Its REMI ' + (plan.copies.length === 1 ? 'copy' : 'copies') + ' on ' + esc([...new Set(plan.copies)].join(' and ')) + ' come' + (plan.copies.length === 1 ? 's' : '') + ' off first.');
+    const blocked = plan.offline.length ? esc(plan.offline.map(controllerName).join(' and ')) + (plan.offline.length === 1 ? ' reads' : ' read') + ' Offline, so it can’t be cleared from there now. The eye clears it from the workspace without ' + (plan.offline.length === 1 ? 'it' : 'them') + '.'
+      : plan.unread.length ? 'Refresh this controller first. Hubble hasn’t read where this camera sits on it.' : '';
+    const detail = [camera.model && !copy ? camera.model : '', camera.model === 'Alpha-USB' ? camera.usb : camera.ip].filter(Boolean).join(' · ');
+    $('modal-layer').innerHTML = '<section class="hc-modal" role="dialog" aria-modal="true" aria-labelledby="hc-clear-rcp-title"><div class="hc-modal-head"><div><h3 id="hc-clear-rcp-title">' + title + '</h3><p>It is deleted there as soon as you press Clear. Nothing waits in Pending sends.</p></div><button data-action="close-modal" aria-label="Close">' + icon('x') + '</button></div>' +
+      '<div class="hc-modal-body"><div class="hc-change-item"><div><strong>' + esc(where) + ' · Camera ' + esc(camera.number) + '</strong><span class="hc-caption">Delete</span></div><div>' + esc(camera.name) + '</div>' + (detail ? '<small>' + esc(detail) + '</small>' : '') + lines.map(line => '<small>' + line + '</small>').join('') + '</div>' +
+      (blocked ? '<div class="hc-change-item"><small class="hc-error-text" data-role="clear-rcp-blocked">' + blocked + '</small></div>' : '') +
+      '<div class="hc-change-item"><small>This can’t be undone from Hubble.</small></div></div>' +
+      '<div class="hc-modal-foot"><button class="hc-button" data-action="close-modal">Cancel</button><button class="hc-danger hc-danger-solid" data-clear-rcp-confirm="' + esc(camera.id) + '"' + (blocked ? ' disabled' : '') + '>Clear from ' + esc(where) + '</button></div></section>';
+    $('modal-layer').hidden = false;
+    icons();
+    $('modal-layer').querySelector('.hc-modal-foot [data-action="close-modal"]').focus();
+  }
+  // A copy comes off on the controller holding it. The ones made from it come off first.
+  async function removeCopies(rows) {
+    const errors = [];
+    for (const copy of [...rows].reverse()) {
+      if (!copy.elementKey) continue;
+      try {
+        const report = await moduleBridge.remiSend({ receiver: copy.device, items: [{ id: 'remove:' + copy.elementKey, kind: 'remove', key: copy.elementKey, enable: false, ...(copy.remi ? { selector: copy.remi.selector, connection: copy.remi.connection } : {}), label: copy.name }] });
+        if (report.snapshot) mergeOwn(report.snapshot);
+        const failed = (report.results || []).find(item => item.error);
+        if (failed) errors.push(failed.error);
+        if (report.refresh) await remiRefreshSheets();
+      } catch (error) { errors.push(error.message || 'The REMI copy could not be removed'); }
+      if (errors.length) break;
+    }
+    return errors;
+  }
+  function clearFromRcp(camera) {
+    if (!camera || !cameras.includes(camera) || clearBusy(camera)) return;
+    if (!moduleBridge || moduleBridge.preview) { toast(sampleRouteMessage); return; }
+    const plan = rcpClearPlan(camera);
+    if (plan.offline.length || plan.unread.length) return;
+    delete camera.removeStaged;
+    delete camera.routeDraft;
+    queuedSends.add(camera);
+    paintItem(camera);
+    return enqueueSend(async () => {
+      queuedSends.delete(camera);
+      const where = controllerName(camera.device), name = 'Camera ' + camera.number;
+      if (!importedCamera(camera)) {
+        await removeCameras([camera]);
+        routeTreeMemo = null;
+        toast(cameras.includes(camera) ? name + ' was not cleared from ' + where + ': ' + (routeErrors.get(camera.id) || 'it could not be confirmed') : name + ' cleared from ' + where);
+        return;
+      }
+      let errors;
+      const source = plan.source;
+      // Marked as deleting, not busy, so the read that confirms it takes the row away.
+      for (const row of plan.rows) { row.deleting = true; paintItem(row); }
+      if (source && source.elementKey) {
+        // A copy of one of your cameras comes off by routing that camera without it and the copies made from it.
+        const actual = actualRoute(source), drop = new Set(plan.rows.map(row => row.device)), tree = Object.fromEntries(Object.entries(actual.links).filter(([rcp]) => !drop.has(rcp)));
+        const report = await requestRoutes([{ id: source.id, camera: source.device, key: source.elementKey, tree, expected: actual.links, copies: actual.keys }]);
+        const result = report.results?.find(row => row.id === source.id);
+        errors = result?.verified ? [] : [result?.error || 'its REMI copies could not be removed'];
+      } else {
+        errors = await removeCopies(plan.rows);
+      }
+      routeTreeMemo = null;
+      for (const row of plan.rows) if (cameras.includes(row)) { delete row.deleting; paintItem(row); }
+      renderCameras();
+      remember();
+      toast(errors.length ? 'The REMI copy of ' + name.toLowerCase() + ' was not cleared from ' + where + ': ' + errors[0] : 'The REMI copy of ' + name.toLowerCase() + ' cleared from ' + where);
+    });
+  }
+
+  // The toolbar's Clear workspace is only there when there is something to clear.
+  function paintClearWorkspace() {
+    const button = root.querySelector('[data-action="clear-workspace"]');
+    if (button) button.disabled = !assignmentRows().some(camera => !clearBusy(camera));
+  }
+  const renderBeforeClear = renderCameras;
+  renderCameras = function(...args) { const drawn = renderBeforeClear(...args); paintClearWorkspace(); return drawn; };
+
+  root.addEventListener('click', event => {
+    const button = event.target.closest?.('button');
+    if (!button || button.disabled) return;
+    const data = button.dataset, row = id => cameras.find(camera => camera.id === id);
+    if (data.action === 'clear-workspace-row' && row(data.clearRow)) {
+      const sheet = button.closest('table[data-camera-device]')?.dataset.cameraDevice ?? virtualSheet(tab) ?? row(data.clearRow).device;
+      clearFromWorkspace([row(data.clearRow)], sheet);
+    }
+    else if (data.action === 'clear-rcp-row' && row(data.clearRow)) reviewClearFromRcp(row(data.clearRow));
+    else if (data.clearRcpConfirm) { $('modal-layer').hidden = true; void clearFromRcp(row(data.clearRcpConfirm)); }
+    else if (data.action === 'clear-workspace') clearFromWorkspace(assignmentRows(), cameraSetupSheet);
+  });
+
   // ⌘+ and ⌘− make the text on every sheet bigger or smaller, and ⌘0 puts it back to 13. It's the text
   // size each sheet already keeps, now set for all of them at once. Zooming the whole page from inside
   // it would draw the sheets' column handles in the wrong place, so the toolbars keep their size.
@@ -5199,14 +5430,16 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from
   }
   function savedDevicesMarkup() {
     const managed = new Set(devices.map(d => savedKey(d.serial)));
+    const checks = new Map(savedSearchRows().map(row => [savedKey(row.item.serial), row]));
+    const checkText = row => !row ? '' : row.candidate ? 'Found · add it on the sheet' : { checking: 'Checking…', missing: 'Didn’t answer', found: 'Found' }[row.state] ?? '';
     const rows = savedDeviceList().map(item => {
-      const inList = managed.has(savedKey(item.serial)), name = item.serial;
-      return '<tr data-saved-device="' + esc(item.serial) + '"><td class="hc-mono">' + esc(item.serial) + '</td><td class="hc-muted">' + esc(item.kind) + '</td><td class="hc-mono hc-muted">' + esc(item.address || item.base) + '</td>' +
-        '<td class="hc-muted">' + (inList ? 'In this sheet' : '') + '</td>' +
+      const inList = managed.has(savedKey(item.serial)), name = item.serial, check = inList ? null : checks.get(savedKey(item.serial));
+      return '<tr data-saved-device="' + esc(item.serial) + '"' + (check ? ' data-saved-state="' + esc(check.candidate ? 'found' : check.state) + '"' : '') + '><td class="hc-mono">' + esc(item.serial) + '</td><td class="hc-muted">' + esc(item.kind) + '</td><td class="hc-mono hc-muted">' + esc(item.address || item.base) + '</td>' +
+        '<td class="hc-muted" data-saved-check>' + (inList ? 'In this sheet' : esc(checkText(check))) + '</td>' +
         '<td class="hc-list-remove"><button type="button" class="hc-row-remove-button" data-action="forget-saved-device" data-serial="' + esc(item.serial) + '" aria-label="Forget ' + esc(name) + '" title="' + (inList ? 'Remove ' + esc(name) + ' from the sheet first' : 'Forget ' + esc(name) + '. Nothing changes on the device.') + '"' + (inList ? ' disabled' : '') + '>' + icon('trash-2') + '</button></td></tr>';
     }).join('');
     return '<header><h3 id="hc-saved-devices-title">Saved devices</h3><button type="button" class="hc-list-close" data-action="close-list-popover" aria-label="Close">' + icon('x') + '</button></header>' +
-      '<p>Every device you add is saved here by its serial. Discover checks these first, whichever network you pick, and lists the ones that aren’t in the sheet straight away.</p>' +
+      '<p>Every device you add is saved here by its serial. Discover checks these first, whichever network you pick. One that answers is listed on the sheet to add; one that doesn’t stays here.</p>' +
       (rows ? '<table class="hc-list-table"><thead><tr><th>Serial</th><th>Type</th><th>Address</th><th></th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' : '<div class="hc-list-empty">No saved devices yet. Every device you add is saved here.</div>') +
       '<footer class="hc-caption">Forget removes a device from this list only. Nothing changes on the device.</footer>';
   }
@@ -5239,15 +5472,23 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from
   const startLiveScanBeforeSaved = startLiveScan;
   startLiveScan = function() {
     const range = $('scan-range').value === 'custom' ? $('custom-range').value.trim() : $('scan-range').value;
-    // The saved devices show at once, before the first word back from the search.
-    if (range) savedScan = { id: '', state: 'scanning', checks: new Map() };
+    // Saved devices says Checking at once, before the first word back from the search.
+    if (range) { savedScan = { id: '', state: 'scanning', checks: new Map() }; renderSavedPopover(); }
     return startLiveScanBeforeSaved();
   };
   const applyLiveStateBeforeSaved = applyLiveState;
   applyLiveState = function(values) {
     const scan = values?.discovery;
-    if (scan && Array.isArray(scan.saved)) savedScan = { id: scan.id, state: scan.state, checks: new Map(scan.saved.map(item => [savedKey(item.serial), item.state])) };
-    return applyLiveStateBeforeSaved(values);
+    let changed = false;
+    if (scan && Array.isArray(scan.saved)) {
+      const next = { id: scan.id, state: scan.state, checks: new Map(scan.saved.map(item => [savedKey(item.serial), item.state])) };
+      changed = JSON.stringify([savedScan?.id, savedScan?.state, [...(savedScan?.checks ?? [])]]) !== JSON.stringify([next.id, next.state, [...next.checks]]);
+      savedScan = next;
+    }
+    const applied = applyLiveStateBeforeSaved(values);
+    // Saved devices, open, says how each check is going.
+    if (changed) renderSavedPopover();
+    return applied;
   };
 
   // ----- The pop-up the two lists share -----

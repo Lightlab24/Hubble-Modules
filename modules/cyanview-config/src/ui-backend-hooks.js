@@ -192,7 +192,10 @@
     try{for(const candidate of results.filter(item=>selectedResults.has(item.id)&&!devices.some(d=>d.serial===item.serial))){
       if(devices.length>=128)throw new Error('Controller capacity reached');
       const snapshot=await moduleBridge.importDevice(candidate);if(cameras.length+snapshot.cameras.length>512)throw new Error('Camera capacity reached');
-      devices.push(snapshot.device);cameras.push(...snapshot.cameras.map(restoredRow));lans.push(...snapshot.lans.map(restoredRow));selectedResults.delete(candidate.id);count++;
+      devices.push(snapshot.device);
+      // Adding a controller doesn't make what is already on it yours: its cameras are listed under Not set up by Hubble (Nov 21, 2026).
+      // The Simulated rig is the exception, since it stands in for a rig already set up and its tour counts those cameras as yours.
+      const foreign=!moduleBridge?.simulated;cameras.push(...snapshot.cameras.map(row=>({...restoredRow(row),...(foreign?{foreign:true}:{})})));lans.push(...snapshot.lans.map(restoredRow));selectedResults.delete(candidate.id);count++;
     }}catch(error){toast(error.message);}
     if(count)await restoreCameraChoiceCatalogs();
     addingDiscovered=false;syncFilter();renderResults();renderLans();renderCameras();if(count)toast(count+' devices added');remember();

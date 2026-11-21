@@ -43,7 +43,7 @@
       '<div class="hc-assignment-body" data-pending-host="setup"><div class="hc-controller-list"><section class="hc-controller" data-role="setup-group">' +
         '<div class="hc-controller-tools">' +
           cameraCountControl(cameraSetupSheet) + '<span class="hc-caption hc-count-hint">New rows join the end</span>' +
-          '<span class="hc-right"></span>' + deleteButton(cameraSetupSheet) +
+          '<span class="hc-right"></span><button class="hc-button" data-action="clear-workspace" title="Clear every camera from this workspace. Nothing on the controllers changes, and ⌘Z puts them back." disabled>' + icon('eye-off') + 'Clear workspace</button>' +
         '</div>' +
         '<div data-role="setup-sheet"></div>' +
       '</section></div></div>' +
@@ -373,11 +373,18 @@
   }
   function cameraMenuItems(camera, cameraById) {
     const staged = removalStaged(camera);
-    return [{ id: 'refresh-camera', label: 'Refresh camera', disabled: !camera.elementKey || !!camera.deleting || !!camera.jobs || cameraEnabledSent.has(camera.id) || !!cameraEnabledJob(camera), run: () => runCameraEnabled(cameraById.get(camera.id) ?? camera, 'refresh') }, { id: 'delete-camera', label: staged ? 'Keep camera' : importedCamera(camera) ? 'Remove REMI copy' : 'Delete camera', icon: staged ? undefined : 'delete', danger: !staged, disabled: !!camera.deleting || !!camera.jobs, run: () => reviewCameraDeletion(cameraById.get(camera.id) ?? camera) }];
+    return [{ id: 'refresh-camera', label: 'Refresh camera', disabled: !camera.elementKey || !!camera.deleting || !!camera.jobs || cameraEnabledSent.has(camera.id) || !!cameraEnabledJob(camera), run: () => runCameraEnabled(cameraById.get(camera.id) ?? camera, 'refresh') }, { id: 'clear-workspace', label: 'Clear from workspace', disabled: !!camera.deleting || !!camera.jobs, run: () => { const row = cameraById.get(camera.id) ?? camera; clearFromWorkspace([row], virtualSheet(tab) ?? row.device); } }, { id: 'clear-rcp', label: staged ? 'Keep camera' : 'Clear from RCP', icon: staged ? undefined : 'delete', danger: !staged, disabled: !!camera.deleting || !!camera.jobs, run: () => reviewClearFromRcp(cameraById.get(camera.id) ?? camera) }];
   }
+  // The eye clears a camera from the workspace only and the bin clears it from its controller; see ui-camera-clear.js.
   function removeCell(camera, column) {
-    const staged = removalStaged(camera), label = (staged ? 'Keep camera ' : importedCamera(camera) ? 'Remove the REMI copy of camera ' : 'Delete camera ') + camera.number;
-    return '<td class="hc-camera-frozen hc-row-remove" style="left:' + column.frozen + 'px"><button type="button" class="hc-row-remove-button" data-action="stage-remove" data-remove-row="' + esc(camera.id) + '" aria-label="' + esc(label) + '" title="' + esc(label) + '"' + (camera.deleting || camera.jobs ? ' disabled' : '') + '>' + icon(staged ? 'undo-2' : 'trash-2') + '</button></td>';
+    const staged = removalStaged(camera), copy = importedCamera(camera), busy = camera.deleting || camera.jobs, number = esc(camera.number), where = esc(controllerName(camera.device) || 'its controller'), id = esc(camera.id);
+    const hide = 'Clear camera ' + number + ' from the workspace. Nothing on ' + where + ' changes, and if Hubble reads it there again it is listed under Not set up by Hubble.';
+    const binLabel = staged ? 'Keep camera ' + number : (copy ? 'Clear the REMI copy of camera ' : 'Clear camera ') + number + ' from ' + where;
+    const binTitle = staged ? binLabel : copy ? binLabel + '. The camera it copies stays where it is.' : binLabel + '. It is deleted there, with its REMI copies.';
+    const disabled = busy ? ' disabled' : '';
+    return '<td class="hc-camera-frozen hc-row-remove" style="left:' + column.frozen + 'px">' +
+      '<button type="button" class="hc-row-remove-button hc-row-hide-button" data-action="clear-workspace-row" data-clear-row="' + id + '" aria-label="Clear camera ' + number + ' from the workspace" title="' + hide + '"' + disabled + '>' + icon('eye-off') + '</button>' +
+      '<button type="button" class="hc-row-remove-button" data-action="' + (staged ? 'stage-remove' : 'clear-rcp-row') + '" data-remove-row="' + id + '" data-clear-row="' + id + '" aria-label="' + binLabel + '" title="' + binTitle + '"' + disabled + '>' + icon(staged ? 'undo-2' : 'trash-2') + '</button></td>';
   }
 
   const requestFailure = (items, error) => ({ results: items.map(item => ({ id: item.id, error: error.message || 'REMI changes could not be confirmed' })), refresh: true });
@@ -1021,13 +1028,14 @@
     if (save) remember();
   };
   const saveRemiView = () => ({ panelOpen: pendingSendsOpen, byController: remiByController, unassigned: cameras.filter(unassigned).map(plainRow), devices: { ...deviceSheet },
-    ignored: [...ignoredControllers].filter(serial => !devices.some(d => d.serial === serial)).slice(0, 256) });
+    ignored: [...ignoredControllers].filter(serial => !devices.some(d => d.serial === serial)).slice(0, 256), cleared: saveClearedFromWorkspace() });
   function restoreRemiView(data) {
     const view = data.remiView, saved = Array.isArray(view?.unassigned) ? view.unassigned.filter(row => typeof row?.id === 'string' && row.device === '') : [];
     pendingSendsOpen = view?.panelOpen === true;
     remiByController = view?.byController === true;
     ignoredControllers.clear();
     for (const serial of Array.isArray(view?.ignored) ? view.ignored : []) if (typeof serial === 'string' && serial && serial.length <= 160) ignoredControllers.add(serial);
+    restoreClearedFromWorkspace(view?.cleared);
     const sheet = view?.devices ?? {};
     Object.assign(deviceSheet, { lanOpen: sheet.lanOpen === true, wanOpen: sheet.wanOpen === true,
       sort: deviceSortable.has(sheet.sort?.field) && ['asc', 'desc'].includes(sheet.sort.direction) ? { field: sheet.sort.field, direction: sheet.sort.direction } : null });
