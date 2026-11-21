@@ -31,7 +31,7 @@ const rendererState = () => {
   const state = session.states.at(-1) as Parameters<typeof session.context.publishState>[0];
   return pageFixtures && state?.values ? { ...state, values: { ...state.values, cameraControl: fixtureControl(state.values.cameraControl) } } : state;
 };
-async function reset(sample: boolean, remi = false, gateway = false, direct = false, extra = false, live = false, wan = false, reachAll = false, simulated = false) {
+async function reset(sample: boolean, remi = false, gateway = false, direct = false, extra = false, live = false, wan = false, reachAll = false, simulated = false, tour = false) {
   statePaused = false;
   pingDelayMs = 0;
   releaseControlWrites?.(); releaseControlWrites = undefined;
@@ -99,6 +99,9 @@ async function reset(sample: boolean, remi = false, gateway = false, direct = fa
   };
   session = fixture({ sampleData: sampleSetting }, sessionOptions);
   await session.instance.start();
+  // The setup tour starts by itself on a page with no controllers. Only a spec about the tour asks
+  // for that; for the rest it has already been seen, as it would be on any Mac after the first time.
+  if (!tour) await session.call('setup-guide', { offered: true, confirmed: [] });
   if (remi) {
     const snapshots = controllers.map(device=>device.snapshot(device.config.IP.protected.IP));
     const names = ['Stage RIO','Master RCP','Downstream RCP','Truck RCP','Cart RCP'];
@@ -142,13 +145,15 @@ const server = createServer(async (request, response) => {
     if (request.method === 'POST') {
       const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk));
       const input = JSON.parse(Buffer.concat(chunks).toString() || '{}');
-      if (url.pathname === '/__reset') { await reset(input.sample !== false && input.simulated !== true, input.remi === true, input.gateway === true, input.direct === true, input.extra === true, input.live === true, input.wan === true, input.reachAll === true, input.simulated === true); send({ reset: true }); return; }
+      if (url.pathname === '/__reset') { await reset(input.sample !== false && input.simulated !== true, input.remi === true, input.gateway === true, input.direct === true, input.extra === true, input.live === true, input.wan === true, input.reachAll === true, input.simulated === true, input.tour === true); send({ reset: true }); return; }
       if (url.pathname === '/__restart') {
         // The equipment and saved documents stay, as they do when Hubble restarts a module's worker.
-        const { records } = session;
+        // The tour's progress lives in the worker's runtime folder, which the preview keeps in memory.
+        const { records } = session, tour = await session.call('setup-guide', null);
         await session.instance.dispose();
         session = fixture({ sampleData: sampleSetting }, sessionOptions, records);
         await session.instance.start();
+        await session.call('setup-guide', tour);
         send({ restarted: true }); return;
       }
       if (url.pathname === '/__simulate') {

@@ -170,7 +170,7 @@ export async function buildUiAdapter() {
     "import { cameraChoiceKey } from './choice-context.js';",
     "import { cyanviewCameraModels } from './camera-models.js';",
     "import { PresentationLedger } from './presentation-ledger.js';",
-    "import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideFinished, setupGuideSteps } from './setup-guide-model.js';",
+    "import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from './setup-guide-model.js';",
   ].join('\n');
   await writeFile(path.join(root, 'src/ui-controller.js'), imports + '\n' + source);
 }

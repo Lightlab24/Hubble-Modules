@@ -220,7 +220,7 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
           return { opened: address };
         }
         case 'send': return send(input, signal);
-        // The setup guide's progress on this Mac. Simulated is walked through apart from the real setup.
+        // The setup tour's progress on this Mac. Simulated is walked through apart from the real setup.
         case 'setup-guide': return request.value == null ? guide.read(sample ? 'simulated' : 'real') : guide.write(sample ? 'simulated' : 'real', request.value);
         default: throw new Error('Unknown Cyanview command');
       }

@@ -85,7 +85,7 @@ export class CameraControl {
   readonly selection: ControlSelection;
   private sessions = new Map<string, RcpSession>();
   private subscriptions: readonly ModuleFeedbackSubscription[] = [];
-  /** A Cyanview key has been pressed since this worker started. The page's setup guide ticks Press a key from it. */
+  /** A Cyanview key has been pressed since this worker started. The page's setup tour ticks Press a key from it. */
   private pressed = false;
   private feedbackSignal?: AbortSignal;
   private stopped = false;
@@ -248,7 +248,7 @@ export class CameraControl {
   }
   state() {
     const { enabled, singleSwitch } = this.selection.value();
-    // keys and pressed tell the page's setup guide that a key uses Cyanview and that one has been pressed.
+    // keys and pressed tell the page's setup tour that a key uses Cyanview and that one has been pressed.
     const value = { enabled, singleSwitch, controllers: this.controllerStatuses(), cameras: this.cameraStatuses(), cameraChanges: { ...this.cameraChanges }, keys: this.subscriptions.length, pressed: this.pressed };
     const text = JSON.stringify(value);
     if (text !== this.stateText) { this.stateText = text; this.stateSequence += 1; }

@@ -5,7 +5,7 @@ import { parseSetupGuideProgress, type SetupGuideProgress } from './setup-guide-
 type Mode = 'real' | 'simulated';
 
 /**
- * The setup guide's progress on this Mac, in the module's runtime folder: local state that is never
+ * The setup tour's progress on this Mac, in the module's runtime folder: local state that is never
  * part of a workspace export, as HubDash keeps its own Guided setup in the browser. A simulated
  * setup is walked through apart from the real one, so a press on the simulated rig doesn't tick the
  * real guide. Until Hubble grants the folder, progress is kept for this run only.

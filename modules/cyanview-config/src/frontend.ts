@@ -149,7 +149,7 @@ if (window.parent !== window) {
     /** A controller's own web page, opened in the browser on the computer Hubble runs on. */
     async openDevicePage(address: string) { return client.call('open-device-page', payload({ address })); },
     async controlState() { return client.call('camera-control-state'); },
-    /** The setup guide's progress on this Mac: null reads it, a value saves it. */
+    /** The setup tour's progress on this Mac: null reads it, a value saves it. */
     async setupGuide(progress: unknown) { return client.call('setup-guide', progress === null ? null : payload(progress)); },
     async controlMutate(value: unknown) {
       await tail.catch(() => undefined);

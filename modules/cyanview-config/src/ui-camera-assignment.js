@@ -772,7 +772,7 @@
     pendingPaintQueued = true;
     queueMicrotask(() => { pendingPaintQueued = false; paintPendingSends(); });
   }
-  /** What Pending sends lists, and how much of it Send would send now. The setup guide reads the same counts. */
+  /** What Pending sends lists, and how much of it Send would send now. The setup tour reads the same counts. */
   function pendingSendCounts() {
     const rows = pendingRows(), groups = remiDraftGroups(), networks = lanDraftGroups();
     const total = rows.reduce((count, row) => count + row.lines.length, 0) + groups.reduce((count, group) => count + group.items.length, 0) + networks.reduce((count, group) => count + group.rows.length, 0) + remiJobs.length;

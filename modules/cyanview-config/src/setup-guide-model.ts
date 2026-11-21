@@ -1,11 +1,12 @@
 /**
- * The Cyanview setup guide: seven steps, each ticked from what the page and the worker can see, in
- * the same shape as HubDash's Guided setup checklist.
+ * The Cyanview setup tour's seven steps, each ticked from what the page and the worker can see. The
+ * tour walks through them in order, and each card says whether its step is already done.
  *
- * Progress (open, skipped, a press that has been seen) describes this computer, as HubDash's does,
- * so it is not workspace data: exporting a workspace must not carry a claim that someone here
- * already walked through it. HubDash keeps its progress in the browser, but a module page runs in a
- * frame with no storage of its own, so the worker keeps this in its runtime folder on this Mac.
+ * Progress (the tour has started by itself once, a press has been seen) describes this computer, as
+ * HubDash's Guided setup does, so it is not workspace data: exporting a workspace must not carry a
+ * claim that someone here already walked through it. HubDash keeps its progress in the browser, but
+ * a module page runs in a frame with no storage of its own, so the worker keeps this in its runtime
+ * folder on this Mac.
  */
 
 export const SETUP_GUIDE_STEP_IDS = ['find', 'name', 'cameras', 'send', 'remi', 'actions', 'press'] as const;
@@ -31,7 +32,7 @@ export interface SetupGuideFacts {
   readonly online: number;
   /** Controllers still named by their serial number, as a new one is. */
   readonly unnamed: number;
-  /** Cameras with a Source, so they belong to a controller. */
+  /** Cameras with a Source, counted as Camera Configuration counts them: a REMI copy is not another camera. */
   readonly cameras: number;
   /** Everything waiting in Pending sends. */
   readonly pending: number;
@@ -46,17 +47,15 @@ export interface SetupGuideFacts {
 }
 
 export interface SetupGuideProgress {
-  readonly open: boolean;
-  /** The panel has opened by itself once. It never does again. */
+  /** The tour has started by itself once, on a new setup. It never does again. */
   readonly offered: boolean;
-  readonly skipped: readonly SetupGuideStepId[];
   /** Steps seen done once that stay done: a press is over as soon as it happens. */
   readonly confirmed: readonly SetupGuideStepId[];
 }
 
-export const INITIAL_SETUP_GUIDE_PROGRESS: SetupGuideProgress = Object.freeze({ open: false, offered: false, skipped: [], confirmed: [] });
+export const INITIAL_SETUP_GUIDE_PROGRESS: SetupGuideProgress = Object.freeze({ offered: false, confirmed: [] });
 
-export type SetupGuideStepStatus = 'done' | 'skipped' | 'current' | 'upcoming';
+export type SetupGuideStepStatus = 'done' | 'current' | 'upcoming';
 export interface SetupGuideStep {
   readonly id: SetupGuideStepId;
   readonly title: string;
@@ -67,11 +66,15 @@ export interface SetupGuideStep {
 const isStep = (value: unknown): value is SetupGuideStepId => SETUP_GUIDE_STEP_IDS.includes(value as SetupGuideStepId);
 const steps = (value: unknown) => Array.isArray(value) ? [...new Set(value.filter(isStep))] : [];
 
-/** Reads saved progress, keeping what makes sense and dropping the rest. */
+/**
+ * Reads saved progress, keeping what makes sense and dropping the rest. Progress saved by the side
+ * panel this tour replaced reads the same way: a panel that opened by itself counts as the tour
+ * having started by itself, and its open and skipped steps are left behind.
+ */
 export function parseSetupGuideProgress(value: unknown): SetupGuideProgress {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return INITIAL_SETUP_GUIDE_PROGRESS;
   const saved = value as Record<string, unknown>;
-  return { open: saved.open === true, offered: saved.offered === true, skipped: steps(saved.skipped), confirmed: steps(saved.confirmed) };
+  return { offered: saved.offered === true, confirmed: steps(saved.confirmed) };
 }
 
 /** True when the page or the worker can see the step's result, rather than taking anyone's word. */
@@ -87,26 +90,26 @@ export function setupGuideStepDetected(id: SetupGuideStepId, facts: SetupGuideFa
   }
 }
 
+/** Each step done or not; the first one that isn't is current. */
 export function setupGuideSteps(facts: SetupGuideFacts, progress: SetupGuideProgress): SetupGuideStep[] {
   let current = false;
   return SETUP_GUIDE_STEP_IDS.map(id => {
     const done = setupGuideStepDetected(id, facts) || progress.confirmed.includes(id);
-    let status: SetupGuideStepStatus = done ? 'done' : progress.skipped.includes(id) ? 'skipped' : 'upcoming';
+    let status: SetupGuideStepStatus = done ? 'done' : 'upcoming';
     if (status === 'upcoming' && !current) { status = 'current'; current = true; }
     return { id, title: SETUP_GUIDE_STEP_TITLES[id], optional: SETUP_GUIDE_OPTIONAL.has(id), status };
   });
 }
 
-/** Done and skipped steps both count, as in HubDash. */
-export const setupGuideFinished = (steps: readonly SetupGuideStep[]) => steps.filter(step => step.status === 'done' || step.status === 'skipped').length;
+export const setupGuideFinished = (steps: readonly SetupGuideStep[]) => steps.filter(step => step.status === 'done').length;
 
 /**
- * Progress after the facts change: a press seen once stays done, and the panel opens by itself the
- * first time the page has loaded and has no controllers.
+ * Progress after the facts change: a press seen once stays done, and the tour is due to start by
+ * itself the first time the page has loaded with no controllers.
  */
 export function nextSetupGuideProgress(progress: SetupGuideProgress, facts: SetupGuideFacts): SetupGuideProgress {
   let next = progress;
   if (facts.pressed && !next.confirmed.includes('press')) next = { ...next, confirmed: [...next.confirmed, 'press'] };
-  if (facts.loaded && !next.offered && facts.controllers === 0) next = { ...next, open: true, offered: true };
+  if (facts.loaded && !next.offered && facts.controllers === 0) next = { ...next, offered: true };
   return next;
 }
