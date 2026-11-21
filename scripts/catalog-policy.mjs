@@ -8,6 +8,19 @@ import {
 
 export const repository = "Lightlab24/Hubble-Modules";
 
+// Retired modules keep their published history, which can still be withdrawn, but no new
+// release of them can enter the catalog.
+export const retiredModules = new Map([
+  [
+    "hubble-tally-switch",
+    "TALLY Switch is retired: its camera-to-router routing is the Routing tab in TSL Tally 1.4.0 and later",
+  ],
+  [
+    "hubble-ccc",
+    "CCC is retired: use the Cyanview module (lightlab-cyanview-config) for camera control",
+  ],
+]);
+
 export function releaseAsset(entry) {
   const { moduleId, version } = entry.identity;
   if (moduleId === "hubble-mock" && entry.status !== "withdrawn")
@@ -25,6 +38,15 @@ export function validateUpdate(raw, previous) {
   if (previous && next.sequence <= previous.sequence)
     throw Error("Catalog sequence must increase");
   for (const entry of next.releases) releaseAsset(entry);
+  for (const entry of next.releases) {
+    const retired = retiredModules.get(entry.identity.moduleId);
+    const known = previous?.releases.some(
+      (old) =>
+        old.identity.moduleId === entry.identity.moduleId &&
+        old.identity.version === entry.identity.version,
+    );
+    if (retired && !known) throw Error(retired);
+  }
   for (const old of previous?.releases ?? []) {
     const entry = next.releases.find(
       (item) =>
@@ -45,6 +67,8 @@ export function validateArchive(entry, bytes) {
   const actual = inspectModulePackage(bytes);
   if (actual.manifest.id === "hubble-mock")
     throw Error("Mock module archives cannot be published");
+  const retired = retiredModules.get(actual.manifest.id);
+  if (retired) throw Error(retired);
   if (
     bytes.length !== entry.bytes ||
     actual.digest !== entry.identity.digest ||
