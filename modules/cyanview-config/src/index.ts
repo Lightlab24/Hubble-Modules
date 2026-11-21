@@ -11,6 +11,7 @@ import { CameraEnabledOperations } from './camera-enabled.js';
 import { CyanviewClient } from './transport.js';
 import { createHostOpenPage } from './open-page.js';
 import { setupGuideStore } from './setup-guide-store.js';
+import { createFirmwareService } from './firmware.js';
 import { SimulatedRig, SimulatedRigStore } from './simulated/rig.js';
 
 export function createInstance(context: ModuleContext, options: ServiceOptions = {}): ModuleInstance {
@@ -32,6 +33,13 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
   const choices = new ChoiceCatalogs(context.services, sample);
   const openPage = io.openPage ?? createHostOpenPage(context.services);
   const service = new CyanviewService(repository, choices, publish, lifetime.signal, { ...io, discovery: { ...io.discovery, ping: io.discovery?.ping ?? hostPing!.sweep } });
+  // Firmware goes to a device's own update page. Only the managed devices with an address are offered.
+  const firmware = createFirmwareService({
+    devices: async () => (await repository.read(lifetime.signal)).plan.devices
+      .filter(device => device.address || device.base)
+      .map(device => ({ id: String(device.id ?? device.serial), name: String(device.name || device.serial || ''), kind: String(device.kind ?? ''), address: String(device.address || device.base), online: true })),
+    log: entry => context.log({ level: entry.level, stage: 'firmware', message: entry.message }),
+  });
   control = new CameraControl(repository, context, sample, () => publish(), io.control);
   // Cyanview's own Enabled on each camera, with every REMI copy following the camera it comes from.
   const cameraEnabled = new CameraEnabledOperations(repository, io.client ?? (address => new CyanviewClient(address)), service.remi,
@@ -219,6 +227,12 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
           context.log({ level: 'info', stage: 'open-page', message: 'Opened http://' + address + '/ in the browser' });
           return { opened: address };
         }
+        case 'firmware-begin': return firmware.begin();
+        case 'firmware-part': return firmware.part({ id: String(input.id ?? ''), index: Number(input.index), text: String(input.text ?? '') });
+        case 'firmware-commit': return firmware.commit({ id: String(input.id ?? ''), fileName: String(input.fileName ?? '') }, signal);
+        case 'firmware-targets': return firmware.targets(String(input.packageId ?? ''), signal);
+        case 'firmware-install': return firmware.install({ packageId: String(input.packageId ?? ''), deviceIds: Array.isArray(input.deviceIds) ? input.deviceIds.map(String) : [] });
+        case 'firmware-status': return firmware.status(typeof input.jobId === 'string' ? input.jobId : null);
         case 'send': return send(input, signal);
         // The setup tour's progress on this Mac. Simulated is walked through apart from the real setup.
         case 'setup-guide': return request.value == null ? guide.read(sample ? 'simulated' : 'real') : guide.write(sample ? 'simulated' : 'real', request.value);
@@ -229,7 +243,7 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
     discoverChoices(query, execution) { return control!.discover(query.provider, query.draft, query.search, query.cursor, query.limit, AbortSignal.any([execution.signal, lifetime.signal])); },
     async choices(provider) { return (await control!.discover(provider, {}, '', null, 512, lifetime.signal)).choices.map(({ id, label, group }) => ({ id, label, ...(group ? { group } : {}) })); },
     subscribeFeedback(subscriptions, execution) { control!.subscribe(subscriptions, execution.signal); },
-    async dispose() { if (stopped) return; stopped = true; lifetime.abort(); service.dispose(); await control!.dispose(); await rig?.dispose(); transfers.clear(); imports.clear(); reads.clear(); },
+    async dispose() { if (stopped) return; stopped = true; lifetime.abort(); service.dispose(); firmware.dispose(); await control!.dispose(); await rig?.dispose(); transfers.clear(); imports.clear(); reads.clear(); },
   };
   if (!rigStore) return instance;
   // Simulated keeps what was sent to its controllers in a document. Hubble lets a module write one only during a

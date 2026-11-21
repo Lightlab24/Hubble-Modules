@@ -149,6 +149,13 @@ if (window.parent !== window) {
     /** A controller's own web page, opened in the browser on the computer Hubble runs on. */
     async openDevicePage(address: string) { return client.call('open-device-page', payload({ address })); },
     async controlState() { return client.call('camera-control-state'); },
+    /** Firmware: the file is sent in parts, then checked and installed on the RIOs chosen with it. */
+    async firmwareBegin() { return client.call('firmware-begin'); },
+    async firmwarePart(value: unknown) { return client.call('firmware-part', payload(value)); },
+    async firmwareCommit(value: unknown) { return client.call('firmware-commit', payload(value)); },
+    async firmwareTargets(value: unknown) { return client.call('firmware-targets', payload(value)); },
+    async firmwareInstall(value: unknown) { return client.call('firmware-install', payload(value)); },
+    async firmwareStatus(value: unknown) { return client.call('firmware-status', payload(value)); },
     /** The setup tour's progress on this Mac: null reads it, a value saves it. */
     async setupGuide(progress: unknown) { return client.call('setup-guide', progress === null ? null : payload(progress)); },
     async controlMutate(value: unknown) {

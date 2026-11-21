@@ -1,0 +1,88 @@
+software =
+{
+    version = "26.10.1";
+    description = "Firmware update file for cy-rio-rev2";
+    hardware-compatibility: [ "1.0", "1.2"];
+    cy-rio-rev2 = {
+emmc:
+        {
+rootfs1:
+            {
+files:
+                (
+                 {
+                 filename = "cy-boot.scr";
+                 path = "/boot0/boot.scr";
+                 sha256 = "dbcf819b21a1241096a77149bd9a2c90d8d8a07694b90c6315417a19d50a6f73";
+                 },
+                 {
+                 filename = "u-boot-sunxi-with-spl.bin";
+                 path = "/boot0/u-boot.bin";
+                 sha256 = "91582d629864fa6940173f3daeb7c9fed3f3ad51f0baf0a631e0b1e546fe337c";
+                 }
+                );
+
+images:
+                (
+                 {
+                 filename = "cyanos-cy-rio-rev2.rootfs.ext4.gz";
+                 type = "raw";
+                 compressed = "zlib";
+                 installed-directly = true;
+                 device = "/dev/mmcblk1p2";
+                 sha256 = "852aef92cdc16579e09c637d0206730942923308fc0dfed4e41de763f5824764";
+                 }
+                );
+
+scripts:
+                (
+                 {
+                 filename = "post-script.sh";
+                 data = "-e mmcblk1 -n rootfs1 -s mmc -r /dev/mmcblk1p2 -p 1:2 -v 26.11.1rc4";
+                 type = "postinstall";
+                 sha256 = "ad1975301af2a958a5751f2e7d1207ecf4f262ce98dceef6bb7c26d74c9dd7a3";
+                 }
+                );
+            };
+rootfs2:
+            {
+files:
+                (
+                 {
+                 filename = "cy-boot.scr";
+                 path = "/boot0/boot.scr";
+                 sha256 = "dbcf819b21a1241096a77149bd9a2c90d8d8a07694b90c6315417a19d50a6f73";
+                 },
+                 {
+                 filename = "u-boot-sunxi-with-spl.bin";
+                 path = "/boot0/u-boot.bin";
+                 sha256 = "91582d629864fa6940173f3daeb7c9fed3f3ad51f0baf0a631e0b1e546fe337c";
+                 }
+                );
+
+images:
+                (
+                 {
+                 filename = "cyanos-cy-rio-rev2.rootfs.ext4.gz";
+                 type = "raw";
+                 compressed = "zlib";
+                 installed-directly = true;
+                 device = "/dev/mmcblk1p3";
+                 sha256 = "852aef92cdc16579e09c637d0206730942923308fc0dfed4e41de763f5824764";
+                 }
+                );
+
+scripts:
+                (
+                 {
+                 filename = "post-script.sh";
+                 data = "-e mmcblk1 -n rootfs2 -s mmc -r /dev/mmcblk1p3 -p 1:3 -v 26.11.1rc4";
+                 type = "postinstall";
+                 sha256 = "ad1975301af2a958a5751f2e7d1207ecf4f262ce98dceef6bb7c26d74c9dd7a3";
+                 }
+                );
+
+            };
+        };
+    };
+};
