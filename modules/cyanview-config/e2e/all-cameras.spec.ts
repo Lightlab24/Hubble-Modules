@@ -85,6 +85,17 @@ async function fleet(request: APIRequestContext) {
 const names = (device: Device) => Object.values(device.config.Camera).map(camera => camera.Name);
 const realNames = (device: Device) => Object.values(device.config.Camera).filter(camera => camera.Model !== 'Cyan - Imported').map(camera => camera.Name);
 const rpcOf = (request: APIRequestContext) => async (commandId: string, value: unknown = null) => (await (await request.post('/__rpc', { data: { commandId, value } })).json()).result;
+// The page saves as it opens and after reads, so a plan a test writes can meet a newer revision. Under load that
+// write was refused and the test went on with nothing changed (Nov 20, 2026). It is written over the newer one,
+// since the test's change is the point, and a write that never lands fails the test here.
+async function writePlan(request: APIRequestContext, revision: string | null, plan: unknown) {
+  const rpc = rpcOf(request);
+  for (let attempt = 0, latest = revision; attempt < 5; attempt++, latest = (await rpc('read-plan')).revision) {
+    const saved = await rpc('save-plan', { revision: latest, plan });
+    if (saved?.revision) return saved;
+  }
+  throw new Error('The test could not write the plan');
+}
 
 test('Camera Configuration is one list of every camera with its settings and Source', async ({ page, request }) => {
   const f = await open(page, request, { direct: true });
@@ -182,7 +193,7 @@ test('a new camera with lens None has no lens change to send, even one saved by 
   const saved = plan.uiState.privateContent.remiView.unassigned.find((row: { name: string }) => row.name === name);
   expect(saved.dirty).not.toContain('lens');
   saved.dirty = [...saved.dirty, 'lens', 'lensPort'];
-  await rpc('save-plan', { revision, plan });
+  await writePlan(request, revision, plan);
   await page.reload();
   await showSetup(f);
   for (const column of ['lens', 'connection']) await expect(cell(added(), column)).not.toHaveClass(/hc-changed/);
@@ -227,7 +238,7 @@ test('a page saved on the old Camera Configuration opens on the new one', async 
   const rpc = rpcOf(request), { revision, plan } = await rpc('read-plan');
   plan.uiState.privateContent.tab = 'cameras';
   delete plan.uiState.privateContent.remiView;
-  await rpc('save-plan', { revision, plan });
+  await writePlan(request, revision, plan);
   await page.reload();
   await expect(f.locator('[data-tab="setup"]')).toHaveAttribute('aria-selected', 'true');
   await expect(setup(f).locator('tbody tr[data-id]')).toHaveCount(1);
@@ -422,7 +433,7 @@ test('a controller saved on a LAN address moves to its base address when the pag
   const device = plan.devices[0];
   expect(device.alias).toMatch(/^10\.20\./);
   device.address = device.alias;
-  await rpc('save-plan', { revision, plan });
+  await writePlan(request, revision, plan);
   await page.reload();
   // Nothing is pressed.
   await expect.poll(async () => (await rpc('read-plan')).plan.devices[0].address, { timeout: 10000 }).toBe(device.base);
@@ -437,7 +448,7 @@ test('an unfinished REMI refresh is listed in Pending sends and can be dismissed
   // Master RCP drops off the network, then the camera it has a copy of is renamed on its RIO.
   const rpc = rpcOf(request), { revision, plan } = await rpc('read-plan');
   Object.assign(plan.devices.find((device: { id: string }) => device.id === MASTER), { base: '10.99.99.99', alias: '', address: '10.99.99.99' });
-  await rpc('save-plan', { revision, plan });
+  await writePlan(request, revision, plan);
   await page.reload();
   await showSetup(f);
   const name = cell(named(setup(f), 'Wide'), 'name').locator('input');
@@ -459,7 +470,7 @@ test('REMI changes staged on a controller are listed in Pending sends, and Refre
   const seed = async () => {
     const rpc = rpcOf(request), { revision, plan } = await rpc('read-plan');
     plan.uiState.privateContent.remiDrafts = { [LEAF]: { drafts: [{ id: 'remove:gone', kind: 'remove', key: 'gone', enable: false, selector: 's', connection: 'c', label: 'FX3 16-35' }], overrides: {} } };
-    await rpc('save-plan', { revision, plan });
+    await writePlan(request, revision, plan);
     await page.reload();
     await showSetup(f);
     await showPending(f);
@@ -731,7 +742,7 @@ test('an edit saved before this version can be cancelled, and the controller say
   const rpc = rpcOf(request);
   const { revision, plan } = await rpc('read-plan');
   Object.assign(plan.cameras[0], { name: 'Staged long ago', dirty: ['name'], pending: true, result: 'Pending' });
-  await rpc('save-plan', { revision, plan });
+  await writePlan(request, revision, plan);
   await page.reload();
   await showMatrix(f);
   await showPending(f);
@@ -776,7 +787,7 @@ test('a controller that cannot be reached leaves that camera pending and the oth
   const rpc = rpcOf(request);
   const { revision, plan } = await rpc('read-plan');
   Object.assign(plan.devices.find((device: { id: string }) => device.id === TRUCK), { base: '10.99.99.99', alias: '', address: '10.99.99.99' });
-  await rpc('save-plan', { revision, plan });
+  await writePlan(request, revision, plan);
   await page.reload();
   await showMatrix(f);
   await circle(row(f, 'Jib'), TRUCK).click();
@@ -861,7 +872,7 @@ test('a copy whose source is not known yet says so, and deleting it asks first, 
   const rpc = rpcOf(request);
   const { revision, plan } = await rpc('read-plan');
   plan.cameras.push({ id: 'old-copy', device: MASTER, elementKey: 'copy', number: '5', name: 'Old copy', model: 'Cyan - Imported', modelLabel: 'Cyan - Imported', dirty: [], isNew: false, result: 'In sync' });
-  await rpc('save-plan', { revision, plan });
+  await writePlan(request, revision, plan);
   await page.reload();
   await showMatrix(f);
   const copy = row(f, 'Old copy');
@@ -892,7 +903,7 @@ test('a copy left on an RCP by a RIO that went off comes off from Pending sends'
   const { revision, plan } = await rpc('read-plan');
   plan.devices = plan.devices.filter((device: { id: string }) => device.id !== RIO);
   plan.cameras = plan.cameras.filter((camera: { device: string }) => camera.device !== RIO).map(({ remi: _remi, ...camera }: Record<string, unknown>) => camera);
-  await rpc('save-plan', { revision, plan });
+  await writePlan(request, revision, plan);
   await page.reload();
   // A copy has no circles, so the matrix is open once its row is there.
   await f.locator('[data-tab="assignment"]').click();
@@ -922,11 +933,12 @@ test('a camera moves to another controller while its RIO is off, and deleting it
   await request.post('/__simulate', { data: { power: { device: 0, on: false } } });
   await setSource(f, 'Wide', 'Truck RCP');
   await showPending(f);
-  await expect(panel(f).locator('.hc-pending-status')).toContainText('Stage RIO is offline. The camera moves now', { timeout: 20000 });
+  await expect(line(f, 'source').locator('.hc-pending-status')).toContainText('Stage RIO is offline. The camera moves now', { timeout: 20000 });
   await expect(panel(f).locator('[data-action="send-all-pending"]')).toBeEnabled();
   await sendAll(f);
   await expect(line(f, 'delete')).toContainText('Deleted from Stage RIO', { timeout: 20000 });
-  await expect(panel(f).locator('.hc-pending-status')).toContainText('Waits until Stage RIO is back online');
+  // The move is done once the RIO's delete is the only thing left, and it says why it waits.
+  await expect(panel(f).locator('.hc-pending-status')).toHaveText(['Waits until Stage RIO is back online'], { timeout: 20000 });
   await expect(panel(f).locator('[data-action="send-all-pending"]')).toBeDisabled();
 
   // Created on Truck RCP with its settings, and REMI'd again the same way: through Master RCP to Downstream RCP.
@@ -974,9 +986,9 @@ test('a camera deleted while its RIO is off loses its copies now, and Cancel put
   await cell(row(f, 'Wide'), 'name').click();
   await matrix(f).locator('[data-action="delete-controller"]').click();
   await showPending(f);
-  await expect(panel(f).locator('.hc-pending-status')).toContainText('Stage RIO is offline. Its REMI copies come off now', { timeout: 20000 });
+  await expect(line(f, 'delete').locator('.hc-pending-status')).toContainText('Stage RIO is offline. Its REMI copies come off now', { timeout: 20000 });
   await sendAll(f);
-  await expect(panel(f).locator('.hc-pending-status')).toContainText('Waits until Stage RIO is back online', { timeout: 20000 });
+  await expect(panel(f).locator('.hc-pending-status')).toHaveText(['Waits until Stage RIO is back online'], { timeout: 20000 });
   expect(names((await fleet(request))[1]!)).toEqual([]);
   await expect(row(f, 'Wide')).toHaveCount(0);
   // Cancel keeps it on the RIO, so it is back in the sheets, without its copy.
@@ -994,11 +1006,11 @@ test('a circle can come off while the RIO it starts from is off', async ({ page,
   await request.post('/__simulate', { data: { power: { device: 0, on: false } } });
   await circle(row(f, 'Wide'), MASTER).click();
   await showPending(f);
-  await expect(panel(f).locator('.hc-pending-status')).toContainText('Its REMI copies can still come off', { timeout: 20000 });
+  await expect(line(f, on(MASTER)).locator('.hc-pending-status')).toContainText('Its REMI copies can still come off', { timeout: 20000 });
   await sendAll(f);
   await settle(f);
   expect(names((await fleet(request))[1]!)).toEqual([]);
   // Putting a copy back needs the RIO.
   await circle(row(f, 'Wide'), MASTER).click();
-  await expect(panel(f).locator('.hc-pending-status')).toContainText('Won’t send while Stage RIO is offline');
+  await expect(line(f, on(MASTER)).locator('.hc-pending-status')).toContainText('Won’t send while Stage RIO is offline');
 });
