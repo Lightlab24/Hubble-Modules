@@ -49,6 +49,8 @@ test('the real package reads as a RIO file for cy-rio-rev2', () => {
   assert.equal(pkg.kind, 'RIO');
   assert.deepEqual(pkg.problems, []);
   assert.match(pkg.warnings.join(' '), /26\.10\.1.*26\.11\.1rc4/);
+  // The device reports the version from the file name, which is the one its post-install step records.
+  assert.match(pkg.warnings.join(' '), /The device will report 26\.11\.1rc4\./);
 });
 
 test('a file that is not a Cyanview package is refused', () => {

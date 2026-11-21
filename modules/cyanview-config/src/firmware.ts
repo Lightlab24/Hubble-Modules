@@ -82,7 +82,7 @@ export function describePackage(fileName: string, size: number, sha256: string, 
   if (nameKind && kind && nameKind !== kind) problems.push('The file name says ' + nameKind + ' but the package is for a ' + kind + '. It is not sent to any device.');
   if (!nameKind) problems.push('The file name must start with the device it is for, such as cy-rio-. Use the file Cyanview published.');
   const nameVersion = /(\d+\.\d+\.\d+(?:rc\d+)?)/.exec(fileName)?.[1] ?? null;
-  if (version && nameVersion && version !== nameVersion) warnings.push('The package says version ' + version + ' inside, but the file name says ' + nameVersion + '. The device will report ' + version + '.');
+  if (version && nameVersion && version !== nameVersion) warnings.push('The package says version ' + version + ' inside, but the file name says ' + nameVersion + '. The device will report ' + nameVersion + '.');
   // The post-install step records the version from the file name, which is what the device reports afterwards.
   return { id: '', fileName, size, sha256, family, kind, version: nameVersion ?? version, revisions, problems, warnings };
 }
