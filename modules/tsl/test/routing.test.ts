@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -132,7 +132,7 @@ async function world(options: { rows?: RoutingRow[]; runtimeDirectory?: string }
     await settle();
   };
   const routed = () => route.mock.calls.map((call) => (call[2] as { source: number }).source);
-  return { routing, route, routed, router, setTally, changed, runtimeDirectory, document: () => saved, setSaved: (rows: RoutingRow[]) => (saved = { ...saved, revision: `rev-${++writes}`, value: { rows } }) };
+  return { routing, route, routed, router, setTally, changed, runtimeDirectory, context, document: () => saved, setSaved: (rows: RoutingRow[]) => (saved = { ...saved, revision: `rev-${++writes}`, value: { rows } }) };
 }
 
 it("routes the camera that goes on air, from this module's own tally, while it follows", async () => {
@@ -310,3 +310,29 @@ it("takes in cameras saved elsewhere, such as an import, within a couple of seco
   expect(test.routing.snapshot()).toMatchObject({ rows: moved, revision: test.document().revision });
   expect(test.changed).toHaveBeenCalled();
 }, 10_000);
+
+it("keeps running when the saved cameras can't be read at first, and takes them in when they can", async () => {
+  const test = await world();
+  const services = test.context.services as unknown as { request: (service: string, version: number, input: { method: string }) => Promise<unknown> };
+  const request = services.request.bind(services);
+  let failing = true;
+  services.request = async (service, version, input) => {
+    if (failing && input.method === "read") throw new Error("Workspace is busy");
+    return request(service, version, input);
+  };
+  await expect(test.routing.start()).resolves.toBeUndefined();
+  expect(test.routing.snapshot()).toMatchObject({ rows: [], notice: "The saved cameras couldn't be read yet: Workspace is busy" });
+  failing = false;
+  await new Promise((resolve) => setTimeout(resolve, 2300));
+  expect(test.routing.snapshot()).toMatchObject({ rows: cameras, revision: "rev-0" });
+  expect(test.routing.live().notice).not.toContain("couldn't be read");
+}, 10_000);
+
+it("starts unfollowed when the saved Follow state is damaged", async () => {
+  const runtimeDirectory = await mkdtemp(path.join(os.tmpdir(), "tsl-routing-"));
+  cleanups.push(() => rm(runtimeDirectory, { recursive: true, force: true }));
+  await writeFile(path.join(runtimeDirectory, "routing-following.json"), "{not json");
+  const test = await world({ runtimeDirectory });
+  await expect(test.routing.start()).resolves.toBeUndefined();
+  expect(test.routing.isFollowing()).toBe(false);
+});

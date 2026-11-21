@@ -1,6 +1,6 @@
 # TSL Tally
 
-Official module `hubble-tsl`, version **1.4.0**, using stable Hubble module API **1**.
+Official module `hubble-tsl`, version **1.4.1**, using stable Hubble module API **1**.
 It receives TSL UMD 3.1 and 5.0 tally over UDP or TCP, shows what a switcher sends, routes a
 router on tally (what TALLY Switch did, merged in at 1.4.0), feeds Button Matrix tally
 feedback, and can set a Ross Carbonite switcher to send its tally to this computer.

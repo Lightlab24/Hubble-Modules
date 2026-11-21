@@ -115,6 +115,9 @@ export class TslRouting {
   private closed = false;
   private writes: Promise<unknown> = Promise.resolve();
   private notice = "Add a router module to this workspace to route on tally";
+  /** Why the saved cameras couldn't be read yet. Tally never waits on it, and reads try again. */
+  private loadError = "";
+  private loaded = false;
   private readonly file: string | undefined;
 
   constructor(
@@ -167,20 +170,27 @@ export class TslRouting {
   }
 
   async start(): Promise<void> {
+    // Routing never stops tally: a damaged Follow file starts unfollowed, and cameras that can't be
+    // read yet come in on the next read.
     if (this.file) {
       try {
         const text = await readFile(this.file, "utf8");
         if (text.length > 1024) throw new Error("Invalid saved follow state");
         this.following = z.object({ following: z.boolean() }).parse(JSON.parse(text)).following;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      } catch {
+        this.following = false;
       }
     }
     if (this.context.services) {
-      const saved = await this.documents().read(ROUTING_DOCUMENT_ID, this.controller.signal);
-      const parsed = RoutingDocumentSchema.safeParse(saved.value);
-      this.rows = parsed.success ? parsed.data.rows : [];
-      this.revision = saved.revision;
+      try {
+        const saved = await this.documents().read(ROUTING_DOCUMENT_ID, this.controller.signal);
+        const parsed = RoutingDocumentSchema.safeParse(saved.value);
+        this.rows = parsed.success ? parsed.data.rows : [];
+        this.revision = saved.revision;
+        this.loaded = true;
+      } catch (error) {
+        this.loadError = unreadable(error);
+      }
     }
     this.engine = this.build(this.engine);
     this.feed();
@@ -199,14 +209,19 @@ export class TslRouting {
     this.reading = true;
     try {
       const saved = await this.documents().read(ROUTING_DOCUMENT_ID, this.controller.signal);
-      if (this.closed || saved.revision === this.revision) return;
+      if (this.closed) return;
+      const first = !this.loaded;
+      this.loaded = true;
+      this.loadError = "";
+      if (saved.revision === this.revision && !first) return;
       const parsed = RoutingDocumentSchema.safeParse(saved.value);
       this.rows = parsed.success ? parsed.data.rows : [];
       this.revision = saved.revision;
       this.engine = this.build(this.engine);
       this.feed();
-    } catch {
+    } catch (error) {
       // The next read tries again.
+      if (!this.loaded) this.loadError = unreadable(error);
     } finally {
       this.reading = false;
     }
@@ -384,7 +399,7 @@ export class TslRouting {
       program: row.values.program,
       status: row.values.status,
     }));
-    return { following: this.following, statuses, routers: this.routers, notice: this.notice, revision: this.revision };
+    return { following: this.following, statuses, routers: this.routers, notice: this.loadError || this.notice, revision: this.revision };
   }
 
   snapshot(): RoutingSnapshot {
@@ -403,4 +418,9 @@ export class TslRouting {
     await Promise.allSettled([...this.subscriptions.values()].map((unsubscribe) => unsubscribe()));
     this.subscriptions.clear();
   }
+}
+
+function unreadable(error: unknown): string {
+  const detail = error instanceof Error && error.message ? `: ${error.message}` : "";
+  return `The saved cameras couldn't be read yet${detail}`.slice(0, 300);
 }
