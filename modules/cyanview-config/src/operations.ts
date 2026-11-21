@@ -1,7 +1,7 @@
 import { CyanviewClient } from './transport.js';
 import { PlanRepository } from './repository.js';
-import { addressParts, lensParameters, normalizedLabel, object, validIp, type Plan, type RecordValue } from './model.js';
-import { optionEntries } from './normalize.js';
+import { addressParts, baseFromSerial, lensParameters, normalizedLabel, object, validIp, type Plan, type RecordValue } from './model.js';
+import { baseRow, normalizeSnapshot, optionEntries } from './normalize.js';
 import { isRemiModel, remiCamera, remiEntries } from './remi-model.js';
 import type { RemiOperations } from './remi.js';
 
@@ -36,7 +36,9 @@ export async function ownSocket(held: HeldControllers | undefined, factory: Clie
 }
 const enabled = (value: unknown) => value === true || value === 1 || value === '1' || value === 'true';
 const advanced = (field: string) => /^(iris|zoom|focus)(Motor|Min|Max|Torque|Direction)$/.test(field) || field === 'lensIp';
-const protectedLan = (row: RecordValue) => enabled(row.ReadOnly) || enabled(row.NoDelete) || String(row.IP).startsWith('10.192.');
+// The controller's own base address, and what it marks ReadOnly or NoDelete. A LAN address someone put in 10.192 is
+// an ordinary address that can be replaced.
+const protectedLan = (row: RecordValue, device: RecordValue) => enabled(row.ReadOnly) || enabled(row.NoDelete) || (!!row.IP && [baseFromSerial(String(device.serial ?? '')), String(device.base ?? '')].includes(String(row.IP)));
 /**
  * One socket per controller for a whole send. A controller pushes its entire configuration to every
  * open socket after every change, so a socket per row multiplies that work by the number of rows.
@@ -381,6 +383,77 @@ export class ConfigurationOperations {
     return result;
   }
   /**
+   * Setup mode: an RCP back to its base address alone, so it can be set up again. Every LAN address it has is
+   * deleted, however many, and its WAN goes to Static with no address, gateway or DNS. All of it goes over the base
+   * address, because the address Hubble reached the RCP by may be one of those being deleted. An RCP that doesn't
+   * answer there is left exactly as it is. Its cameras are cleared by the page, the way Clear all clears them.
+   */
+  clearNetwork(input: RecordValue, signal: AbortSignal, progress: (deviceId: string, done: number, total: number) => void = () => {}): Promise<RecordValue> {
+    const deviceId = String(input.device ?? ''), lans = input.lans !== false, wan = input.wan !== false;
+    if (!deviceId) return Promise.reject(new Error('Choose an RCP to clear'));
+    // Like any other network change, it waits for every send already working on this controller.
+    const rows = this.rowQueues.get(deviceId);
+    const previous = [this.queues.get(deviceId), ...(rows ? rows.values() : []), ...(this.batches.get(deviceId) ?? [])];
+    const task = Promise.all(previous.map(task => task?.catch(() => undefined))).then(async () => {
+      signal.throwIfAborted();
+      const device = (await this.repository.read(signal)).plan.devices.find(row => row.id === deviceId);
+      if (!device) throw new Error('Controller is no longer in the managed list');
+      const name = String(device.name || device.serial), serial = String(device.serial ?? '');
+      if (!/^CY-RCP-/i.test(serial)) throw new Error('Setup mode clears RCPs only; ' + name + ' is left as it is');
+      const base = baseFromSerial(serial) || String(device.base ?? '');
+      if (!validIp(base)) throw new Error(name + ' has no base address, so nothing on it was changed');
+      let client: CyanviewClient;
+      try { client = await ownSocket(this.held, this.client, device, signal, base); }
+      catch { signal.throwIfAborted(); throw new Error(name + ' didn’t answer on its base address ' + base + ', so nothing on it was changed'); }
+      try {
+        if (client.serial !== device.serial) throw new Error('Another controller answered at ' + base + ', so nothing was changed');
+        const entries = Object.entries(object(client.config.IP)).map(([key, raw]) => [key, object(raw)] as const);
+        const own = baseRow(entries.map(([key, row]) => ({ key, ...row })), serial);
+        if (!own || own.IP !== base) throw new Error(name + ' doesn’t list ' + base + ' as its base address, so nothing on it was changed');
+        const isWan = (row: RecordValue) => String(row.Type ?? '').toUpperCase().includes('WAN');
+        // What the controller lets go of: its own addresses are ReadOnly, and the WAN and its base are NoDelete.
+        const deleting = lans ? entries.filter(([key, row]) => key !== own.key && !isWan(row) && !enabled(row.ReadOnly) && !enabled(row.NoDelete)).map(([key]) => key) : [];
+        const wanEntry = wan ? entries.find(([, row]) => isWan(row) && !enabled(row.ReadOnly)) : undefined;
+        const wanBlank = (row: RecordValue) => !enabled(row.DHCP) && ['IP', 'Gateway', 'DNS1', 'DNS2'].every(field => !String(row[field] ?? '').trim());
+        const wanChange = !!wanEntry && !wanBlank(wanEntry[1]);
+        const total = deleting.length + (wanChange ? 1 : 0);
+        let done = 0;
+        progress(deviceId, done, total);
+        for (const key of deleting) {
+          const gone = (config: RecordValue) => !object(config.IP)[key];
+          try { await client.action({ delete: [key] }, signal); }
+          catch (error) {
+            // A reply can be lost after the controller has done it, so what it reports decides.
+            signal.throwIfAborted();
+            if (!client.connected) throw error;
+          }
+          try { await client.waitFor(gone, signal); }
+          catch { signal.throwIfAborted(); throw new Error('LAN address ' + String(object(object(client.config.IP)[key]).IP ?? key) + ' on ' + name + ' could not be deleted'); }
+          progress(deviceId, ++done, total);
+        }
+        if (wanEntry && wanChange) {
+          const [key, row] = wanEntry;
+          await this.wan(client, { dhcp: false, planned: '', gateway: '', dns1: '', dns2: '' }, key, row, ['dhcp', 'planned', 'gateway', 'dns1', 'dns2'], signal);
+          progress(deviceId, ++done, total);
+        }
+        const snapshot = normalizeSnapshot(client.config, base);
+        const saved = await this.repository.update(plan => {
+          const cleared = new Set(deleting);
+          plan.lans = plan.lans.filter(row => row.device !== deviceId || !row.elementKey || !cleared.has(String(row.elementKey)));
+          const wanRow = wanEntry && plan.lans.find(row => row.device === deviceId && row.elementKey === wanEntry[0]);
+          if (wanRow) Object.assign(wanRow, { current: '', planned: '', dhcp: false, gateway: '', dns1: '', dns2: '', operation: 'Keep', result: 'In sync', pending: false, dirty: [] });
+          const controller = plan.devices.find(row => row.id === deviceId);
+          if (controller) Object.assign(controller, { base, address: base, ...(lans ? { alias: '' } : {}) });
+        }, signal);
+        return { device: deviceId, deleted: deleting.length, wan: wanChange, revision: saved.revision, snapshot };
+      } finally { client.close(); }
+    });
+    this.queues.set(deviceId, task);
+    const cleanup = () => { if (this.queues.get(deviceId) === task) this.queues.delete(deviceId); };
+    void task.then(cleanup, cleanup);
+    return task;
+  }
+  /**
    * A WAN's mode, address, gateway and DNS, written the way Cyanview's own page wrote them on a RIO WAN
    * (captured Nov 17, 2026): DHCP through the on or off command the controller itself offers, then the
    * address and the mask as separate writes. Turning DHCP on blanks the address, mask, gateway and DNS in
@@ -448,7 +521,7 @@ export class ConfigurationOperations {
     const desired = addressParts(String(item.planned)), replacing = item.operation === 'Replace';
     if (!/^LAN\d+$/.test(String(item.iface))) throw new Error('Choose a valid LAN interface');
     if (replacing && (!oldKey || !old.IP || String(old.IP) !== String(item.current).split('/')[0]) && !item.newElementKey) throw new Error('The original address changed; refresh before replacing it');
-    if (replacing && old.IP && protectedLan(old)) throw new Error('The management or protected address cannot be replaced');
+    if (replacing && old.IP && protectedLan(old, device)) throw new Error('The management or protected address cannot be replaced');
     const separate = replacing || item.operation === 'Add' && !!item.current && !!oldKey;
     let key = String(separate ? item.newElementKey ?? '' : item.elementKey ?? '');
     if (key && !rows[key]) throw new Error('The saved network element is unavailable; refresh before retrying');

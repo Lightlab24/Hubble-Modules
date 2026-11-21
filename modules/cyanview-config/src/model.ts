@@ -47,6 +47,12 @@ export const controllerLabel = (device: RecordValue) => {
   return name && name !== serial ? `${name} · ${serial}` : serial;
 };
 export const validIp = (address: string) => /^\d{1,3}(\.\d{1,3}){3}$/.test(address) && address.split('.').every(part => Number(part) <= 255);
+/** A Cyanview serial carries its own base address: CY-RCP-1-20 is 10.192.1.20. */
+export const baseFromSerial = (serial: string) => {
+  const parts = /^cy-[a-z0-9]+-(\d{1,3})-(\d{1,3})$/i.exec(serial.trim());
+  const address = parts ? '10.192.' + Number(parts[1]) + '.' + Number(parts[2]) : '';
+  return validIp(address) ? address : '';
+};
 export function addressParts(value: string) {
   const parts = value.split('/'), [ip, prefix] = parts;
   if (parts.length !== 2 || !validIp(ip ?? '') || !/^\d{1,2}$/.test(prefix ?? '') || Number(prefix) > 32) throw new Error('Enter a valid address and prefix, such as 10.20.101.200/16');

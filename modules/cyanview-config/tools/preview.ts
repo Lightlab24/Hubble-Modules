@@ -192,6 +192,14 @@ const server = createServer(async (request, response) => {
         if (input.addCamera) { const target = controllers[Number(input.addCamera.device) || 0]!; target.config.Camera[String(input.addCamera.key)] = input.addCamera.row; target.broadcast(); }
         // A change made outside Hubble, such as in Cyanview's own page. The controller pushes it to every open socket.
         if (input.editCamera) { const target = controllers[Number(input.editCamera.device) || 0]!; Object.assign(target.config.Camera[String(input.editCamera.key)], input.editCamera.fields); target.broadcast(); }
+        // Address rows set on one controller outside Hubble, as on its own page. They are listed first, since a controller
+        // lists its rows in no fixed order, and a row given as null is deleted.
+        if (input.editIp) {
+          const target = controllers[Number(input.editIp.device) || 0]!, rows = Object.entries(input.editIp.rows ?? {}) as [string, any][];
+          const kept = Object.entries(target.config.IP).filter(([key]) => !rows.some(([other]) => other === key));
+          target.config.IP = Object.fromEntries([...rows.filter(([, row]) => row !== null), ...kept]);
+          target.broadcast();
+        }
         if (input.rekeyCamera) { const { wide, ...others } = controller.config.Camera; controller.config.Camera = { ...others, [input.rekeyCamera]: wide }; controller.broadcast(); }
         if (input.mqtt) mqtt.send(input.mqtt.topic, input.mqtt.value);
         if (input.mqttControls) Object.assign(mqtt.controls, input.mqttControls);

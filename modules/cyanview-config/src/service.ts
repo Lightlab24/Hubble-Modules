@@ -3,7 +3,7 @@ import { ConfigurationOperations, lentSocket, ownSocket, type ClientFactory, typ
 import { PlanRepository } from './repository.js';
 import { Discovery, type DiscoveryMethod, type DiscoveryOptions } from './discovery.js';
 import { normalizeSnapshot, optionEntries } from './normalize.js';
-import { object, savedDeviceAddresses, validIp, type Plan, type RecordValue } from './model.js';
+import { baseFromSerial, object, savedDeviceAddresses, validIp, type Plan, type RecordValue } from './model.js';
 import { readNeighbors } from './neighbors.js';
 import { RemiOperations } from './remi.js';
 import type { ChoiceCatalogs } from './choice-catalogs.js';
@@ -23,12 +23,7 @@ export type ServiceOptions = { client?: ClientFactory; reachable?: (address: str
   lookReachMs?: number;
   /** Opens a controller's own web page. Tests record the address and open nothing. */
   openPage?: OpenDevicePage };
-/** A Cyanview serial carries its own base address: CY-RCP-1-20 is 10.192.1.20. */
-export const baseFromSerial = (serial: string) => {
-  const parts = /^cy-[a-z0-9]+-(\d{1,3})-(\d{1,3})$/i.exec(serial.trim());
-  const address = parts ? '10.192.' + Number(parts[1]) + '.' + Number(parts[2]) : '';
-  return validIp(address) ? address : '';
-};
+export { baseFromSerial };
 const safeDevice = (device: RecordValue) => Object.fromEntries(['id', 'serial', 'name', 'kind', 'base', 'alias', 'address', 'online', 'lastSeen', 'addresses', 'capacity'].filter(key => device[key] !== undefined).map(key => [key, device[key]]));
 export class CyanviewService {
   private client: ClientFactory;
@@ -42,6 +37,8 @@ export class CyanviewService {
   /** Every controller a read one lists as a neighbour, by lower-case serial, with the addresses it was seen at. */
   private neighbours = new Map<string, Set<string>>();
   private lookups = new Map<string, RecordValue>();
+  /** Setup mode's network clears under way: how many of each RCP's addresses are done. */
+  private networkClears = new Map<string, { done: number; total: number }>();
   private discovery: Discovery;
   private live?: LiveConfig;
   private stopped = false;
@@ -94,7 +91,7 @@ export class CyanviewService {
       }),
     });
   }
-  state() { return { observations: this.observations, discovery: this.discovery.progress, lookupResults: [...this.lookups.values()], configChanges: this.live?.state() ?? null }; }
+  state() { return { observations: this.observations, discovery: this.discovery.progress, lookupResults: [...this.lookups.values()], configChanges: this.live?.state() ?? null, networkClears: Object.fromEntries(this.networkClears) }; }
   /** Says whether a controller's MQTT link is down, which with no settings socket either means it isn't answering at all. */
   followMqtt(down: (id: string) => boolean) { this.mqttDown = down; }
   /** Keeps a settings socket open on each managed controller, so a change made anywhere shows up without Refresh all. */
@@ -272,5 +269,12 @@ export class CyanviewService {
     return { ...catalog, saved };
   }
   send(input: RecordValue, signal: AbortSignal) { return this.operations.run(input, signal); }
+  /** Setup mode: deletes an RCP's LAN addresses and leaves its WAN Static with nothing set, reporting each one as it goes. */
+  async clearNetwork(input: RecordValue, signal: AbortSignal) {
+    const id = String(input.device ?? '');
+    try {
+      return await this.operations.clearNetwork(input, signal, (device, done, total) => { this.networkClears.set(device, { done, total }); this.emit(); });
+    } finally { this.networkClears.delete(id); this.emit(); }
+  }
   dispose() { this.stopped = true; this.discovery.dispose(); this.live?.dispose(); }
 }

@@ -148,6 +148,11 @@ if (window.parent !== window) {
     async cameraRefresh(device: string, key: string) { return client.call('camera-refresh', payload({ device, key })); },
     /** A controller's own web page, opened in the browser on the computer Hubble runs on. */
     async openDevicePage(address: string) { return client.call('open-device-page', payload({ address })); },
+    /** Setup mode: an RCP's LAN addresses deleted and its WAN left Static with nothing set. Saves already queued go first. */
+    async clearNetwork(device: string, lans: boolean, wan: boolean) {
+      await tail.catch(() => undefined);
+      return readBounded(await client.call('clear-network', payload({ device, lans, wan })) as Record<string, any>);
+    },
     async controlState() { return client.call('camera-control-state'); },
     /** Firmware: the file is sent in parts, then checked and installed on the RIOs chosen with it. */
     async firmwareBegin() { return client.call('firmware-begin'); },

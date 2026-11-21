@@ -60,6 +60,8 @@
     if (failed) return failed.result;
     return rows.some(row => row.pending) ? 'Pending' : d.online ? 'In sync' : '—';
   }
+  // Setup mode says how its clear is going here instead.
+  function deviceSyncMarkup(d) { return resultMark(deviceSyncText(d)); }
   const deviceCameraCount = d => cameras.filter(camera => camera.device === d.id).length;
   function deviceSortValue(d, field) {
     const net = deviceNetwork(d);
@@ -121,13 +123,13 @@
       case 'lan1': return cell(input('lan1', net.lan[0]?.planned, 'LAN IP', busy) + pageOpener(net.lan[0], d.name) + (deviceSheet.lanOpen ? '' : waiting(net.lan.slice(1))), !!net.lan[0]?.pending);
       case 'lan2': return cell(input('lan2', net.lan[1]?.planned, 'LAN IP 2', busy) + pageOpener(net.lan[1], d.name) + waiting(net.lan.slice(2)), !!net.lan[1]?.pending);
       // Folded away, the WAN shows what it will be once sent.
-      case 'wan': return cell(net.wan ? (net.wan.dhcp || net.wan.planned ? esc(net.wan.dhcp ? 'DHCP' : net.wan.planned) : quiet('Not set')) + waiting([net.wan]) : quiet('—'), !!net.wan?.pending);
+      case 'wan': return cell(net.wan ? (net.wan.dhcp ? esc('DHCP') : !net.wan.planned ? quiet('Static') : plainAddress(net.wan.planned).startsWith('10.192.') ? '<span class="hc-mono hc-setup-inside" title="This WAN is inside 10.192, the factory network the base addresses use">' + esc(net.wan.planned) + '</span>' : esc(net.wan.planned)) + waiting([net.wan]) : quiet('—'), !!net.wan?.pending);
       case 'wanMode': return cell(net.wan ? '<select class="hc-cell-input" data-device-cell="' + id + ':wanMode" aria-label="' + esc('WAN mode for ' + d.name) + '"' + (busy ? ' disabled' : '') + '>' + options(['DHCP', 'Static'], held('wanMode') ?? (net.wan.dhcp ? 'DHCP' : 'Static')) + '</select>' : quiet('—'), !!net.wan?.dirty.has('dhcp'));
       case 'wanIp': return cell(net.wan ? input('wanIp', net.wan.dhcp ? '' : net.wan.planned, 'WAN IP', busy || net.wan.dhcp) + pageOpener(net.wan, d.name) : '', !!net.wan && !net.wan.dhcp && net.wan.dirty.has('planned'));
       case 'gateway': case 'dns1': case 'dns2': return cell(net.wan ? input(column.id, net.wan[column.id], column.label, busy || net.wan.dhcp) : '', !!net.wan?.dirty.has(column.id));
       case 'connected': return cell(quiet(deviceConnectedOn(d)), false, ' data-device-connected="' + id + '"');
       case 'cameras': return cell(deviceCamerasMarkup(d), false, ' data-device-cameras="' + id + '"');
-      case 'sync': return cell(resultMark(deviceSyncText(d)), false, ' data-device-sync="' + id + '"');
+      case 'sync': return cell(deviceSyncMarkup(d), false, ' data-device-sync="' + id + '"');
       default: return cell('<button type="button" class="hc-row-remove-button" data-action="remove-device" data-id="' + id + '" aria-label="Remove ' + esc(d.name) + ' from this list" title="Remove ' + esc(d.name) + ' from this list. Nothing is deleted on the device."' + (busy ? ' disabled' : '') + '>' + icon('trash-2') + '</button>');
     }
   }
@@ -213,7 +215,7 @@
       set('data-device-status', d.id, status(d.online));
       set('data-device-connected', d.id, '<span class="hc-muted">' + esc(deviceConnectedOn(d)) + '</span>');
       set('data-device-cameras', d.id, deviceCamerasMarkup(d));
-      set('data-device-sync', d.id, resultMark(deviceSyncText(d)));
+      set('data-device-sync', d.id, deviceSyncMarkup(d));
     }
     for (const row of host.querySelectorAll('tr[data-device-row]')) row.classList.toggle('hc-device-selected', row.dataset.deviceRow === selectedDeviceId);
     icons();

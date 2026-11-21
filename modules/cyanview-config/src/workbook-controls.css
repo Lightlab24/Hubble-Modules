@@ -375,3 +375,20 @@ body:has(#cyanview-design .hc-veil:not([hidden])) .hubble-column-resize-handles 
 /* A device's place in the Devices list, typed over to move it. */
 #cyanview-design .hc-grid .hc-device-position { text-align: center; color: var(--hc-secondary); }
 #cyanview-design .hc-grid .hc-device-position:focus { color: inherit; }
+
+/* Setup mode (Nov 21, 2026): its On button and the band above the Devices sheet read amber, like a pending cell. */
+#cyanview-design .hc-setup-mode-control [data-mode="on"][aria-pressed="true"] { background: var(--hc-pending); color: var(--hc-amber); font-weight: 600; }
+#cyanview-design .hc-setup-band { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 20px; margin: 0 0 14px; padding: 10px 14px; border: 1px solid color-mix(in srgb, var(--hc-amber) 50%, transparent); border-radius: 8px; background: var(--hc-pending); color: var(--hc-text); font-size: 12px; }
+#cyanview-design .hc-setup-band[hidden] { display: none; }
+#cyanview-design .hc-setup-band > strong { color: var(--hc-amber); font-size: 13px; font-weight: 600; }
+#cyanview-design .hc-setup-choice { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap; }
+#cyanview-design .hc-setup-note { color: var(--hc-secondary); }
+#cyanview-design .hc-setup-running, #cyanview-design .hc-setup-inside { color: var(--hc-amber); }
+#cyanview-design .hc-setup-done { color: var(--hc-green); }
+#cyanview-design .hc-setup-failed { color: var(--hc-red); }
+#cyanview-design .hc-modal.hc-setup-review { width: min(760px, 100%); }
+#cyanview-design .hc-setup-review .hc-modal-body { max-height: min(560px, 70vh); }
+#cyanview-design .hc-setup-review-item { display: flex; gap: 12px; align-items: flex-start; }
+#cyanview-design .hc-setup-review-item > input { flex: none; margin-top: 2px; }
+#cyanview-design .hc-setup-review-lines { display: grid; gap: 4px; }
+#cyanview-design .hc-setup-review-lines small { margin-top: 0; }

@@ -51,6 +51,6 @@ export default defineModuleManifest({
   }],
   pages: [{ id: 'studio', label: 'Cyanview', icon: 'ui/logo.svg', layout: 'full-page', sections: [ModuleFrontendSectionSchema.parse({
     type: 'custom', id: 'frontend', label: 'Cyanview configuration', entry: 'ui/index.html',
-    commands: ['read-plan', 'read-part', 'save-plan', 'save-begin', 'save-part', 'save-commit', 'send', 'send-begin', 'send-part', 'send-commit', 'scan', 'stop-scan', 'probe', 'find-rig', 'import-device', 'import-part', 'refresh', 'choice-catalogs', 'options', 'firmware-begin', 'firmware-part', 'firmware-commit', 'firmware-targets', 'firmware-install', 'firmware-status', 'remi-state', 'remi-send', 'remi-route', 'camera-control-state', 'camera-control-mutate', 'camera-enabled', 'camera-refresh', 'open-device-page', 'setup-guide'].map(id => ({ id, label: id })),
+    commands: ['read-plan', 'read-part', 'save-plan', 'save-begin', 'save-part', 'save-commit', 'send', 'clear-network', 'send-begin', 'send-part', 'send-commit', 'scan', 'stop-scan', 'probe', 'find-rig', 'import-device', 'import-part', 'refresh', 'choice-catalogs', 'options', 'firmware-begin', 'firmware-part', 'firmware-commit', 'firmware-targets', 'firmware-install', 'firmware-status', 'remi-state', 'remi-send', 'remi-route', 'camera-control-state', 'camera-control-mutate', 'camera-enabled', 'camera-refresh', 'open-device-page', 'setup-guide'].map(id => ({ id, label: id })),
   })] }],
 });

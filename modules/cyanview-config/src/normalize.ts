@@ -1,14 +1,27 @@
-import { decodeLensParameters, object, validIp, type RecordValue } from './model.js';
+import { baseFromSerial, decodeLensParameters, object, validIp, type RecordValue } from './model.js';
 import { isRemiModel, remiEntries, type RemiCameraInfo } from './remi-model.js';
 
 const flag = (value: unknown) => value === true || value === 1 || value === '1' || value === 'true';
 export const deviceId = (serial: string) => serial.replace(/[^A-Za-z0-9_.:-]/g, '-');
+const wanRow = (row: RecordValue) => String(row.Type ?? '').toUpperCase().includes('WAN');
+/**
+ * Which of a controller's address rows is its own base address. A WAN or a LAN address can be set inside 10.192 too
+ * (Nov 21, 2026: an RCP's WAN was), and the controller lists its rows in no fixed order, so being in 10.192 says
+ * nothing. The serial does: CY-RCP-46-197 is always 10.192.46.197. The controller also marks that row, and only that
+ * row, ReadOnly; a WAN is NoDelete without being ReadOnly. A WAN is never the base.
+ */
+export function baseRow(ips: RecordValue[], serial: string): RecordValue | undefined {
+  const factory = baseFromSerial(serial), usable = ips.filter(row => !wanRow(row) && validIp(String(row.IP)));
+  return usable.find(row => factory && row.IP === factory)
+    ?? usable.find(row => flag(row.ReadOnly) && String(row.IP).startsWith('10.192.'))
+    ?? usable.find(row => flag(row.ReadOnly));
+}
 export function normalizeSnapshot(config: RecordValue, address: string) {
   const product = object(config.Product), serial = String(product.Serial ?? '').trim();
   if (!serial || serial.length > 160) throw new Error('The endpoint did not identify a Cyanview controller');
   const id = deviceId(serial), ips = Object.entries(object(config.IP)).map(([key, raw]) => ({ key, ...object(raw) } as RecordValue));
-  const primary = ips.find(row => (flag(row.ReadOnly)||flag(row.NoDelete)) && validIp(String(row.IP)) && String(row.IP).startsWith('10.192.')) ?? ips.find(row=>validIp(String(row.IP))&&String(row.IP).startsWith('10.192.'));
-  const secondary = ips.find(row => !flag(row.ReadOnly) && String(row.Type).toUpperCase().includes('LAN') && validIp(String(row.IP)));
+  const primary = baseRow(ips, serial);
+  const secondary = ips.find(row => row !== primary && !flag(row.ReadOnly) && !wanRow(row) && String(row.Type).toUpperCase().includes('LAN') && validIp(String(row.IP)));
   const productName=String(product.Name).toUpperCase();
   const device: RecordValue = { id, serial, name: serial, kind: productName.includes('RIO') ? 'RIO' : productName.includes('GATEWAY')||productName.includes('GWY')?'Gateway':'RCP', base: primary?.IP ?? address, address, alias: secondary?.IP ?? '', interfaces:[...new Set(ips.map(row=>String(row.Interface??'')).filter(Boolean))],online: true, lastSeen: new Date().toISOString(), capacity: product.MaxCam ?? null };
   const imports = new Map(remiEntries(config).filter(entry => entry.enabled && entry.localKey).map(entry => [entry.localKey, entry]));
@@ -29,7 +42,7 @@ export function normalizeSnapshot(config: RecordValue, address: string) {
     // A WAN on DHCP reads as DHCP whatever address it was given. An address whose mask is still blank shows on its own.
     const ip = String(row.IP ?? ''), mask = String(row.mask ?? '16'), dhcp = flag(row.DHCP), type = String(row.Type ?? 'LAN').toUpperCase().includes('WAN') ? 'WAN' : 'LAN';
     const current = type === 'WAN' && dhcp ? 'DHCP' : validIp(ip) ? (mask ? `${ip}/${mask}` : ip) : dhcp ? 'DHCP' : '';
-    return { id: `${id}:lan:${row.key}`, device: id, elementKey: row.key, type, iface: String(row.Interface ?? 'LAN1'), current, planned: current, operation: 'Keep', result: 'In sync', dhcp, gateway: String(row.Gateway ?? ''), dns1: String(row.DNS1 ?? ''), dns2: String(row.DNS2 ?? ''), readOnly: flag(row.ReadOnly), noDelete: flag(row.NoDelete), pending: false, dirty: [], revision: 0 };
+    return { id: `${id}:lan:${row.key}`, device: id, elementKey: row.key, type, iface: String(row.Interface ?? 'LAN1'), current, planned: current, operation: 'Keep', result: 'In sync', dhcp, gateway: String(row.Gateway ?? ''), dns1: String(row.DNS1 ?? ''), dns2: String(row.DNS2 ?? ''), readOnly: flag(row.ReadOnly) || row === primary, noDelete: flag(row.NoDelete), pending: false, dirty: [], revision: 0 };
   });
   return { device, cameras, lans };
 }

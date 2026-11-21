@@ -234,6 +234,13 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
         case 'firmware-install': return firmware.install({ packageId: String(input.packageId ?? ''), deviceIds: Array.isArray(input.deviceIds) ? input.deviceIds.map(String) : [] });
         case 'firmware-status': return firmware.status(typeof input.jobId === 'string' ? input.jobId : null);
         case 'send': return send(input, signal);
+        // Setup mode: an RCP's LAN addresses deleted and its WAN left Static with nothing set, over its base address.
+        case 'clear-network': {
+          const began = performance.now(), result = await watched('setup-clear', 'Clearing an RCP for setup', signal, () => service.clearNetwork({ device: String(input.device ?? ''), lans: input.lans !== false, wan: input.wan !== false }, signal));
+          context.log({ level: 'info', stage: 'setup-clear', message: 'Cleared ' + String(result.device) + ' for setup in ' + Math.round(performance.now() - began) + ' ms: ' + result.deleted + (result.deleted === 1 ? ' LAN address' : ' LAN addresses') + ' deleted' + (result.wan ? ', WAN set to Static with no address' : '') });
+          await followSaved(signal);
+          return bounded(result);
+        }
         // The setup tour's progress on this Mac. Simulated is walked through apart from the real setup.
         case 'setup-guide': return request.value == null ? guide.read(sample ? 'simulated' : 'real') : guide.write(sample ? 'simulated' : 'real', request.value);
         default: throw new Error('Unknown Cyanview command');
