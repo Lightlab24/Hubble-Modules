@@ -10,12 +10,49 @@ import {
 } from "./config.js";
 import { TslReceiver } from "./receiver.js";
 import { TslPresentation } from "./presentation.js";
+import { PAGE_ID, TslPage, type PageDependencies } from "./page.js";
+import { TslRouting } from "./routing.js";
 
-const module: HubbleModule = {
+/**
+ * Hubble's own older TSL code still reads the reports the managed helper publishes, so the
+ * receiver stays wrapped in it. The page, the switcher setup and Matrix feedback sit on top.
+ * `dependencies` lets tests and the preview stand in for the switcher and this computer's
+ * network addresses.
+ */
+export function createTslModule(dependencies: Partial<PageDependencies> = {}): HubbleModule {
+ return {
   createInstance(context) {
     let receiver: TslReceiver;
     const presentation = new TslPresentation(context, () => receiver);
-    const matrixFeedback = new MatrixFeedback(context, () => receiver);
+    // Routing on tally, merged in from TALLY Switch, reads this module's own tally.
+    const routing = new TslRouting(
+      context,
+      () => {
+        try {
+          return presentation.shared();
+        } catch {
+          // No receiver yet: nothing is known about tally.
+          return null;
+        }
+      },
+      () => {
+        page.changed();
+        matrixFeedback.emit();
+      },
+    );
+    const matrixFeedback = new MatrixFeedback(context, () => receiver, routing);
+    const tallySwitches = async () =>
+      ((await context.modules?.discover()) ?? [])
+        .filter(
+          (peer) =>
+            peer.peer.moduleId === "hubble-tally-switch" &&
+            peer.peer.kind === "connection",
+        )
+        .map((peer) => ({
+          id: peer.peer.kind === "connection" ? peer.peer.connectionId : "",
+          label: peer.name,
+        }));
+    const page = new TslPage(context, () => receiver, tallySwitches, routing, dependencies);
     const legacy = managedModule<ConnectionDefinition, ActionDefinition>(
       "tsl",
       (definition, context) => {
@@ -32,6 +69,8 @@ const module: HubbleModule = {
           ]);
           presentation.emit();
           matrixFeedback.emit();
+          page.changed();
+          routing.tallyChanged();
         };
         return {
           start: () => receiver.start(),
@@ -74,7 +113,7 @@ const module: HubbleModule = {
       },
     ).createInstance({
       ...context,
-      settings: { name: "TSL UMD", ...context.settings },
+      settings: { name: "TSL Tally", ...context.settings },
       publishState: () => {},
     });
     return {
@@ -82,6 +121,7 @@ const module: HubbleModule = {
       async start() {
         await matrixFeedback.start();
         await legacy.start();
+        await routing.start();
       },
       subscribeFeedback(subscriptions) {
         matrixFeedback.subscribe(subscriptions);
@@ -123,6 +163,8 @@ const module: HubbleModule = {
       },
       async call(method, value, execution) {
         execution.signal.throwIfAborted();
+        if (method === `page.${PAGE_ID}`)
+          return page.call(value, execution.signal);
         if (method === "matrix-control") {
           const control = z
             .object({
@@ -146,18 +188,7 @@ const module: HubbleModule = {
           return {
             revision: "peers",
             nextCursor: null,
-            choices: ((await context.modules?.discover()) ?? [])
-              .filter(
-                (peer) =>
-                  peer.peer.moduleId === "hubble-tally-switch" &&
-                  peer.peer.kind === "connection",
-              )
-              .map((peer) => ({
-                id:
-                  peer.peer.kind === "connection" ? peer.peer.connectionId : "",
-                label: peer.name,
-              }))
-              .slice(0, query.limit),
+            choices: (await tallySwitches()).slice(0, query.limit),
           };
         if (query.provider !== "matrix-addresses") {
           if (query.provider !== "feedback-mappings")
@@ -218,17 +249,7 @@ const module: HubbleModule = {
         };
       },
       async choices(provider) {
-        if (provider === "tally-switch-peers")
-          return ((await context.modules?.discover()) ?? [])
-            .filter(
-              (peer) =>
-                peer.peer.moduleId === "hubble-tally-switch" &&
-                peer.peer.kind === "connection",
-            )
-            .map((peer) => ({
-              id: peer.peer.kind === "connection" ? peer.peer.connectionId : "",
-              label: peer.name,
-            }));
+        if (provider === "tally-switch-peers") return tallySwitches();
         if (provider !== "feedback-mappings") return [];
         return presentation.mappings.map((row) => ({
           id: row.id,
@@ -243,12 +264,15 @@ const module: HubbleModule = {
         return presentation.shared();
       },
       async dispose() {
+        await page.close();
+        await routing.close();
         presentation.close();
         await matrixFeedback.close();
         await legacy.dispose();
       },
     };
   },
-};
+ };
+}
 
-export default module;
+export default createTslModule();

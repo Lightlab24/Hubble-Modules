@@ -1,16 +1,24 @@
 {
   "name": "@hubble-module/tsl",
-  "version": "1.2.4",
+  "version": "1.4.2",
   "private": true,
   "type": "module",
   "hubble": {
     "id": "hubble-tsl",
-    "name": "TSL UMD"
+    "name": "TSL Tally",
+    "assets": [
+      "ui/index.html",
+      "ui/tsl.svg"
+    ],
+    "frontend": {
+      "ui/app.js": "src/frontend.ts"
+    }
   },
   "scripts": {
     "build": "hubble-module build .",
     "test": "hubble-module test .",
-    "package": "hubble-module build . && hubble-module test . && hubble-module pack . ../../artifacts/hubble-tsl-1.2.4.hubble-module"
+    "package": "hubble-module build . && hubble-module test . && hubble-module pack . ../../artifacts/hubble-tsl-1.4.2.hubble-module",
+    "preview": "tsx tools/preview.ts"
   },
   "dependencies": {
     "@hubble/module-sdk": "workspace:1.8.0",
@@ -20,5 +28,6 @@
   },
   "devDependencies": {
     "@hubble/module-tools": "workspace:1.5.0"
-  }
+  },
+  "description": "Receives TSL tally, shows what a switcher sends, and sets a Ross switcher to send it here"
 }

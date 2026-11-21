@@ -1,6 +1,6 @@
 import { connectModuleFrontend, ModuleFrontendValueSchema } from '@hubble/module-sdk/frontend';
 import { mountSpreadsheetSheets,mountSpreadsheetToolbar,type SpreadsheetAddress } from '@hubble/module-sdk/spreadsheet-controls';
-import { alertChoices, alertsOn, autoSendOn, liveOn, readFieldIds, type AlertChoices, groups, fields, fieldById, valueOf, clone, validHost, activeSheetId, isFlipped, sheetList, sheetRowCount, addSheet, renameSheet, removeSheet, moveSheet, setOrientation, viewChange, setCameraCount, cameraHasData, loginVisible, type Camera, type CameraDocument, type CellEdit, type Field, type Mutation, type Orientation } from './model.js';
+import { alertChoices, alertsOn, autoSendOn, liveOn, readFieldIds, sameValue, type AlertChoices, groups, fields, fieldById, valueOf, clone, validHost, activeSheetId, isFlipped, sheetList, sheetRowCount, addSheet, renameSheet, removeSheet, moveSheet, setOrientation, viewChange, setCameraCount, cameraHasData, loginVisible, type Camera, type CameraDocument, type CellEdit, type Field, type Mutation, type Orientation } from './model.js';
 import { DraftStore, type SaveReceipt } from './draft-store.js';
 import { createCameraGrid } from './ui-grid.js';
 import type { Observations } from './backend.js';
@@ -53,7 +53,7 @@ try {
     const row=store.document.cameras.find(r=>r.id===id),o=observations[id];
     return row&&o?.host===valueOf(row,'camera-host')?o:undefined;
   };
-  const pending=(id:string)=>{const row=store.document.cameras.find(r=>r.id===id),obs=rowObservation(id);return row?fields.filter(f=>!!row.values[f.id]&&row.values[f.id]!==obs?.values[f.id]):[];};
+  const pending=(id:string)=>{const row=store.document.cameras.find(r=>r.id===id),obs=rowObservation(id);return row?fields.filter(f=>!!row.values[f.id]&&!sameValue(f,row.values[f.id],obs?.values[f.id])):[];};
   // What Send all would write now: staged settings on cameras that are online. Offline ones wait.
   const readyToSend=()=>store.document.cameras.reduce((n,r)=>n+(rowObservation(r.id)?.state==='online'?pending(r.id).length:0),0);
   const sendBlocked=()=>busy||store.pending.length>0||store.invalid.size>0;
@@ -226,7 +226,7 @@ try {
     store.confirm(fields.filter(f=>{
       const value=row.values[f.id];
       if(!value||(open?.rowId===rowId&&open.columnId===f.id)||unsent.get(rowId)?.some(entry=>entry.id===f.id))return false;
-      return value===obs.values[f.id]||verified.some(entry=>entry.id===f.id&&entry.value===value);
+      return sameValue(f,value,obs.values[f.id])||verified.some(entry=>entry.id===f.id&&entry.value===value);
     }).map(f=>({rowId,columnId:f.id,value:'',expected:row.values[f.id]!})));
   }
   // A camera coming back or a new column is read quietly, without tying up the buttons or popping up a failure.

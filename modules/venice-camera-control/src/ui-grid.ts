@@ -4,7 +4,7 @@ import {
   type SpreadsheetAddress,type SpreadsheetCell,type SpreadsheetControls,type SpreadsheetColumn,type SpreadsheetColumnGroup,
   type SpreadsheetEdit,type SpreadsheetReorderItem,type SpreadsheetColumnGroupControls
 } from '@hubble/module-sdk/spreadsheet-controls';
-import { groups,fields,fieldById,valueOf,clone,visibleFields,withColumnVisibility,withNoColumns,activeSheetId,isFlipped,viewChange,isLoginField,loginVisible,type View,type Camera,type CellEdit,type Field } from './model.js';
+import { groups,fields,fieldById,valueOf,sameValue,clone,visibleFields,withColumnVisibility,withNoColumns,activeSheetId,isFlipped,viewChange,isLoginField,loginVisible,type View,type Camera,type CellEdit,type Field } from './model.js';
 import { DraftStore } from './draft-store.js';
 import type { Observations } from './backend.js';
 
@@ -350,7 +350,7 @@ export async function createCameraGrid(options:GridOptions){
         cell.toggleAttribute('aria-invalid',!!invalid);if(invalid)cell.setAttribute('aria-invalid','true');
         cell.title=invalid?.message??obs?.errors[id]??(definition?definition.note:'');
         cell.setAttribute('aria-label',(settingLabel(id)??id)+(flip?' for '+valueOf(row,'camera-name'):'')+(invalid?': '+invalid.message:''));
-        const pending=!!definition&&isOnline(row)&&!!row.values[id]&&row.values[id]!==obs?.values[id];
+        const pending=!!definition&&isOnline(row)&&!!row.values[id]&&!sameValue(definition,row.values[id],obs?.values[id]);
         cell.dataset.pending=String(pending);cell.dataset.sending=String(obs?.sending.includes(id)??false);cell.dataset.failed=String(pending&&!!obs?.errors[id]);
         if(field?.kind==='boolean'&&!invalid){delete cell.dataset.empty;if(!cell.firstElementChild?.hasAttribute('data-hubble-boolean')){const slot=document.createElement('span');slot.setAttribute('data-hubble-boolean','');cell.replaceChildren(slot);}continue;}
         const labels=definition?getChoices(row,definition):[];

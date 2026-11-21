@@ -1,5 +1,4 @@
 import type { ModuleField } from "@hubble/module-sdk";
-import { indicatorValues } from "./presentation.js";
 export const text = (id: string, label: string, value = ""): ModuleField => ({
   id,
   label,
@@ -67,11 +66,4 @@ export const listenerFields: ModuleField[] = [
     description:
       "Use 0 for switchers that send only on change. TCP disconnect always clears tally.",
   },
-];
-export const feedbackColumns = [
-  text("name", "Name", "Camera"),
-  number("screen", "Screen"),
-  number("address", "Address"),
-  choice("indicator", "Program tally", indicatorValues, "default"),
-  text("status", "Live tally"),
 ];

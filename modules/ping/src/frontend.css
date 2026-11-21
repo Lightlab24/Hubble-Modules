@@ -4,7 +4,7 @@
   --font-ui:var(--hubble-font,-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',Arial,sans-serif)}
 html,body{height:100%;margin:0;overflow:hidden;color-scheme:dark}
 body{color:var(--hubble-text,#dedede);font:var(--hubble-text-size,13px) var(--hubble-font,system-ui)}
-.ping-app{height:100%;display:grid;grid-template-rows:auto auto auto minmax(0,1fr) auto auto;background:var(--hubble-sheet,#111)}
+.ping-app{height:100%;display:grid;grid-template-rows:auto auto auto minmax(0,1fr) auto auto auto;background:var(--hubble-sheet,#111)}
 .ping-app *{box-sizing:border-box}
 [hidden]{display:none!important}
 .app-header{min-height:72px;padding:14px 20px;display:flex;align-items:center;gap:20px;border-bottom:1px solid var(--hubble-line,#292929);background:var(--hubble-bar,#151515)}
@@ -78,10 +78,31 @@ button.quiet:hover{background:var(--hubble-hover,#2e2e2e)}
  */
 .legend .legend-spacer{flex:1}
 .legend .hint{width:320px;flex:none;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
-.legend .scale{font-size:var(--hubble-control-text-size,11px)}.legend .scale select{width:88px}
+.legend .scale{font-size:var(--hubble-control-text-size,11px)}
+.legend-chips{display:flex;gap:14px;align-items:center;white-space:nowrap}
+button.quiet.toggle[aria-pressed=true]{background:var(--hubble-selected,#373737);color:var(--hubble-text-strong,#f4f4f4);border-color:var(--hubble-line-strong,#4a4a4a)}
+/* On Auto the box shows Auto's choice, dimmed, until − + or a typed number fixes it. */
+#scale[data-auto=true] .hubble-stepper-input{color:var(--hubble-text-disabled,#7a7a7a)}
+.timeline{position:relative}
+.colors-panel{position:absolute;left:16px;bottom:44px;z-index:30;width:260px;padding:12px 12px 10px;background:var(--hubble-raised,#1c1c1c);border:1px solid var(--hubble-line-strong,#414141);border-radius:var(--hubble-radius-panel,10px);box-shadow:0 12px 32px #0009;color:var(--hubble-text,#dedede);font-size:var(--hubble-text-size-small,12px)}
+.colors-panel h3{margin:0 0 10px;font-size:var(--hubble-text-size,13px);font-weight:600;color:var(--hubble-text-strong,#f4f4f4)}
+.color-rows{display:grid;gap:6px}
+.color-row{display:flex;align-items:center;gap:8px;min-height:28px}
+.color-row i{flex:none;width:12px;height:12px;border-radius:3px}
+.color-row .color-name{width:52px;color:var(--hubble-text-strong,#f4f4f4)}
+.colors-note{margin:10px 0 0;color:var(--hubble-text-secondary,#b2b2b2);line-height:1.4}
+.color-row .band-ms{width:72px;min-height:var(--hubble-control-height,26px);padding:0 6px;border:1px solid var(--hubble-line-strong,#414141);border-radius:var(--hubble-radius-control,7px);background:var(--hubble-bar,#111);color:var(--hubble-text,#dedede);font:var(--hubble-control-text-size,11px) var(--hubble-font,system-ui);font-variant-numeric:tabular-nums}
+.color-row .band-ms[aria-invalid=true]{border-color:var(--ping-bad);outline:1px solid var(--ping-bad)}
+.color-actions{display:flex;gap:8px;margin-top:10px}
+.color-actions:has(.follow-alert[hidden]){display:none}
 .app-footer{display:flex;gap:14px;justify-content:space-between;align-items:center;min-height:34px;padding:8px 16px;border-top:1px solid var(--hubble-line,#3b3b3b);background:var(--hubble-bar,#171717);font-size:var(--hubble-control-text-size,11px);color:var(--hubble-text-secondary,#b2b2b2);white-space:nowrap}
 #save-status[data-error=true]{color:#f2aaa5}
 .loading{position:absolute;inset:0;display:grid;place-content:center;background:var(--hubble-sheet,#111);color:var(--hubble-text-secondary,#999)}
 .empty{position:absolute;inset:70px 20px auto;max-width:460px;margin:auto;padding:28px;border:1px dashed var(--hubble-line-strong,#414141);border-radius:var(--hubble-radius-surface,8px);text-align:center;color:var(--hubble-text-secondary,#999);background:var(--hubble-bar,#171717)}
 .empty h2{margin:0 0 8px;font-size:15px;color:var(--hubble-text,#dedede)}.empty p{line-height:1.5;margin:0 0 14px}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
+/* Sheets sit just above the timeline. "Move selected rows…" comes and goes with a selection, so it shares the tabs' line and never moves the timeline. */
+.sheet-tabs{border-top:1px solid var(--hubble-line,#3b3b3b);background:var(--hubble-bar,#131313)}
+.sheet-tabs .hubble-spreadsheet-sheets{display:flex;align-items:center;gap:10px;min-width:0}
+.sheet-tabs .hubble-spreadsheet-sheets>.button-sheet-bar{flex:0 1 auto;min-width:0}
+.sheet-tabs .hubble-spreadsheet-sheets>select{flex:none;margin:0}

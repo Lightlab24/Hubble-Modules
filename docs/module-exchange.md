@@ -60,7 +60,7 @@ the service computer. The module's settings name what it connected to, without a
 a control.
 
 Connecting never enables a connection or issues a device command. The module decides
-when to act: TALLY Switch still needs a mapping, Follow and a fresh tally change before
+when to act: TSL Tally's Routing tab still needs a mapping, Follow and a fresh tally change before
 it routes.
 
 `bindings()` returns each declared peer with a stable derived `id`, the module's current

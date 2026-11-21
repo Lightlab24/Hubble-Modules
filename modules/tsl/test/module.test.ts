@@ -66,11 +66,20 @@ describe("module-owned TSL observations", () => {
           state: "active",
         }),
       );
-      expect(states.at(-1)?.values.discovery).toEqual([
-        expect.objectContaining({
-          values: expect.objectContaining({ label: "CAM 1", tally: "T2" }),
-        }),
-      ]);
+      // The page reads live tally through its own command, not the published state.
+      expect(states.at(-1)?.values).toMatchObject({ received: 1, invalidPackets: 0 });
+      expect(states.at(-1)?.values.discovery).toBeUndefined();
+      expect(
+        await instance.call?.(
+          "page.tsl",
+          { sectionId: "app", commandId: "live", value: { after: 0 } },
+          { signal: new AbortController().signal, log: vi.fn() },
+        ),
+      ).toMatchObject({
+        full: true,
+        rows: [{ key: "0:1", address: 1, label: "CAM 1", lamps: [0, 1, 0, 0], fresh: true, sender: "127.0.0.1" }],
+        listener: { phase: "listening", error: null, invalidPackets: 0 },
+      });
       expect(
         await instance.queryData?.(
           { id: "tally", version: 1, input: null },

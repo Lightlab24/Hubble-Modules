@@ -13,6 +13,12 @@ import {
 import { matrix } from "./matrix.js";
 import type { TslReceiver } from "./receiver.js";
 
+/** This module's own routing on tally (merged in from TALLY Switch), which Follow buttons drive. */
+export interface FollowTarget {
+  isFollowing(): boolean;
+  follow(mode: "follow" | "unfollow" | "toggle"): Promise<boolean>;
+}
+
 const Settings = z.object({
   indicationEnabled: z.boolean().default(true),
   programFlag: z.int().min(1).max(4).default(2),
@@ -125,15 +131,19 @@ export class MatrixFeedback {
   constructor(
     private readonly context: ModuleContext,
     private readonly receiver: () => TslReceiver,
+    /** With routing here, TALLY Switch follow buttons follow it rather than another module. */
+    private readonly routing?: FollowTarget,
   ) {
     this.file = context.runtimeDirectory
       ? path.join(context.runtimeDirectory, "matrix-following.json")
       : undefined;
   }
   async start(): Promise<void> {
-    this.peerTimer = setInterval(() => void this.refreshPeer(), 1000);
-    this.peerTimer.unref();
-    void this.refreshPeer();
+    if (!this.routing) {
+      this.peerTimer = setInterval(() => void this.refreshPeer(), 1000);
+      this.peerTimer.unref();
+      void this.refreshPeer();
+    }
     if (!this.file) return;
     try {
       const text = await readFile(this.file, "utf8");
@@ -234,7 +244,7 @@ export class MatrixFeedback {
         )
           active = this.enabled(input);
         else if (choice.value.startsWith("tally-switch"))
-          active = this.peerState;
+          active = this.routing ? this.routing.isFollowing() : this.peerState;
         const feedback = choice.parameters.feedback;
         const enabled = feedback !== false && feedback !== "off";
         const colors = Array.isArray(choice.parameters.colors)
@@ -322,6 +332,11 @@ export class MatrixFeedback {
       choice.value === "follow-tally" || choice.value === "tally-switch"
         ? String(input.values.followMode)
         : choice.value.split("-").at(-1);
+    if (choice.value.startsWith("tally-switch") && this.routing) {
+      await this.routing.follow(z.enum(["follow", "unfollow", "toggle"]).parse(mode));
+      this.emit();
+      return;
+    }
     if (choice.value.startsWith("tally-switch")) {
       const exchange = this.context.modules;
       await this.refreshPeer();

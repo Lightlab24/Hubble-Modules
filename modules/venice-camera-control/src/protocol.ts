@@ -1,5 +1,5 @@
 import { setTimeout as delay } from 'node:timers/promises';
-import { type Field, type Camera, valueOf, validateValue } from './model.js';
+import { type Field, type Camera, valueOf, validateValue, reelProperty, reelNumber, sameValue } from './model.js';
 import type { RpcClient } from './camera-client.js';
 
 // The camera ignores a Speed/Angle change sent to Camera.Shutter.Mode. Sony's page changes it through this menu setting.
@@ -17,7 +17,7 @@ function ndLabel(factor:number):string {
 // The reel a VENICE records to is in its next clip name, such as B502C001. Its Reel Number menu setting can lag:
 // on real cameras it kept the old number after the cards moved to the next reel, until each camera next recorded.
 // So the clip name comes first, and the setting is only the fallback, for a camera with no clip name to report.
-const reelMenu='P.System.Menu.ClipnamingReelNum';
+const reelMenu=reelProperty;
 export const clipNameProperty='Clip.Mediabox.ClipName';
 function reelFromClipName(raw:Record<string,any>):string {
   const value=raw[clipNameProperty],name=typeof value==='string'?value:value?.main;
@@ -74,6 +74,7 @@ export function recordingState(raw:Record<string,any>):string {
 export const recordingSignals=(raw:Record<string,any>):string=>'media box '+(raw[recordingProperty]?.main??'unknown')+', cards '+JSON.stringify(raw[mediaRecording]??null);
 function inputWire(field:Field,value:string):unknown {
   if(field.kind==='boolean'){const label=value==='TRUE'?'on':'off';return field.choices.find(c=>c.label.toLowerCase()===label)!.wire;}
+  if(field.property===reelMenu)return reelNumber(value);
   return field.choices.find(c=>c.value===value)?.wire??value;
 }
 export function encodeField(field:Field,value:string,row:Camera,current:Record<string,any>):Record<string,unknown> {
@@ -133,8 +134,9 @@ async function assertNotLocked(client:RpcClient,keys:string[],signal:AbortSignal
   catch(error){if(signal.aborted)throw error;return;}
   for(const key of keys)if(pick(status?.[key])==='Locked')throw Error('This setting is locked in the camera’s current mode.');
 }
-// ND and Speed/Angle are judged by what the camera ends up reporting, not by the exact shape of what was sent.
-const readbackConfirms=(field:Field,value:string,payload:Record<string,unknown>,after:Record<string,any>)=>field.id==='nd'||field.id==='shutter-mode'?decodeField(field,after)===value:Object.entries(payload).every(([k,v])=>subsetEqual(v,after?.[k]));
+// ND, Speed/Angle and the reel are judged by what the camera ends up reporting, not by the exact shape of what was sent.
+// A reel typed as 001 is reel 1 whether the camera reports it as 1 or 001.
+const readbackConfirms=(field:Field,value:string,payload:Record<string,unknown>,after:Record<string,any>)=>field.id==='nd'||field.id==='shutter-mode'||field.property===reelMenu?sameValue(field,value,decodeField(field,after)):Object.entries(payload).every(([k,v])=>subsetEqual(v,after?.[k]));
 export async function writeField(client:RpcClient,field:Field,value:string,row:Camera,signal:AbortSignal):Promise<Record<string,any>> {
   const current=await readFields(client,[field],signal);
   const payload=encodeField(field,value,row,current);

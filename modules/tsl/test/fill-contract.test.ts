@@ -6,12 +6,6 @@ it("increments address inputs in Matrix and mapping tables, leaving device ident
   expect(
     tsl.matrix?.fields.find((field) => field.id === "tallyAddress")?.fill,
   ).toBe("series");
-  const mappings = tsl.pages
-    ?.flatMap((page) => page.sections)
-    .find((section) => section.id === "feedbackMappings");
-  if (mappings?.type !== "table") throw new Error("Missing TSL mappings");
-  for (const id of ["name", "address"])
-    expect(mappings.workbook?.columns?.[id]?.fill).toBe("series");
   const routing = tally.pages
     ?.flatMap((page) => page.sections)
     .find((section) => section.id === "mappings");

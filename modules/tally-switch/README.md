@@ -1,5 +1,11 @@
 # TALLY Switch
 
+> **Retired.** TALLY Switch is part of TSL Tally from 1.4.0: its camera mappings, Follow and
+> routing are TSL Tally's Routing tab. No new release of `hubble-tally-switch` can enter the
+> catalog (`scripts/catalog-policy.mjs`), and Hubble moves a workspace's TALLY Switch mappings
+> into its TSL Tally when it opens. The source stays here so the published releases can still
+> be read and withdrawn.
+
 An independent Hubble module that consumes TSL observations and invokes router actions through module API 1. Reception belongs to `hubble-tsl`; no sockets or router protocol implementation are duplicated here.
 
 Add a TSL receiver and a router to the workspace. They connect automatically, with no permission step, because this package declares them in `exchange.peers`. Choose them for each camera mapping on the module page. Each output/level requires known tally from every enabled camera and exactly one on-air camera. For TSL 3.1, the default program indicator is flag 2; for 5.0 it is red text tally.

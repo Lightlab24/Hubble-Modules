@@ -237,4 +237,79 @@ describe('TSL live receivers', () => {
     expect(second.snapshot()).toMatchObject({ phase: 'error' })
     expect(first.snapshot().phase).toBe('listening')
   })
+
+  it.each(['tcp', 'udp'] as const)(
+    'keeps trying a %s port another program holds, and listens once it is free',
+    async (transport) => {
+      const holder =
+        transport === 'tcp'
+          ? await new Promise<net.Server>((resolve) => {
+              const server = net.createServer()
+              server.listen(0, '127.0.0.1', () => resolve(server))
+            })
+          : await new Promise<dgram.Socket>((resolve) => {
+              const socket = dgram.createSocket('udp4')
+              socket.bind(0, '127.0.0.1', () => resolve(socket))
+            })
+      const port = (holder.address() as net.AddressInfo).port
+      const receiver = new TslReceiver(
+        { protocol: '3.1', transport, bindAddress: '127.0.0.1', port, sourceAddress: '', staleAfterMs: 0 },
+        () => undefined,
+        Date.now,
+        50,
+      )
+      cleanup.push(() => receiver.stop())
+      await receiver.start()
+      expect(receiver.health()).toMatchObject({ phase: 'error', error: expect.stringContaining('EADDRINUSE') })
+      expect(receiver.retrying).toBe(true)
+      await new Promise((resolve) => setTimeout(resolve, 160))
+      expect(receiver.health().phase).toBe('error')
+      await new Promise<void>((resolve) => {
+        holder.close(() => resolve())
+      })
+      await expect.poll(() => receiver.health(), { timeout: 2000 }).toEqual({ phase: 'listening', error: null })
+      expect(receiver.retrying).toBe(false)
+      expect(receiver.boundPort).toBe(port)
+      if (transport === 'udp') {
+        const sender = dgram.createSocket('udp4')
+        cleanup.push(() => {
+          sender.close()
+        })
+        sender.send(packet31(2, 2, 'CAM TWO'), port, '127.0.0.1')
+        await expect.poll(() => receiver.resolve(0, 2)?.label).toBe('CAM TWO')
+      } else {
+        const client = net.connect(port, '127.0.0.1')
+        cleanup.push(() => {
+          client.destroy()
+        })
+        await once(client, 'connect')
+      }
+    },
+  )
+
+  it('keeps trying an address this computer does not have, until it is stopped', async () => {
+    let changes = 0
+    const receiver = new TslReceiver(
+      // TEST-NET-1: never one of this computer's addresses.
+      { protocol: '3.1', transport: 'tcp', bindAddress: '192.0.2.10', port: 5727, sourceAddress: '', staleAfterMs: 0 },
+      () => {
+        changes += 1
+      },
+      Date.now,
+      50,
+    )
+    cleanup.push(() => receiver.stop())
+    await receiver.start()
+    expect(receiver.health()).toMatchObject({ phase: 'error', error: expect.stringContaining('EADDRNOTAVAIL') })
+    expect(receiver.retrying).toBe(true)
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(receiver.health()).toMatchObject({ phase: 'error', error: expect.stringContaining('EADDRNOTAVAIL') })
+    expect(receiver.retrying).toBe(true)
+    // Several tries, one change: the page isn't redrawn for a retry that fails the same way.
+    expect(changes).toBe(1)
+    await receiver.stop()
+    expect(receiver.retrying).toBe(false)
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(receiver.health()).toEqual({ phase: 'stopped', error: null })
+  })
 })

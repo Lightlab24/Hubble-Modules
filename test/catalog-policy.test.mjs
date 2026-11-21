@@ -153,3 +153,38 @@ test("Mock cannot enter a beta or stable release", () => {
     assert.throws(() => validateArchive(mock, archive), /Mock/);
   }
 });
+
+test("a retired module gets no new release but keeps and can withdraw its history", () => {
+  for (const id of ["hubble-tally-switch", "hubble-ccc"]) {
+    const retiredManifest = { ...manifest, id };
+    const archive = createModulePackage(
+      retiredManifest,
+      new Map([["module.mjs", Buffer.from("export default {}")]]),
+    );
+    const inspected = inspectModulePackage(archive);
+    const old = {
+      ...entry,
+      identity: { ...entry.identity, moduleId: id, digest: inspected.digest },
+      manifest: inspected.manifest,
+      bytes: archive.length,
+      url: `https://github.com/Lightlab24/Hubble-Modules/releases/download/module-${id}-v${manifest.version}/${id}-${manifest.version}.hubble-module`,
+    };
+    const fresh = {
+      ...old,
+      identity: { ...old.identity, version: "9.9.9" },
+      manifest: { ...old.manifest, version: "9.9.9" },
+      url: `https://github.com/Lightlab24/Hubble-Modules/releases/download/module-${id}-v9.9.9/${id}-9.9.9.hubble-module`,
+    };
+    assert.throws(
+      () => validateUpdate({ ...next(), releases: [entry, fresh] }, previous),
+      /retired/,
+    );
+    assert.throws(() => validateArchive(old, archive), /retired/);
+    const before = { ...previous, releases: [entry, old] };
+    const kept = structuredClone({ ...before, sequence: 2 });
+    assert.equal(validateUpdate(kept, before).releases.length, 2);
+    kept.releases[1].status = "withdrawn";
+    kept.releases[1].reason = "Retired";
+    assert.equal(validateUpdate(kept, before).releases[1].status, "withdrawn");
+  }
+});

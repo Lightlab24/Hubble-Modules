@@ -100,12 +100,19 @@ function parse50(data: Buffer): readonly TslDisplay[] {
   return displays
 }
 
-/** Bounded incremental TCP decoder. 5.0 uses the standard FE/02, FE/FE wrapper. */
+/**
+ * Bounded incremental TCP decoder. A 5.0 sender either wraps each packet in the standard
+ * FE/02, FE/FE framing or sends the packets bare, one after another: a Ross Carbonite sends
+ * them bare unless its TSL header option is on. Which one a connection uses is read from its
+ * first two bytes, and it keeps to that.
+ */
 export class TslStreamDecoder {
   readonly #protocol: TslProtocol
   #bytes: number[] = []
   #escaped = false
   #inPacket = false
+  #framing: 'unknown' | 'wrapped' | 'bare' = 'unknown'
+  #opening: number[] = []
   constructor(protocol: TslProtocol) {
     this.#protocol = protocol
   }
@@ -123,40 +130,64 @@ export class TslStreamDecoder {
         if (this.#bytes.length === 18) this.#finish(displays, onError)
         continue
       }
-      if (this.#escaped) {
-        this.#escaped = false
-        if (byte === 0x02) {
-          if (this.#bytes.length > 0)
-            onError(new TslPacketError('Truncated TSL 5.0 stream packet'))
-          this.#bytes = []
-          this.#inPacket = true
-          continue
-        }
-        if (byte !== 0xfe) {
-          this.#bytes = []
-          this.#inPacket = false
-          onError(new TslPacketError('Invalid TSL 5.0 stream escape'))
-          continue
-        }
-      } else if (byte === 0xfe) {
-        this.#escaped = true
+      if (this.#framing === 'unknown') {
+        // FE 02 opens a wrapped stream. Anything else is the byte count of a bare packet.
+        this.#opening.push(byte)
+        if (this.#opening.length === 1 && byte === 0xfe) continue
+        this.#framing = this.#opening.length === 2 && byte === 0x02 ? 'wrapped' : 'bare'
+        const opening = this.#opening
+        this.#opening = []
+        for (const first of opening) this.#next(first, displays, onError)
         continue
       }
-      if (!this.#inPacket) continue
-      this.#bytes.push(byte)
-      if (this.#bytes.length >= 2) {
-        const size = (this.#bytes[0] ?? 0) + ((this.#bytes[1] ?? 0) << 8) + 2
-        if (size < 6 || size > 2048) {
-          this.#bytes = []
-          this.#inPacket = false
-          onError(new TslPacketError('Invalid TSL 5.0 stream byte count'))
-        } else if (this.#bytes.length === size) {
-          this.#finish(displays, onError)
-          this.#inPacket = false
-        }
-      }
+      this.#next(byte, displays, onError)
     }
     return displays
+  }
+
+  #next(byte: number, displays: TslDisplay[], onError: (error: TslPacketError) => void): void {
+    if (this.#framing === 'bare') {
+      this.#bytes.push(byte)
+      if (this.#bytes.length < 2) return
+      const size = (this.#bytes[0] ?? 0) + ((this.#bytes[1] ?? 0) << 8) + 2
+      if (size < 6 || size > 2048) {
+        // A bare stream has no marker to find the next packet by, so start over from here.
+        this.#bytes = []
+        onError(new TslPacketError('Invalid TSL 5.0 stream byte count'))
+      } else if (this.#bytes.length === size) this.#finish(displays, onError)
+      return
+    }
+    if (this.#escaped) {
+      this.#escaped = false
+      if (byte === 0x02) {
+        if (this.#bytes.length > 0) onError(new TslPacketError('Truncated TSL 5.0 stream packet'))
+        this.#bytes = []
+        this.#inPacket = true
+        return
+      }
+      if (byte !== 0xfe) {
+        this.#bytes = []
+        this.#inPacket = false
+        onError(new TslPacketError('Invalid TSL 5.0 stream escape'))
+        return
+      }
+    } else if (byte === 0xfe) {
+      this.#escaped = true
+      return
+    }
+    if (!this.#inPacket) return
+    this.#bytes.push(byte)
+    if (this.#bytes.length >= 2) {
+      const size = (this.#bytes[0] ?? 0) + ((this.#bytes[1] ?? 0) << 8) + 2
+      if (size < 6 || size > 2048) {
+        this.#bytes = []
+        this.#inPacket = false
+        onError(new TslPacketError('Invalid TSL 5.0 stream byte count'))
+      } else if (this.#bytes.length === size) {
+        this.#finish(displays, onError)
+        this.#inPacket = false
+      }
+    }
   }
 
   #finish(displays: TslDisplay[], onError: (error: TslPacketError) => void): void {
