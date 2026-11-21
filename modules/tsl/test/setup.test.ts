@@ -85,7 +85,26 @@ describe("whether the switcher and this computer agree", () => {
       text: "HUBBLE sends to 10.20.100.236 : 5727, which isn't this computer. Point it here and send, then match",
       match: null,
     });
+    // Naming this computer's address on the switcher's network, when it is known.
+    expect(link({ reading: reading({ ip: "10.20.100.236", port: 5727 }), hereAddress: "10.20.100.235" }).text).toBe(
+      "HUBBLE sends to 10.20.100.236 : 5727, which isn't this computer (10.20.100.235). Point it here and send, then match",
+    );
     expect(link({ reading: reading({ enabled: false }) })).toMatchObject({ text: "HUBBLE is switched off on the switcher", match: null });
+  });
+
+  it("says when the address is all that differs, and both ways to put it right", () => {
+    // TSL 5.0, UDP and 9821 agree; the switcher sends to an address this computer doesn't have.
+    expect(link({ reading: reading({ ip: "10.20.100.236" }), hereAddress: "10.20.100.235" })).toEqual({
+      tone: "warn",
+      title: "Not matched",
+      text: "Only the address differs: HUBBLE sends to 10.20.100.236, and this computer is 10.20.100.235. Point HUBBLE at 10.20.100.235, or give this computer 10.20.100.236",
+      match: null,
+    });
+    // An address that isn't one of this computer's is no help in the words.
+    for (const hereAddress of [null, undefined, "192.168.9.9"])
+      expect(link({ reading: reading({ ip: "10.20.100.236" }), hereAddress }).text).toBe(
+        "Only the address differs: HUBBLE sends to 10.20.100.236, and this computer is not on that address. Point HUBBLE at this computer, or give this computer 10.20.100.236",
+      );
     expect(link({ listening: false })).toMatchObject({ tone: "warn", title: "Not listening", match: null });
   });
 

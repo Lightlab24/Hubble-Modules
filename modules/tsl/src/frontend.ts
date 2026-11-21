@@ -18,6 +18,7 @@ import {
   documentFromRow,
   linkStatus,
   listenerProblem,
+  sameFormat,
   OFFSETS,
   wantedDevice,
   type ReceiverSettings,
@@ -218,6 +219,7 @@ try {
           localAddresses,
           listening: live.listener.phase === "listening",
           deviceName: deviceIdentity(switcher),
+          hereAddress: routeAddress,
         });
     match = status.match;
     el("link").dataset.tone = status.tone;
@@ -229,7 +231,9 @@ try {
     el("match-hint").textContent = status.match
       ? `Listen for what ${who} sends: ${format(status.match)}, port ${status.match.port}${status.match.bindAddress !== receiver.bindAddress ? `, on ${status.match.bindAddress}` : ""}`
       : mine?.settings && !localAddresses.includes(mine.settings.ip)
-        ? `${mine.name} doesn't send to this computer yet`
+        ? sameFormat(receiver, mine.settings)
+          ? `TSL ${receiver.protocol}, ${receiver.transport.toUpperCase()} and port ${receiver.port} already match`
+          : `${mine.name} doesn't send to this computer yet`
         : `Listens for exactly what ${who} sends`;
   };
   const deviceGrid = el<HTMLTableElement>("device-grid");
@@ -293,9 +297,12 @@ try {
 
     el<HTMLSelectElement>("offset").disabled = fiveOnlyOff();
     const target = sendTo();
+    const here = routeAddress && localAddresses.includes(routeAddress) ? routeAddress : null;
     el("link-note").textContent =
       target && !localAddresses.includes(target)
-        ? `${target} isn't this computer, so this device's tally doesn't come here`
+        ? here
+          ? `This computer is ${here} on the switcher's network. Choose it in Send to, then send`
+          : `${target} isn't this computer, so this device's tally doesn't come here`
         : fiveOnlyOff()
           ? "TSL 3.1 has no Screen, Address offset, Brightness or TSL header"
           : "\u00a0";

@@ -155,6 +155,12 @@ export interface LinkStatus {
    */
   readonly match: Pick<ReceiverLink, "protocol" | "transport" | "port" | "bindAddress"> | null;
 }
+/** True when a device sends the TSL version, transport and port this computer listens for. */
+export const sameFormat = (
+  receiver: Pick<ReceiverLink, "protocol" | "transport" | "port">,
+  theirs: Pick<SwitcherDeviceSettings, "protocol" | "transport" | "port">,
+): boolean => theirs.protocol === receiver.protocol && theirs.transport === receiver.transport && theirs.port === receiver.port;
+
 const format = (link: Pick<ReceiverLink, "protocol" | "transport">) =>
   `TSL ${link.protocol} over ${link.transport.toUpperCase()}`;
 
@@ -171,6 +177,8 @@ export function linkStatus(input: {
   readonly listening: boolean;
   /** The device the page edits, for the words when the switcher has none by that name. */
   readonly deviceName?: string;
+  /** This computer's address on the switcher's network, when it could be worked out. */
+  readonly hereAddress?: string | null;
 }): LinkStatus {
   const none = (tone: Tone, title: string, text: string): LinkStatus => ({ tone, title, text, match: null });
   if (input.readError) return none("bad", "Switcher offline", input.readError);
@@ -188,14 +196,19 @@ export function linkStatus(input: {
     return none("idle", "Not checked", "Someone is editing devices on the switcher, so its settings couldn't be read");
   const theirs = mine.settings;
   const receiver = input.receiver;
-  if (!input.localAddresses.includes(theirs.ip))
+  if (!input.localAddresses.includes(theirs.ip)) {
+    // Hubble can't take on an address this computer doesn't have, so there is nothing to match
+    // here. When the address is all that differs, say so, and give both ways to put it right.
+    const here = input.hereAddress && input.localAddresses.includes(input.hereAddress) ? input.hereAddress : null;
     return none(
       "warn",
       "Not matched",
-      `${mine.name} sends to ${theirs.ip} : ${theirs.port}, which isn't this computer. Point it here and send, then match`,
+      sameFormat(receiver, theirs)
+        ? `Only the address differs: ${mine.name} sends to ${theirs.ip}, and this computer is ${here ?? "not on that address"}. Point ${mine.name} at ${here ?? "this computer"}, or give this computer ${theirs.ip}`
+        : `${mine.name} sends to ${theirs.ip} : ${theirs.port}, which isn't this computer${here ? ` (${here})` : ""}. Point it here and send, then match`,
     );
-  const differs =
-    theirs.protocol !== receiver.protocol || theirs.transport !== receiver.transport || theirs.port !== receiver.port;
+  }
+  const differs = !sameFormat(receiver, theirs);
   const elsewhere = receiver.bindAddress !== "0.0.0.0" && receiver.bindAddress !== theirs.ip;
   if (differs || elsewhere)
     return {

@@ -1,6 +1,6 @@
 # TSL Tally
 
-Official module `hubble-tsl`, version **1.3.1**, using stable Hubble module API **1**.
+Official module `hubble-tsl`, version **1.3.2**, using stable Hubble module API **1**.
 It receives TSL UMD 3.1 and 5.0 tally over UDP or TCP, shows what a switcher sends, feeds
 TALLY Switch and Button Matrix tally feedback, and can set a Ross Carbonite switcher to send
 its tally to this computer.
@@ -32,7 +32,10 @@ its tally to this computer.
   - **Match switcher** sets this computer's TSL version, transport and port (and Listen on,
     when that is another address) to what the device sends, as last read from the switcher.
     It is offered only for a device that sends to this computer: one that sends elsewhere is
-    pointed here first (Send to, then Send to switcher). A save never runs beside a switcher
+    pointed here first (Send to, then Send to switcher). Hubble can't take on an address this
+    computer doesn't have, so when the address is all that differs the page says so, names this
+    computer's address on the switcher's network, and gives both fixes: point the device here,
+    or give this computer the address the device sends to. A save never runs beside a switcher
     request, because the restart would cut the request short.
   - Changing a device that sends somewhere else asks first. It may keep sending there; any
     other Send to must be one of this computer's addresses.
