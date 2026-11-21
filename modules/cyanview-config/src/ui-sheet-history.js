@@ -71,7 +71,7 @@
       if (!fields.length) continue;
       // What it was before the first edit since the last send, which is what Cancel goes back to.
       const row = rows.find(item => item.id === old.id);
-      for (const field of fields) if (!['routeDraft', 'device', 'remiMaster', 'removeStaged'].includes(field) && !(field in (row.sentValues ??= {}))) row.sentValues[field] = old.values[field] ?? null;
+      for (const field of fields) if (!['routeDraft', 'device', 'remiMaster', 'removeStaged', 'leftBehind'].includes(field) && !(field in (row.sentValues ??= {}))) row.sentValues[field] = old.values[field] ?? null;
       // Undo belongs to the sheet the edit was made on.
       const id = virtualSheet(tab) ?? row.device;
       if (!byDevice.has(id)) byDevice.set(id, []);
@@ -85,8 +85,7 @@
     const entry = from.at(-1);
     if (!entry) return;
     const source = forward ? 'before' : 'after', target = forward ? 'after' : 'before';
-    if (entry.kind === 'cleared') setClearedRows(entry.rows, forward);
-    else if (entry.kind === 'layout') {
+    if (entry.kind === 'layout') {
       if (JSON.stringify(cameraPresentation(id)) !== JSON.stringify(entry[source])) { toast('The sheet layout has changed; this history entry is no longer available'); return; }
       entry.epoch = changeCameraPresentation(id, () => applyCameraPresentation(id, entry[target], forward ? entry.activeAfter : entry.activeBefore), true, false);
     } else {

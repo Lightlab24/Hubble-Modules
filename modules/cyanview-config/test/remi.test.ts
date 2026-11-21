@@ -511,3 +511,57 @@ test('the log says why a send was not confirmed, how long the copies took, and w
     assert.match(lines().at(-1)!, new RegExp('^Read 3 controllers in \\d+ ms, no answer from ' + s.downstream + '$'));
   } finally { await s.close(); }
 });
+
+// Nov 20, 2026: a RIO went off with its camera REMI'd to the Gateway and RCP 1. The Gateway stopped listing
+// that RIO's cameras and kept the copy, so a move or a delete with the RIO off could not take it off.
+test('copies come off while the camera they came from is off, and a copy nothing imports is removed on its own', async () => {
+  const s = await routeSetup();
+  try {
+    const tree = { [s.receiver]: s.source, [s.downstream]: s.receiver };
+    assert.equal((await s.route(tree, {})).results[0].verified, true);
+    const onMaster = Object.keys(s.master.config.Camera)[0]!, onLeaf = Object.keys(s.leaf.config.Camera)[0]!;
+    s.fleet.power(s.rio, false);
+    // The copies stay, and nothing imports them any more.
+    assert.deepEqual(names(s.master), ['Wide']);
+    assert.deepEqual(Object.values(object(s.master.config.Remi)).flatMap(row => Object.values(object(object(row).Connections))).flatMap(peer => object(peer).cameras ?? []), []);
+    const copies = { [s.receiver]: onMaster, [s.downstream]: onLeaf };
+    const taken = await s.session.call('remi-route', { items: [{ id: 'wide', camera: s.source, key: 'original', tree: {}, expected: tree, copies }] });
+    assert.equal(taken.results[0].verified, true, taken.results[0].error);
+    assert.deepEqual(names(s.master), []);
+    assert.deepEqual(names(s.leaf), []);
+    const store = await s.session.repository.readRemi(s.session.signal);
+    assert.deepEqual(store.data.links.filter(link => link.sourceKey === 'original' || [onMaster, onLeaf].includes(String(link.entry.localKey))), []);
+  } finally { await s.close(); }
+});
+
+test('Remove REMI copy takes off a copy whose source is gone, and refuses a camera set up on the controller', async () => {
+  const s = await routeSetup();
+  try {
+    assert.equal((await s.route({ [s.receiver]: s.source }, {})).results[0].verified, true);
+    const copy = Object.keys(s.master.config.Camera)[0]!;
+    s.fleet.power(s.rio, false);
+    // Nothing tells the page where it came from any more, so it asks with the key alone.
+    const removed = await s.session.call('remi-send', { receiver: s.receiver, items: [{ id: 'remove:' + copy, kind: 'remove', key: copy, enable: false, label: 'Wide' }] });
+    assert.equal(removed.results[0].verified, true, removed.results[0].error);
+    assert.deepEqual(names(s.master), []);
+    assert.deepEqual(s.master.actions.filter(row => row.delete).map(row => row.delete), [[copy]]);
+
+    s.master.config.Camera.jib = { Number: '7', Name: 'Jib', Model: 'Sony - Venice-IP', IP: '10.20.20.7', Port: '80' };
+    s.master.broadcast();
+    const own = await s.session.call('remi-send', { receiver: s.receiver, items: [{ id: 'remove:jib', kind: 'remove', key: 'jib', enable: false, label: 'Jib' }] });
+    assert.match(own.results[0].error, /set up on .* itself/);
+    assert.deepEqual(names(s.master), ['Jib']);
+  } finally { await s.close(); }
+});
+
+test('Remove REMI copy with only the key switches off the one import that still feeds it', async () => {
+  const s = await routeSetup();
+  try {
+    assert.equal((await s.route({ [s.receiver]: s.source }, {})).results[0].verified, true);
+    const copy = Object.keys(s.master.config.Camera)[0]!;
+    const removed = await s.session.call('remi-send', { receiver: s.receiver, items: [{ id: 'remove:' + copy, kind: 'remove', key: copy, enable: false, label: 'Wide' }] });
+    assert.equal(removed.results[0].verified, true, removed.results[0].error);
+    assert.deepEqual(names(s.master), []);
+    assert.deepEqual(s.fleet.writes.map(row => [row.device, row.enable]), [[s.receiver, '1'], [s.receiver, '0']]);
+  } finally { await s.close(); }
+});

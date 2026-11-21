@@ -2,13 +2,14 @@ import { randomUUID } from 'node:crypto';
 import type { HubbleModule, ModuleContext, ModuleInstance } from '@hubble/module-sdk';
 import { PlanRepository } from './repository.js';
 import { CyanviewService, type ServiceOptions } from './service.js';
-import { object, validatePlan, type Plan, type RecordValue } from './model.js';
+import { object, validIp, validatePlan, type Plan, type RecordValue } from './model.js';
 import { createHostPing } from './ping.js';
 import { networkRange } from './discovery.js';
 import { ChoiceCatalogs } from './choice-catalogs.js';
 import { CameraControl } from './control/service.js';
 import { CameraEnabledOperations } from './camera-enabled.js';
 import { CyanviewClient } from './transport.js';
+import { createHostOpenPage } from './open-page.js';
 
 export function createInstance(context: ModuleContext, options: ServiceOptions = {}): ModuleInstance {
   if (!context.services) throw new Error('Module storage is unavailable');
@@ -20,12 +21,14 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
   const publish = (values: RecordValue = {}) => { serviceState = { ...serviceState, ...values }; if (!stopped) context.publishState({ phase: 'ready', observedAt: new Date().toISOString(), message: sample ? 'Sample data' : null, values: { sample, ...serviceState, cameraControl: control?.state() ?? null } }); };
   const hostPing = options.discovery?.ping ? null : createHostPing(context.services);
   const choices = new ChoiceCatalogs(context.services);
+  const openPage = options.openPage ?? createHostOpenPage(context.services);
   const service = new CyanviewService(repository, choices, publish, lifetime.signal, { ...options, discovery: { ...options.discovery, ping: options.discovery?.ping ?? hostPing!.sweep } });
   control = new CameraControl(repository, context, sample, () => publish(), options.control);
   // Cyanview's own Enabled on each camera, with every REMI copy following the camera it comes from.
   const cameraEnabled = new CameraEnabledOperations(repository, options.client ?? (address => new CyanviewClient(address)), service.remi,
     (device, number, key) => control!.cameraOnline(device, number, key), () => publish({ cameraEnabledJobs: cameraEnabled.state() }),
-    message => context.log({ level: 'info', stage: 'camera-enabled', message: message.slice(0, 500) }), lifetime.signal, options.cameraEnabled);
+    message => context.log({ level: 'info', stage: 'camera-enabled', message: message.slice(0, 500) }), lifetime.signal, options.cameraEnabled, service.held);
+  service.followMqtt(id => control!.controllerDown(id));
   if (!sample) service.observeConfig((device, before, after) => cameraEnabled.observe(device, before, after));
   const transfers = new Map<string, { kind: 'save' | 'send'; revision: string | null; parts: string[]; size: number; expires: number }>();
   const imports = new Map<string, { cameras: RecordValue[]; expires: number }>();
@@ -50,7 +53,9 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
       (failed.length ? ', ' + failed.length + ' not confirmed: ' + reason(failed[0]!.error) : '') + (copies ? ', copies not rebuilt: ' + reason(copies.remiError) : '') });
   };
   // The page and the controller sockets follow the saved plan. Sample data opens nothing.
-  const followPlan = (plan: Plan) => { control!.setPlan(plan); if (!sample) service.watch(plan); };
+  // A plan that was just read comes with its saved revision, which lets the next press act on it without reading again.
+  const followPlan = (plan: Plan, revision?: string | null) => { control!.setPlan(plan, revision); if (!sample) service.watch(plan); };
+  const followSaved = async (signal: AbortSignal) => { const saved = await repository.read(signal); followPlan(saved.plan, saved.revision); };
   const reason = (error: unknown) => String(error instanceof Error ? error.message : error || 'no reason given').slice(0, 200);
   // A request that gives up has no result to time, and a timeout is the longest wait a page has. So it's logged here, as is one that was slow.
   const watched = async <T>(stage: string, what: string, signal: AbortSignal, work: () => Promise<T>, slowMs = Infinity): Promise<T> => {
@@ -68,7 +73,7 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
     if (sample) throw new Error('Sample data does not send commands to equipment');
     const began = performance.now(), result = await watched('send-timing', 'A send', signal, () => service.send(input, signal));
     if (Array.isArray(result.results)) timing('send-timing', result.results, result.controllers, performance.now() - began, result.openMs);
-    followPlan((await repository.read(signal)).plan);
+    await followSaved(signal);
     return bounded(result);
   };
   const save = async (revision: unknown, value: unknown, signal: AbortSignal) => {
@@ -94,7 +99,7 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
       for (const [id, transfer] of imports) if (transfer.expires < Date.now()) imports.delete(id);
       for (const [id, transfer] of reads) if (transfer.expires < Date.now()) reads.delete(id);
       switch (request.commandId) {
-        case 'camera-control-state': followPlan((await repository.read(signal)).plan); return control!.state();
+        case 'camera-control-state': await followSaved(signal); return control!.state();
         case 'camera-control-mutate': return control!.mutate(input, signal);
         case 'read-plan': {
           const saved = await repository.read(signal);
@@ -204,6 +209,15 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
           context.log({ level: 'info', stage: 'camera-enabled', message: (refresh ? 'Refreshed' : input.enabled === true ? 'Switched on' : 'Switched off') + ' camera ' + key + ' on ' + device +
             ' and ' + result.copies + (result.copies === 1 ? ' copy' : ' copies') + ' in ' + Math.round(performance.now() - began) + ' ms' + (result.unread.length ? ', could not read ' + result.unread.join(', ') : '') });
           return result;
+        }
+        case 'open-device-page': {
+          // Sample devices are made up, so there is no page to open.
+          if (sample) throw new Error('Sample devices have no web page to open');
+          const address = String(input.address ?? '').trim();
+          if (!validIp(address)) throw new Error('This device has no address to open');
+          await openPage(address, signal);
+          context.log({ level: 'info', stage: 'open-page', message: 'Opened http://' + address + '/ in the browser' });
+          return { opened: address };
         }
         case 'send': return send(input, signal);
         default: throw new Error('Unknown Cyanview command');

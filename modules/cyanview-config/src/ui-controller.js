@@ -60,7 +60,7 @@ import { PresentationLedger } from './presentation-ledger.js';
   function toast(message){clearTimeout(toastTimer);$('toast').textContent=message;$('toast').hidden=false;toastTimer=setTimeout(()=>{$('toast').hidden=true;},2800);}
   let lastSavedPrivateContent='';
   function remember(){
-    try{const snapshot={modelContent:{activeTab:tab,layout:'Fleet LAN sheet',cameraOrganization:'Expandable spreadsheet per RCP/RIO',sendMode:ui.sendMode,sendModeScope:'Camera/lens and LAN',density:ui.density,lensColumns:ui.lensColumns,deviceOrder:orderedDevices().slice(0,16).map(d=>d.name),lensPresentation:'Inline Iris, Zoom and Focus column groups',axisGroups:axisGroups('rcp1'),reordering:'Drag handles with Alt+Up/Down keyboard support',columnVisibility:'Individual column checkboxes per sheet',hiddenCameraColumns:[...hiddenCameraColumns('rcp1')],hiddenLanColumns:[...hiddenLanColumns],remiSharing:'Managed camera sources'},privateContent:{revision:6,hiddenCameraColumnsByDevice:Object.fromEntries(Object.entries(hiddenCameraColumnsByDevice).map(([id,fields])=>[id,[...fields]])),hiddenLanColumns:[...hiddenLanColumns],tab,ui:{...ui},axisGroupsByDevice:JSON.parse(JSON.stringify(axisGroupsByDevice)),deviceOrder:orderedDevices().map(d=>d.id),openControllers:[...openControllers],openNetworkDevices:[...openNetworkDevices],cameraSortByDevice:JSON.parse(JSON.stringify(cameraSortByDevice)),cameraLayouts:saveCameraLayouts(),cameraSheetsByDevice:saveCameraSheets(),hiddenNetworkColumnsByDevice:Object.fromEntries(Object.entries(hiddenNetworkColumnsByDevice).map(([id,fields])=>[id,[...fields]])),discoveryOpen:discoveryCard?.open,remiDrafts:saveRemiDrafts(),remiView:saveRemiView(),scanRange:$('scan-range').value,deviceFilter:$('device-filter').value}};lastSavedPrivateContent=JSON.stringify(snapshot.privateContent);if(moduleBridge){return persistPlan(snapshot);}const p=window.openai?.setWidgetState?.(snapshot);if(p?.catch)p.catch(()=>{});}catch{}
+    try{const snapshot={modelContent:{activeTab:tab,layout:'Fleet LAN sheet',cameraOrganization:'Expandable spreadsheet per RCP/RIO',sendMode:ui.sendMode,sendModeScope:'Camera/lens and LAN',density:ui.density,lensColumns:ui.lensColumns,deviceOrder:orderedDevices().slice(0,16).map(d=>d.name),lensPresentation:'Inline Iris, Zoom and Focus column groups',axisGroups:axisGroups('rcp1'),reordering:'Drag handles with Alt+Up/Down keyboard support',columnVisibility:'Individual column checkboxes per sheet',hiddenCameraColumns:[...hiddenCameraColumns('rcp1')],hiddenLanColumns:[...hiddenLanColumns],remiSharing:'Managed camera sources'},privateContent:{revision:6,hiddenCameraColumnsByDevice:Object.fromEntries(Object.entries(hiddenCameraColumnsByDevice).map(([id,fields])=>[id,[...fields]])),hiddenLanColumns:[...hiddenLanColumns],tab,ui:{...ui},axisGroupsByDevice:JSON.parse(JSON.stringify(axisGroupsByDevice)),deviceOrder:orderedDevices().map(d=>d.id),openControllers:[...openControllers],cameraSortByDevice:JSON.parse(JSON.stringify(cameraSortByDevice)),cameraLayouts:saveCameraLayouts(),cameraSheetsByDevice:saveCameraSheets(),remiDrafts:saveRemiDrafts(),remiView:saveRemiView(),scanRange:$('scan-range').value,deviceFilter:$('device-filter').value}};lastSavedPrivateContent=JSON.stringify(snapshot.privateContent);if(moduleBridge){return persistPlan(snapshot);}const p=window.openai?.setWidgetState?.(snapshot);if(p?.catch)p.catch(()=>{});}catch{}
   }
   function syncFilter(){const select=$('device-filter'),old=select.value;select.innerHTML='<option value="all">All devices</option>'+options(orderedDevices().map(d=>({id:d.id,label:d.name+' · '+d.serial})),old);select.value=devices.some(d=>d.id===old)?old:'all';}
   function syncOrganization(){
@@ -111,7 +111,7 @@ import { PresentationLedger } from './presentation-ledger.js';
       const b=group.querySelector('[data-action="send-controller"]');b.disabled=!pending||cameras.some(c=>c.device===d.id&&c.jobs>0);b.querySelector('span').textContent=pending;
       syncCameraDeleteButton(group);
     });
-    syncOrganization();syncNetworkControls();
+    syncOrganization();syncDeviceControls();
   }
   function paintItem(item){
     root.querySelectorAll('[data-sync-id="'+item.id+'"]').forEach(el=>el.innerHTML=resultMark(syncResult(item)));
@@ -175,7 +175,7 @@ import { PresentationLedger } from './presentation-ledger.js';
     if(Array.isArray(data.hiddenLanColumns)){const knownLan=new Set(lanColumnDefinitions.map(field=>field.id));hiddenLanColumns=new Set(data.hiddenLanColumns.filter(field=>knownLan.has(field)));}
     else if(data.revision<6)hiddenLanColumns=ui.networkAdvanced?new Set():new Set(['dhcp','gateway','dns1','dns2']);
   }
-  function renderLans(){return renderManagedDevices();}
+  function renderLans(){syncSummary();renderDeviceSheet();}
   function renderLegacyLans(){
     const filter=$('device-filter').value,rank=new Map(orderedDevices().map((d,i)=>[d.id,i])),rows=lans.filter(l=>filter==='all'||l.device===filter).slice().sort((a,b)=>rank.get(a.device)-rank.get(b.device));
     const fields=lanColumnDefinitions.filter(field=>!hiddenLanColumns.has(field.id));
@@ -247,7 +247,7 @@ import { PresentationLedger } from './presentation-ledger.js';
     // columns keep the delete button on screen however far the sheet scrolls.
     if (deviceId !== allCamerasSheet) {
       columns.splice(columns.findIndex(column => column.id === 'password') + 1, 0, deviceId === cameraSetupSheet ? { id: 'source', label: 'Source', width: 140 } : { id: 'remiMaster', label: 'Master RCP', width: 130 });
-      columns.splice(columns.findIndex(column => column.id === 'name') + 1, 0, { id: 'remove', label: '', width: 62, tool: true, frozen: 0 });
+      columns.splice(columns.findIndex(column => column.id === 'name') + 1, 0, { id: 'remove', label: '', width: 34, tool: true, frozen: 0 });
     }
     columns.push({ id: 'sync', label: 'Sync', width: 70 });
     if (deviceId === allCamerasSheet) columns = arrangeAllCameraColumns(columns);
@@ -301,12 +301,12 @@ import { PresentationLedger } from './presentation-ledger.js';
   function renderCameras(){
     const scrolls=new Map([...root.querySelectorAll('[data-controller]')].map(el=>[el.dataset.controller,el.querySelector('.hc-scroll')?.scrollLeft||0]));
     $('controllers').innerHTML=orderedDevices().map(d=>{
-      const rows=cameras.filter(c=>c.device===d.id),open=openControllers.has(d.id),selection=cellSelections.get(d.id)||['C2',rows[0]?.name||''];
+      const rows=cameras.filter(c=>c.device===d.id&&!c.leftBehind&&!c.foreign),open=openControllers.has(d.id),selection=cellSelections.get(d.id)||['C2',rows[0]?.name||''];
       return '<section class="hc-controller" data-controller="'+d.id+'"><div class="hc-controller-header"><button class="hc-controller-handle" draggable="true" data-reorder-handle="'+d.id+'" aria-label="Reorder '+esc(d.name)+'" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" data-tooltip="Drag to reorder; Alt + up/down also moves this device">'+icon('grip-vertical')+'</button><button class="hc-controller-expander" data-action="toggle-controller" data-id="'+d.id+'" aria-expanded="'+open+'" aria-controls="hc-controller-'+d.id+'">'+icon(open?'chevron-down':'chevron-right')+'<strong>'+esc(d.name)+'</strong><span class="hc-device-type">'+d.kind+'</span><span class="hc-controller-serial">'+esc(d.serial)+'</span></button><span class="hc-controller-camera-count">'+rows.length+' camera'+(rows.length===1?'':'s')+'</span>'+cameraControlCount(d)+status(d.online)+'<span class="hc-controller-pending" data-controller-pending></span></div><div id="hc-controller-'+d.id+'"'+(!open?' hidden':'')+'><div class="hc-controller-tools">'+cameraCountControl(d.id)+'<button class="hc-danger" data-action="delete-controller" data-id="'+d.id+'" disabled>'+icon('trash-2')+'<span data-camera-delete-label>Delete camera</span></button>'+cameraControlTools(d)+'<span class="hc-right"></span><button class="hc-danger" data-action="clear-device-cameras" data-id="'+d.id+'"'+(rows.length?'':' disabled')+'>'+icon('eraser')+'Clear all cameras</button><button class="hc-danger" data-action="remove-device" data-id="'+d.id+'" aria-label="Remove '+esc(d.name)+' from managed list">'+icon('trash-2')+'Remove device</button><button class="hc-button" data-action="send-controller" data-id="'+d.id+'">'+icon('send')+'Send changes <span>0</span></button>'+cameraSelectionStrip(d.id)+'</div><div class="hc-sheet"><div class="hc-scroll"><table class="hc-grid" role="grid" data-camera-device="'+d.id+'" aria-label="Camera and lens spreadsheet for '+esc(d.name)+'">'+cameraGrid(rows,d.id)+'</table></div></div><span class="hc-visually-hidden" data-connection-note>'+esc(connectionNote(d))+'</span></div></section>';
     }).join('');syncSummary();icons();
     for(const [id,left] of scrolls){const scroll=root.querySelector('[data-controller="'+id+'"] .hc-scroll');if(scroll)scroll.scrollLeft=left;}
   }
-  function setTab(next,save=true){if(next==='discovery'){next='devices';if(discoveryCard)discoveryCard.open=true;}tab=next;root.querySelectorAll('[data-tab]').forEach(el=>el.setAttribute('aria-selected',String(el.dataset.tab===next)));for(const id of ['devices','setup','cameras','assignment'])root.querySelector('#hc-'+id).hidden=id!==next;$('lan-columns-menu').hidden=true;$('drawer').hidden=true;refreshCameraSheets();if(save)remember();}
+  function setTab(next,save=true){if(next==='discovery')next='devices';tab=next;root.querySelectorAll('[data-tab]').forEach(el=>el.setAttribute('aria-selected',String(el.dataset.tab===next)));for(const id of ['devices','setup','cameras','assignment'])root.querySelector('#hc-'+id).hidden=id!==next;$('lan-columns-menu').hidden=true;$('drawer').hidden=true;refreshCameraSheets();if(save)remember();}
   function showDevice(id){
     const d=device(id);if(!d)return;
     $('drawer').innerHTML='<div class="hc-drawer-head"><div><h3>'+esc(d.name)+'</h3><span class="hc-mono hc-muted">'+esc(d.serial)+'</span></div><button data-action="close-drawer" aria-label="Close details">'+icon('x')+'</button></div><div class="hc-detail-section"><h4>DEVICE STATUS</h4><div class="hc-detail-line"><span>Connection</span>'+status(d.online)+'</div><div class="hc-detail-line"><span>LAN1 link</span><span>'+(d.online?'Up':'Unknown')+'</span></div></div><div class="hc-detail-section"><h4>MANAGEMENT ADDRESS</h4><div class="hc-address-item"><div class="hc-mono">'+esc(d.base)+'/16<small>LAN1 · built-in</small></div><span class="hc-retained">'+icon('lock-keyhole')+'Protected</span></div></div><div class="hc-detail-section"><h4>CONFIGURABLE ADDRESSES</h4>'+lans.filter(l=>l.device===id).map(l=>'<div class="hc-address-item"><div class="hc-mono">'+esc(l.current||'Not assigned')+'<small>'+esc(l.iface+' · '+l.type)+'</small></div>'+resultMark(l.result)+'</div>').join('')+'</div><div class="hc-detail-section"><button class="hc-button" data-action="device-cameras" data-id="'+id+'" style="width:100%">Open camera &amp; lens sheet '+icon('arrow-right')+'</button></div>';$('drawer').hidden=false;icons();
@@ -491,7 +491,7 @@ import { PresentationLedger } from './presentation-ledger.js';
     remember();
   }
   function updateDesign(){renderLans();renderCameras();remember();}
-  function restore(snapshot){const data=snapshot?.privateContent;if(!data||![2,3,4,5,6].includes(data.revision))return;if(data.ui)for(const k of Object.keys(ui))if(typeof data.ui[k]===typeof ui[k])ui[k]=data.ui[k];if(data.revision<5){ui.cameraCore=true;ui.cameraCredentials=true;}restoreColumnVisibility(data);restoreDeviceWorkflow(data);restoreCameraSorting(data);restoreCameraLayouts(data);restoreRemiDrafts(data);restoreRemiView(data);if(data.axisGroupsByDevice&&typeof data.axisGroupsByDevice==='object'){for(const [id,groups] of Object.entries(data.axisGroupsByDevice)){if(!sheetOwner(id)||!groups||typeof groups!=='object')continue;for(const axis of ['iris','zoom','focus'])if(typeof groups[axis]==='boolean')axisGroups(id)[axis]=groups[axis];}}restoreCameraSheets(data);if(Array.isArray(data.deviceOrder)){const known=new Set(devices.map(d=>d.id));deviceOrder=[...new Set(data.deviceOrder.filter(id=>known.has(id)))];devices.forEach(d=>{if(!deviceOrder.includes(d.id))deviceOrder.push(d.id);});}if(Array.isArray(data.openControllers)){openControllers.clear();data.openControllers.forEach(id=>{if(device(id))openControllers.add(id);});}if(['devices','discovery','setup','cameras','assignment'].includes(data.tab))setTab(data.tab,false);if(['','10.192.0.0/16','10.20.0.0/16','custom'].includes(data.scanRange))$('scan-range').value=data.scanRange;$('custom-range-field').hidden=$('scan-range').value!=='custom';action('scan').disabled=!$('scan-range').value;syncFilter();if(data.deviceFilter==='all'||devices.some(item=>item.id===data.deviceFilter))$('device-filter').value=data.deviceFilter;renderLans();renderCameras();}
+  function restore(snapshot){const data=snapshot?.privateContent;if(!data||![2,3,4,5,6].includes(data.revision))return;if(data.ui)for(const k of Object.keys(ui))if(typeof data.ui[k]===typeof ui[k])ui[k]=data.ui[k];if(data.revision<5){ui.cameraCore=true;ui.cameraCredentials=true;}restoreColumnVisibility(data);restoreCameraSorting(data);restoreCameraLayouts(data);restoreRemiDrafts(data);restoreRemiView(data);if(data.axisGroupsByDevice&&typeof data.axisGroupsByDevice==='object'){for(const [id,groups] of Object.entries(data.axisGroupsByDevice)){if(!sheetOwner(id)||!groups||typeof groups!=='object')continue;for(const axis of ['iris','zoom','focus'])if(typeof groups[axis]==='boolean')axisGroups(id)[axis]=groups[axis];}}restoreCameraSheets(data);if(Array.isArray(data.deviceOrder)){const known=new Set(devices.map(d=>d.id));deviceOrder=[...new Set(data.deviceOrder.filter(id=>known.has(id)))];devices.forEach(d=>{if(!deviceOrder.includes(d.id))deviceOrder.push(d.id);});}if(Array.isArray(data.openControllers)){openControllers.clear();data.openControllers.forEach(id=>{if(device(id))openControllers.add(id);});}if(['devices','discovery','setup','cameras','assignment'].includes(data.tab))setTab(data.tab,false);if(['','10.192.0.0/16','10.20.0.0/16','custom'].includes(data.scanRange))$('scan-range').value=data.scanRange;$('custom-range-field').hidden=$('scan-range').value!=='custom';action('scan').disabled=!$('scan-range').value;syncFilter();if(data.deviceFilter==='all'||devices.some(item=>item.id===data.deviceFilter))$('device-filter').value=data.deviceFilter;renderLans();renderCameras();}
   root.addEventListener('click',event=>{
     const b=event.target.closest('button');if(!b||!root.contains(b))return;
     if(b.dataset.tab){setTab(b.dataset.tab);return;}if(b.dataset.device){showDevice(b.dataset.device);return;}
@@ -517,9 +517,9 @@ import { PresentationLedger } from './presentation-ledger.js';
       case 'refresh-all':if(moduleBridge&&!moduleBridge.preview){void refreshLive();break;}action('refresh-all').disabled=true;setTimeout(()=>{action('refresh-all').disabled=false;toast('Settings refreshed · edits retained');},500);break;
     }
   });
-  root.addEventListener('dragstart',event=>{const handle=event.target.closest('[data-reorder-handle]');if(!handle||!root.contains(handle))return;draggedDevice=handle.dataset.reorderHandle;event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('text/plain',draggedDevice);handle.closest('[data-controller],[data-network-controller]').dataset.dragging='true';});
-  root.addEventListener('dragover',event=>{const group=event.target.closest('[data-controller],[data-network-controller]');if(!draggedDevice||!group)return;event.preventDefault();event.dataTransfer.dropEffect='move';root.querySelectorAll('[data-drop]').forEach(el=>delete el.dataset.drop);if((group.dataset.controller||group.dataset.networkController)!==draggedDevice){const rect=group.querySelector('.hc-controller-header').getBoundingClientRect();group.dataset.drop=event.clientY>rect.top+rect.height/2?'after':'before';}});
-  root.addEventListener('drop',event=>{const group=event.target.closest('[data-controller],[data-network-controller]');if(!draggedDevice||!group)return;event.preventDefault();const source=draggedDevice,target=(group.dataset.controller||group.dataset.networkController),rect=group.querySelector('.hc-controller-header').getBoundingClientRect(),after=event.clientY>rect.top+rect.height/2;clearDrag();dropDevice(source,target,after);});
+  root.addEventListener('dragstart',event=>{const handle=event.target.closest('[data-reorder-handle]');if(!handle||!root.contains(handle))return;draggedDevice=handle.dataset.reorderHandle;event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('text/plain',draggedDevice);handle.closest('[data-controller]').dataset.dragging='true';});
+  root.addEventListener('dragover',event=>{const group=event.target.closest('[data-controller]');if(!draggedDevice||!group)return;event.preventDefault();event.dataTransfer.dropEffect='move';root.querySelectorAll('[data-drop]').forEach(el=>delete el.dataset.drop);if(group.dataset.controller!==draggedDevice){const rect=group.querySelector('.hc-controller-header').getBoundingClientRect();group.dataset.drop=event.clientY>rect.top+rect.height/2?'after':'before';}});
+  root.addEventListener('drop',event=>{const group=event.target.closest('[data-controller]');if(!draggedDevice||!group)return;event.preventDefault();const source=draggedDevice,target=group.dataset.controller,rect=group.querySelector('.hc-controller-header').getBoundingClientRect(),after=event.clientY>rect.top+rect.height/2;clearDrag();dropDevice(source,target,after);});
   root.addEventListener('dragend',clearDrag);
   root.addEventListener('keydown',event=>{const handle=event.target.closest('[data-reorder-handle]');if(event.key==='Escape')clearDrag();if(handle&&event.altKey&&['ArrowUp','ArrowDown'].includes(event.key)){event.preventDefault();moveDevice(handle.dataset.reorderHandle,event.key==='ArrowUp'?'up':'down');}});
   root.addEventListener('input',event=>{const el=event.target;if(!el.dataset?.row||el.type==='checkbox'||el.closest('table[data-camera-device]'))return;persistence='draft';saveSequence++;const isLan=!!el.closest('table[data-lan-device]'),item=(isLan?lans:cameras).find(i=>i.id===el.dataset.row);if(!item)return;if(!isLan&&isLensSetting(el.dataset.field)&&!lensFieldUsed(item,el.dataset.field))return;item[el.dataset.field]=el.value;item.dirty.add(el.dataset.field);item.pending=true;item.result='Pending';if(isLan){if($('lan-value'))$('lan-value').textContent=el.value;if(item.operation==='Keep')item.operation=item.current?'Replace':'Add';}paintItem(item);});
@@ -657,12 +657,7 @@ import { PresentationLedger } from './presentation-ledger.js';
     submitCameraControl([{kind:'all',controllerId:id,enabled:!cameraControlRows(id).every(camera=>enabled[camera.id]===true)}]);
   });
 
-  const openNetworkDevices=new Set(devices[0]?[devices[0].id]:[]);
-  const hiddenNetworkColumnsByDevice={};
   const removedDevices=[];
-  let discoveryCard=null;
-  const networkFields=lanColumnDefinitions.filter(field=>field.id!=='device'&&field.id!=='status');
-  function networkHidden(id){return hiddenNetworkColumnsByDevice[id]||(hiddenNetworkColumnsByDevice[id]=new Set(hiddenLanColumns));}
   // A redraw leaves the element in use where it is. The cell being typed in and the path down to it
   // stay in the page, and everything around them is replaced. Replacing the cell itself made the
   // browser commit its half-typed text, so an unfinished address was refused and cleared, and a
@@ -693,117 +688,42 @@ import { PresentationLedger } from './presentation-ledger.js';
     }
     return twin;
   }
-  // In the Details cards, the box in use is the one with the same tag and data attributes.
-  function sameBoxIn(active){
-    const names=active.getAttributeNames().filter(name=>name.startsWith('data-'));
-    return next=>{
-      if(!names.length||!['INPUT','SELECT'].includes(active.tagName))return null;
-      const matches=[...next.querySelectorAll(active.tagName)].filter(element=>names.every(name=>element.getAttribute(name)===active.getAttribute(name)));
-      return matches.length===1&&!matches[0].disabled?matches[0]:null;
-    };
-  }
   function deviceBusy(id){return [...cameras,...lans].some(row=>row.device===id&&row.jobs>0);}
+  // The Devices tab is the device sheet. The old finder panel stays out of sight: the sheet's toolbar
+  // takes its scan controls, and found devices list as rows in the sheet.
   function initializeDeviceWorkflow(){
     root.querySelector('[data-tab="discovery"]')?.remove();
-    const panel=root.querySelector('#hc-devices'),discovery=root.querySelector('#hc-discovery');
-    discovery.className='hc-discovery-block';discovery.hidden=false;discovery.setAttribute('role','region');discovery.setAttribute('aria-label','Find and add Cyanview devices');discovery.removeAttribute('aria-labelledby');
-    discoveryCard=document.createElement('details');discoveryCard.className='hc-discovery-card';discoveryCard.dataset.role='device-discovery';discoveryCard.open=!devices.length;
-    discoveryCard.innerHTML='<summary>'+icon('radar')+'Find &amp; add devices<span class="hc-caption">Discover RCPs and RIOs or enter an IP address</span></summary>';
-    discoveryCard.append(discovery);panel.prepend(discoveryCard);
-    discoveryCard.addEventListener('toggle',()=>{if(!root.hidden)remember();});
-    const toolbar=action('review-lan').closest('.hc-toolbar');toolbar.querySelector('.hc-toolbar-title h3').textContent='Managed devices';action('review-lan').hidden=true;
-    toolbar.insertAdjacentHTML('beforeend','<button class="hc-button" data-action="undo-remove-device" hidden>Undo removal</button><button class="hc-button" data-action="toggle-all-network" aria-label="Expand all device settings">Expand all</button>');
+    const panel=root.querySelector('#hc-devices');
+    const toolbar=action('review-lan').closest('.hc-toolbar');action('review-lan').hidden=true;action('add-ip').remove();
+    toolbar.insertAdjacentHTML('beforeend','<button class="hc-button" data-action="undo-remove-device" hidden>Undo removal</button>');
     root.querySelector('#hc-cameras > .hc-toolbar').insertAdjacentHTML('beforeend','<button class="hc-button" data-action="undo-remove-device" hidden>Undo removal</button>');
     panel.querySelector('.hc-toolbar-secondary').hidden=true;
-    const list=document.createElement('div');list.dataset.role='network-devices';list.className='hc-controller-list';
-    const oldSheet=panel.querySelector('.hc-sheet');oldSheet.replaceWith(list);
-    action('add-ip').innerHTML=icon('radar')+'Find &amp; add';
-    $('lan-foot').textContent='Each device has its own network settings.';
     panel.querySelector('.hc-panel-foot .hc-caption').textContent='Factory management addresses are protected';
   }
-  function networkSelect(row,field,choices,disabled=false){return '<select class="hc-cell-input" data-row="'+row.id+'" data-field="'+field+'" aria-label="'+esc(field+' for '+device(row.device).name)+'"'+(disabled?' disabled':'')+'>'+(disabled?'<option value=""></option>':options(choices,row[field]))+'</select>';}
-  function networkGrid(rows,d){
-    const fields=networkFields.filter(field=>!networkHidden(d.id).has(field.id));
-    if(!fields.length)return '<caption>No columns selected. Use Columns to show settings.</caption>';
-    const header='<colgroup>'+fields.map(field=>'<col style="width:'+field.width+'px">').join('')+'</colgroup><thead><tr>'+fields.map(field=>'<th>'+field.label+'</th>').join('')+'</tr></thead>';
-    return header+'<tbody>'+rows.map(row=>'<tr data-id="'+row.id+'">'+fields.map(field=>{
-      const wan=row.type==='WAN',locked=row.readOnly;let content='',attrs='',inactive=false;
-      if(field.id==='iface')content=locked?esc(row.iface):networkSelect(row,'iface',[...new Set([...(d.interfaces||[]),...rows.map(item=>item.iface),row.iface].filter(Boolean))]);
-      else if(field.id==='current'){attrs=' data-current="'+row.id+'"';content='<span class="hc-mono hc-muted">'+esc(row.current||'—')+'</span>'+(wan?' <span class="hc-caption">WAN</span>':'');}
-      else if(field.id==='planned'){inactive=locked||wan&&row.dhcp;content=inputCell(row,'planned',row.planned,'hc-mono',inactive);}
-      else if(field.id==='operation'){inactive=locked;content=networkSelect(row,'operation',wan?['Keep','Edit']:['Keep','Add','Replace'],inactive);}
-      else if(field.id==='sync'){attrs=' data-sync-id="'+row.id+'"';content=resultMark(row.result);}
-      else if(field.id==='dhcp'){inactive=!wan||locked;content=inactive?'':'<input type="checkbox" data-row="'+row.id+'" data-field="dhcp" aria-label="DHCP for '+esc(d.name)+'"'+(row.dhcp?' checked':'')+'>';}
-      else{inactive=!wan||row.dhcp||locked;content=inputCell(row,field.id,row[field.id],'hc-mono',inactive);}
-      return '<td data-column="'+field.id+'"'+attrs+' class="'+(inactive?'hc-axis-inactive ':'')+(row.dirty.has(field.id)?'hc-changed':'')+'">'+content+'</td>';
-    }).join('')+'</tr>').join('')+'</tbody>';
-  }
-  function networkColumnMenu(id){return '<section class="hc-column-section"><h4>Network columns</h4>'+networkFields.map(field=>'<label><input type="checkbox" data-network-column="'+field.id+'" data-network-device="'+id+'" aria-label="Show '+esc(field.label)+'"'+(!networkHidden(id).has(field.id)?' checked':'')+'>'+field.label+'</label>').join('')+'</section>';}
-  function renderManagedDevices(){
-    const list=$('network-devices');if(!list)return;
-    const scrolls=new Map([...list.querySelectorAll('[data-network-controller]')].map(element=>[element.dataset.networkController,element.querySelector('.hc-scroll')?.scrollLeft||0]));
-    const active=list.contains(document.activeElement)?document.activeElement:null;
-    redrawAround(list,orderedDevices().map(d=>{
-      const rows=lans.filter(row=>row.device===d.id),open=openNetworkDevices.has(d.id),interfaces=new Set(rows.map(row=>row.iface)).size;
-      return '<section class="hc-controller" data-network-controller="'+d.id+'"><div class="hc-controller-header"><button class="hc-controller-handle" draggable="true" data-reorder-handle="'+d.id+'" aria-label="Reorder '+esc(d.name)+'" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown">'+icon('grip-vertical')+'</button><button class="hc-controller-expander" data-action="toggle-network-device" data-id="'+d.id+'" aria-expanded="'+open+'" aria-controls="network-settings-'+d.id+'">'+icon(open?'chevron-down':'chevron-right')+'<strong>'+esc(d.name)+'</strong><span class="hc-device-type">'+esc(d.kind)+'</span>'+(d.name!==d.serial?'<span class="hc-controller-serial">'+esc(d.serial)+'</span>':'')+'</button><span class="hc-controller-camera-count">'+interfaces+' interface'+(interfaces===1?'':'s')+'</span>'+status(d.online)+'</div><div id="network-settings-'+d.id+'"'+(open?'':' hidden')+'><div class="hc-controller-tools"><button class="hc-button" data-action="network-add-lan" data-id="'+d.id+'">'+icon('plus')+'LAN address</button><button class="hc-danger" data-action="remove-device" data-id="'+d.id+'" aria-label="Remove '+esc(d.name)+' from managed list">'+icon('trash-2')+'Remove device</button><span class="hc-right"></span><button data-action="network-columns" data-id="'+d.id+'">'+icon('columns-3')+'Columns</button><button class="hc-button" data-action="send-network-device" data-id="'+d.id+'">'+icon('send')+'Send settings <span>0</span></button><div class="hc-column-menu" data-network-columns-for="'+d.id+'" hidden>'+networkColumnMenu(d.id)+'</div></div><div class="hc-device-settings"><label>Device name<input class="hc-input" data-device-setting="name" data-device-id="'+d.id+'" aria-label="Device name for '+esc(d.serial)+'" value="'+esc(d.name)+'"></label><label>Connection IP<input class="hc-input hc-mono" data-device-setting="address" data-device-id="'+d.id+'" aria-label="Connection IP for '+esc(d.serial)+'" value="'+esc(d.address||d.base)+'"></label><span class="hc-caption">Factory address <span class="hc-mono">'+esc(d.base)+'</span></span></div><div class="hc-sheet"><div class="hc-scroll"><table class="hc-grid" data-lan-device="'+d.id+'" aria-label="Network settings for '+esc(d.name)+'">'+networkGrid(rows,d)+'</table></div></div><div class="hc-controller-bottom"><span>Network settings</span><span data-network-pending="'+d.id+'"></span></div></div></section>';
-    }).join('')||'<div class="hc-managed-empty"><strong>No managed devices yet</strong><span>Use Find &amp; add devices above to discover or enter a device IP.</span></div>',active,active?sameBoxIn(active):()=>null);
-    for(const[id,left]of scrolls){const scroll=list.querySelector('[data-network-controller="'+id+'"] .hc-scroll');if(scroll)scroll.scrollLeft=left;}
-    syncSummary();icons();
-  }
-  function syncNetworkControls(){
-    const allOpen=devices.length>0&&devices.every(d=>openNetworkDevices.has(d.id)),toggle=action('toggle-all-network');
-    if(toggle){toggle.textContent=allOpen?'Collapse all':'Expand all';toggle.disabled=!devices.length;toggle.setAttribute('aria-label',(allOpen?'Collapse':'Expand')+' all device settings');}
+  function syncDeviceControls(){
     root.querySelectorAll('[data-action="undo-remove-device"]').forEach(button=>button.hidden=!removedDevices.length);
-    for(const d of devices){const section=root.querySelector('[data-network-controller="'+d.id+'"]');if(!section)continue;const pending=pendingLans().filter(row=>row.device===d.id).length,busy=deviceBusy(d.id);const send=section.querySelector('[data-action="send-network-device"]');send.disabled=!pending||busy;send.querySelector('span').textContent=pending;section.querySelector('[data-action="remove-device"]').disabled=busy;section.querySelector('[data-network-pending]').textContent=pending?pending+' pending':'';}
     root.querySelectorAll('[data-action="remove-device"]').forEach(button=>button.disabled=deviceBusy(button.dataset.id));
-  }
-  function addNetworkAddress(id){
-    const d=device(id);if(!d)return;
-    if(lans.length>=1024){toast('Network row capacity reached');return;}
-    const iface=lans.find(row=>row.device===id&&row.readOnly)?.iface||d.interfaces?.[0]||'LAN1';
-    lans.push({id:'new-lan-'+crypto.randomUUID(),device:id,type:'LAN',iface,current:'',planned:'',operation:'Add',pending:true,result:'Incomplete',dhcp:false,gateway:'',dns1:'',dns2:'',dirty:new Set(['planned']),revision:0,jobs:0});
-    openNetworkDevices.add(id);renderLans();remember();
   }
   function removeManagedDevice(id){
     if(deviceBusy(id)){toast('Wait for this device’s current send to finish');return;}
     const index=devices.findIndex(d=>d.id===id);if(index<0)return;
-    const d=devices[index];removedDevices.push({device:{...d},index,orderIndex:deviceOrder.indexOf(id),lans:lans.filter(row=>row.device===id),cameras:cameras.filter(row=>row.device===id),networkOpen:openNetworkDevices.has(id),cameraOpen:openControllers.has(id)});
-    devices.splice(index,1);lans=lans.filter(row=>row.device!==id);cameras=cameras.filter(row=>row.device!==id);deviceOrder=deviceOrder.filter(value=>value!==id);openNetworkDevices.delete(id);openControllers.delete(id);if(!devices.length)discoveryCard.open=true;
+    const d=devices[index];removedDevices.push({device:{...d},index,orderIndex:deviceOrder.indexOf(id),lans:lans.filter(row=>row.device===id),cameras:cameras.filter(row=>row.device===id),cameraOpen:openControllers.has(id)});
+    devices.splice(index,1);lans=lans.filter(row=>row.device!==id);cameras=cameras.filter(row=>row.device!==id);deviceOrder=deviceOrder.filter(value=>value!==id);openControllers.delete(id);
     syncFilter();renderLans();renderCameras();renderResults();syncSummary();remember();toast(d.name+' removed from managed list');
   }
   function undoDeviceRemoval(){
     const entry=removedDevices.pop();if(!entry)return;if(device(entry.device.id)){syncSummary();toast('This device is already managed');return;}
     devices.splice(Math.min(entry.index,devices.length),0,{...entry.device,online:null});deviceOrder.splice(Math.max(0,entry.orderIndex),0,entry.device.id);lans.push(...entry.lans);cameras.push(...entry.cameras);
-    if(entry.networkOpen)openNetworkDevices.add(entry.device.id);if(entry.cameraOpen)openControllers.add(entry.device.id);
+    if(entry.cameraOpen)openControllers.add(entry.device.id);
     syncFilter();renderLans();renderCameras();renderResults();syncSummary();remember();toast('Device restored to managed list');
-  }
-  function restoreDeviceWorkflow(data){
-    if(typeof data.discoveryOpen==='boolean'&&discoveryCard)discoveryCard.open=data.discoveryOpen;
-    if(Array.isArray(data.openNetworkDevices)){openNetworkDevices.clear();for(const id of data.openNetworkDevices)if(device(id))openNetworkDevices.add(id);}
-    for(const[id,fields]of Object.entries(data.hiddenNetworkColumnsByDevice||{}))if(device(id)&&Array.isArray(fields))hiddenNetworkColumnsByDevice[id]=new Set(fields.filter(id=>networkFields.some(field=>field.id===id)));
   }
   root.addEventListener('click',event=>{
     const button=event.target.closest('button');if(!button)return;const id=button.dataset.id;
     switch(button.dataset.action){
-      case 'toggle-network-device':if(openNetworkDevices.has(id))openNetworkDevices.delete(id);else openNetworkDevices.add(id);renderLans();remember();break;
-      case 'toggle-all-network':if(devices.every(d=>openNetworkDevices.has(d.id)))openNetworkDevices.clear();else devices.forEach(d=>openNetworkDevices.add(d.id));renderLans();remember();break;
-      case 'network-add-lan':addNetworkAddress(id);break;
-      case 'send-network-device':showReview(pendingLans().filter(row=>row.device===id),'lan');break;
       case 'remove-device':removeManagedDevice(id);break;
       case 'undo-remove-device':undoDeviceRemoval();break;
-      case 'network-columns':{const menu=root.querySelector('[data-network-columns-for="'+id+'"]');if(menu.hidden)showColumnMenu(menu);else menu.hidden=true;break;}
     }
   });
-  root.addEventListener('change',event=>{
-    const element=event.target;
-    if(element.dataset.networkColumn){const id=element.dataset.networkDevice,field=element.dataset.networkColumn,hidden=networkHidden(id),scroll=element.closest('.hc-column-menu').scrollTop;if(element.checked)hidden.delete(field);else hidden.add(field);renderLans();const menu=root.querySelector('[data-network-columns-for="'+id+'"]');showColumnMenu(menu);menu.scrollTop=scroll;menu.querySelector('[data-network-column="'+field+'"]')?.focus({preventScroll:true});remember();}
-    if(element.dataset.deviceSetting&&!redrawing){
-      const d=device(element.dataset.deviceId);if(!d)return;const field=element.dataset.deviceSetting,value=element.value.trim();if(field==='address'&&!ipv4(value)||field==='name'&&(!value||value.length>160)){element.value=d[field]||d.base;toast(field==='address'?'Enter a valid connection IP':'Enter a device name');return;}
-      // The change is reported while the focus is on its way to the next box; drawing once it has landed keeps it there.
-      setTimeout(()=>{if(device(d.id)!==d)return;d[field]=value;syncFilter();renderLans();renderCameras();remember();},0);
-    }
-  });
-  root.addEventListener('keydown',event=>{if(event.key==='Escape')root.querySelectorAll('[data-network-columns-for]').forEach(menu=>menu.hidden=true);if(event.key==='Enter'&&event.target.dataset.deviceSetting){event.preventDefault();event.target.blur();}});
 
   const cameraLayouts = new Map();
   // The All Cameras tab is one more sheet with its own layout, sort and tabs, but no controller of its own.
@@ -1294,7 +1214,7 @@ import { PresentationLedger } from './presentation-ledger.js';
       const plan=await moduleBridge.read();
       applyCameraControlState(await moduleBridge.controlState());
       await restoreCameraChoiceCatalogs();
-      if(plan){restoreSavedLists(plan);devices.splice(0,devices.length,...plan.devices);cameras=(plan.cameras||[]).map(row=>withoutFormerLensDefaults(restoredRow(row)));lans=withoutDuplicateRows((plan.lans||[]).map(restoredRow));deviceOrder=devices.map(item=>item.id);openControllers.clear();openNetworkDevices.clear();if(devices[0]){openControllers.add(devices[0].id);openNetworkDevices.add(devices[0].id);}discoveryCard.open=!devices.length;syncConnections();syncFilter();renderLans();renderCameras();if(plan.uiState)restore(plan.uiState);}
+      if(plan){restoreSavedLists(plan);devices.splice(0,devices.length,...plan.devices);cameras=(plan.cameras||[]).map(row=>withoutFormerLensDefaults(restoredRow(row)));lans=withoutDuplicateRows((plan.lans||[]).map(restoredRow));deviceOrder=devices.map(item=>item.id);openControllers.clear();if(devices[0])openControllers.add(devices[0].id);syncConnections();syncFilter();renderLans();renderCameras();if(plan.uiState)restore(plan.uiState);}
       moduleBridge.onReceipt(applyReceipts);
       moduleBridge.subscribe(applyLiveState);
       if(plan?.uiState?.privateContent?.ui?.discoveryVersion!==2&&ui.discoveryMethod==='broadcast')ui.discoveryMethod='ping';
@@ -1395,7 +1315,7 @@ import { PresentationLedger } from './presentation-ledger.js';
     try{for(const candidate of results.filter(item=>selectedResults.has(item.id)&&!devices.some(d=>d.serial===item.serial))){
       if(devices.length>=128)throw new Error('Controller capacity reached');
       const snapshot=await moduleBridge.importDevice(candidate);if(cameras.length+snapshot.cameras.length>512)throw new Error('Camera capacity reached');
-      devices.push(snapshot.device);openNetworkDevices.add(snapshot.device.id);cameras.push(...snapshot.cameras.map(restoredRow));lans.push(...snapshot.lans.map(restoredRow));selectedResults.delete(candidate.id);count++;
+      devices.push(snapshot.device);cameras.push(...snapshot.cameras.map(restoredRow));lans.push(...snapshot.lans.map(restoredRow));selectedResults.delete(candidate.id);count++;
     }}catch(error){toast(error.message);}
     if(count)await restoreCameraChoiceCatalogs();
     addingDiscovered=false;syncFilter();renderResults();renderLans();renderCameras();if(count)toast(count+' devices added');remember();
@@ -2015,7 +1935,7 @@ import { PresentationLedger } from './presentation-ledger.js';
       if (!fields.length) continue;
       // What it was before the first edit since the last send, which is what Cancel goes back to.
       const row = rows.find(item => item.id === old.id);
-      for (const field of fields) if (!['routeDraft', 'device', 'remiMaster', 'removeStaged'].includes(field) && !(field in (row.sentValues ??= {}))) row.sentValues[field] = old.values[field] ?? null;
+      for (const field of fields) if (!['routeDraft', 'device', 'remiMaster', 'removeStaged', 'leftBehind'].includes(field) && !(field in (row.sentValues ??= {}))) row.sentValues[field] = old.values[field] ?? null;
       // Undo belongs to the sheet the edit was made on.
       const id = virtualSheet(tab) ?? row.device;
       if (!byDevice.has(id)) byDevice.set(id, []);
@@ -2029,8 +1949,7 @@ import { PresentationLedger } from './presentation-ledger.js';
     const entry = from.at(-1);
     if (!entry) return;
     const source = forward ? 'before' : 'after', target = forward ? 'after' : 'before';
-    if (entry.kind === 'cleared') setClearedRows(entry.rows, forward);
-    else if (entry.kind === 'layout') {
+    if (entry.kind === 'layout') {
       if (JSON.stringify(cameraPresentation(id)) !== JSON.stringify(entry[source])) { toast('The sheet layout has changed; this history entry is no longer available'); return; }
       entry.epoch = changeCameraPresentation(id, () => applyCameraPresentation(id, entry[target], forward ? entry.activeAfter : entry.activeBefore), true, false);
     } else {
@@ -2074,12 +1993,6 @@ import { PresentationLedger } from './presentation-ledger.js';
   }
 
   function syncCameraDeleteButton(group) {
-    const clear = group.querySelector('[data-action="clear-selected"]');
-    if (clear) {
-      const count = selectedCameras(group.querySelector('table[data-camera-device]')).length, text = count > 1 ? 'Clear ' + count + ' from view' : 'Clear from view', label = clear.querySelector('[data-camera-clear-label]');
-      if (label.textContent !== text) label.textContent = text;
-      clear.disabled = !count;
-    }
     const button = group.querySelector('[data-action="delete-controller"]');
     const camera = activeCamera(group.querySelector('table[data-camera-device]'));
     const label = button.querySelector('[data-camera-delete-label]');
@@ -2091,22 +2004,23 @@ import { PresentationLedger } from './presentation-ledger.js';
 
   function reviewCameraDeletion(camera) {
     if (!camera || camera.deleting) return;
-    if (importedCamera(camera) && !camera.remi) {
-      toast('Refresh the REMI assignment before removing this camera');
+    if (importedCamera(camera) && !camera.elementKey) {
+      toast('Refresh this controller before removing this copy');
       return;
     }
     showReview([camera], 'camera', true);
     $('modal-layer').querySelector('.hc-modal-foot [data-action="close-modal"]').focus();
   }
 
+  // A copy whose source is off or gone isn't imported any more, so its controller deletes it on its own.
   function deleteReviewedCamera(camera) {
     if (!camera || camera.deleting) return;
     if (!importedCamera(camera)) {
       void sendItems([camera], 'camera', true);
-    } else if (camera.remi) {
+    } else if (camera.elementKey) {
       remiStage(camera.device, [{
         id: 'remove:' + camera.elementKey, kind: 'remove', key: camera.elementKey, enable: false,
-        selector: camera.remi.selector, connection: camera.remi.connection, label: camera.name,
+        ...(camera.remi ? { selector: camera.remi.selector, connection: camera.remi.connection } : {}), label: camera.name,
       }]);
     }
   }
@@ -2590,7 +2504,7 @@ import { PresentationLedger } from './presentation-ledger.js';
     configTab.after(button);
     const toggle = pendingSendsToggle();
     const viewSwitch = '<div class="hc-segment hc-remi-view" role="group" aria-label="REMI Matrix view"><button type="button" data-remi-view="matrix" aria-pressed="true">Matrix</button><button type="button" data-remi-view="controllers" aria-pressed="false">By controller</button></div>';
-    const deleteButton = id => '<button class="hc-button" data-action="clear-selected" disabled title="Forget the selected cameras here. Nothing is sent to a controller.">' + icon('eye-off') + '<span data-camera-clear-label>Clear from view</span></button><button class="hc-danger" data-action="delete-controller" data-id="' + id + '" disabled>' + icon('trash-2') + '<span data-camera-delete-label>Delete camera</span></button>';
+    const deleteButton = id => '<button class="hc-danger" data-action="delete-controller" data-id="' + id + '" disabled>' + icon('trash-2') + '<span data-camera-delete-label>Delete camera</span></button>';
     const setup = document.createElement('section');
     Object.assign(setup, { id: 'hc-setup', className: 'hc-panel', hidden: true });
     setup.setAttribute('role', 'tabpanel');
@@ -2684,12 +2598,29 @@ import { PresentationLedger } from './presentation-ledger.js';
     return routeTreeMemo;
   }
   // A copy whose source isn't in this workspace keeps its own row, since nothing else can show it.
+  // Something Hubble didn't set up is listed apart, under Not set up by Hubble, until it is moved in.
   function assignmentRows() {
     const { parents } = routeTree();
-    return cameras.filter(camera => !movesInFlight.has(camera) && (!importedCamera(camera) || !parents.has(camera)));
+    return cameras.filter(camera => !movesInFlight.has(camera) && !camera.leftBehind && !camera.foreign && (!importedCamera(camera) || !parents.has(camera)));
   }
   function sheetCameras(id) {
-    return id === cameraSetupSheet ? assignmentRows() : id === allCamerasSheet ? matrixRows() : cameras.filter(camera => camera.device === id);
+    return id === cameraSetupSheet ? assignmentRows() : id === allCamerasSheet ? matrixRows() : cameras.filter(camera => camera.device === id && !camera.leftBehind && !camera.foreign);
+  }
+  // A camera deleted or moved while its controller was off is out of the workspace, but that controller still
+  // has it. Its delete waits in Pending sends until the controller is back.
+  function leaveBehind(camera) {
+    camera.removeStaged = true;
+    camera.leftBehind = true;
+    delete camera.routeDraft;
+    routeErrors.delete(camera.id);
+    if (camera.result === 'Error') camera.result = 'In sync';
+    routeTreeMemo = null;
+  }
+  // Cancelling that delete keeps the camera where it is, so it is back in the sheets.
+  function keepLeftBehind(camera) {
+    delete camera.removeStaged;
+    delete camera.leftBehind;
+    routeTreeMemo = null;
   }
   function matrixRows() { return assignmentRows().filter(camera => !unassigned(camera)); }
   // The camera a copy was made from, however many copies away.
@@ -2912,40 +2843,13 @@ import { PresentationLedger } from './presentation-ledger.js';
     renderCameras();
     remember();
   }
-  // Clearing only forgets a camera here. Nothing goes to a controller, so the next read of one that
-  // still has it brings it back. Its copies live in its row, so they go with it.
-  function clearFromView(rows) {
-    const { children } = routeTree(), gone = new Set();
-    const add = row => { if (gone.has(row)) return; gone.add(row); for (const copy of children.get(row) ?? []) if (importedCamera(copy)) add(copy); };
-    for (const camera of rows) if (!camera.jobs && !camera.deleting) add(camera);
-    if (!gone.size) return;
-    const saved = [...gone].map(row => copyPresentation(plainRow(row)));
-    cameras = cameras.filter(row => !gone.has(row));
-    for (const row of gone) { queuedSends.delete(row); routeErrors.delete(row.id); }
-    recordCameraHistory(virtualSheet(tab) ?? [...gone][0].device, { kind: 'cleared', rows: saved });
-    routeTreeMemo = null;
-    renderCameras();
-    remember();
-    toast((rows.length === 1 ? 'Camera ' + rows[0].number : rows.length + ' cameras') + ' cleared from view. Anything still on a controller comes back on the next read.');
-  }
-  function setClearedRows(rows, gone) {
-    const ids = new Set(rows.map(row => row.id));
-    if (gone) cameras = cameras.filter(row => !ids.has(row.id));
-    // A read may have brought it back already.
-    else for (const saved of rows) if (!cameras.some(row => row.id === saved.id || row.elementKey && row.device === saved.device && row.elementKey === saved.elementKey)) cameras.push(restoredRow(copyPresentation(saved)));
-    routeTreeMemo = null;
-    renderCameras();
-    remember();
-  }
   function cameraMenuItems(camera, cameraById) {
     const staged = removalStaged(camera);
-    return [{ id: 'refresh-camera', label: 'Refresh camera', disabled: !camera.elementKey || !!camera.deleting || !!camera.jobs || cameraEnabledSent.has(camera.id) || !!cameraEnabledJob(camera), run: () => runCameraEnabled(cameraById.get(camera.id) ?? camera, 'refresh') }, { id: 'clear-camera', label: 'Clear from view', disabled: !!camera.deleting || !!camera.jobs, run: () => clearFromView([cameraById.get(camera.id) ?? camera]) }, { id: 'delete-camera', label: staged ? 'Keep camera' : importedCamera(camera) ? 'Remove REMI copy' : 'Delete camera', icon: staged ? undefined : 'delete', danger: !staged, disabled: !!camera.deleting || !!camera.jobs, run: () => reviewCameraDeletion(cameraById.get(camera.id) ?? camera) }];
+    return [{ id: 'refresh-camera', label: 'Refresh camera', disabled: !camera.elementKey || !!camera.deleting || !!camera.jobs || cameraEnabledSent.has(camera.id) || !!cameraEnabledJob(camera), run: () => runCameraEnabled(cameraById.get(camera.id) ?? camera, 'refresh') }, { id: 'delete-camera', label: staged ? 'Keep camera' : importedCamera(camera) ? 'Remove REMI copy' : 'Delete camera', icon: staged ? undefined : 'delete', danger: !staged, disabled: !!camera.deleting || !!camera.jobs, run: () => reviewCameraDeletion(cameraById.get(camera.id) ?? camera) }];
   }
   function removeCell(camera, column) {
     const staged = removalStaged(camera), label = (staged ? 'Keep camera ' : importedCamera(camera) ? 'Remove the REMI copy of camera ' : 'Delete camera ') + camera.number;
-    const busy = camera.deleting || camera.jobs ? ' disabled' : '', clearLabel = 'Clear camera ' + camera.number + ' from view';
-    const clear = camera.elementKey || importedCamera(camera) ? '<button type="button" class="hc-row-remove-button" data-action="clear-from-view" data-clear-row="' + esc(camera.id) + '" aria-label="' + esc(clearLabel) + '" title="' + esc(clearLabel) + '. Nothing is sent to a controller."' + busy + '>' + icon('eye-off') + '</button>' : '';
-    return '<td class="hc-camera-frozen hc-row-remove" style="left:' + column.frozen + 'px">' + clear + '<button type="button" class="hc-row-remove-button" data-action="stage-remove" data-remove-row="' + esc(camera.id) + '" aria-label="' + esc(label) + '" title="' + esc(label) + '"' + (camera.deleting || camera.jobs ? ' disabled' : '') + '>' + icon(staged ? 'undo-2' : 'trash-2') + '</button></td>';
+    return '<td class="hc-camera-frozen hc-row-remove" style="left:' + column.frozen + 'px"><button type="button" class="hc-row-remove-button" data-action="stage-remove" data-remove-row="' + esc(camera.id) + '" aria-label="' + esc(label) + '" title="' + esc(label) + '"' + (camera.deleting || camera.jobs ? ' disabled' : '') + '>' + icon(staged ? 'undo-2' : 'trash-2') + '</button></td>';
   }
 
   const requestFailure = (items, error) => ({ results: items.map(item => ({ id: item.id, error: error.message || 'REMI changes could not be confirmed' })), refresh: true });
@@ -3060,9 +2964,15 @@ import { PresentationLedger } from './presentation-ledger.js';
       }
     }
     const ready = rows.filter(camera => !stuck.has(camera) && cameras.includes(camera));
-    if (!ready.length) return;
-    await sendItems(ready, 'camera', true);
-    for (const camera of ready) if (cameras.includes(camera)) routeErrors.set(camera.id, 'Not deleted from ' + controllerName(camera.device) + '.');
+    // A controller that is off can't delete its camera yet. Its copies are already off, so the camera leaves
+    // the workspace and the delete waits for that controller.
+    const away = ready.filter(camera => !camera.leftBehind && device(camera.device)?.online === false);
+    for (const camera of away) { leaveBehind(camera); paintItem(camera); }
+    if (away.length) toast(away.length === 1 ? 'Camera ' + away[0].number + ' is out of the workspace. Deleting it from ' + controllerName(away[0].device) + ' waits until it is back online.' : away.length + ' cameras are out of the workspace. Deleting them waits until their controllers are back online.');
+    const reachable = ready.filter(camera => !away.includes(camera));
+    if (!reachable.length) return;
+    await sendItems(reachable, 'camera', true);
+    for (const camera of reachable) if (cameras.includes(camera)) routeErrors.set(camera.id, 'Not deleted from ' + controllerName(camera.device) + '.');
   }
 
   // Everything the sheet shows travels with the camera. A lens connection is a physical port on the
@@ -3130,9 +3040,13 @@ import { PresentationLedger } from './presentation-ledger.js';
       return;
     }
     delete camera.routeDraft;
-    await sendItems([camera], 'camera', true);
+    // The old controller may be off, which is often why the camera is moving. It keeps the camera until it is
+    // back, and deleting it there waits in Pending sends.
+    const oldAway = device(camera.device)?.online === false;
+    if (oldAway) leaveBehind(camera);
+    else await sendItems([camera], 'camera', true);
     movesInFlight.delete(moved);
-    if (cameras.includes(camera)) {
+    if (!oldAway && cameras.includes(camera)) {
       fail('Camera ' + camera.number + ' is now on both ' + target.name + ' and ' + oldName + ': it could not be deleted from the old controller.');
       renderCameras();
       return;
@@ -3143,7 +3057,7 @@ import { PresentationLedger } from './presentation-ledger.js';
     if (routeHasChanges(moved)) await runRoutes([moved]);
     renderCameras();
     remember();
-    toast(lensKept ? 'Camera moved to ' + target.name : 'Camera moved to ' + target.name + ' · choose its lens connection there');
+    toast('Camera moved to ' + target.name + (lensKept ? '' : ' · choose its lens connection there') + (oldAway ? ' · deleting it from ' + oldName + ' waits until it is back online' : ''));
   }
 
   function describeRoute({ source, links }) {
@@ -3188,23 +3102,36 @@ import { PresentationLedger } from './presentation-ledger.js';
   }
   function pendingLines(camera) {
     if (importedCamera(camera) || unassigned(camera)) return [];
+    if (camera.leftBehind) return [{ id: 'delete', label: 'Delete camera', change: 'Deleted from ' + controllerName(camera.device), note: 'It is out of the workspace. Cancel puts it back.' }];
     if (camera.removeStaged) {
       const copies = Object.keys(actualRoute(camera).links).map(controllerName);
       return [{ id: 'delete', label: 'Delete camera', change: 'Deleted from ' + controllerName(camera.device), note: copies.length ? 'Its REMI copies on ' + copies.join(' and ') + ' come off first.' : '' }];
     }
     return [...routeLines(camera), ...settingLines(camera)];
   }
+  // Taking copies off only touches the controllers that hold them, so the camera's own controller can be off.
+  function onlyTakesCopiesOff(camera) {
+    if (!routeHasChanges(camera) || isMove(camera) || camera.pending) return false;
+    const actual = actualRoute(camera).links;
+    return Object.entries(wantedRoute(camera).links).every(([rcp, parent]) => actual[rcp] === parent);
+  }
+  // A delete or a move can go ahead with the camera's own controller off: everything else is done, and the
+  // camera waits to be deleted there. Every other controller it involves has to be on.
+  const ownMayBeOff = camera => !camera.leftBehind && !!camera.elementKey && (!!camera.removeStaged || isMove(camera) || onlyTakesCopiesOff(camera));
   function pendingState(camera) {
     if (camera.deleting || camera.jobs) return { text: 'Sending…', kind: 'active', blocked: true };
     if (queuedSends.has(camera)) return { text: 'Queued', kind: 'active', blocked: true };
     const wanted = wantedRoute(camera), actual = actualRoute(camera);
-    const offline = [...new Set([camera.device, wanted.source, ...Object.keys(actual.links), ...Object.keys(wanted.links)])].filter(id => device(id)?.online === false);
+    const involved = [...new Set([camera.device, wanted.source, ...Object.keys(actual.links), ...Object.keys(wanted.links)])].filter(id => device(id)?.online === false);
+    const ownOff = ownMayBeOff(camera) && involved.includes(camera.device), offline = ownOff ? involved.filter(id => id !== camera.device) : involved;
     const error = routeErrors.get(camera.id) ?? (['Pending', 'Verified', 'In sync', 'Queued', 'Sending', 'Verifying', 'Error'].includes(camera.result) ? '' : camera.result);
     if (error) return { text: error, kind: 'failed', blocked: !!offline.length };
+    if (camera.leftBehind && offline.length) return { text: 'Waits until ' + controllerName(camera.device) + ' is back online', kind: 'offline', blocked: true };
     if (offline.length) return { text: 'Won’t send while ' + offline.map(controllerName).join(' and ') + (offline.length === 1 ? ' is' : ' are') + ' offline', kind: 'offline', blocked: true };
+    if (ownOff) return { text: controllerName(camera.device) + ' is offline. ' + (camera.removeStaged ? 'Its REMI copies come off now and deleting it there waits until it is back.' : isMove(camera) ? 'The camera moves now and deleting it there waits until it is back.' : 'Its REMI copies can still come off.'), kind: 'offline', blocked: false };
     return { text: camera.result === 'Error' ? 'Could not be confirmed' : '', kind: camera.result === 'Error' ? 'failed' : '', blocked: false };
   }
-  const pendingRows = () => sortCameraRows(assignmentRows(), allCamerasSheet).flatMap(camera => { const lines = pendingLines(camera); return lines.length ? [{ camera, lines }] : []; });
+  const pendingRows = () => sortCameraRows([...assignmentRows(), ...cameras.filter(camera => camera.leftBehind || camera.foreign && !importedCamera(camera))], allCamerasSheet).flatMap(camera => { const lines = pendingLines(camera); return lines.length ? [{ camera, lines }] : []; });
   // REMI changes staged per controller have no camera row to sit on, but they still wait to be sent.
   const remiDraftGroups = () => [...remiPanels].filter(([id, state]) => device(id) && state.drafts.size).map(([id, state]) => ({ id, state, items: [...state.drafts.values()] }));
   const remiDraftLabel = item => item.kind === 'tag' ? (item.enable ? 'Add REMI tag' : 'Remove REMI tag') : item.enable ? 'Import REMI camera' : 'Remove REMI copy';
@@ -3402,7 +3329,7 @@ import { PresentationLedger } from './presentation-ledger.js';
   }
   function cancelLine(camera, line) {
     if (line === 'new') { cameras = cameras.filter(row => row !== camera); queuedSends.delete(camera); return false; }
-    if (line === 'delete') { delete camera.removeStaged; routeErrors.delete(camera.id); if (camera.result === 'Error') camera.result = camera.pending ? 'Pending' : 'In sync'; return false; }
+    if (line === 'delete') { keepLeftBehind(camera); routeErrors.delete(camera.id); if (camera.result === 'Error') camera.result = camera.pending ? 'Pending' : 'In sync'; return false; }
     const unknown = line.startsWith('setting:') && cancelSetting(camera, line.slice(8));
     if (!line.startsWith('setting:')) cancelRouteLine(camera, line);
     camera.pending = !!camera.isNew || camera.dirty.size > 0;
@@ -3463,7 +3390,7 @@ import { PresentationLedger } from './presentation-ledger.js';
   }
   // Refresh all starts again from what the controllers say, so nothing is left waiting to be sent.
   function clearPendingSends() {
-    const cleared = pendingRows().reduce((count, row) => count + row.lines.length, 0) + pendingLans().length + [...remiPanels.values()].reduce((count, state) => count + state.drafts.size, 0);
+    const cleared = pendingRows().filter(row => !row.camera.leftBehind).reduce((count, row) => count + row.lines.length, 0) + pendingLans().length + [...remiPanels.values()].reduce((count, state) => count + state.drafts.size, 0);
     queuedSends.clear();
     routeErrors.clear();
     routeQueue = Promise.resolve();
@@ -3473,6 +3400,8 @@ import { PresentationLedger } from './presentation-ledger.js';
       if (unassigned(camera)) continue;
       // A create with an unknown outcome: the read shows whether it happened.
       if (camera.createState) { cameras = cameras.filter(row => row !== camera); continue; }
+      // A camera already out of the workspace stays out. Its controller still has it, and a read can't change that.
+      if (camera.leftBehind) continue;
       delete camera.routeDraft;
       delete camera.removeStaged;
       // A camera that never reached a controller keeps what was typed, and goes back to having no Source.
@@ -3566,9 +3495,8 @@ import { PresentationLedger } from './presentation-ledger.js';
     ignoredControllers.clear();
     for (const serial of Array.isArray(view?.ignored) ? view.ignored : []) if (typeof serial === 'string' && serial && serial.length <= 160) ignoredControllers.add(serial);
     const sheet = view?.devices ?? {};
-    Object.assign(deviceSheet, { lanOpen: sheet.lanOpen === true, wanOpen: sheet.wanOpen === true, details: sheet.details === true,
+    Object.assign(deviceSheet, { lanOpen: sheet.lanOpen === true, wanOpen: sheet.wanOpen === true,
       sort: deviceSortable.has(sheet.sort?.field) && ['asc', 'desc'].includes(sheet.sort.direction) ? { field: sheet.sort.field, direction: sheet.sort.direction } : null });
-    paintDeviceView();
     // Saved before Camera Configuration was one list, this tab meant that page and not the view under REMI Matrix.
     if (data.tab === 'cameras' && view?.byController === undefined) data.tab = 'setup';
     cameras = [...cameras.filter(camera => !unassigned(camera)), ...saved.map(restoredRow)];
@@ -3655,18 +3583,35 @@ import { PresentationLedger } from './presentation-ledger.js';
     if (autoReads.size) scheduleAutoRead(30);
   }
   function scheduleAutoRead(wait) { autoReadTimer ??= setTimeout(runAutoRead, wait); }
+  // Every change this page asks a controller for is counted as it starts and as it ends. A read that was out
+  // while one started or ended may hold what the controller had before it, even when that change has finished
+  // by the time the read comes back, so it is read again and never shown.
+  let controllerWork = 0;
+  if (moduleBridge) for (const name of ['send', 'remiSend', 'remiRoute', 'cameraEnabled', 'cameraRefresh']) {
+    const ask = moduleBridge[name].bind(moduleBridge);
+    moduleBridge[name] = (...values) => {
+      controllerWork++;
+      const settled = () => { controllerWork++; };
+      let reply;
+      try { reply = ask(...values); } catch (error) { settled(); throw error; }
+      Promise.resolve(reply).then(settled, settled);
+      return reply;
+    };
+  }
   // A send reports its own results, and a read partway through one would show half a change.
   const autoReadWaits = () => sendsRunning || cameras.some(camera => camera.jobs > 0 || camera.deleting) || [...remiPanels.values()].some(state => state.busy);
   async function runAutoRead() {
     autoReadTimer = null;
     if (!autoReads.size) return;
     if (autoReadWaits()) { scheduleAutoRead(500); return; }
-    const ids = [...autoReads];
+    const ids = [...autoReads], workBefore = controllerWork;
     autoReads.clear();
     try {
       const reply = await moduleBridge.refresh(ids, true);
       // A send that began during the read may already have changed what it read. The send's own change reads again after it.
       if (autoReadWaits()) { for (const id of ids) autoReads.add(id); scheduleAutoRead(500); return; }
+      // So may one that began and finished while the read was out.
+      if (controllerWork !== workBefore) { for (const id of ids) autoReads.add(id); scheduleAutoRead(30); return; }
       for (const snapshot of reply.snapshots || []) mergeSnapshot(snapshot);
       renderLans();
       renderCameras();
@@ -3708,8 +3653,6 @@ import { PresentationLedger } from './presentation-ledger.js';
     if (data.remiView) { remiByController = data.remiView === 'controllers'; setTab(remiByController ? 'cameras' : 'assignment'); }
     else if (data.action === 'toggle-pending-sends') setPendingSendsOpen(!pendingSendsOpen);
     else if (data.action === 'stage-remove' && row(data.removeRow)) reviewCameraDeletion(row(data.removeRow));
-    else if (data.action === 'clear-from-view' && row(data.clearRow)) clearFromView([row(data.clearRow)]);
-    else if (data.action === 'clear-selected') clearFromView(selectedCameras(button.closest('[data-controller]').querySelector('table[data-camera-device]')));
     else if (data.action === 'send-all-pending' || data.action === 'send-all-pending-quick') void sendAllPending();
     else if (data.pendingJobRetry) void settleRemiJob(data.pendingJobRetry, 'retry');
     else if (data.pendingJobDismiss) void settleRemiJob(data.pendingJobDismiss, 'dismiss');
@@ -3854,9 +3797,17 @@ import { PresentationLedger } from './presentation-ledger.js';
   }
   const mergeBeforeRig = mergeSnapshot;
   mergeSnapshot = function(snapshot) {
-    const known = ownMerge ? null : new Set(cameras);
+    const known = ownMerge ? null : new Set(cameras), id = snapshot.device?.id;
+    const ours = known ? cameras.filter(camera => camera.device === id && camera.elementKey && !camera.foreign) : [];
     mergeBeforeRig(snapshot);
-    if (known) for (const camera of cameras) if (!known.has(camera) && camera.elementKey && camera.device === snapshot.device?.id) camera.foreign = true;
+    if (!known) return;
+    // A camera of ours deleted and added back under a new key, with the same number, is still ours.
+    const replaced = ours.filter(camera => !cameras.includes(camera)).map(camera => String(camera.number));
+    for (const camera of cameras) if (!known.has(camera) && camera.elementKey && camera.device === id) {
+      const at = replaced.indexOf(String(camera.number));
+      if (at >= 0) replaced.splice(at, 1);
+      else camera.foreign = true;
+    }
   };
   const copyLabel = camera => (String(camera.number ?? '') + ' ' + String(camera.name ?? '')).trim() || 'Camera';
   const listed = names => names.length < 2 ? names.join('') : names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
@@ -3876,111 +3827,96 @@ import { PresentationLedger } from './presentation-ledger.js';
     }
     return items;
   }
-  function paintForeignReview() {
-    const tools = root.querySelector('[data-role="setup-group"] .hc-controller-tools');
-    if (!tools) return;
-    let button = tools.querySelector('[data-action="review-foreign"]'), note = tools.querySelector('[data-role="foreign-note"]');
-    if (!button) {
-      (tools.querySelector('.hc-count-hint') ?? tools.querySelector('[data-camera-count]')).insertAdjacentHTML('afterend', '<button type="button" class="hc-primary hc-foreign-review" data-action="review-foreign" hidden></button><span class="hc-caption hc-foreign-note" data-role="foreign-note" hidden></span>');
-      button = tools.querySelector('[data-action="review-foreign"]');
-      note = tools.querySelector('[data-role="foreign-note"]');
-    }
-    const count = foreignItems().length;
-    button.hidden = note.hidden = !count;
-    button.disabled = sendsRunning > 0;
-    button.textContent = 'Review ' + count + (count === 1 ? ' item' : ' items');
-    note.textContent = count + (count === 1 ? ' thing on this rig wasn’t' : ' things on this rig weren’t') + ' configured by Hubble';
+  // Listed apart from the cameras Hubble set up, with Move and Clear on each. Move makes it one of yours and
+  // sends nothing. Clear marks it like a delete, and it goes from Pending sends like every other delete.
+  root.querySelector('[data-role="setup-group"]').insertAdjacentHTML('afterend',
+    '<div class="hc-outside" data-role="outside" hidden><div class="hc-outside-title"><div class="hc-toolbar-title"><h3>Not set up by Hubble</h3><span data-role="outside-summary"></span></div></div>' +
+    '<section class="hc-controller" data-role="outside-group"><div class="hc-controller-tools"><span class="hc-outside-note">Cyanview has these, but Hubble didn’t set them up. Move one into your cameras to manage it here, or clear it from its controller.</span><span class="hc-right"></span>' +
+    '<button type="button" class="hc-button" data-action="outside-move-all">' + icon('plus') + 'Move all to my cameras</button><button type="button" class="hc-danger" data-action="outside-clear-all">' + icon('trash-2') + 'Clear all</button></div>' +
+    '<div class="hc-sheet"><div class="hc-scroll"><table class="hc-grid hc-outside-grid" aria-label="Not set up by Hubble"></table></div></div></section></div>');
+  const outsideDraft = item => remiPanels.get(item.camera.device)?.drafts.get('remove:' + item.camera.elementKey);
+  // Whether Clear has marked it: a camera to delete, a copy whose circle is off, or a copy with no known source to remove.
+  function outsideCleared(item) {
+    if (item.kind === 'camera') return !!item.camera.removeStaged;
+    return item.source && cameras.includes(item.source) ? copyRemoval(item.camera) : !!outsideDraft(item);
   }
-  const renderBeforeRig = renderCameras;
-  renderCameras = function() { renderBeforeRig(); paintForeignReview(); };
-  // The button waits for a send that is running, so it is painted again when one ends.
-  const paintPendingBeforeRig = paintPendingSends;
-  paintPendingSends = function() { paintPendingBeforeRig(); paintForeignReview(); };
-  function reviewForeign() {
-    const items = foreignItems();
-    if (!items.length) return;
-    const rows = items.map(item => '<div class="hc-change-item hc-review-item"><div class="hc-review-text"><div><strong>' + esc(item.title) + '</strong></div><small>' + esc(item.detail) + '</small></div>' +
-      '<div class="hc-segment" role="group" aria-label="' + esc(item.title) + '" data-review-item="' + esc(item.id) + '"><button type="button" data-review-choice="keep" aria-pressed="true">Keep as is</button><button type="button" data-review-choice="clear" aria-pressed="false">Clear</button></div></div>');
-    $('modal-layer').innerHTML = '<section class="hc-modal hc-review-modal" role="dialog" aria-modal="true" aria-label="Not configured by Hubble"><div class="hc-modal-head"><div><h3>' + (items.length === 1 ? 'This wasn’t' : 'These weren’t') + ' configured by Hubble</h3><p>' + (items.length === 1 ? 'It is' : 'They are') + ' already on your controllers, so ' + (items.length === 1 ? 'it shows' : 'they show') + ' up here. Nothing has been changed.</p></div><button data-action="close-modal" aria-label="Close">' + icon('x') + '</button></div>' +
-      '<div class="hc-modal-body">' + rows.join('') +
-      '<div class="hc-change-item"><small><strong>Keep as is</strong> leaves it exactly as it is and stops asking about it.<br><strong>Clear</strong> deletes it from its controller, along with any REMI copies of it. That can’t be undone from Hubble.</small></div></div>' +
-      '<div class="hc-modal-foot"><button class="hc-button" data-action="close-modal">Not now</button><button class="hc-primary" data-review-apply>Apply</button></div></section>';
-    $('modal-layer').hidden = false;
-    icons();
-    $('modal-layer').querySelector('.hc-modal-foot [data-action="close-modal"]').focus();
-  }
-  function applyForeignReview(choices) {
-    const items = foreignItems().filter(item => choices.has(item.id));
-    const kept = items.filter(item => choices.get(item.id) !== 'clear'), clearing = items.filter(item => choices.get(item.id) === 'clear');
-    for (const item of kept) for (const row of item.rows) delete row.foreign;
-    const said = (cleared, problems) => {
-      const parts = [];
-      if (kept.length) parts.push('Kept ' + kept.length + (kept.length === 1 ? ' as it is' : ' as they are'));
-      if (cleared) parts.push('Cleared ' + cleared);
-      toast(problems.length ? problems[0] : parts.join(' · '));
-    };
-    if (!clearing.length) { renderCameras(); remember(); said(0, []); return; }
-    if (!moduleBridge || moduleBridge.preview) { renderCameras(); remember(); toast(sampleRouteMessage); return; }
-    return enqueueSend(async () => {
-      let cleared = 0;
-      const problems = [];
-      // A camera goes with its copies, which come off first.
-      const own = clearing.filter(item => item.kind === 'camera').map(item => item.camera).filter(camera => cameras.includes(camera));
-      if (own.length) {
-        try { await removeCameras(own); } catch (error) { problems.push(error.message || 'A camera could not be cleared'); }
-        for (const camera of own) {
-          if (!cameras.includes(camera)) cleared++;
-          else problems.push(routeErrors.get(camera.id) || copyLabel(camera) + ' could not be cleared from ' + controllerName(camera.device) + '.');
-        }
-      }
-      for (const item of clearing.filter(item => item.kind === 'copy')) {
-        const copy = item.camera, where = controllerName(copy.device), label = copyLabel(copy);
-        if (!cameras.includes(copy)) continue;
-        try {
-          if (item.source && cameras.includes(item.source)) {
-            // The copy comes off, with anything that was made from it.
-            const actual = actualRoute(item.source), tree = { ...actual.links }, gone = new Set([copy.device]);
-            for (let grew = true; grew;) { grew = false; for (const [receiver, parent] of Object.entries(tree)) if (!gone.has(receiver) && gone.has(parent)) { gone.add(receiver); grew = true; } }
-            for (const receiver of gone) delete tree[receiver];
-            const result = (await requestRoutes([{ id: item.source.id, camera: item.source.device, key: item.source.elementKey, tree, expected: actual.links, copies: actual.keys }])).results?.[0];
-            if (!result?.verified) throw new Error(label + ' could not be cleared from ' + where + ': ' + (result?.error || 'no answer'));
-          } else {
-            let removed;
-            if (copy.remi) removed = await moduleBridge.remiSend({ receiver: copy.device, items: [{ id: 'remove:' + copy.elementKey, kind: 'remove', key: copy.elementKey, enable: false, selector: copy.remi.selector, connection: copy.remi.connection, label: copy.name }] });
-            else removed = await moduleBridge.send({ items: [{ kind: 'camera', deleting: true, orphan: true, item: plainRow(copy), fields: [] }] });
-            const result = removed.results?.[0];
-            if (!result || result.error) throw new Error(label + ' could not be cleared from ' + where + ': ' + (result?.error || 'no answer'));
-            cameras = cameras.filter(camera => camera !== copy);
-            if (removed.snapshot) mergeOwn(removed.snapshot);
-          }
-          cleared++;
-        } catch (error) { problems.push(error.message || label + ' could not be cleared'); }
-      }
-      routeTreeMemo = null;
+  const outsideBusy = item => item.rows.some(row => row.jobs || row.deleting);
+  function clearOutside(item, on) {
+    if (outsideBusy(item) || outsideCleared(item) === on) return;
+    const camera = item.camera;
+    if (item.kind === 'camera') stageRemoval([camera], on);
+    // A copy of a camera here comes off by clearing its circle, which waits in Pending sends.
+    else if (item.source && cameras.includes(item.source)) reviewCameraDeletion(camera);
+    else {
+      const state = remiPanelState(camera.device), id = 'remove:' + camera.elementKey;
+      if (on) state.drafts.set(id, { id, kind: 'remove', key: camera.elementKey, enable: false, ...(camera.remi ? { selector: camera.remi.selector, connection: camera.remi.connection } : {}), label: camera.name });
+      else state.drafts.delete(id);
       renderCameras();
       remember();
-      said(cleared, problems);
-    }).finally(paintForeignReview);
-  }
-  root.addEventListener('click', event => {
-    const target = event.target.closest?.('[data-action="review-foreign"], [data-review-choice], [data-review-apply]');
-    if (!target) return;
-    if (target.dataset.action === 'review-foreign') { reviewForeign(); return; }
-    if (target.dataset.reviewChoice) {
-      for (const button of target.parentElement.querySelectorAll('[data-review-choice]')) button.setAttribute('aria-pressed', String(button === target));
-      return;
     }
-    const choices = new Map([...$('modal-layer').querySelectorAll('[data-review-item]')].map(group => [group.dataset.reviewItem, group.querySelector('[aria-pressed="true"]')?.dataset.reviewChoice || 'keep']));
-    $('modal-layer').hidden = true;
-    void applyForeignReview(choices);
+  }
+  function moveOutside(items) {
+    items = items.filter(item => !outsideBusy(item) && !outsideCleared(item));
+    if (!items.length) return;
+    for (const item of items) for (const row of item.rows) delete row.foreign;
+    routeTreeMemo = null;
+    renderCameras();
+    remember();
+    toast(items.length === 1 ? copyLabel(items[0].camera) + ' is now one of your cameras' : items.length + ' cameras moved to your cameras');
+  }
+  function outsideRow(item) {
+    const camera = item.camera, copy = item.kind === 'copy', cleared = outsideCleared(item), busy = outsideBusy(item), id = esc(item.id), label = esc(copyLabel(camera));
+    const source = copy ? 'Copy on ' + controllerName(camera.device) + (item.source ? ' · of ' + copyLabel(item.source) : '') : controllerName(camera.device);
+    const address = camera.model === 'Alpha-USB' ? camera.usb : camera.ip;
+    const enabled = camera.cameraEnabled === true ? 'On' : camera.cameraEnabled === false ? 'Off' : '';
+    const tools = '<button type="button" class="hc-button" data-outside-move="' + id + '" aria-label="Move ' + label + ' to my cameras" title="Move to my cameras. Nothing is sent."' + (busy || cleared ? ' disabled' : '') + '>Move</button>' +
+      '<button type="button" class="' + (cleared ? 'hc-button' : 'hc-danger') + '" data-outside-clear="' + id + '" aria-label="' + (cleared ? 'Keep ' : 'Clear ') + label + '" title="' + (cleared ? 'Keep it on ' + esc(controllerName(camera.device)) : 'Delete it from ' + esc(controllerName(camera.device)) + ' when you send it') + '"' + (busy ? ' disabled' : '') + '>' + (cleared ? 'Keep' : 'Clear') + '</button>';
+    return '<tr data-outside-row="' + id + '"' + (cleared ? ' class="hc-remove-staged"' : '') + '><td class="hc-num">' + esc(camera.number) + '</td><td>' + esc(camera.name) + '</td><td class="hc-outside-tools">' + tools + '</td>' +
+      '<td>' + esc(importedCamera(camera) ? remiModelName(camera) : camera.model) + '</td><td class="hc-mono">' + esc(address ?? '') + '</td><td class="hc-mono">' + esc(copy ? '' : camera.port ?? '') + '</td><td>' + esc(copy ? '' : camera.login ?? '') + '</td>' +
+      '<td>' + esc(source) + '</td><td>' + status(camera.online) + '</td><td>' + esc(enabled) + '</td></tr>';
+  }
+  const outsideColumns = [['#', 42], ['Camera name', 160], ['', 132], ['Camera model', 120], ['Camera IP / interface', 150], ['Port', 60], ['Username', 110], ['Source', 200], ['Control', 110], ['Camera Enabled', 120]];
+  let paintedOutside = '';
+  function paintOutside() {
+    const host = root.querySelector('[data-role="outside"]');
+    if (!host) return;
+    const items = foreignItems().sort((a, b) => (Number(a.camera.number) || 0) - (Number(b.camera.number) || 0) || String(a.camera.name).localeCompare(String(b.camera.name)));
+    host.hidden = !items.length || tab !== 'setup';
+    const summary = items.length + (items.length === 1 ? ' camera' : ' cameras');
+    host.querySelector('[data-role="outside-summary"]').textContent = summary;
+    host.querySelector('[data-action="outside-move-all"]').disabled = !items.some(item => !outsideBusy(item) && !outsideCleared(item));
+    const clearAll = host.querySelector('[data-action="outside-clear-all"]');
+    clearAll.disabled = !items.some(item => !outsideBusy(item) && !outsideCleared(item));
+    const markup = '<colgroup>' + outsideColumns.map(([, width]) => '<col style="width:' + width + 'px">').join('') + '</colgroup><thead><tr>' + outsideColumns.map(([label]) => '<th>' + esc(label) + '</th>').join('') + '</tr></thead><tbody>' + items.map(outsideRow).join('') + '</tbody>';
+    // Painting it again only when it changed keeps a pressed button under the pointer.
+    if (markup === paintedOutside) return;
+    paintedOutside = markup;
+    host.querySelector('table').innerHTML = markup;
+    icons();
+  }
+  const renderBeforeRig = renderCameras;
+  renderCameras = function() { renderBeforeRig(); paintOutside(); };
+  // A send that ends can take a row away or free its buttons.
+  const paintPendingBeforeRig = paintPendingSends;
+  paintPendingSends = function() { paintPendingBeforeRig(); paintOutside(); };
+  const setTabBeforeRig = setTab;
+  setTab = function(...args) { setTabBeforeRig(...args); paintOutside(); };
+  root.addEventListener('click', event => {
+    const button = event.target.closest?.('[data-outside-move], [data-outside-clear], [data-action="outside-move-all"], [data-action="outside-clear-all"]');
+    if (!button || button.disabled) return;
+    const items = foreignItems(), item = id => items.find(entry => entry.id === id);
+    if (button.dataset.outsideMove && item(button.dataset.outsideMove)) moveOutside([item(button.dataset.outsideMove)]);
+    else if (button.dataset.outsideClear && item(button.dataset.outsideClear)) { const entry = item(button.dataset.outsideClear); clearOutside(entry, !outsideCleared(entry)); }
+    else if (button.dataset.action === 'outside-move-all') moveOutside(items);
+    else if (button.dataset.action === 'outside-clear-all') for (const entry of items) clearOutside(entry, true);
   });
 
   // The Devices tab as one sheet: a row per controller with its addresses as columns. LAN and WAN
   // settings fold away behind their own groups. A device is added by typing its IP in the last row,
-  // and found devices list under the managed ones, each with its own Add. The cards this replaces
-  // stay as the Details view, and every edit here goes through the same rows and sends they use.
+  // and found devices list under the managed ones, each with its own Add. It replaced a card per
+  // device, and its edits still go through the same LAN rows and sends those cards used.
   // The remove button sits beside the name, where it is on the camera sheets.
-  const deviceSheet = { lanOpen: false, wanOpen: false, sort: null, details: false };
+  const deviceSheet = { lanOpen: false, wanOpen: false, sort: null };
   let selectedDeviceId = '', deviceAddNote = '', deviceAddBusy = false, committingDeviceCell = '';
   // The cell that has been typed in since the keyboard came to it. Only that cell has something to
   // commit when it is left, and only that cell keeps its own text through a redraw.
@@ -3998,6 +3934,31 @@ import { PresentationLedger } from './presentation-ledger.js';
     return { lan: rows.filter(row => row.type !== 'WAN' && !row.readOnly), wan: rows.find(row => row.type === 'WAN' && !row.readOnly) };
   }
   const plainAddress = value => String(value ?? '').split('/')[0];
+  // A controller's own web page, opened in Safari from its address. A module page can't open a window
+  // itself, so it asks the module to. An address that isn't one yet stays plain text.
+  const openableAddress = value => { const address = plainAddress(value).trim(); return moduleBridge?.openDevicePage && ipv4(address) ? address : ''; };
+  // An address that is only shown is the link.
+  function pageLink(value, name) {
+    const address = openableAddress(value);
+    if (!address) return '<span class="hc-mono hc-muted">' + esc(value || '') + '</span>';
+    return '<button type="button" class="hc-ip-link hc-mono" data-action="open-device-page" data-address="' + esc(address) + '" aria-label="' + esc('Open ' + name + ' at ' + address + ' in Safari') + '" title="' + esc('Open ' + address + ' in Safari') + '">' + esc(address) + '</button>';
+  }
+  // An address that can be typed over keeps its box. A small button beside it opens the address the device has now.
+  // The button never takes the keyboard: Tab still goes from one box to the next, and a box being typed in keeps its caret.
+  function pageOpener(row, name) {
+    const address = openableAddress(row?.current);
+    return address ? '<button type="button" class="hc-ip-open" tabindex="-1" data-action="open-device-page" data-address="' + esc(address) + '" aria-label="' + esc('Open ' + name + ' at ' + address + ' in Safari') + '" title="' + esc('Open ' + address + ' in Safari') + '">' + icon('external-link') + '</button>' : '';
+  }
+  root.addEventListener('mousedown', event => { if (event.target.closest?.('.hc-ip-open')) event.preventDefault(); });
+  const pagesOpening = new Set();
+  async function openDevicePage(address) {
+    // A second click while Safari is still coming up would open the page twice.
+    if (!openableAddress(address) || pagesOpening.has(address)) return;
+    pagesOpening.add(address);
+    try { await moduleBridge.openDevicePage(address); }
+    catch (error) { toast(error.message || 'Could not open ' + address); }
+    finally { pagesOpening.delete(address); }
+  }
   function deviceConnectedOn(d) {
     const address = d.address || d.base;
     if (d.online === false || d.online == null) return '—';
@@ -4067,13 +4028,13 @@ import { PresentationLedger } from './presentation-ledger.js';
       case 'type': return cell(quiet(d.kind));
       case 'serial': return cell('<span class="hc-mono hc-muted">' + esc(d.serial) + '</span>');
       case 'status': return cell(status(d.online), false, ' data-device-status="' + id + '"');
-      case 'base': return cell('<span class="hc-mono hc-muted">' + esc(d.base || '') + '</span>');
-      case 'lan1': return cell(input('lan1', net.lan[0]?.planned, 'LAN IP', busy) + (deviceSheet.lanOpen ? '' : waiting(net.lan.slice(1))), !!net.lan[0]?.pending);
-      case 'lan2': return cell(input('lan2', net.lan[1]?.planned, 'LAN IP 2', busy) + waiting(net.lan.slice(2)), !!net.lan[1]?.pending);
+      case 'base': return cell(pageLink(d.base, d.name));
+      case 'lan1': return cell(input('lan1', net.lan[0]?.planned, 'LAN IP', busy) + pageOpener(net.lan[0], d.name) + (deviceSheet.lanOpen ? '' : waiting(net.lan.slice(1))), !!net.lan[0]?.pending);
+      case 'lan2': return cell(input('lan2', net.lan[1]?.planned, 'LAN IP 2', busy) + pageOpener(net.lan[1], d.name) + waiting(net.lan.slice(2)), !!net.lan[1]?.pending);
       // Folded away, the WAN shows what it will be once sent.
       case 'wan': return cell(net.wan ? (net.wan.dhcp || net.wan.planned ? esc(net.wan.dhcp ? 'DHCP' : net.wan.planned) : quiet('Not set')) + waiting([net.wan]) : quiet('—'), !!net.wan?.pending);
       case 'wanMode': return cell(net.wan ? '<select class="hc-cell-input" data-device-cell="' + id + ':wanMode" aria-label="' + esc('WAN mode for ' + d.name) + '"' + (busy ? ' disabled' : '') + '>' + options(['DHCP', 'Static'], held('wanMode') ?? (net.wan.dhcp ? 'DHCP' : 'Static')) + '</select>' : quiet('—'), !!net.wan?.dirty.has('dhcp'));
-      case 'wanIp': return cell(net.wan ? input('wanIp', net.wan.dhcp ? '' : net.wan.planned, 'WAN IP', busy || net.wan.dhcp) : '', !!net.wan && !net.wan.dhcp && net.wan.dirty.has('planned'));
+      case 'wanIp': return cell(net.wan ? input('wanIp', net.wan.dhcp ? '' : net.wan.planned, 'WAN IP', busy || net.wan.dhcp) + pageOpener(net.wan, d.name) : '', !!net.wan && !net.wan.dhcp && net.wan.dirty.has('planned'));
       case 'gateway': case 'dns1': case 'dns2': return cell(net.wan ? input(column.id, net.wan[column.id], column.label, busy || net.wan.dhcp) : '', !!net.wan?.dirty.has(column.id));
       case 'connected': return cell(quiet(deviceConnectedOn(d)), false, ' data-device-connected="' + id + '"');
       case 'cameras': return cell(deviceCamerasMarkup(d), false, ' data-device-cameras="' + id + '"');
@@ -4114,7 +4075,7 @@ import { PresentationLedger } from './presentation-ledger.js';
     const span = columns.length - 7;
     // Saved devices a search is checking come first, in the order they were saved.
     const saved = savedSearchRows(), savedSerials = new Set(saved.map(row => savedKey(row.item.serial)));
-    const foundRows = saved.map(row => savedSearchRowMarkup(row, span)).join('') + found.filter(candidate => !savedSerials.has(savedKey(candidate.serial))).map(candidate => '<tr class="hc-device-found" data-device-found="' + esc(candidate.id) + '"><td><span class="hc-muted">+</span></td><td>' + esc(candidate.name || candidate.serial) + '</td><td></td><td><span class="hc-muted">' + esc(candidate.kind || '') + '</span></td><td><span class="hc-mono hc-muted">' + esc(candidate.serial) + '</span></td><td><span class="hc-found-tag">Found</span></td><td><span class="hc-mono hc-muted">' + esc(candidate.base || candidate.address || '') + '</span></td><td colspan="' + span + '"><button type="button" class="hc-primary hc-add-found" data-action="add-found-device" data-id="' + esc(candidate.id) + '" aria-label="Add ' + esc(candidate.name || candidate.serial) + '"' + (deviceAddBusy ? ' disabled' : '') + '>' + icon('plus') + 'Add</button></td></tr>').join('');
+    const foundRows = saved.map(row => savedSearchRowMarkup(row, span)).join('') + found.filter(candidate => !savedSerials.has(savedKey(candidate.serial))).map(candidate => '<tr class="hc-device-found" data-device-found="' + esc(candidate.id) + '"><td><span class="hc-muted">+</span></td><td>' + esc(candidate.name || candidate.serial) + '</td><td></td><td><span class="hc-muted">' + esc(candidate.kind || '') + '</span></td><td><span class="hc-mono hc-muted">' + esc(candidate.serial) + '</span></td><td><span class="hc-found-tag">Found</span></td><td>' + pageLink(candidate.base || candidate.address, candidate.name || candidate.serial) + '</td><td colspan="' + span + '"><button type="button" class="hc-primary hc-add-found" data-action="add-found-device" data-id="' + esc(candidate.id) + '" aria-label="Add ' + esc(candidate.name || candidate.serial) + '"' + (deviceAddBusy ? ' disabled' : '') + '>' + icon('plus') + 'Add</button></td></tr>').join('');
     const addRow = '<tr class="hc-device-add"><td><span class="hc-muted">+</span></td><td colspan="5"><span class="hc-muted">New device</span></td><td><input class="hc-cell-input hc-mono" data-device-add placeholder="Type an IP" aria-label="IP address of a device to add" spellcheck="false" autocomplete="off"' + (deviceAddBusy ? ' disabled' : '') + '></td><td colspan="' + span + '"><span class="hc-muted" data-role="device-add-note">' + esc(deviceAddNote || 'Type or paste an IP and press Enter. Hubble finds the device and fills in the row.') + '</span></td></tr>';
     const markup = '<div class="hc-sheet"><div class="hc-scroll"><table class="hc-grid" data-device-sheet aria-label="Devices" style="width:' + columns.reduce((total, column) => total + column.width, 0) + 'px">' + deviceSheetHeader(columns) + '<tbody>' + rows + foundRows + addRow + '</tbody></table></div></div>';
     const keeping = deviceSheetKept(host), twin = redrawAround(host, markup, keeping?.kept, keeping?.find ?? (() => null));
@@ -4150,7 +4111,6 @@ import { PresentationLedger } from './presentation-ledger.js';
         try { if (committed) element.select?.(); else element.setSelectionRange?.(focus.start, focus.end); } catch { /* A select has no caret. */ }
       } else if (focus.key === typedDeviceCell) typedDeviceCell = '';
     }
-    paintDeviceView();
     paintDeviceSheet();
   }
   // Status and counts change without anyone editing, so they are painted in place and typing isn't interrupted.
@@ -4175,7 +4135,7 @@ import { PresentationLedger } from './presentation-ledger.js';
     addAll.disabled = deviceAddBusy;
     addAll.querySelector('[data-add-all-label]').textContent = 'Add all ' + found;
     $('device-summary').textContent = devices.length + (devices.length === 1 ? ' device' : ' devices') + ' · ' + devices.filter(d => d.online).length + ' online';
-    if (!deviceSheet.details) $('lan-foot').textContent = 'Click a heading to sort. Address changes wait in Pending sends until you press Send.';
+    $('lan-foot').textContent = 'Click a heading to sort. Address changes wait in Pending sends until you press Send.';
     releaseHeldDeviceEdits();
   }
   function releaseHeldDeviceEdits() {
@@ -4186,26 +4146,10 @@ import { PresentationLedger } from './presentation-ledger.js';
       setTimeout(() => runDeviceCommit(key, value), 0);
     }
   }
-  function paintDeviceView() {
-    for (const button of root.querySelectorAll('[data-device-view]')) button.setAttribute('aria-pressed', String((button.dataset.deviceView === 'details') === deviceSheet.details));
-    $('device-sheet-group').hidden = deviceSheet.details;
-    $('network-devices').hidden = !deviceSheet.details;
-    action('toggle-all-network').hidden = !deviceSheet.details;
-    action('add-ip').hidden = !deviceSheet.details;
-    // On the sheet, finding devices is one line in its toolbar, and what it finds lists as rows. The
-    // Details view keeps its card, so the controls move back into it there.
-    discoveryCard.hidden = !deviceSheet.details;
-    placeScanControls(deviceSheet.details);
-  }
-  const scanControlHomes = [];
-  function placeScanControls(inCard) {
-    const bar = $('scan-bar'), parts = [root.querySelector('.hc-scan-controls'), $('discovery-error'), root.querySelector('.hc-scan-status')].filter(Boolean);
-    if (!bar || !parts.length) return;
-    if (!scanControlHomes.length) for (const part of parts) { const home = document.createComment('scan control'); part.before(home); scanControlHomes.push([part, home]); }
-    for (const [part, home] of scanControlHomes) {
-      if (inCard) { if (part.parentElement === bar) home.after(part); }
-      else if (part.parentElement !== bar) bar.append(part);
-    }
+  // Finding devices is one line in the sheet's toolbar, and what it finds lists as rows.
+  function placeScanControls() {
+    const bar = $('scan-bar');
+    for (const part of [root.querySelector('.hc-scan-controls'), $('discovery-error'), root.querySelector('.hc-scan-status')]) if (part) bar.append(part);
   }
   // Every found device that isn't in the list yet is added in one go.
   async function addAllFound() {
@@ -4401,10 +4345,9 @@ import { PresentationLedger } from './presentation-ledger.js';
   }
 
   function createDeviceSheet() {
-    const list = $('network-devices'), toolbar = action('review-lan').closest('.hc-toolbar');
+    const panel = root.querySelector('#hc-devices'), toolbar = action('review-lan').closest('.hc-toolbar');
     toolbar.querySelector('.hc-toolbar-title h3').textContent = 'Devices';
-    toolbar.insertAdjacentHTML('beforeend', '<div class="hc-segment hc-device-view" role="group" aria-label="Devices view"><button type="button" data-device-view="sheet" aria-pressed="true">Sheet</button><button type="button" data-device-view="details" aria-pressed="false">Details</button></div>' +
-      pendingSendsToggle());
+    toolbar.insertAdjacentHTML('beforeend', pendingSendsToggle());
     const body = document.createElement('div'), column = document.createElement('div');
     body.className = 'hc-assignment-body';
     body.dataset.pendingHost = 'devices';
@@ -4412,34 +4355,15 @@ import { PresentationLedger } from './presentation-ledger.js';
     column.innerHTML = '<div class="hc-controller-list"><section class="hc-controller" data-role="device-sheet-group"><div class="hc-controller-tools">' +
       '<div class="hc-scan-bar" data-role="scan-bar"></div><span class="hc-right"></span><span class="hc-found-count" data-role="found-summary" aria-live="polite"></span>' +
       '<button class="hc-primary" data-action="add-all-found" hidden>' + icon('plus') + '<span data-add-all-label>Add all</span></button></div><div data-role="device-sheet"></div></section></div>';
-    list.before(body);
+    panel.querySelector(':scope > .hc-sheet').replaceWith(body);
     body.append(column);
-    column.append(list);
-    discoveryCard.addEventListener('toggle', paintDeviceView);
     if ($('scan-label').textContent === 'No scan running') $('scan-label').textContent = '';
-    paintDeviceView();
+    placeScanControls();
   }
-  const initializeDeviceCards = initializeDeviceWorkflow;
-  initializeDeviceWorkflow = function() { initializeDeviceCards(); createDeviceSheet(); };
-  const renderNetworkCards = renderLans;
-  renderLans = function() { const drawn = renderNetworkCards(); renderDeviceSheet(); return drawn; };
-  const renderDiscoveryResults = renderResults;
-  renderResults = function() { renderDiscoveryResults(); paintFoundList(); renderDeviceSheet(); };
-  // The Details view's list of found devices has an Add on each one and Add all, not ticks.
-  function paintFoundList() {
-    for (const box of root.querySelectorAll('input[data-select-found]')) {
-      box.closest('td').innerHTML = box.disabled ? '' : '<button type="button" class="hc-primary hc-add-found" data-action="add-found-device" data-id="' + esc(box.dataset.selectFound) + '" aria-label="Add ' + esc(results.find(candidate => candidate.id === box.dataset.selectFound)?.serial ?? 'device') + '"' + (deviceAddBusy ? ' disabled' : '') + '>' + icon('plus') + 'Add</button>';
-    }
-    const found = foundDevices().length, button = action('add-discovered');
-    button.innerHTML = 'Add all <span data-role="found-selected">' + found + '</span>';
-    button.disabled = !found || deviceAddBusy;
-    icons();
-  }
-  root.addEventListener('click', event => {
-    if (!event.target.closest('[data-action="add-discovered"]')) return;
-    event.stopImmediatePropagation();
-    void addAllFound();
-  }, true);
+  const initializeDevicePanel = initializeDeviceWorkflow;
+  initializeDeviceWorkflow = function() { initializeDevicePanel(); createDeviceSheet(); };
+  // Found devices are rows in the sheet. The old finder's own table, with a tick on each, is never drawn.
+  renderResults = function() { renderDeviceSheet(); };
   const syncLiveConnections = syncConnections;
   syncConnections = function() { syncLiveConnections(); paintDeviceSheet(); };
   const syncBeforeDeviceSheet = syncSummary;
@@ -4452,11 +4376,11 @@ import { PresentationLedger } from './presentation-ledger.js';
     if (!button) return;
     const data = button.dataset;
     if (data.deviceSort) sortDevices(data.deviceSort);
-    else if (data.deviceView) { deviceSheet.details = data.deviceView === 'details'; paintDeviceView(); renderLans(); remember(); }
     else if (data.action === 'toggle-device-group') { deviceSheet[data.group + 'Open'] = !deviceSheet[data.group + 'Open']; renderDeviceSheet(); root.querySelector('[data-action="toggle-device-group"][data-group="' + data.group + '"]')?.focus({ preventScroll: true }); remember(); }
     else if (data.action === 'add-all-found') void addAllFound();
     else if (data.action === 'add-found-device') { deviceAddBusy = true; renderDeviceSheet(); void addFoundDevice(data.id).catch(error => toast(error.message)).finally(() => { deviceAddBusy = false; renderLans(); }); }
     else if (data.action === 'clear-device-cameras' && device(data.id)) reviewDeviceClear(data.id);
+    else if (data.action === 'open-device-page') void openDevicePage(data.address);
     else if (data.clearDeviceConfirm) { $('modal-layer').hidden = true; void clearDeviceCameras(data.clearDeviceConfirm); }
   });
   root.addEventListener('focusin', event => {

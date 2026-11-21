@@ -1,6 +1,6 @@
 import { object, stable, validIp, type Plan, type RecordValue } from './model.js';
 import { normalizeSnapshot } from './normalize.js';
-import type { ClientFactory } from './operations.js';
+import { lentSocket, ownSocket, type ClientFactory, type HeldControllers } from './operations.js';
 import type { PlanRepository } from './repository.js';
 import {
   describeRemiOrigins, isRemiModel, remiAddresses, remiCamera, remiEntries, remiLabel, remiTagRelay, samePeer,
@@ -18,11 +18,26 @@ const sameEntry = (a: RemiEntry, b: RemiEntry) => a.selector === b.selector && a
   a.importer === b.importer && a.peer === b.peer;
 const isImported = (entry: RemiEntry, config: RecordValue) =>
   entry.enabled && !!entry.localKey && isRemiModel(config.Camera?.[entry.localKey]?.Model);
+/**
+ * A copy nothing imports any more. A controller stops listing a source's cameras while that source is off or
+ * gone, and keeps the copies it made from them. A copy names the controller it came from, and one that names
+ * another is not the copy being looked for.
+ */
+const leftBehind = (config: RecordValue, key: string, from?: RecordValue) => {
+  const row = config.Camera?.[key];
+  if (!isRemiModel(row?.Model) || remiEntries(config).some(entry => entry.enabled && entry.localKey === key)) return false;
+  const named = /^\(D\)(cy-[a-z0-9-]+)$/i.exec(String(object(row.Interface).device ?? ''))?.[1];
+  return !from || !named || samePeer(named, from);
+};
 
 export class RemiOperations {
   private tail: Promise<unknown> = Promise.resolve();
 
-  constructor(private repository: PlanRepository, private factory: ClientFactory) {}
+  /**
+   * `lookReachMs` is how long a watched controller with no held socket is given to answer when it is only being
+   * looked at for copies. One on the network opens in about a tenth of a second.
+   */
+  constructor(private repository: PlanRepository, private factory: ClientFactory, private held?: HeldControllers, private lookReachMs = 1500) {}
 
   private enqueue<T>(run: () => Promise<T>) {
     const task = this.tail.catch(() => undefined).then(run);
@@ -36,10 +51,12 @@ export class RemiOperations {
     return device;
   }
 
-  private async connect(device: RecordValue, signal: AbortSignal) {
-    const client = this.factory(device.address || device.base);
+  /** The socket already held on a controller, or a new one. `reachMs` limits only how long a new one may take to answer. */
+  private async connect(device: RecordValue, signal: AbortSignal, reachMs?: number) {
+    const lent = lentSocket(this.held, device);
+    if (lent) return lent;
+    const client = await ownSocket(this.held, this.factory, device, reachMs === undefined ? signal : AbortSignal.any([signal, AbortSignal.timeout(reachMs)]));
     try {
-      await client.connect(signal);
       if (client.serial !== device.serial) throw new Error('Controller identity changed. Refresh before sending.');
       return client;
     } catch (error) {
@@ -77,8 +94,8 @@ export class RemiOperations {
     describeRemiOrigins(rows, available, plan.cameras, devices, links ?? (await this.repository.readRemi(signal)).data.links);
   }
 
-  private async observe(device: RecordValue, signal: AbortSignal): Promise<Observed> {
-    const client = await this.connect(device, signal);
+  private async observe(device: RecordValue, signal: AbortSignal, reachMs?: number): Promise<Observed> {
+    const client = await this.connect(device, signal, reachMs);
     try {
       const entries = remiEntries(client.config);
       const selectors = entries.some(entry => entry.enabled) ? await this.selectors(client, signal) : new Map();
@@ -346,12 +363,10 @@ export class RemiOperations {
       touched.add(receiver);
       const entry = remiEntries(target.config).find(candidate => candidate.localKey === key && isImported(candidate, target.config));
       if (!entry) {
-        // Already taken off by hand. Anything else under that key is not this copy.
-        if (target.config.Camera?.[key]) throw stale();
-        if (store.data.links.some(link => link.receiver === receiver && link.entry.localKey === key)) {
-          store.data.links = store.data.links.filter(link => link.receiver !== receiver || link.entry.localKey !== key);
-          await this.repository.writeRemi(store, signal);
-        }
+        // Already taken off by hand, or left behind because its source is off or gone and nothing imports it
+        // any more. Anything else under that key is not this copy.
+        if (target.config.Camera?.[key] && !leftBehind(target.config, key, parent)) throw stale();
+        await this.deleteLeftover(target, receiver, key, store, signal);
         continue;
       }
       if (!samePeer(entry.peer, parent)) throw stale();
@@ -561,10 +576,30 @@ export class RemiOperations {
   }
 
   private async removeRow(target: CyanviewClient, receiver: RecordValue, item: RecordValue, store: Receipt, signal: AbortSignal) {
-    const entry = remiEntries(target.config).find(row => row.localKey === item.key && row.selector === item.selector &&
-      row.connection === item.connection && isImported(row, target.config));
-    if (!entry) throw new Error('The REMI assignment changed. Refresh before removing it.');
-    await this.remove(target, receiver.id, entry, store, signal);
+    const key = String(item.key ?? '');
+    if (!key) throw new Error('Choose a REMI copy to remove');
+    const imports = remiEntries(target.config).filter(row => row.localKey === key && isImported(row, target.config));
+    // A page that no longer knows the import asks with the key alone, and the one import feeding that key is it.
+    const entry = imports.find(row => row.selector === item.selector && row.connection === item.connection) ??
+      (!item.selector && imports.length === 1 ? imports[0] : undefined);
+    if (entry) { await this.remove(target, receiver.id, entry, store, signal); return; }
+    // With its source off or gone, nothing imports the copy any more and it is deleted on its own. One that
+    // something still imports was changed since the page read it.
+    if (target.config.Camera?.[key] && !leftBehind(target.config, key)) {
+      throw new Error(isRemiModel(target.config.Camera[key].Model) ? 'The REMI assignment changed. Refresh before removing it.' : 'This camera is set up on ' + receiver.name + ' itself, not copied to it');
+    }
+    await this.deleteLeftover(target, receiver.id, key, store, signal);
+  }
+
+  private async deleteLeftover(target: CyanviewClient, receiver: string, key: string, store: Receipt, signal: AbortSignal) {
+    if (target.config.Camera?.[key]) {
+      await target.action({ delete: [key] }, signal);
+      await target.waitFor(config => !config.Camera?.[key], signal);
+    }
+    if (store.data.links.some(link => link.receiver === receiver && link.entry.localKey === key)) {
+      store.data.links = store.data.links.filter(link => link.receiver !== receiver || link.entry.localKey !== key);
+      await this.repository.writeRemi(store, signal);
+    }
   }
 
   private async remove(target: CyanviewClient, receiver: string, entry: RemiEntry, store: Receipt, signal: AbortSignal) {
@@ -607,8 +642,11 @@ export class RemiOperations {
 
   /**
    * Every REMI copy of a camera, however many hops away, each listed after the copy it was made from.
-   * Every managed controller is read afresh, so a copy made by hand is found too. A controller that
-   * can't be read is named in `unread`, since a copy on it can't be reached either.
+   * Every managed controller is looked at, so a copy made by hand is found too: over the socket already held
+   * on it, which always has what the controller last reported, or over a new one where none is held. A
+   * controller that can't be read is named in `unread`, since a copy on it can't be reached either. One that
+   * answers on neither its settings socket nor MQTT is named at once, and one with no held socket gets a short
+   * time to answer, so a controller that is switched off doesn't hold up the cameras on the others.
    */
   async copiesOf(sourceId: string, key: string, signal: AbortSignal) {
     const { plan } = await this.repository.read(signal);
@@ -616,7 +654,10 @@ export class RemiOperations {
     const inventory = new Map<string, Observed>();
     for (let start = 0; start < plan.devices.length; start += 8) {
       await Promise.all(plan.devices.slice(start, start + 8).map(async device => {
-        try { inventory.set(device.id, await this.observe(device, signal)); }
+        const other = device.id !== sourceId;
+        if (other && this.held?.down(device)) return;
+        // A watched controller with no held socket has not been answering, so it is not waited on for long.
+        try { inventory.set(device.id, await this.observe(device, signal, other && this.held?.watched(device) ? this.lookReachMs : undefined)); }
         catch { signal.throwIfAborted(); }
       }));
     }

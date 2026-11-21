@@ -1,9 +1,9 @@
   // The Devices tab as one sheet: a row per controller with its addresses as columns. LAN and WAN
   // settings fold away behind their own groups. A device is added by typing its IP in the last row,
-  // and found devices list under the managed ones, each with its own Add. The cards this replaces
-  // stay as the Details view, and every edit here goes through the same rows and sends they use.
+  // and found devices list under the managed ones, each with its own Add. It replaced a card per
+  // device, and its edits still go through the same LAN rows and sends those cards used.
   // The remove button sits beside the name, where it is on the camera sheets.
-  const deviceSheet = { lanOpen: false, wanOpen: false, sort: null, details: false };
+  const deviceSheet = { lanOpen: false, wanOpen: false, sort: null };
   let selectedDeviceId = '', deviceAddNote = '', deviceAddBusy = false, committingDeviceCell = '';
   // The cell that has been typed in since the keyboard came to it. Only that cell has something to
   // commit when it is left, and only that cell keeps its own text through a redraw.
@@ -21,6 +21,31 @@
     return { lan: rows.filter(row => row.type !== 'WAN' && !row.readOnly), wan: rows.find(row => row.type === 'WAN' && !row.readOnly) };
   }
   const plainAddress = value => String(value ?? '').split('/')[0];
+  // A controller's own web page, opened in Safari from its address. A module page can't open a window
+  // itself, so it asks the module to. An address that isn't one yet stays plain text.
+  const openableAddress = value => { const address = plainAddress(value).trim(); return moduleBridge?.openDevicePage && ipv4(address) ? address : ''; };
+  // An address that is only shown is the link.
+  function pageLink(value, name) {
+    const address = openableAddress(value);
+    if (!address) return '<span class="hc-mono hc-muted">' + esc(value || '') + '</span>';
+    return '<button type="button" class="hc-ip-link hc-mono" data-action="open-device-page" data-address="' + esc(address) + '" aria-label="' + esc('Open ' + name + ' at ' + address + ' in Safari') + '" title="' + esc('Open ' + address + ' in Safari') + '">' + esc(address) + '</button>';
+  }
+  // An address that can be typed over keeps its box. A small button beside it opens the address the device has now.
+  // The button never takes the keyboard: Tab still goes from one box to the next, and a box being typed in keeps its caret.
+  function pageOpener(row, name) {
+    const address = openableAddress(row?.current);
+    return address ? '<button type="button" class="hc-ip-open" tabindex="-1" data-action="open-device-page" data-address="' + esc(address) + '" aria-label="' + esc('Open ' + name + ' at ' + address + ' in Safari') + '" title="' + esc('Open ' + address + ' in Safari') + '">' + icon('external-link') + '</button>' : '';
+  }
+  root.addEventListener('mousedown', event => { if (event.target.closest?.('.hc-ip-open')) event.preventDefault(); });
+  const pagesOpening = new Set();
+  async function openDevicePage(address) {
+    // A second click while Safari is still coming up would open the page twice.
+    if (!openableAddress(address) || pagesOpening.has(address)) return;
+    pagesOpening.add(address);
+    try { await moduleBridge.openDevicePage(address); }
+    catch (error) { toast(error.message || 'Could not open ' + address); }
+    finally { pagesOpening.delete(address); }
+  }
   function deviceConnectedOn(d) {
     const address = d.address || d.base;
     if (d.online === false || d.online == null) return '—';
@@ -90,13 +115,13 @@
       case 'type': return cell(quiet(d.kind));
       case 'serial': return cell('<span class="hc-mono hc-muted">' + esc(d.serial) + '</span>');
       case 'status': return cell(status(d.online), false, ' data-device-status="' + id + '"');
-      case 'base': return cell('<span class="hc-mono hc-muted">' + esc(d.base || '') + '</span>');
-      case 'lan1': return cell(input('lan1', net.lan[0]?.planned, 'LAN IP', busy) + (deviceSheet.lanOpen ? '' : waiting(net.lan.slice(1))), !!net.lan[0]?.pending);
-      case 'lan2': return cell(input('lan2', net.lan[1]?.planned, 'LAN IP 2', busy) + waiting(net.lan.slice(2)), !!net.lan[1]?.pending);
+      case 'base': return cell(pageLink(d.base, d.name));
+      case 'lan1': return cell(input('lan1', net.lan[0]?.planned, 'LAN IP', busy) + pageOpener(net.lan[0], d.name) + (deviceSheet.lanOpen ? '' : waiting(net.lan.slice(1))), !!net.lan[0]?.pending);
+      case 'lan2': return cell(input('lan2', net.lan[1]?.planned, 'LAN IP 2', busy) + pageOpener(net.lan[1], d.name) + waiting(net.lan.slice(2)), !!net.lan[1]?.pending);
       // Folded away, the WAN shows what it will be once sent.
       case 'wan': return cell(net.wan ? (net.wan.dhcp || net.wan.planned ? esc(net.wan.dhcp ? 'DHCP' : net.wan.planned) : quiet('Not set')) + waiting([net.wan]) : quiet('—'), !!net.wan?.pending);
       case 'wanMode': return cell(net.wan ? '<select class="hc-cell-input" data-device-cell="' + id + ':wanMode" aria-label="' + esc('WAN mode for ' + d.name) + '"' + (busy ? ' disabled' : '') + '>' + options(['DHCP', 'Static'], held('wanMode') ?? (net.wan.dhcp ? 'DHCP' : 'Static')) + '</select>' : quiet('—'), !!net.wan?.dirty.has('dhcp'));
-      case 'wanIp': return cell(net.wan ? input('wanIp', net.wan.dhcp ? '' : net.wan.planned, 'WAN IP', busy || net.wan.dhcp) : '', !!net.wan && !net.wan.dhcp && net.wan.dirty.has('planned'));
+      case 'wanIp': return cell(net.wan ? input('wanIp', net.wan.dhcp ? '' : net.wan.planned, 'WAN IP', busy || net.wan.dhcp) + pageOpener(net.wan, d.name) : '', !!net.wan && !net.wan.dhcp && net.wan.dirty.has('planned'));
       case 'gateway': case 'dns1': case 'dns2': return cell(net.wan ? input(column.id, net.wan[column.id], column.label, busy || net.wan.dhcp) : '', !!net.wan?.dirty.has(column.id));
       case 'connected': return cell(quiet(deviceConnectedOn(d)), false, ' data-device-connected="' + id + '"');
       case 'cameras': return cell(deviceCamerasMarkup(d), false, ' data-device-cameras="' + id + '"');
@@ -137,7 +162,7 @@
     const span = columns.length - 7;
     // Saved devices a search is checking come first, in the order they were saved.
     const saved = savedSearchRows(), savedSerials = new Set(saved.map(row => savedKey(row.item.serial)));
-    const foundRows = saved.map(row => savedSearchRowMarkup(row, span)).join('') + found.filter(candidate => !savedSerials.has(savedKey(candidate.serial))).map(candidate => '<tr class="hc-device-found" data-device-found="' + esc(candidate.id) + '"><td><span class="hc-muted">+</span></td><td>' + esc(candidate.name || candidate.serial) + '</td><td></td><td><span class="hc-muted">' + esc(candidate.kind || '') + '</span></td><td><span class="hc-mono hc-muted">' + esc(candidate.serial) + '</span></td><td><span class="hc-found-tag">Found</span></td><td><span class="hc-mono hc-muted">' + esc(candidate.base || candidate.address || '') + '</span></td><td colspan="' + span + '"><button type="button" class="hc-primary hc-add-found" data-action="add-found-device" data-id="' + esc(candidate.id) + '" aria-label="Add ' + esc(candidate.name || candidate.serial) + '"' + (deviceAddBusy ? ' disabled' : '') + '>' + icon('plus') + 'Add</button></td></tr>').join('');
+    const foundRows = saved.map(row => savedSearchRowMarkup(row, span)).join('') + found.filter(candidate => !savedSerials.has(savedKey(candidate.serial))).map(candidate => '<tr class="hc-device-found" data-device-found="' + esc(candidate.id) + '"><td><span class="hc-muted">+</span></td><td>' + esc(candidate.name || candidate.serial) + '</td><td></td><td><span class="hc-muted">' + esc(candidate.kind || '') + '</span></td><td><span class="hc-mono hc-muted">' + esc(candidate.serial) + '</span></td><td><span class="hc-found-tag">Found</span></td><td>' + pageLink(candidate.base || candidate.address, candidate.name || candidate.serial) + '</td><td colspan="' + span + '"><button type="button" class="hc-primary hc-add-found" data-action="add-found-device" data-id="' + esc(candidate.id) + '" aria-label="Add ' + esc(candidate.name || candidate.serial) + '"' + (deviceAddBusy ? ' disabled' : '') + '>' + icon('plus') + 'Add</button></td></tr>').join('');
     const addRow = '<tr class="hc-device-add"><td><span class="hc-muted">+</span></td><td colspan="5"><span class="hc-muted">New device</span></td><td><input class="hc-cell-input hc-mono" data-device-add placeholder="Type an IP" aria-label="IP address of a device to add" spellcheck="false" autocomplete="off"' + (deviceAddBusy ? ' disabled' : '') + '></td><td colspan="' + span + '"><span class="hc-muted" data-role="device-add-note">' + esc(deviceAddNote || 'Type or paste an IP and press Enter. Hubble finds the device and fills in the row.') + '</span></td></tr>';
     const markup = '<div class="hc-sheet"><div class="hc-scroll"><table class="hc-grid" data-device-sheet aria-label="Devices" style="width:' + columns.reduce((total, column) => total + column.width, 0) + 'px">' + deviceSheetHeader(columns) + '<tbody>' + rows + foundRows + addRow + '</tbody></table></div></div>';
     const keeping = deviceSheetKept(host), twin = redrawAround(host, markup, keeping?.kept, keeping?.find ?? (() => null));
@@ -173,7 +198,6 @@
         try { if (committed) element.select?.(); else element.setSelectionRange?.(focus.start, focus.end); } catch { /* A select has no caret. */ }
       } else if (focus.key === typedDeviceCell) typedDeviceCell = '';
     }
-    paintDeviceView();
     paintDeviceSheet();
   }
   // Status and counts change without anyone editing, so they are painted in place and typing isn't interrupted.
@@ -198,7 +222,7 @@
     addAll.disabled = deviceAddBusy;
     addAll.querySelector('[data-add-all-label]').textContent = 'Add all ' + found;
     $('device-summary').textContent = devices.length + (devices.length === 1 ? ' device' : ' devices') + ' · ' + devices.filter(d => d.online).length + ' online';
-    if (!deviceSheet.details) $('lan-foot').textContent = 'Click a heading to sort. Address changes wait in Pending sends until you press Send.';
+    $('lan-foot').textContent = 'Click a heading to sort. Address changes wait in Pending sends until you press Send.';
     releaseHeldDeviceEdits();
   }
   function releaseHeldDeviceEdits() {
@@ -209,26 +233,10 @@
       setTimeout(() => runDeviceCommit(key, value), 0);
     }
   }
-  function paintDeviceView() {
-    for (const button of root.querySelectorAll('[data-device-view]')) button.setAttribute('aria-pressed', String((button.dataset.deviceView === 'details') === deviceSheet.details));
-    $('device-sheet-group').hidden = deviceSheet.details;
-    $('network-devices').hidden = !deviceSheet.details;
-    action('toggle-all-network').hidden = !deviceSheet.details;
-    action('add-ip').hidden = !deviceSheet.details;
-    // On the sheet, finding devices is one line in its toolbar, and what it finds lists as rows. The
-    // Details view keeps its card, so the controls move back into it there.
-    discoveryCard.hidden = !deviceSheet.details;
-    placeScanControls(deviceSheet.details);
-  }
-  const scanControlHomes = [];
-  function placeScanControls(inCard) {
-    const bar = $('scan-bar'), parts = [root.querySelector('.hc-scan-controls'), $('discovery-error'), root.querySelector('.hc-scan-status')].filter(Boolean);
-    if (!bar || !parts.length) return;
-    if (!scanControlHomes.length) for (const part of parts) { const home = document.createComment('scan control'); part.before(home); scanControlHomes.push([part, home]); }
-    for (const [part, home] of scanControlHomes) {
-      if (inCard) { if (part.parentElement === bar) home.after(part); }
-      else if (part.parentElement !== bar) bar.append(part);
-    }
+  // Finding devices is one line in the sheet's toolbar, and what it finds lists as rows.
+  function placeScanControls() {
+    const bar = $('scan-bar');
+    for (const part of [root.querySelector('.hc-scan-controls'), $('discovery-error'), root.querySelector('.hc-scan-status')]) if (part) bar.append(part);
   }
   // Every found device that isn't in the list yet is added in one go.
   async function addAllFound() {
@@ -424,10 +432,9 @@
   }
 
   function createDeviceSheet() {
-    const list = $('network-devices'), toolbar = action('review-lan').closest('.hc-toolbar');
+    const panel = root.querySelector('#hc-devices'), toolbar = action('review-lan').closest('.hc-toolbar');
     toolbar.querySelector('.hc-toolbar-title h3').textContent = 'Devices';
-    toolbar.insertAdjacentHTML('beforeend', '<div class="hc-segment hc-device-view" role="group" aria-label="Devices view"><button type="button" data-device-view="sheet" aria-pressed="true">Sheet</button><button type="button" data-device-view="details" aria-pressed="false">Details</button></div>' +
-      pendingSendsToggle());
+    toolbar.insertAdjacentHTML('beforeend', pendingSendsToggle());
     const body = document.createElement('div'), column = document.createElement('div');
     body.className = 'hc-assignment-body';
     body.dataset.pendingHost = 'devices';
@@ -435,34 +442,15 @@
     column.innerHTML = '<div class="hc-controller-list"><section class="hc-controller" data-role="device-sheet-group"><div class="hc-controller-tools">' +
       '<div class="hc-scan-bar" data-role="scan-bar"></div><span class="hc-right"></span><span class="hc-found-count" data-role="found-summary" aria-live="polite"></span>' +
       '<button class="hc-primary" data-action="add-all-found" hidden>' + icon('plus') + '<span data-add-all-label>Add all</span></button></div><div data-role="device-sheet"></div></section></div>';
-    list.before(body);
+    panel.querySelector(':scope > .hc-sheet').replaceWith(body);
     body.append(column);
-    column.append(list);
-    discoveryCard.addEventListener('toggle', paintDeviceView);
     if ($('scan-label').textContent === 'No scan running') $('scan-label').textContent = '';
-    paintDeviceView();
+    placeScanControls();
   }
-  const initializeDeviceCards = initializeDeviceWorkflow;
-  initializeDeviceWorkflow = function() { initializeDeviceCards(); createDeviceSheet(); };
-  const renderNetworkCards = renderLans;
-  renderLans = function() { const drawn = renderNetworkCards(); renderDeviceSheet(); return drawn; };
-  const renderDiscoveryResults = renderResults;
-  renderResults = function() { renderDiscoveryResults(); paintFoundList(); renderDeviceSheet(); };
-  // The Details view's list of found devices has an Add on each one and Add all, not ticks.
-  function paintFoundList() {
-    for (const box of root.querySelectorAll('input[data-select-found]')) {
-      box.closest('td').innerHTML = box.disabled ? '' : '<button type="button" class="hc-primary hc-add-found" data-action="add-found-device" data-id="' + esc(box.dataset.selectFound) + '" aria-label="Add ' + esc(results.find(candidate => candidate.id === box.dataset.selectFound)?.serial ?? 'device') + '"' + (deviceAddBusy ? ' disabled' : '') + '>' + icon('plus') + 'Add</button>';
-    }
-    const found = foundDevices().length, button = action('add-discovered');
-    button.innerHTML = 'Add all <span data-role="found-selected">' + found + '</span>';
-    button.disabled = !found || deviceAddBusy;
-    icons();
-  }
-  root.addEventListener('click', event => {
-    if (!event.target.closest('[data-action="add-discovered"]')) return;
-    event.stopImmediatePropagation();
-    void addAllFound();
-  }, true);
+  const initializeDevicePanel = initializeDeviceWorkflow;
+  initializeDeviceWorkflow = function() { initializeDevicePanel(); createDeviceSheet(); };
+  // Found devices are rows in the sheet. The old finder's own table, with a tick on each, is never drawn.
+  renderResults = function() { renderDeviceSheet(); };
   const syncLiveConnections = syncConnections;
   syncConnections = function() { syncLiveConnections(); paintDeviceSheet(); };
   const syncBeforeDeviceSheet = syncSummary;
@@ -475,11 +463,11 @@
     if (!button) return;
     const data = button.dataset;
     if (data.deviceSort) sortDevices(data.deviceSort);
-    else if (data.deviceView) { deviceSheet.details = data.deviceView === 'details'; paintDeviceView(); renderLans(); remember(); }
     else if (data.action === 'toggle-device-group') { deviceSheet[data.group + 'Open'] = !deviceSheet[data.group + 'Open']; renderDeviceSheet(); root.querySelector('[data-action="toggle-device-group"][data-group="' + data.group + '"]')?.focus({ preventScroll: true }); remember(); }
     else if (data.action === 'add-all-found') void addAllFound();
     else if (data.action === 'add-found-device') { deviceAddBusy = true; renderDeviceSheet(); void addFoundDevice(data.id).catch(error => toast(error.message)).finally(() => { deviceAddBusy = false; renderLans(); }); }
     else if (data.action === 'clear-device-cameras' && device(data.id)) reviewDeviceClear(data.id);
+    else if (data.action === 'open-device-page') void openDevicePage(data.address);
     else if (data.clearDeviceConfirm) { $('modal-layer').hidden = true; void clearDeviceCameras(data.clearDeviceConfirm); }
   });
   root.addEventListener('focusin', event => {

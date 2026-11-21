@@ -80,3 +80,53 @@ test('after the worker restarts, changes made outside still show up', async ({ p
   await rename(request, { Name: 'After a restart' });
   await expect(name).toHaveValue('After a restart');
 });
+
+test('a Send from the page goes down the held sockets: none is opened, and they go on listening', async ({ page, request }) => {
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  const { ui, name } = await openFleet(page, request);
+  const before = await inspect(request);
+  await name.locator('..').dblclick(); await name.fill('Wide shot'); await page.keyboard.press('Enter');
+  await expect(await openPending(ui)).toContainText('Wide shot');
+  await ui.locator('.hc-panel:not([hidden]) [data-action="send-all-pending"]').click();
+  await expect.poll(async () => (await inspect(request)).fleet[0].config.Camera.wide.Name).toBe('Wide shot');
+  await expect(ui.locator('[data-role="pending-sends"]')).toContainText('Nothing is waiting to send');
+  const after = await inspect(request);
+  expect(after.opened, 'The send opened no socket on any controller').toEqual(before.opened);
+  expect(after.openSockets).toEqual([1, 1, 1]);
+  // The same sockets still report what changes outside Hubble.
+  await rename(request, { Name: 'Renamed after a send' });
+  await expect(name).toHaveValue('Renamed after a send');
+  expect((await inspect(request)).opened).toEqual(before.opened);
+  expect(errors).toEqual([]);
+});
+
+test('a read that comes back after a Send began and finished is not shown: the sent value never flips back', async ({ page, request }) => {
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  const { ui, name, ip } = await openFleet(page, request);
+  // The page hears back from its next background read late, after the whole Send below.
+  await simulate(request, { liveReadDelayMs: 900 });
+  await rename(request, { IP: '10.20.20.77' });
+  await page.waitForTimeout(250);
+  // Every value the Name cell shows from here on, frame by frame.
+  const frame = page.frames().find(item => item !== page.mainFrame())!;
+  const shown = frame.evaluate(() => new Promise<string[]>(resolve => {
+    const values: string[] = [], began = performance.now();
+    const check = () => {
+      const value = document.querySelector<HTMLInputElement>('[data-controller="CY-RIO-1-10"] input[data-field="name"]')?.value ?? '(gone)';
+      if (values.at(-1) !== value) values.push(value);
+      if (performance.now() - began > 2600) resolve(values); else requestAnimationFrame(check);
+    };
+    requestAnimationFrame(check);
+  }));
+  await name.locator('..').dblclick(); await name.fill('Wide shot'); await page.keyboard.press('Enter');
+  await ui.locator('.hc-panel:not([hidden]) .hc-toolbar [data-action="toggle-pending-sends"]').click();
+  await ui.locator('.hc-panel:not([hidden]) [data-action="send-all-pending"]').click();
+  await expect.poll(async () => (await inspect(request)).fleet[0].config.Camera.wide.Name).toBe('Wide shot');
+  const values = await shown;
+  expect(values.at(-1)).toBe('Wide shot');
+  expect(values.slice(values.indexOf('Wide shot')), 'Once the sent name shows, the name it replaced never comes back').toEqual(['Wide shot']);
+  // The change made outside still arrives, from the read that was made again.
+  await expect(ip).toHaveValue('10.20.20.77');
+  await expect(name).toHaveValue('Wide shot');
+  expect(errors).toEqual([]);
+});

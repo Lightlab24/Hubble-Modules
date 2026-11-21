@@ -1,5 +1,10 @@
 # Hubble Modules
 
+**Building a module for your own device?** Start with
+[Build a Hubble module: start here](docs/getting-started.md). It covers what to
+download, the five commands, trying your module in Hubble and sending it in for
+testing.
+
 Official Hubble module source, reusable protocol packages, public author SDK and
 reviewed downloads live here. All 14 initial official modules, including Evertz
 Quartz, start at version **1.0.0**. Each module has its own version and release tag;

@@ -1,7 +1,7 @@
 // Module-owned SDK fixture. Every device connection is redirected to a loopback simulator.
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { createConnection } from 'node:net';
+import { createConnection, type Socket } from 'node:net';
 import path from 'node:path';
 import { FakeController, FakeRemiFleet, fixture } from '../test/helpers.js';
 import { broker, closeBrokers } from '../test/control-broker.js';
@@ -14,6 +14,13 @@ let mqtt: Awaited<ReturnType<typeof broker>>;
 let releaseControlWrites: (() => void) | undefined;
 let releasePlanWrites: (() => void) | undefined;
 let planSaves = 0, planSavePending = 0;
+// The addresses the page asked to open in a browser. The preview opens nothing.
+let openedPages: string[] = [], openPageError = '';
+// How long a live read's answer is held back after it is worked out, as when the page hears back late.
+let liveReadDelayMs = 0;
+// Controllers switched off: their settings sockets fail and their MQTT broker stops answering.
+let fleet: FakeRemiFleet | null = null;
+const switchedOff = new Set<string>(), mqttSockets = new Map<string, Set<Socket>>();
 let sampleSetting = true, sessionOptions: Parameters<typeof fixture>[1], statePaused = false;
 const rendererState = () => session.states.at(-1) as Parameters<typeof session.context.publishState>[0];
 async function reset(sample: boolean, remi = false, gateway = false, direct = false, extra = false, live = false, wan = false, reachAll = false) {
@@ -22,6 +29,8 @@ async function reset(sample: boolean, remi = false, gateway = false, direct = fa
   releaseControlWrites?.(); releaseControlWrites = undefined;
   releasePlanWrites?.(); releasePlanWrites = undefined;
   planSaves = 0; planSavePending = 0;
+  switchedOff.clear(); mqttSockets.clear();
+  openedPages = []; openPageError = ''; liveReadDelayMs = 0;
   if (session) await session.instance.dispose();
   await Promise.all(controllers.map(device => device.close()));
   await closeBrokers();
@@ -46,7 +55,7 @@ async function reset(sample: boolean, remi = false, gateway = false, direct = fa
     // A camera set up directly on an RCP, with no RIO in front of it.
     if (direct) controllers[1]!.config.Camera.direct = { Number:'7',Name:'Jib',Model:'Sony - Venice-IP',IP:'10.20.20.7',Port:'80',Enabled:'1' };
   }
-  const fleet = remi ? new FakeRemiFleet(controllers) : null;
+  fleet = remi ? new FakeRemiFleet(controllers) : null;
   await Promise.all(controllers.map(device => device.start()));
   const socket = (url: string, options: Parameters<typeof controller.socket>[1]) => {
     const address = new URL(url).hostname;
@@ -61,7 +70,14 @@ async function reset(sample: boolean, remi = false, gateway = false, direct = fa
     liveConfig: live ? { retryMs: [200, 1000], settleMs: 50 } : false,
     // Short enough for specs. Hubble itself holds a camera off for a second and waits up to six for it to come back online.
     cameraEnabled: { holdMs: 300, onlineWaitMs: 400 },
-    control: { cameraSettleMs: 400, session: (definition, changed) => new RcpSession(definition, changed, true, () => createConnection({ host: '127.0.0.1', port: mqtt.port })) },
+    openPage: async address => { if (openPageError) throw new Error(openPageError); openedPages.push(address); },
+    control: { cameraSettleMs: 400, session: (definition, changed) => new RcpSession(definition, changed, true, () => {
+      // Nothing listens on port 9, so a switched-off controller's broker refuses the connection.
+      const socket = createConnection({ host: '127.0.0.1', port: switchedOff.has(definition.connectionId) ? 9 : mqtt.port }), open = mqttSockets.get(definition.connectionId) ?? new Set<Socket>();
+      mqttSockets.set(definition.connectionId, open.add(socket));
+      socket.once('close', () => open.delete(socket));
+      return socket;
+    }) },
     // Only the RIO answers a connection unless a spec asks for every simulated controller, as saved devices do.
     reachable: async address => ['10.192.1.10', '10.20.101.200'].includes(address) || reachAll && Boolean(fleet?.deviceAt(address)),
     discovery: { durationMs: 100,
@@ -132,6 +148,13 @@ const server = createServer(async (request, response) => {
         if (input.failPlanWrite) session.failNextWrite(session.repository.root);
         if (input.releasePlanWrites) { releasePlanWrites?.(); releasePlanWrites = undefined; }
         if (input.closeController) await controller.close();
+        // Switches one simulated controller off or back on, as when a RIO loses power.
+        if (input.power && fleet) {
+          const target = controllers[Number(input.power.device) || 0]!, id = String(target.config.Product.Serial);
+          if (input.power.on) switchedOff.delete(id); else switchedOff.add(id);
+          fleet.power(target, !!input.power.on);
+          if (!input.power.on) for (const socket of mqttSockets.get(id) ?? []) socket.destroy();
+        }
         if (input.cameraName) controller.config.Camera.wide.Name = input.cameraName;
         if (input.addCamera) { const target = controllers[Number(input.addCamera.device) || 0]!; target.config.Camera[String(input.addCamera.key)] = input.addCamera.row; target.broadcast(); }
         // A change made outside Hubble, such as in Cyanview's own page. The controller pushes it to every open socket.
@@ -141,6 +164,9 @@ const server = createServer(async (request, response) => {
         if (input.mqttControls) Object.assign(mqtt.controls, input.mqttControls);
         if (typeof input.pauseState === 'boolean') statePaused = input.pauseState;
         if (input.closeBroker) await closeBrokers();
+        if (typeof input.openPageError === 'string') openPageError = input.openPageError;
+        if (typeof input.liveReadDelayMs === 'number') liveReadDelayMs = Math.min(3000, Math.max(0, input.liveReadDelayMs));
+        if (typeof input.optionDelayMs === 'number') controller.optionDelayMs = Math.min(3000, Math.max(0, input.optionDelayMs));
         if (typeof input.pingDelayMs === 'number') pingDelayMs = Math.min(5000,Math.max(0,input.pingDelayMs));
         send({ updated: true }); return;
       }
@@ -149,7 +175,11 @@ const server = createServer(async (request, response) => {
       if (input.operation !== 'state' && !declaredCommands.has(input.commandId)) { send({ error: 'Module page command is not declared: ' + input.commandId }); return; }
       const planSave = ['save-plan', 'save-commit'].includes(input.commandId);
       if (planSave) { planSaves++; planSavePending++; }
-      try { send({ result: input.operation === 'state' ? rendererState() : await session.call(input.commandId, input.value) }); }
+      try {
+        const result = input.operation === 'state' ? rendererState() : await session.call(input.commandId, input.value);
+        if (liveReadDelayMs && input.commandId === 'refresh' && input.value?.live === true) await new Promise(resolve => setTimeout(resolve, liveReadDelayMs));
+        send({ result });
+      }
       catch (error) { send({ error: error instanceof Error ? error.message : 'Preview request failed' }); }
       finally { if (planSave) planSavePending--; }
       return;
@@ -159,7 +189,7 @@ const server = createServer(async (request, response) => {
       if (statePaused) { response.writeHead(204); response.end(); return; }
       send(rendererState()); return;
     }
-    if (url.pathname === '/__inspect') { send({ planSaves, planSavePending, opened: controllers.map(device => device.opened), openSockets: controllers.map(device => device.sockets.size), mqttConnections: mqtt.connections, actions: controller.actions, heldReplies: controller.heldActionReplies.length, config: controller.config, records: [...session.records], traces: session.traces, states: session.states.slice(-1), fleet:controllers.map(device=>({config:device.config,actions:device.actions})) }); return; }
+    if (url.pathname === '/__inspect') { send({ planSaves, planSavePending, openedPages, opened: controllers.map(device => device.opened), openSockets: controllers.map(device => device.sockets.size), mqttConnections: mqtt.connections, actions: controller.actions, heldReplies: controller.heldActionReplies.length, config: controller.config, records: [...session.records], traces: session.traces, states: session.states.slice(-1), fleet:controllers.map(device=>({config:device.config,actions:device.actions})) }); return; }
     if (url.pathname === '/') { response.writeHead(200, { 'Content-Type': 'text/html' }); response.end(html); return; }
     if (url.pathname === runtimePath) {
       response.writeHead(200, { 'Content-Type': 'text/javascript', 'Access-Control-Allow-Origin': '*' });

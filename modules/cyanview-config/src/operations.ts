@@ -6,6 +6,34 @@ import { isRemiModel, remiCamera, remiEntries } from './remi-model.js';
 import type { RemiOperations } from './remi.js';
 
 export type ClientFactory = (address: string) => CyanviewClient;
+/** What is already known of each controller's connections, so settings work can use them instead of opening its own. */
+export type HeldControllers = {
+  /** The settings socket held open on a controller, lent for a piece of work. Nothing when none is usable. */
+  lend(device: RecordValue): CyanviewClient | undefined;
+  /**
+   * Some work opened a socket of its own on a controller. Until the returned function is called, and for a moment
+   * after, the held socket isn't lent: a controller reports a change to each socket separately, so the held one can
+   * be a moment behind what that work changed. Work on the one held socket is always in order.
+   */
+  opened(device: RecordValue): () => void;
+  /** True for a controller a settings socket is held on, or kept being tried on. */
+  watched(device: RecordValue): boolean;
+  /** True when a watched controller answers on neither its settings socket nor MQTT, so it isn't worth waiting on. */
+  down(device: RecordValue): boolean;
+};
+/** A controller's held socket when it is that controller's and usable, so a caller can fall back to its own. */
+export const lentSocket = (held: HeldControllers | undefined, device: RecordValue) => {
+  const client = held?.lend(device);
+  return client && client.connected && client.serial === device.serial ? client : undefined;
+};
+/** A socket of its own on a controller, for work the held one can't be lent to. Closing it says the work is done. */
+export async function ownSocket(held: HeldControllers | undefined, factory: ClientFactory, device: RecordValue, signal: AbortSignal, address: string = device.address || device.base): Promise<CyanviewClient> {
+  const client = factory(address), done = held?.opened(device) ?? (() => {});
+  const close = client.close.bind(client);
+  client.close = () => { done(); close(); };
+  try { await client.connect(signal); return client; }
+  catch (error) { client.close(); throw error; }
+}
 const enabled = (value: unknown) => value === true || value === 1 || value === '1' || value === 'true';
 const advanced = (field: string) => /^(iris|zoom|focus)(Motor|Min|Max|Torque|Direction)$/.test(field) || field === 'lensIp';
 const protectedLan = (row: RecordValue) => enabled(row.ReadOnly) || enabled(row.NoDelete) || String(row.IP).startsWith('10.192.');
@@ -51,11 +79,11 @@ export class ConfigurationOperations {
   private batches = new Map<string, Set<Promise<void>>>();
   private rowQueues = new Map<string, Map<string, Promise<unknown>>>();
   private cameraNumbers = new Map<string, Set<number>>();
-  constructor(private repository: PlanRepository, private client: ClientFactory = address => new CyanviewClient(address), private remi?: RemiOperations) {}
+  constructor(private repository: PlanRepository, private client: ClientFactory = address => new CyanviewClient(address), private remi?: RemiOperations, private held?: HeldControllers) {}
   private async connect(device: RecordValue, signal: AbortSignal, address = device.address || device.base): Promise<CyanviewClient> {
-    const client = this.client(address);
-    try { await client.connect(signal); if (client.serial !== device.serial) throw new Error('Controller identity changed; refresh before sending'); return client; }
-    catch (error) { client.close(); throw error; }
+    const client = await ownSocket(this.held, this.client, device, signal, address);
+    if (client.serial !== device.serial) { client.close(); throw new Error('Controller identity changed; refresh before sending'); }
+    return client;
   }
   private receipt(kind: 'camera' | 'lan', item: RecordValue, patch: RecordValue, signal: AbortSignal) {
     return this.repository.update(plan => {
@@ -117,7 +145,8 @@ export class ConfigurationOperations {
     }
     // Controllers work side by side, and each takes its rows in turn over its one socket.
     const started = performance.now();
-    const session = new ControllerSession((device, opening) => this.connect(device, opening), async reading => (await this.repository.read(reading)).plan);
+    // A send goes down the socket already held on each controller. It is opened afresh only where none is held.
+    const session = new ControllerSession(async (device, opening) => lentSocket(this.held, device) ?? this.connect(device, opening), async reading => (await this.repository.read(reading)).plan);
     const groups = new Map<string, number[]>();
     items.forEach((value, index) => { const device = String(object(object(value).item).device ?? ''); groups.set(device, [...(groups.get(device) ?? []), index]); });
     const work = [...groups.values()], results: RecordValue[] = new Array(items.length);

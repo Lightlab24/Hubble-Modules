@@ -1,5 +1,8 @@
 # Contributing a Hubble module
 
+New to Hubble modules? [Start here](docs/getting-started.md) for the short version:
+what to download, how to build and try a module, and how to send it in for testing.
+
 Use the public TypeScript starter and [developer guide](docs/developer-kit.md).
 Official source lives in `modules/<name>/`; shared packages have focused protocol
 or contract ownership. Community proposals can use `submissions/<module-id>/` or

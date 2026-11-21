@@ -439,6 +439,11 @@ const MatrixDefinitionSchema = z
       .strictObject({
         ms: z.union([z.literal(1000), z.literal(2000), z.literal(3000)]),
         when: z.array(ModuleMatrixConditionSchema).min(1).max(16).optional(),
+        /**
+         * The colour of the disc that fills on these rows' keys while they are
+         * held; white when absent. Requires module-matrix-hold-color-v1.
+         */
+        color: Color.optional(),
       })
       .optional(),
     mapping: z

@@ -2,6 +2,7 @@ import {
   sourceBranch,
   catalogBranch,
   catalogReadArgs,
+  readCatalogFile,
 } from "./publication-targets.mjs";
 // This job inspects archives as data. It never imports or executes submitted module code.
 import { execFileSync } from "node:child_process";
@@ -45,14 +46,14 @@ const catalogFile =
   desired.formatVersion === 2 ? "catalog-v2.json" : "catalog.json";
 let current;
 try {
-  current = JSON.parse(gh(catalogReadArgs(repository, catalogFile)));
+  current = readCatalogFile(gh, repository, catalogFile);
 } catch (error) {
   if (
     catalogFile !== "catalog-v2.json" ||
     !/404|Not Found/.test(String(error.stderr))
   )
     throw error;
-  current = JSON.parse(gh(catalogReadArgs(repository, "catalog.json")));
+  current = readCatalogFile(gh, repository, "catalog.json");
   current = { ...current, sha: undefined };
 }
 const envelope = JSON.parse(

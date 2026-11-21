@@ -1,13 +1,24 @@
 name: Module submission
-description: Propose a module for review and official distribution
+description: Send a module in for testing, review and official distribution
 title: "Module submission: "
 body:
+  - type: markdown
+    attributes:
+      value: >-
+        New to Hubble modules? See
+        [Build a Hubble module: start here](https://github.com/Lightlab24/Hubble-Modules/blob/main/docs/getting-started.md).
+  - type: textarea
+    id: package
+    attributes:
+      label: Package for testing
+      description: >-
+        Drag in your .hubble-module file. Zip it first, because GitHub only accepts
+        certain file types. Leave this empty if you give a source repository below.
   - type: input
     id: source
     attributes:
       label: Source repository and exact commit or tag
-    validations:
-      required: true
+      description: Needed before an official release. Optional for a first test if you attached the package.
   - type: textarea
     id: capabilities
     attributes:

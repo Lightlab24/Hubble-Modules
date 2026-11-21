@@ -23,8 +23,16 @@ export class PlanRepository {
   private receiptRevisions = new Set<string | null>();
   private receiptHead: string | null | undefined;
   private deletedCameras = new Set<string>();
+  private head: string | null | undefined;
   constructor(services: ModuleHostServices, readonly sample: boolean) { this.documents = createModuleDocumentClient(services); }
   get root() { return this.sample ? 'sample-plan' : 'plan'; }
+  /**
+   * The newest revision of the saved plan this module has itself read or written, or undefined before its first read.
+   * Every save writes the plan's main document last, so that document's revision names the whole plan.
+   */
+  get revision() { return this.head; }
+  /** The plan's main document, now and each time anything saves the plan. */
+  watch(signal: AbortSignal) { return this.documents.watch(this.root, signal); }
   cameraWasDeleted(id: string) { return this.deletedCameras.has(id); }
   async readRemi(signal: AbortSignal) {
     const document = await this.documents.read(this.root + '-remi', signal);
@@ -41,7 +49,9 @@ export class PlanRepository {
       const current = await this.documents.read(this.root, signal), value = object(current.value), bank = Number(value.cameraBank ?? 0);
       const cameras = await Promise.all(Array.from({ length: Math.ceil(Number(value.cameraCount ?? 0) / 128) }, (_, part) => this.documents.read(`${this.root}-c${bank}-${part}`, signal)));
       const lans = await Promise.all(Array.from({ length: Math.ceil(Number(value.lanCount ?? 0) / 128) }, (_, part) => this.documents.read(`${this.root}-l${bank}-${part}`, signal)));
-      if ((await this.documents.read(this.root, signal)).revision !== current.revision) continue;
+      const after = (await this.documents.read(this.root, signal)).revision;
+      this.head = after;
+      if (after !== current.revision) continue;
       const plan = validatePlan({ formatVersion: 1, devices: value.devices ?? [], cameras: cameras.flatMap(chunk => chunk.value as unknown as RecordValue[]), lans: lans.flatMap(chunk => chunk.value as unknown as RecordValue[]), uiState: value.uiState ?? null, cameraLogins: value.cameraLogins ?? undefined, savedDevices: value.savedDevices ?? undefined });
       return { revision: current.revision, plan, fresh: current.revision === null };
     }
@@ -80,6 +90,7 @@ export class PlanRepository {
       for (const row of before.plan.cameras) if (!plan.cameras.some(item => item.id === row.id)) this.deletedCameras.add(row.id);
     }
     this.receiptHead = saved.revision;
+    this.head = saved.revision;
     return { revision: saved.revision, plan, removedDeviceIds: before.plan.devices.filter(device=>!plan.devices.some(item=>item.id===device.id)).map(device=>String(device.id)) };
   }
   write(revision: string | null, plan: Plan, signal: AbortSignal) {

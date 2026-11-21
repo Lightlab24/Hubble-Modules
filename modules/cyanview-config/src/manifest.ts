@@ -41,11 +41,14 @@ export default defineModuleManifest({
   helpers: [{
     id: 'icmp-probe', label: 'IP discovery',
     variants: (['darwin', 'linux'] as const).flatMap(platform => (['arm64', 'x64'] as const).map(arch => ({ platform, arch, runtime: 'node' as const, nodeMajor: 22, entry: 'helpers/ping.mjs' }))),
-    methods: [{ id: 'batch', readOnly: true, timeoutMs: 10000 }],
-    readinessTimeoutMs: 5000, maxConcurrent: 4, memoryMb: 64,
+    // open-page starts the browser at a controller's own web page. A page can't: Hubble's frame opens no windows.
+    methods: [{ id: 'batch', readOnly: true, timeoutMs: 10000 }, { id: 'open-page', readOnly: false, timeoutMs: 10000 }],
+    // Discover keeps one ping batch going per worker (four), so room is left beside them to open a page.
+    // At four, a link couldn't be clicked while a search ran: "Helper request capacity reached" (Nov 20, 2026).
+    readinessTimeoutMs: 5000, maxConcurrent: 8, memoryMb: 64,
   }],
   pages: [{ id: 'studio', label: 'Cyanview', icon: 'ui/logo.svg', layout: 'full-page', sections: [ModuleFrontendSectionSchema.parse({
     type: 'custom', id: 'frontend', label: 'Cyanview configuration', entry: 'ui/index.html',
-    commands: ['read-plan', 'read-part', 'save-plan', 'save-begin', 'save-part', 'save-commit', 'send', 'send-begin', 'send-part', 'send-commit', 'scan', 'stop-scan', 'probe', 'find-rig', 'import-device', 'import-part', 'refresh', 'choice-catalogs', 'options', 'remi-state', 'remi-send', 'remi-route', 'camera-control-state', 'camera-control-mutate', 'camera-enabled', 'camera-refresh'].map(id => ({ id, label: id })),
+    commands: ['read-plan', 'read-part', 'save-plan', 'save-begin', 'save-part', 'save-commit', 'send', 'send-begin', 'send-part', 'send-commit', 'scan', 'stop-scan', 'probe', 'find-rig', 'import-device', 'import-part', 'refresh', 'choice-catalogs', 'options', 'remi-state', 'remi-send', 'remi-route', 'camera-control-state', 'camera-control-mutate', 'camera-enabled', 'camera-refresh', 'open-device-page'].map(id => ({ id, label: id })),
   })] }],
 });

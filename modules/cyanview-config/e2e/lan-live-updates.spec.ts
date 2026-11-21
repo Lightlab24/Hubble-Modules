@@ -66,6 +66,9 @@ test('an address change saved on Keep by an earlier version opens as Replace and
   await sendAll(f);
   await expect(panel(f)).toContainText('Nothing is waiting to send', { timeout: 15000 });
   expect(await rioAddresses(request)).toContain('10.20.101.213');
-  const keys = (await savedLans(request)).map(item => item.elementKey).filter(Boolean);
-  expect(keys.length).toBe(new Set(keys).size);
+  // The page saves its rows after the send, so the saved copy settles a moment later, as in the spec above.
+  await expect.poll(async () => {
+    const keys = (await savedLans(request)).map(item => item.elementKey).filter(Boolean);
+    return keys.length - new Set(keys).size;
+  }, { message: 'No element is saved as two rows' }).toBe(0);
 });

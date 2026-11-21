@@ -22,6 +22,12 @@ export function fixture(settings: RecordValue = {}, options: ServiceOptions = {}
   let heldPart: string | undefined, writeHold: Promise<void> | undefined;
   let slowRead: { part: string; ms: number } | undefined;
   let refusedWatches = 0;
+  // Every document request the module makes of Hubble, in order, so a test can count what a press reads.
+  const requests: { method: string; id: string }[] = [];
+  let heldRead: string | undefined, readHold: Promise<void> | undefined;
+  let failedReads: { part: string; count: number } | undefined;
+  let refusedPlanWatches = 0, quietWatch: string | undefined;
+  const pendingWatches = new Map<string, unknown>();
   const watchers = new Map<string, Set<() => void>>();
   const definitions = documentDefinitions();
   const scope = { kind: 'host' as const, workspaceId: randomUUID(), capabilityId: 'lightlab-cyanview-config' };
@@ -33,18 +39,23 @@ export function fixture(settings: RecordValue = {}, options: ServiceOptions = {}
       if (method !== 'service') throw new Error('Unexpected host operation');
       const outer = object(raw), input = object(outer.input), id = String(input.id);
       if (outer.service !== 'documents') throw new Error('Unexpected service');
+      requests.push({ method: String(input.method), id });
       if (input.method === 'read' && slowRead && id.includes(slowRead.part)) { const { ms } = slowRead; slowRead = undefined; await delay(ms); }
+      if (input.method === 'read' && heldRead && id.includes(heldRead)) await readHold;
+      if (input.method === 'read' && failedReads && failedReads.count > 0 && id.includes(failedReads.part)) { failedReads.count--; throw new Error('Simulated storage failure'); }
       if (input.method === 'watch' && refusedWatches > 0 && id.includes('camera-control')) { refusedWatches--; throw new Error('Host service is not granted or available for this scope'); }
+      if (input.method === 'watch' && refusedPlanWatches > 0 && (id === 'plan' || id === 'sample-plan')) { refusedPlanWatches--; throw new Error('Host service is not granted or available for this scope'); }
       const definition = definitions.find(item => item.id === id); if (!definition) throw new Error('Unknown document');
       let document: ModuleDocumentSnapshot = records.get(id) ?? { workspaceId: scope.workspaceId, owner: { kind: 'host' as const, capabilityId: scope.capabilityId, moduleId: 'lightlab-cyanview-config' }, id, version: 1, revision: null, value: structuredClone(definition.defaultValue) as ModuleDocumentSnapshot['value'], canUndo: false, canRedo: false };
       if (input.method === 'watch' && input.afterRevision === document.revision) {
+        pendingWatches.set(id, input.afterRevision);
         await new Promise<void>((resolve, reject) => {
           const entries = watchers.get(id) ?? new Set(); watchers.set(id, entries);
           const done = () => { entries.delete(done); signal?.removeEventListener('abort', abort); resolve(); };
           const abort = () => { entries.delete(done); reject(new Error('Document watch cancelled')); };
           entries.add(done); signal?.addEventListener('abort', abort, { once: true });
           if (signal?.aborted) abort();
-        });
+        }).finally(() => pendingWatches.delete(id));
         document = records.get(id) ?? document;
       }
       if (input.method === 'write') {
@@ -53,7 +64,7 @@ export function fixture(settings: RecordValue = {}, options: ServiceOptions = {}
         if (input.expectedRevision !== document.revision) return { status: 'conflict', document } as unknown as ModuleJsonValue;
         document = { ...document, revision: randomUUID(), value: structuredClone(input.value) };
         records.set(id, document);
-        for (const done of [...(watchers.get(id) ?? [])]) done();
+        if (!(quietWatch && id.includes(quietWatch))) for (const done of [...(watchers.get(id) ?? [])]) done();
       }
       return { status: 'document', document } as unknown as ModuleJsonValue;
     },
@@ -64,6 +75,25 @@ export function fixture(settings: RecordValue = {}, options: ServiceOptions = {}
     failNextWrite(part: string) { failWrite = part; },
     slowNextRead(part: string, ms: number) { slowRead = { part, ms }; },
     refuseSelectionWatches(count: number) { refusedWatches = count; },
+    requests,
+    /** The saved plan's documents read since request number `from`: its main document and its camera and network rows. */
+    planReads(from = 0) {
+      const root = repository.root;
+      return requests.slice(from).filter(request => request.method === 'read' && (request.id === root || request.id.startsWith(root + '-c') || request.id.startsWith(root + '-l'))).map(request => request.id);
+    },
+    /** True once the module is waiting for the next change to this document after `revision`, so it has taken in that revision. */
+    watchingAfter(id: string, revision: string | null) { return pendingWatches.has(id) && pendingWatches.get(id) === revision; },
+    refusePlanWatches(count: number) { refusedPlanWatches = count; },
+    /** Saves to documents whose id includes `part` reach no watcher, as if a watch had gone quiet without failing. */
+    quietWatches(part: string | undefined) { quietWatch = part; },
+    failNextReads(part: string, count: number) { failedReads = { part, count }; },
+    failedReadsLeft() { return failedReads?.count ?? 0; },
+    holdReads(part: string) {
+      heldRead = part;
+      let release!: () => void;
+      readHold = new Promise<void>(resolve => { release = resolve; });
+      return () => { heldRead = undefined; release(); };
+    },
     holdWrites(part: string) {
       heldPart = part;
       let release!: () => void;
@@ -84,12 +114,16 @@ export class FakeController {
   origins: string[] = [];
   options: string[] = [];
   opened = 0;
+  /** The path of every socket opened, in order: `/ws/ui` is a settings socket, `/ws` a read of the element list. */
+  paths: string[] = [];
   failProperty = '';
   dropCreateReply = false;
   dropDeleteReply = false;
   wrongIdentity = false;
   replyDelayProperty = '';
   replyDelayMs = 0;
+  /** How long the controller takes to answer a question about a setting's choices. */
+  optionDelayMs = 0;
   /** A controller answers a write at once and pushes its changed configuration a little later. */
   pushDelayMs = 0;
   holdAction = '';
@@ -114,7 +148,7 @@ export class FakeController {
       const url = new URL(request.url!, 'http://localhost'), address = url.searchParams.get('device');
       if (!Object.values(object(this.config.IP)).some(row => object(row).IP === address)) { socket.destroy(); return; }
       this.wss.handleUpgrade(request, socket, head, ws => {
-        this.sockets.add(ws); this.opened++; this.origins.push(String(request.headers.origin));
+        this.sockets.add(ws); this.opened++; this.paths.push(url.pathname); this.origins.push(String(request.headers.origin));
         ws.once('close', () => this.sockets.delete(ws));
         if (url.pathname === '/ws' && (this.remiFleet || this.endpointElements)) {
           ws.send(JSON.stringify({ elements: [...(this.remiFleet?.elements(this) ?? []), ...(this.endpointElements?.() ?? [])], version: 1 })); return;
@@ -127,7 +161,9 @@ export class FakeController {
           const message = JSON.parse(raw.toString());
           if (message.type === 'option_request') {
             this.options.push(message.request[1]);
-            ws.send(JSON.stringify({ type: 'option_reply', request: message.request, payload: this.option(message.request) })); return;
+            const answer = () => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'option_reply', request: message.request, payload: this.option(message.request) })); };
+            if (this.optionDelayMs) setTimeout(answer, this.optionDelayMs); else answer();
+            return;
           }
           if (message.type !== 'action_request') return;
           this.actions.push(structuredClone(message.request)); this.onAction?.(structuredClone(message.request));
@@ -228,6 +264,11 @@ export class FakeRemiFleet {
   keepCopies = false;
   /** Serials a controller still lists from an earlier job, which nothing on this network answers to. */
   remembered: string[] = [];
+  /**
+   * Controllers switched off. Nothing reaches them, and the others stop listing their cameras but keep the
+   * copies they made from them, as the Gateway did with a RIO that went off on Nov 20, 2026.
+   */
+  readonly off = new Set<FakeController>();
   /** Which controllers list which. Every one lists every other unless a test says otherwise. */
   sees: (from: FakeController, to: FakeController) => boolean = () => true;
   private sequence = 0;
@@ -256,7 +297,13 @@ export class FakeRemiFleet {
   }
   private key(prefix: string) { return prefix + (++this.sequence); }
   deviceAt(address: string) {
-    return this.devices.find(device => Object.values(object(device.config.IP)).some(row => row.IP === address));
+    return this.devices.find(device => !this.off.has(device) && Object.values(object(device.config.IP)).some(row => row.IP === address));
+  }
+  /** Switches a controller off or back on. Its open sockets drop when it goes off. */
+  power(device: FakeController, on: boolean) {
+    if (on) this.off.delete(device);
+    else { this.off.add(device); for (const socket of device.sockets) socket.terminate(); }
+    this.publish();
   }
   client = (address: string) => {
     const device = this.deviceAt(address);
@@ -283,14 +330,14 @@ export class FakeRemiFleet {
       }
       // Like a real controller, each one lists every other it has seen, whether or not it takes cameras from it.
       for (const key of Object.keys(receiver.config.Remi)) if (key.startsWith('seen-')) delete receiver.config.Remi[key];
-      for (const other of this.devices) if (other !== receiver && this.sees(receiver, other)) {
+      for (const other of this.devices) if (other !== receiver && !this.off.has(other) && this.sees(receiver, other)) {
         const serial = String(other.config.Product.Serial).toLowerCase();
         receiver.config.Remi['seen-' + serial] = { Type: 'LAN_auto', IP: other.config.IP.protected.IP, Connections: { ['seen-' + serial]: { name: serial, connected: '1', cameras: [] } } };
       }
       for (const serial of this.remembered) receiver.config.Remi['seen-' + serial] = { Type: 'LAN_auto', IP: '', Connections: { ['seen-' + serial]: { name: serial, connected: '0', cameras: [] } } };
     }
   }
-  publish() { this.sync(); for (const device of this.devices) device.broadcast(); }
+  publish() { this.sync(); for (const device of this.devices) if (!this.off.has(device)) device.broadcast(); }
   elements(receiver: FakeController) {
     return [...this.entries.get(receiver)!.entries()].map(([key, row]) => ({
       key, module: 'CyElement.ImportedDevice', parents: [row.connection],
@@ -304,6 +351,8 @@ export class FakeRemiFleet {
       this.sync();
       return ['ok', key];
     }
+    // A deleted copy is no longer what its import feeds.
+    if (request.delete) for (const [selector, key] of this.assignments.get(receiver)!) if (key === request.delete[0]) this.assignments.get(receiver)!.delete(selector);
     const update = request.update;
     if (!update) return;
     if (update.key === 'relay' && typeof update.changes.tags === 'string') {
@@ -321,7 +370,8 @@ export class FakeRemiFleet {
     if (enable === '1' && !previous) {
       const key = this.key('copy');
       const row = entry.source.config.Camera[entry.sourceKey];
-      receiver.config.Camera[key] = { Number: row.Number, Name: row.Name, Model: 'Cyan - Imported', Enabled: '1' };
+      // A copy names the controller and camera it came from, as real copies do.
+      receiver.config.Camera[key] = { Number: row.Number, Name: row.Name, Model: 'Cyan - Imported', Enabled: '1', Interface: { device: '(D)' + String(entry.source.config.Product.Serial).toLowerCase(), port: entry.sourceKey } };
       assignments.set(update.key, key);
     } else if (enable === '0' && previous) {
       if (!this.keepCopies) delete receiver.config.Camera[previous];

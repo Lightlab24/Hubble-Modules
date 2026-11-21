@@ -33,11 +33,8 @@ async function sentCamera(page: Page, request: APIRequestContext) {
   await page.goto('/');
   const f = ui(page);
   await expect(f.locator('[data-role="saved-label"]')).toContainText('Workspace saved');
-  await f.locator('[data-device-view="details"]').click();
-  await f.locator('[data-role="manual-ip"]').fill('10.192.1.10');
-  await f.getByRole('button', { name: 'Find', exact: true }).click();
-  await expect(f.locator('[data-action="add-discovered"]')).toBeEnabled();
-  await f.locator('[data-action="add-discovered"]').click();
+  await f.locator('[data-device-add]').fill('10.192.1.10');
+  await f.locator('[data-device-add]').press('Enter');
   await expect(f.locator('[data-role="device-count"]')).toHaveText('1');
   await f.locator('[data-tab="assignment"]').click().then(() => f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   await f.getByRole('button', { name: 'Expand all device spreadsheets', exact: true }).click();
@@ -348,10 +345,8 @@ test('a lens picked but not sent yet lists its connections, and one Send sets bo
   await page.goto('/');
   const f = ui(page);
   await expect(f.locator('[data-role="saved-label"]')).toContainText('Workspace saved');
-  await f.locator('[data-device-view="details"]').click();
-  await f.locator('[data-role="manual-ip"]').fill('10.192.1.10');
-  await f.getByRole('button', { name: 'Find', exact: true }).click();
-  await f.locator('[data-action="add-discovered"]').click();
+  await f.locator('[data-device-add]').fill('10.192.1.10');
+  await f.locator('[data-device-add]').press('Enter');
   await expect(f.locator('[data-role="device-count"]')).toHaveText('1');
   await f.locator('[data-tab="assignment"]').click().then(() => f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   await f.getByRole('button', { name: 'Expand all device spreadsheets', exact: true }).click();

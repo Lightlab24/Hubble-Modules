@@ -28,6 +28,8 @@ export async function buildUiAdapter() {
   replace("selectedCameras=new Set(),selectedResults=new Set(),deviceQueues=new Map()", "selectedResults=new Set()");
   replaceBetween("  function sendItems(", "  function showReview(", await readFile(path.join(root, 'src/ui-send-workflows.js'), 'utf8'));
   replace("group.querySelector('[data-action=\"delete-controller\"]').disabled=!cameras.some(c=>c.device===d.id&&selectedCameras.has(c.id));", "syncCameraDeleteButton(group);");
+  // A camera deleted or moved while its controller was off is out of the workspace, though that controller still has it.
+  replace("const rows=cameras.filter(c=>c.device===d.id),open=openControllers.has(d.id)", "const rows=cameras.filter(c=>c.device===d.id&&!c.leftBehind&&!c.foreign),open=openControllers.has(d.id)");
   replace("    syncSummary();icons();\n  }\n  function inputCell", "    if(item.deleting&&row)row.querySelectorAll('[data-field],input[data-lens-axis]').forEach(el=>el.disabled=true);\n    paintCameraColumn(item);\n    paintIrisSwap(item);\n    syncSummary();icons();\n  }\n  function inputCell");
   replace("row.querySelectorAll('input[data-field],select[data-field]')", "row.querySelectorAll('[data-field]')");
   replace("+' for '+(device(row.device)?.name||'new row'))+'\"'+(disabled?' disabled':'')", "+' for '+(device(row.device)?.name||'new row'))+'\"'+(disabled||row.deleting?' disabled':'')");
@@ -38,13 +40,10 @@ export async function buildUiAdapter() {
   replace("b.disabled=!pending||!d.online||", "b.disabled=!pending||");
   replace("<span>'+esc(d.online?'Connected at '+d.base:'Offline · edits stay pending')+'</span>", "<span data-connection-note>'+esc(connectionNote(d))+'</span>");
   replace("'Manual · edit, then Send changes.'", "'Manual · edit, then Send settings.'");
-  replace("    syncOrganization();\n  }\n  function paintItem", "    syncOrganization();syncNetworkControls();\n  }\n  function paintItem");
-  replace("openControllers:[...openControllers],", "openControllers:[...openControllers],openNetworkDevices:[...openNetworkDevices],hiddenNetworkColumnsByDevice:Object.fromEntries(Object.entries(hiddenNetworkColumnsByDevice).map(([id,fields])=>[id,[...fields]])),discoveryOpen:discoveryCard?.open,");
-  replace("restoreColumnVisibility(data);", "restoreColumnVisibility(data);restoreDeviceWorkflow(data);");
-  replace("restoreDeviceWorkflow(data);", "restoreDeviceWorkflow(data);restoreCameraSorting(data);restoreCameraLayouts(data);restoreRemiDrafts(data);restoreRemiView(data);");
-  replace("discoveryOpen:discoveryCard?.open,", "discoveryOpen:discoveryCard?.open,remiDrafts:saveRemiDrafts(),remiView:saveRemiView(),");
+  replace("    syncOrganization();\n  }\n  function paintItem", "    syncOrganization();syncDeviceControls();\n  }\n  function paintItem");
+  replace("openControllers:[...openControllers],", "openControllers:[...openControllers],cameraSortByDevice:JSON.parse(JSON.stringify(cameraSortByDevice)),cameraLayouts:saveCameraLayouts(),cameraSheetsByDevice:saveCameraSheets(),remiDrafts:saveRemiDrafts(),remiView:saveRemiView(),");
+  replace("restoreColumnVisibility(data);", "restoreColumnVisibility(data);restoreCameraSorting(data);restoreCameraLayouts(data);restoreRemiDrafts(data);restoreRemiView(data);");
   replace("remiSharing:'Deferred until a later capture'", "remiSharing:'Managed camera sources'");
-  replace("openNetworkDevices:[...openNetworkDevices],", "openNetworkDevices:[...openNetworkDevices],cameraSortByDevice:JSON.parse(JSON.stringify(cameraSortByDevice)),cameraLayouts:saveCameraLayouts(),cameraSheetsByDevice:saveCameraSheets(),");
   replace("  function cameraGrid(rows,deviceId){", "  function cameraGrid(rows,deviceId){rows=sortCameraRows(rows,deviceId);");
   replace("    const groups=axisGroups(deviceId);\n", "");
   replaceBetween("{id:'selected',label:", "{id:'number',", "");
@@ -55,7 +54,7 @@ export async function buildUiAdapter() {
     // columns keep the delete button on screen however far the sheet scrolls.
     if (deviceId !== allCamerasSheet) {
       columns.splice(columns.findIndex(column => column.id === 'password') + 1, 0, deviceId === cameraSetupSheet ? { id: 'source', label: 'Source', width: 140 } : { id: 'remiMaster', label: 'Master RCP', width: 130 });
-      columns.splice(columns.findIndex(column => column.id === 'name') + 1, 0, { id: 'remove', label: '', width: 62, tool: true, frozen: 0 });
+      columns.splice(columns.findIndex(column => column.id === 'name') + 1, 0, { id: 'remove', label: '', width: 34, tool: true, frozen: 0 });
     }
     columns.push({ id: 'sync', label: 'Sync', width: 70 });
     if (deviceId === allCamerasSheet) columns = arrangeAllCameraColumns(columns);
@@ -99,13 +98,13 @@ export async function buildUiAdapter() {
   replace("id:'login',label:'Username',width:96", "id:'login',label:'Username',width:88");
   replace("id:'password',label:'Password',width:114", "id:'password',label:'Password',width:96");
   replace("    if(ui.sendMode==='Auto send')sendItems([item],isLan?'lan':'camera',false,item.isNew?[...item.dirty]:fields);", "    if(ui.sendMode==='Auto send')sendItems([item],isLan?'lan':'camera',false,item.isNew?[...item.dirty]:fields);\n    if(!isLan&&cameraSort(item.device).field===field)renderCameras();");
-  replace("  function renderLans(){", "  function renderLans(){return renderManagedDevices();}\n  function renderLegacyLans(){");
+  replace("  function renderLans(){", "  function renderLans(){syncSummary();renderDeviceSheet();}\n  function renderLegacyLans(){");
   replace("  function emptyRows(cols,start,count=2){return", "  function emptyRows(){return '';}\n  function legacyEmptyRows(cols,start,count=2){return");
   replaceBetween('<div class="hc-formula">', '<div class="hc-scroll">', '');
   replace("<button data-action=\"camera-columns\"", "<button class=\"hc-danger\" data-action=\"clear-device-cameras\" data-id=\"'+d.id+'\"'+(rows.length?'':' disabled')+'>'+icon('eraser')+'Clear all cameras</button><button class=\"hc-danger\" data-action=\"remove-device\" data-id=\"'+d.id+'\" aria-label=\"Remove '+esc(d.name)+' from managed list\">'+icon('trash-2')+'Remove device</button><button data-action=\"camera-columns\"");
   replace("<button data-action=\"camera-columns\" data-id=\"'+d.id+'\">'+icon('columns-3')+'Columns</button>", "");
   replace("<div class=\"hc-column-menu\" data-columns-for=\"'+d.id+'\" hidden>'+cameraColumnMenu(d.id)+'</div></div><div class=\"hc-sheet\">", "'+cameraSelectionStrip(d.id)+'</div><div class=\"hc-sheet\">");
-  replace("function setTab(next,save=true){tab=next;", "function setTab(next,save=true){if(next==='discovery'){next='devices';if(discoveryCard)discoveryCard.open=true;}tab=next;");
+  replace("function setTab(next,save=true){tab=next;", "function setTab(next,save=true){if(next==='discovery')next='devices';tab=next;");
   replace("for(const id of ['devices','discovery','cameras'])", "for(const id of ['devices','setup','cameras','assignment'])");
   replace("if(['devices','discovery','cameras'].includes(data.tab))", "if(['devices','discovery','setup','cameras','assignment'].includes(data.tab))");
   replace("if(!device(id)||!groups||typeof groups!=='object')continue;", "if(!sheetOwner(id)||!groups||typeof groups!=='object')continue;");
@@ -117,9 +116,6 @@ export async function buildUiAdapter() {
   source=source.replaceAll("el.closest('table')===$('lan-grid')", "!!el.closest('table[data-lan-device]')");
   source=source.replaceAll("$('lan-value').textContent=el.value;", "if($('lan-value'))$('lan-value').textContent=el.value;");
   replace("else{const id=item.device;root.querySelector('[data-formula-value=\"'+id+'\"]').textContent=el.value;}", "");
-  replace("handle.closest('[data-controller]').dataset.dragging", "handle.closest('[data-controller],[data-network-controller]').dataset.dragging");
-  source=source.replaceAll("event.target.closest('[data-controller]')", "event.target.closest('[data-controller],[data-network-controller]')");
-  source=source.replaceAll("group.dataset.controller", "(group.dataset.controller||group.dataset.networkController)");
   replace("  function startScan(){\n", "  function startScan(){\n    if(moduleBridge&&!moduleBridge.preview){startLiveScan();return;}\n");
   replace("  function addResults(){", "  function addResults(){if(moduleBridge&&!moduleBridge.preview){void addLiveResults();return;}");
   replace("  function probeIP(){", "  function probeIP(){if(moduleBridge&&!moduleBridge.preview){void probeLiveIP();return;}");

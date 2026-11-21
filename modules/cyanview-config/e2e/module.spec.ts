@@ -26,8 +26,6 @@ async function open(page: Page, request: APIRequestContext, sample = true) {
   await request.post('/__reset', { data: { sample } });
   await page.goto('/'); await expect(ui(page).locator('#cyanview-design')).toBeVisible();
   await expect(ui(page).locator('[data-role="saved-label"]')).toContainText(sample ? 'Sample data' : 'Workspace saved');
-  // These cover each device's own network card, which is now the Details view of the Devices tab.
-  await ui(page).locator('[data-device-view="details"]').click();
   if (sample) await ui(page).locator('[data-tab="assignment"]').click().then(() => ui(page).locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
 }
 // Lists open Hubble's own pop-up; the system menu underneath can't be reached by hand.
@@ -42,6 +40,14 @@ async function openPending(frame: ReturnType<typeof ui>) {
   await expect(list).toBeVisible();
   return list;
 }
+// The Devices sheet adds a device by its IP in its last row.
+async function addByIp(frame: ReturnType<typeof ui>, address = '10.192.1.10') {
+  const add = frame.locator('[data-role="device-sheet"] [data-device-add]');
+  await add.fill(address);
+  await add.press('Enter');
+}
+const deviceRows = (frame: ReturnType<typeof ui>) => frame.locator('[data-role="device-sheet"] tr[data-device-row]');
+const foundRows = (frame: ReturnType<typeof ui>) => frame.locator('[data-role="device-sheet"] tr[data-device-found]');
 async function inspect(request: APIRequestContext) { return (await request.get('/__inspect')).json(); }
 async function saved(request: APIRequestContext) {
   const reply = await request.post('/__rpc', { data: { operation: 'call', commandId: 'read-plan', value: null } });
@@ -57,10 +63,7 @@ test('camera deletion targets the active cell or the right-clicked row after con
     }
   });
   await open(page, request, false); const f = ui(page);
-  await f.locator('[data-role="manual-ip"]').fill('10.192.1.10');
-  await f.getByRole('button', { name: 'Find', exact: true }).click();
-  await expect(f.locator('[data-action="add-discovered"]')).toBeEnabled();
-  await f.locator('[data-action="add-discovered"]').click();
+  await addByIp(f);
   await expect(f.locator('[data-role="device-count"]')).toHaveText('1');
   await f.locator('[data-tab="assignment"]').click().then(() => f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   await f.getByRole('button', { name: 'Expand all device spreadsheets', exact: true }).click();
@@ -123,10 +126,7 @@ test('camera deletion targets the active cell or the right-clicked row after con
 test('auto sends and deletions on different cameras proceed while earlier replies are held', async ({ page, request }) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   await open(page, request, false); const f = ui(page);
-  await f.locator('[data-role="manual-ip"]').fill('10.192.1.10');
-  await f.getByRole('button', { name: 'Find', exact: true }).click();
-  await expect(f.locator('[data-action="add-discovered"]')).toBeEnabled();
-  await f.locator('[data-action="add-discovered"]').click();
+  await addByIp(f);
   await expect(f.locator('[data-role="device-count"]')).toHaveText('1');
   await f.locator('[data-tab="assignment"]').click().then(() => f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   await f.getByRole('button', { name: 'Expand all device spreadsheets', exact: true }).click();
@@ -280,10 +280,7 @@ test('Patch Sheet saves camera column widths, row heights and collapsed fields',
 test('each camera opts into lens axes and only sends the selected settings', async ({ page, request }) => {
   await open(page, request, false);
   const f = ui(page);
-  await f.locator('[data-role="manual-ip"]').fill('10.192.1.10');
-  await f.getByRole('button', { name: 'Find', exact: true }).click();
-  await expect(f.locator('[data-action="add-discovered"]')).toBeEnabled();
-  await f.locator('[data-action="add-discovered"]').click();
+  await addByIp(f);
   await expect(f.locator('[data-role="device-count"]')).toHaveText('1');
   await f.locator('[data-tab="assignment"]').click().then(() => f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   await f.getByRole('button', { name: 'Expand all device spreadsheets', exact: true }).click();
@@ -342,7 +339,7 @@ test('each camera opts into lens axes and only sends the selected settings', asy
   expect(await params()).toEqual(['3:I:1.6:32,5:Z,8:F', '']);
 });
 
-test('mixed device order, expand all and LAN columns retain the approved interactions', async ({ page, request }) => {
+test('mixed device order and expand all retain the approved interactions', async ({ page, request }) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   await open(page, request); const f = ui(page);
   await f.getByRole('button', { name: 'Expand all device spreadsheets', exact: true }).click();
@@ -352,20 +349,13 @@ test('mixed device order, expand all and LAN columns retain the approved interac
   await f.getByRole('button', { name: 'Collapse all device spreadsheets', exact: true }).click();
   await expect(f.locator('[data-action="toggle-controller"][aria-expanded="true"]')).toHaveCount(0);
   await f.locator('[data-tab="devices"]').click();
-  const network=f.locator('[data-network-controller="rcp1"]');
-  await expect(f.locator('[data-network-controller]')).toHaveCount(5);
   await expect(f.locator('[data-tab="discovery"]')).toHaveCount(0);
-  await network.locator('[data-action="network-columns"]').click();
-  await network.getByRole('checkbox', { name: 'Show Current address', exact: true }).uncheck();
-  await page.keyboard.press('Escape');
-  await expect(network.locator('[data-network-columns-for]')).toBeHidden();
-  await expect(network.locator('td[data-column="current"]')).toHaveCount(0);
-  await f.getByRole('button', { name: 'Expand all device settings', exact: true }).click();
-  await expect(f.locator('[data-action="toggle-network-device"][aria-expanded="true"]')).toHaveCount(5);
-  await expect(f.locator('[data-network-controller="rio1"] td[data-column="current"]').first()).toBeVisible();
-  await expect.poll(async () => (await saved(request))?.uiState?.privateContent?.hiddenNetworkColumnsByDevice?.rcp1).toContain('current');
-  await page.reload(); await expect(network.getByRole('table')).toBeVisible();
-  await expect(network.locator('td[data-column="current"]')).toHaveCount(0);
+  // The Devices sheet lists the devices in the same order.
+  const sheetOrder = () => deviceRows(f).evaluateAll(elements => elements.map(element => (element as HTMLElement).dataset.deviceRow));
+  expect(await sheetOrder()).toEqual(['rcp1', 'rio1', 'rcp2', 'rio2', 'rio3']);
+  await expect.poll(async () => (await saved(request))?.uiState?.privateContent?.deviceOrder).toEqual(['rcp1', 'rio1', 'rcp2', 'rio2', 'rio3']);
+  await page.reload(); await expect(deviceRows(f).first()).toBeVisible();
+  expect(await sheetOrder()).toEqual(['rcp1', 'rio1', 'rcp2', 'rio2', 'rio3']);
   await f.locator('[data-tab="assignment"]').click().then(() => f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   await expect(f.locator('[data-action="toggle-controller"][aria-expanded="true"]')).toHaveCount(0);
   expect(await f.locator('[data-controller]').evaluateAll(elements => elements.map(element => (element as HTMLElement).dataset.controller))).toEqual(['rcp1', 'rio1', 'rcp2', 'rio2', 'rio3']);
@@ -376,19 +366,15 @@ test('live bridge discovers, explicitly adds, saves and sends to the simulated c
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   await open(page, request, false); const f = ui(page);
   await expect(f.locator('[data-controller]')).toHaveCount(0);
-  await expect(f.locator('[data-role="device-discovery"]')).toHaveAttribute('open','');
+  await expect(f.locator('[data-role="scan-bar"]')).toBeVisible();
   await expect(f.locator('[data-action="scan"]')).toBeDisabled();
   await pick(f, 'Network range', 'Custom range…');
   await f.getByRole('textbox', { name: 'Custom CIDR range', exact: true }).fill('10.20.101.200/32');
   await f.getByRole('button', { name: 'Discover', exact: true }).click();
-  await expect(f.getByRole('table', { name: 'Discovered devices' }).locator('tbody tr')).toHaveCount(1);
-  await expect(f.locator('[data-action="add-discovered"]')).toHaveText('Add all 1');
+  await expect(foundRows(f)).toHaveCount(1);
+  await expect(f.locator('[data-action="add-all-found"]')).toHaveText('Add all 1');
   await expect(f.locator('[data-role="device-count"]')).toHaveText('0');
-  await f.getByRole('textbox', { name: 'Device IP address', exact: true }).fill('10.192.1.10');
-  await f.getByRole('button', { name: 'Find', exact: true }).click();
-  await expect(f.getByRole('table', { name: 'Discovered devices' }).locator('tbody tr')).toHaveCount(1);
-  await expect(f.locator('[data-role="device-count"]')).toHaveText('0');
-  await f.locator('[data-action="add-discovered"]').click();
+  await f.locator('[data-action="add-all-found"]').click();
   await expect(f.locator('[data-role="device-count"]')).toHaveText('1');
   expect((await inspect(request)).actions).toHaveLength(0);
   await f.locator('[data-tab="assignment"]').click().then(() => f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
@@ -442,17 +428,14 @@ test('live bridge discovers, explicitly adds, saves and sends to the simulated c
   expect(errors).toEqual([]);
 });
 
-test('Find by IP stays visible through completed scans and repeated host state updates',async({page,request})=>{
+test('found devices stay listed through completed scans and repeated host state updates',async({page,request})=>{
   await open(page,request,false);const f=ui(page);
   await expect(f.locator('[data-tab="devices"]')).toHaveAttribute('aria-selected','true');
   await pick(f, 'Network range', 'Custom range…');
-  await f.getByRole('textbox',{name:'Custom CIDR range',exact:true}).fill('10.20.101.250/32');
+  await f.getByRole('textbox',{name:'Custom CIDR range',exact:true}).fill('10.192.1.10/32');
   await f.getByRole('button',{name:'Discover',exact:true}).click();
   await expect(f.locator('[data-role="scan-label"]')).toContainText('Discovery complete');
-  await f.getByRole('textbox',{name:'Device IP address',exact:true}).fill('10.192.1.10');
-  await f.getByRole('button',{name:'Find',exact:true}).click();
-  const rows=f.getByRole('table',{name:'Discovered devices'}).locator('tbody tr');
-  await expect(rows).toHaveCount(1);
+  await expect(foundRows(f)).toHaveCount(1);
   await f.getByRole('button',{name:'Discovery method',exact:true}).click();
   await expect(f.getByRole('listbox',{name:'Discovery method'}).getByRole('option')).toHaveText(['Fast IP discovery','Broadcast discovery']);
   await f.getByRole('listbox',{name:'Discovery method'}).getByRole('option',{name:'Fast IP discovery',exact:true}).click();
@@ -460,21 +443,18 @@ test('Find by IP stays visible through completed scans and repeated host state u
   await expect(f.locator('[data-role="scan-label"]')).toContainText('Discovery complete');
   await f.getByRole('button',{name:'Refresh all',exact:true}).click();
   await expect(f.locator('[data-role="toast"]')).toHaveText('Settings refreshed');
-  await expect(rows).toHaveCount(1);
-  await expect(f.locator('[data-action="add-discovered"]')).toBeEnabled();
+  await expect(foundRows(f)).toHaveCount(1);
+  await expect(f.locator('[data-action="add-all-found"]')).toBeEnabled();
   expect((await inspect(request)).actions).toHaveLength(0);
 });
 
 async function addController(page: Page) {
   const f=ui(page);
-  await f.getByRole('textbox',{name:'Device IP address',exact:true}).fill('10.192.1.10');
-  await f.getByRole('button',{name:'Find',exact:true}).click();
-  await expect(f.locator('[data-action="add-discovered"]')).toBeEnabled();
-  await f.locator('[data-action="add-discovered"]').click();
+  await addByIp(f);
   await expect(f.locator('[data-role="device-count"]')).toHaveText('1');
 }
 
-test('offline status allows fresh camera and LAN sends, with plain headers on both sheets',async({page,request})=>{
+test('offline status allows fresh camera sends and holds LAN sends, with plain headers on both sheets',async({page,request})=>{
   const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
   await open(page,request,false);await addController(page);const f=ui(page);
   await f.locator('[data-tab="assignment"]').click().then(() => f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
@@ -492,22 +472,22 @@ test('offline status allows fresh camera and LAN sends, with plain headers on bo
   await expect(f.locator('.hc-letters,.hc-num,.hc-formula')).toHaveCount(0);
   await expect(camera.locator('[data-field="number"]')).toHaveValue('1');
   await f.locator('[data-tab="devices"]').click();
-  const network=f.locator('[data-network-controller]');
-  const lanId=await network.locator('tr[data-id]').filter({hasText:'10.20.101.200/16'}).getAttribute('data-id');
-  const current=network.locator('tr[data-id="'+lanId+'"]');
-  await current.locator('[data-field="operation"] + .hc-dropdown').click();
-  await f.getByRole('listbox').getByRole('option', { name: 'Add', exact: true }).click();
-  await current.locator('[data-field="planned"]').fill('10.20.101.201/16');
-  await current.locator('[data-field="planned"]').press('Enter');
-  await expect(network.locator('.hc-controller-header > .hc-status')).toHaveText('Offline');
-  await expect(network.locator('[data-action="send-network-device"]')).toBeEnabled();
-  await network.locator('[data-action="send-network-device"]').click();
-  await f.locator('[data-action="confirm-send"]').click();
-  await expect(current.locator('[data-column="sync"]')).toContainText('Verified');
-  const configuration=(await inspect(request)).config;
-  expect(configuration.IP.protected.IP).toBe('10.192.1.10');expect(configuration.IP.old.IP).toBe('10.20.101.200');
-  expect(Object.values(configuration.IP).some((value:any)=>value.IP==='10.20.101.201')).toBe(true);
-  await f.locator('[data-role="device-discovery"] > summary').click();
+  const device=deviceRows(f);
+  await expect(device.locator('[data-device-column="status"]')).toHaveText('Offline');
+  await expect(device.locator('[data-device-cell$=":lan1"]')).toHaveValue('10.20.101.200/16');
+  await f.locator('[data-role="device-sheet"] [data-action="toggle-device-group"][data-group="lan"]').click();
+  const second=device.locator('[data-device-cell$=":lan2"]');
+  await second.fill('10.20.101.201/16');
+  await second.press('Enter');
+  // Pending sends holds an address for a controller reading Offline, as it holds a camera change.
+  const before=structuredClone((await inspect(request)).config.IP);
+  const pending=await openPending(f);
+  const line=pending.locator('[data-pending-lan-line]');
+  await expect(line).toContainText('10.20.101.201/16');
+  await expect(line).toContainText('is offline');
+  await expect(pending.locator('[data-pending-lan-send]')).toBeDisabled();
+  await expect(second).toHaveValue('10.20.101.201/16');
+  expect((await inspect(request)).config.IP).toEqual(before);
   await f.locator('html').evaluate(element=>element.scrollTop=0);
   await page.locator('iframe').screenshot({path:'artifacts/cyanview-devices-ui.png'});
   expect(errors).toEqual([]);
@@ -533,11 +513,11 @@ test('device removal persists, and Undo retains camera drafts and concurrent cha
     if(!intercepted&&message.commandId==='save-plan'&&message.value?.plan?.devices?.length===0){intercepted=true;heldResolve();await released;await route.fulfill({json:{error:'Simulated storage failure'}});}
     else await route.continue();
   });
-  await f.locator('[data-network-controller] [data-action="remove-device"]').click();await held;
-  await expect(f.locator('[data-controller],[data-network-controller]')).toHaveCount(0);
+  await deviceRows(f).locator('[data-action="remove-device"]').click();await held;
+  await expect(f.locator('[data-controller],[data-device-row]')).toHaveCount(0);
   await f.locator('[data-action="send-mode"][data-mode="Auto send"]').click();
   await f.locator('#hc-devices').getByRole('button',{name:'Undo removal',exact:true}).click();
-  await expect(f.locator('[data-network-controller]')).toHaveCount(1);release();
+  await expect(deviceRows(f)).toHaveCount(1);release();
   await expect.poll(async()=>{const plan=await saved(request);return {count:plan?.devices?.length,name:plan?.cameras?.[0]?.name,mode:plan?.uiState?.privateContent?.ui?.sendMode};}).toEqual({count:1,name:'Keep this draft',mode:'Auto send'});
   await expect(f.locator('[data-role="saved-label"]')).toContainText('Workspace saved');
   await page.reload();
@@ -546,7 +526,7 @@ test('device removal persists, and Undo retains camera drafts and concurrent cha
   await f.locator('[data-controller] [data-action="remove-device"]').click();
   await expect.poll(async()=>(await saved(request))?.devices?.length).toBe(0);
   await page.reload();await f.locator('[data-tab="devices"]').click();
-  await expect(f.locator('[data-network-controller],[data-controller]')).toHaveCount(0);
+  await expect(f.locator('[data-device-row],[data-controller]')).toHaveCount(0);
   expect((await saved(request)).cameras).toHaveLength(0);
   expect((await inspect(request)).config).toEqual(hardware);expect((await inspect(request)).actions).toHaveLength(0);
   expect(errors).toEqual([]);
@@ -564,7 +544,7 @@ test('full-page sizing keeps chrome visible while long sheets scroll across resi
     await expect(f.locator('.hc-module-header')).toBeInViewport();await expect(f.locator('.hc-global-foot')).toBeInViewport();await expect(f.locator('.hc-tabs')).toBeInViewport();
   }
   expect(await f.locator('#hc-cameras').evaluate(element=>element.scrollHeight>element.clientHeight)).toBe(true);
-  await f.locator('[data-tab="devices"]').click();await expect(f.locator('[data-role="network-devices"]')).toBeVisible();
+  await f.locator('[data-tab="devices"]').click();await expect(f.locator('[data-role="device-sheet"]')).toBeVisible();
   await f.locator('[data-tab="assignment"]').click().then(() => f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());await expect(f.locator('[data-action="toggle-controller"][aria-expanded="true"]')).toHaveCount(5);
   await expect.poll(async()=>(await saved(request))?.uiState?.privateContent?.tab).toBe('cameras');await page.reload();
   await expect(f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]')).toHaveAttribute('aria-pressed','true');await expect(f.locator('.hc-global-foot')).toBeInViewport();
@@ -572,20 +552,20 @@ test('full-page sizing keeps chrome visible while long sheets scroll across resi
   await page.locator('iframe').screenshot({path:'artifacts/cyanview-full-page-ui.png'});
 });
 
-test('fast ping discovery streams verified devices, stops cleanly and retains manual results',async({page,request})=>{
+test('fast ping discovery streams verified devices into the sheet and stops cleanly',async({page,request})=>{
   await open(page,request,false);const f=ui(page);
   await expect(f.getByRole('button',{name:'Discovery method',exact:true})).toHaveText('Fast IP discovery');
   await request.post('/__simulate',{data:{pingDelayMs:3000}});
   await pick(f, 'Network range', '10.192.0.0/16');
   await f.getByRole('button',{name:'Discover',exact:true}).click();
-  await expect(f.getByRole('table',{name:'Discovered devices'}).locator('tbody tr')).toHaveCount(1);
+  await expect(foundRows(f)).toHaveCount(1);
   await expect(f.locator('[data-role="scan-label"]')).toContainText('Pinging IP addresses');
   await f.getByRole('button',{name:'Stop',exact:true}).click();await expect(f.locator('[data-role="scan-label"]')).toContainText('Discovery stopped');
-  await f.getByRole('textbox',{name:'Device IP address',exact:true}).fill('10.192.1.10');await f.getByRole('button',{name:'Find',exact:true}).click();
+  await expect(foundRows(f)).toHaveCount(1);
   await request.post('/__simulate',{data:{pingDelayMs:0}});
   await pick(f, 'Network range', 'Custom range…');await f.getByRole('textbox',{name:'Custom CIDR range',exact:true}).fill('10.20.101.250/32');
   await f.getByRole('button',{name:'Discover',exact:true}).click();await expect(f.locator('[data-role="scan-label"]')).toContainText('Discovery complete');
-  await expect(f.getByRole('table',{name:'Discovered devices'}).locator('tbody tr')).toHaveCount(1);expect((await inspect(request)).actions).toHaveLength(0);
+  expect((await inspect(request)).actions).toHaveLength(0);
 });
 
 test('camera sheets default to numeric order and retain independent header sorting',async({page,request})=>{
@@ -714,10 +694,7 @@ test('a multi-row camera paste sends one Auto send batch without replaying stage
       if (payload?.commandId === 'send') sends.push(payload.value);
     }
   });
-  await f.locator('[data-role="manual-ip"]').fill('10.192.1.10');
-  await f.getByRole('button', { name: 'Find', exact: true }).click();
-  await expect(f.locator('[data-action="add-discovered"]')).toBeEnabled();
-  await f.locator('[data-action="add-discovered"]').click();
+  await addByIp(f);
   await expect(f.locator('[data-role="device-count"]')).toHaveText('1');
   await f.locator('[data-tab="assignment"]').click().then(() => f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   await f.getByRole('button', { name: 'Expand all device spreadsheets', exact: true }).click();
@@ -763,10 +740,7 @@ test('a multi-row camera paste sends one Auto send batch without replaying stage
 test('live lens connection choices can be selected and saved offline after reload', async ({ page, request }) => {
   await open(page, request, false);
   const f = ui(page);
-  await f.locator('[data-role="manual-ip"]').fill('10.192.1.10');
-  await f.getByRole('button', { name: 'Find', exact: true }).click();
-  await expect(f.locator('[data-action="add-discovered"]')).toBeEnabled();
-  await f.locator('[data-action="add-discovered"]').click();
+  await addByIp(f);
   await expect(f.locator('[data-role="device-count"]')).toHaveText('1');
   await f.locator('[data-tab="assignment"]').click().then(() => f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   await f.getByRole('button', { name: 'Expand all device spreadsheets', exact: true }).click();

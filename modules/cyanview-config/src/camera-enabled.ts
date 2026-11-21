@@ -1,6 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { object, type RecordValue } from './model.js';
-import type { ClientFactory } from './operations.js';
+import { lentSocket, ownSocket, type ClientFactory, type HeldControllers } from './operations.js';
 import type { PlanRepository } from './repository.js';
 import type { RemiOperations } from './remi.js';
 
@@ -31,7 +31,7 @@ export class CameraEnabledOperations {
   private expected = new Map<string, { value: boolean; until: number }>();
   constructor(private repository: PlanRepository, private factory: ClientFactory, private remi: RemiOperations,
     private online: CameraOnline, private changed: () => void, private log: (message: string) => void,
-    private lifetime: AbortSignal, private options: CameraEnabledOptions = {}) {}
+    private lifetime: AbortSignal, private options: CameraEnabledOptions = {}, private held?: HeldControllers) {}
   state(): EnabledJob[] { return [...this.jobs.values()]; }
   /** Switches a camera on or off on its controller, then its REMI copies the same way. */
   set(device: string, key: string, on: boolean, signal: AbortSignal) { return this.enqueue(() => this.apply(device, key, on ? 'on' : 'off', signal)); }
@@ -106,19 +106,20 @@ export class CameraEnabledOperations {
     await delay(this.options.holdMs ?? 1000, undefined, { signal });
     return this.write(device, key, true, signal);
   }
+  /** The socket already held on a controller, or a new one. Each switch used to open its own. */
+  private async open(device: RecordValue, signal: AbortSignal) {
+    return lentSocket(this.held, device) ?? ownSocket(this.held, this.factory, device, signal);
+  }
   private async number(device: RecordValue, key: string, signal: AbortSignal) {
-    const client = this.factory(device.address || device.base);
-    try {
-      await client.connect(signal);
-      return Number(client.config.Camera?.[key]?.Number) || 0;
-    } finally { client.close(); }
+    const client = await this.open(device, signal);
+    try { return Number(client.config.Camera?.[key]?.Number) || 0; }
+    finally { client.close(); }
   }
   /** Sets Enabled and waits for the controller to report it. Returns the camera's number. */
   private async write(device: RecordValue, key: string, on: boolean, signal: AbortSignal) {
-    const client = this.factory(device.address || device.base);
-    let number = 0;
+    let number = 0, client: Awaited<ReturnType<CameraEnabledOperations['open']>> | undefined;
     try {
-      await client.connect(signal);
+      client = await this.open(device, signal);
       if (client.serial !== device.serial) throw new Error('Controller identity changed. Refresh before sending.');
       const camera = client.config.Camera?.[key];
       if (!camera) throw new Error('The camera is no longer there');
@@ -132,7 +133,7 @@ export class CameraEnabledOperations {
     } catch (error) {
       this.expected.delete(device.id + '\n' + key);
       throw new Error((number ? 'Camera ' + number : 'A camera') + ' on ' + device.name + ': ' + message(error));
-    } finally { client.close(); }
+    } finally { client?.close(); }
   }
   /** Waits for a camera to report itself online, up to a limit, since one that never does shouldn't hold up the rest. */
   private async waitOnline(device: string, number: number, key: string, signal: AbortSignal) {

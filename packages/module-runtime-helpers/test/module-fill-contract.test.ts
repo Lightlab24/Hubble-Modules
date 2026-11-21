@@ -30,6 +30,7 @@ const series: Record<string, readonly string[]> = {
   "http-requests": [],
   lightencode: [],
   livegrade: ["sequence", "slotId"],
+  ping: [],
   "ross-ultrix-ogp": ["source", "destination"],
   "system-actions": [],
   tsl: ["tallyAddress"],

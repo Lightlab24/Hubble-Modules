@@ -236,6 +236,8 @@ test('a camera deleted and added back on the controller appears with no Refresh 
   await expect(row).toHaveCount(1);
   await expect(rio.locator('tr[data-id]')).toHaveCount(1);
   await expect(row.locator('[data-field="controlEnabled"] [role="checkbox"]')).toBeChecked();
+  // Same number on the same controller, so it is still the camera Hubble had, not one to list apart.
+  await expect(ui.locator('[data-role="outside"] tbody tr')).toHaveCount(0);
   expect((await inspect(request)).opened[0]).toBe(before[0]+1);
   // Noticing a change isn't Refresh all, so nothing waiting to send is thrown away.
   const name=row.locator('[data-field="name"]');
@@ -308,12 +310,9 @@ test('a Gateway is watched over MQTT like an RCP, and its cameras can be ticked'
     if(!await row.isVisible())await group.locator('[data-action="toggle-controller"]').click();
   };
   await expect(ui.locator('[data-role="saved-label"]')).toContainText('Workspace saved');
-  // The finder's IP field lives in the Details view; the sheet adds by IP in its last row.
-  await ui.locator('[data-device-view="details"]').click();
-  await ui.getByRole('textbox',{name:'Device IP address',exact:true}).fill('10.192.1.10');
-  await ui.getByRole('button',{name:'Find',exact:true}).click();
-  await expect(ui.locator('[data-action="add-discovered"]')).toBeEnabled();
-  await ui.locator('[data-action="add-discovered"]').click();
+  // The Devices sheet adds a device by its IP in its last row.
+  await ui.locator('[data-device-add]').fill('10.192.1.10');
+  await ui.locator('[data-device-add]').press('Enter');
   await expect(ui.locator('[data-role="device-count"]')).toHaveText('1');
   await show();
   // Its broker answers, as an RCP's does.

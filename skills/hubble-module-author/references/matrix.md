@@ -376,6 +376,15 @@ what each does. Rows already timed to a hold, by their own lane or their column,
 left as they are. A key with other actions on its Press row also fires them on
 release from then on, which is the cost of telling a tap from a hold.
 
+While a held key counts down, Hubble fills a disc on its face in 16 steps, full when
+the hold runs; it is white, and from half full the key's text turns black or white,
+whichever reads on the disc. To use your own colour, add `color` as `#RRGGBB` and
+require `module-matrix-hold-color-v1` too:
+
+```json
+"hold": { "ms": 2000, "when": [{ "field": "actionType", "values": ["record-camera"] }], "color": "#E3242B" }
+```
+
 Use `runtimeDirectory` for local runtime state that must survive module versions.
 Document any data excluded from workspace export. Tally's follow-state file is
 local runtime state; row colour/glow choices and column defaults are portable.

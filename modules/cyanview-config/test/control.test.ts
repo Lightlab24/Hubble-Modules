@@ -19,7 +19,9 @@ const eventually = async (predicate: () => boolean, attempts = 200) => {
   assert.ok(predicate(), 'Expected control observation');
 };
 /** An RCP and a second controller, a RIO with no panel unless a test asks for another kind. */
-async function fleet({ second = { Serial: 'CY-RIO-1-20', Name: 'RIO' }, secondPanel = false, cameraSettleMs = undefined as number | undefined, selectHoldMs = undefined as number | undefined, ndConfirmMs = undefined as number | undefined, whiteBalanceConfirmMs = undefined as number | undefined } = {}) {
+async function fleet({ second = { Serial: 'CY-RIO-1-20', Name: 'RIO' }, secondPanel = false, cameraSettleMs = undefined as number | undefined, selectHoldMs = undefined as number | undefined, ndConfirmMs = undefined as number | undefined, whiteBalanceConfirmMs = undefined as number | undefined,
+  // Hubble refuses to watch the saved plan, so every press reads it first. `networkRows` saves the controllers' network rows too.
+  planRecheckMs = undefined as number | undefined, refusePlanWatch = false, networkRows = false } = {}) {
   const a = new FakeController(), b = new FakeController();
   a.config.Product = { Serial: 'CY-RCP-1-10', Name: 'RCP' };
   b.config.Product = { ...second };
@@ -51,7 +53,7 @@ async function fleet({ second = { Serial: 'CY-RIO-1-20', Name: 'RIO' }, secondPa
       if (wait) { const connect = client.connect.bind(client); client.connect = async signal => { await delay(wait); return connect(signal); }; }
       return client;
     },
-    control: { cameraSettleMs, ...(selectHoldMs === undefined ? {} : { selectHoldMs }), ...(ndConfirmMs === undefined ? {} : { ndConfirmMs }), ...(whiteBalanceConfirmMs === undefined ? {} : { whiteBalanceConfirmMs }), session: (definition, changed) => {
+    control: { cameraSettleMs, ...(planRecheckMs === undefined ? {} : { planRecheckMs }), ...(selectHoldMs === undefined ? {} : { selectHoldMs }), ...(ndConfirmMs === undefined ? {} : { ndConfirmMs }), ...(whiteBalanceConfirmMs === undefined ? {} : { whiteBalanceConfirmMs }), session: (definition, changed) => {
       const network = networks[definition.serial === a.config.Product.Serial ? 0 : 1]!;
       const session = new RcpSession({ ...definition, requestTimeoutMs: 350 }, changed, true,
         () => createConnection({ host: '127.0.0.1', port: network.port }));
@@ -59,10 +61,11 @@ async function fleet({ second = { Serial: 'CY-RIO-1-20', Name: 'RIO' }, secondPa
     } },
   };
   const f = fixture({}, options);
+  if (refusePlanWatch) f.refusePlanWatches(Number.MAX_SAFE_INTEGER);
   await f.instance.start();
   const snapshots = [a.snapshot(), b.snapshot('10.192.1.20')];
   let plan: Plan = { formatVersion: 1 as const, devices: snapshots.map(snapshot => ({ ...snapshot.device, name: 'Same label' })),
-    cameras: snapshots.flatMap(snapshot => snapshot.cameras), lans: [], uiState: null };
+    cameras: snapshots.flatMap(snapshot => snapshot.cameras), lans: networkRows ? snapshots.flatMap(snapshot => snapshot.lans) : [], uiState: null };
   await f.call('save-plan', { revision: null, plan });
   const ids = plan.devices.map(device => device.id);
   const run = (command: string, controller = 0, cameraNumber?: number, signal?: AbortSignal, gesture: 'press' | 'long-press-2s' = 'press') => f.instance.execute(command,
@@ -794,8 +797,10 @@ test('a press cancelled while waiting its turn sends nothing', async () => {
 });
 
 test('a tick made just before a press counts, and one made just after it does not', async () => {
-  const s = await fleet();
+  // With nothing watching the saved plan, each press reads it first, and that read can be slow.
+  const s = await fleet({ refusePlanWatch: true });
   try {
+    await delay(20);
     // The tick starts first but finishes reading the plan last.
     s.f.slowNextRead(s.f.repository.root, 100);
     const [tick, press] = await Promise.all([s.run('toggle-camera-enabled', 0, 1), s.run('roll-enabled-cameras')]);
@@ -851,8 +856,10 @@ test('a tick made after a press, whose save fails, does not stop that press', as
 });
 
 test('page edits apply in the order they were made, even if the first is slow to start', async () => {
-  const s = await fleet();
+  // With nothing watching the saved plan, each edit reads it first, and that read can be slow.
+  const s = await fleet({ refusePlanWatch: true });
   try {
+    await delay(20);
     const controllerId = s.ids[0]!;
     s.f.slowNextRead(s.f.repository.root, 100);
     await Promise.all([
@@ -862,6 +869,157 @@ test('page edits apply in the order they were made, even if the first is slow to
     const state = await s.state();
     assert.equal(state.singleSwitch[controllerId], true);
     assert.deepEqual(s.plan.cameras.slice(0, 2).map(row => !!state.enabled[row.id]), [true, false]);
+  } finally { await s.close(); }
+});
+
+/** Waits until the module has taken in the saved plan as it now stands and has nothing left to read. */
+const planSettled = async (s: Awaited<ReturnType<typeof fleet>>) => {
+  const root = s.f.repository.root;
+  let seen = -1;
+  await eventually(() => {
+    if (!s.f.watchingAfter(root, s.f.records.get(root)?.revision ?? null)) return false;
+    const still = s.f.requests.length === seen;
+    seen = s.f.requests.length;
+    return still;
+  }, 600);
+};
+/** Another editor's change to the plan's main document alone: the second controller stops being one. */
+const retireSecondController = async (s: Awaited<ReturnType<typeof fleet>>) => {
+  const documents = createModuleDocumentClient(s.f.context.services!), root = await documents.read(s.f.repository.root, s.f.signal), value = object(root.value);
+  return documents.write(root, { ...value, devices: (value.devices as Record<string, unknown>[]).map((device, index) => index === 1 ? { ...device, kind: 'Camera' } : device) } as never, s.f.signal);
+};
+
+test('a press acts on the plan in memory: a tick, Single switch, Enable All and Select camera read no saved plan first', async () => {
+  const s = await fleet({ networkRows: true });
+  try {
+    await eventually(() => s.sessions[0]?.snapshot().phase === 'ready');
+    await planSettled(s);
+    for (const [command, camera] of [['toggle-camera-enabled', 1], ['single-switch', undefined], ['enable-all-cameras', undefined], ['select-camera', 2]] as const) {
+      // The press before has finished saving its tick, and the selection's own watch has caught up with it.
+      await planSettled(s);
+      const from = s.f.requests.length;
+      const result = await s.run(command, 0, camera);
+      assert.equal(result.status, 'success', command + ': ' + JSON.stringify(result));
+      assert.deepEqual(s.f.planReads(from), [], command + ' read the saved plan');
+      // A press that names its camera asks Hubble for nothing at all. The others save their tick afterwards.
+      if (command === 'select-camera') assert.deepEqual(s.f.requests.slice(from).filter(request => request.method !== 'watch'), []);
+    }
+    // The presses did act: Enable All left Single switch off and both cameras on the first controller ticked.
+    const state = await s.state();
+    assert.equal(state.singleSwitch[s.ids[0]!], false);
+    assert.deepEqual(s.plan.cameras.map(row => !!state.enabled[row.id]), [true, true, false, false]);
+    assert.deepEqual(s.networks[0]!.commands.map(command => command.topic), ['unit/RCP/rcp/action/set/active_camera_number']);
+  } finally { await s.close(); }
+});
+
+test('a plan saved by another editor reaches the next press through the watch, with nothing read at the press', async () => {
+  const s = await fleet();
+  try {
+    await planSettled(s);
+    const current = await s.f.repository.read(s.f.signal);
+    const row = current.plan.cameras.find(row => row.device === s.ids[0] && Number(row.number) === 2)!;
+    row.number = '3';
+    await s.f.repository.write(current.revision, current.plan, s.f.signal);
+    await planSettled(s);
+    const from = s.f.requests.length;
+    const tick = await s.run('toggle-camera-enabled', 0, 3);
+    assert.equal(tick.status, 'success', JSON.stringify(tick));
+    assert.deepEqual(s.f.planReads(from), []);
+    assert.equal((await s.state()).enabled[row.id], true);
+    // The number it had before is no longer a camera there.
+    assert.equal((await s.run('toggle-camera-enabled', 0, 2)).status, 'failure');
+  } finally { await s.close(); }
+});
+
+test('a press that arrives while a reported save is still being read waits for it, and acts on the new plan', async () => {
+  const s = await fleet();
+  try {
+    await planSettled(s);
+    const root = s.f.repository.root;
+    // The read of the changed plan gets as far as its camera rows and stops there.
+    const release = s.f.holdReads(root + '-c');
+    const saved = await retireSecondController(s);
+    await eventually(() => s.f.watchingAfter(root, saved.revision));
+    const from = s.f.requests.length;
+    let settled = false;
+    const press = s.run('enable-all-cameras', 1).finally(() => { settled = true; });
+    await delay(60);
+    assert.equal(settled, false, 'the press went ahead on a plan known to be behind');
+    assert.deepEqual(s.f.requests.slice(from), [], 'the press read or saved something while it waited');
+    release();
+    const result = await press;
+    // On the plan it had before, this press would have ticked the second controller's cameras.
+    assert.equal(result.status, 'failure');
+    assert.match(String((result as { message?: string }).message), /Choose a named Cyanview controller/);
+    // One read served the watch and the press: all that was left of it was its closing check of the main document.
+    assert.deepEqual(s.f.planReads(from), [root]);
+    assert.deepEqual((await s.state()).enabled, {});
+  } finally { await s.close(); }
+});
+
+test('a reported save that can’t be read is not papered over: the press says why, and the next one acts on the new plan', async () => {
+  const s = await fleet();
+  try {
+    await planSettled(s);
+    const root = s.f.repository.root;
+    // The read behind the watch fails, and so does the press's own.
+    s.f.failNextReads(root + '-c', 2);
+    const saved = await retireSecondController(s);
+    await eventually(() => s.f.watchingAfter(root, saved.revision) && s.f.failedReadsLeft() === 1);
+    await delay(10);
+    const refused = await s.run('enable-all-cameras', 1);
+    assert.equal(refused.status, 'failure');
+    assert.match(String((refused as { message?: string }).message), /Simulated storage failure/);
+    assert.equal(s.f.failedReadsLeft(), 0);
+    // Nothing was ticked on the plan it could no longer vouch for.
+    assert.deepEqual((await s.state()).enabled, {});
+    const next = await s.run('enable-all-cameras', 1);
+    assert.equal(next.status, 'failure');
+    assert.match(String((next as { message?: string }).message), /Choose a named Cyanview controller/);
+    assert.equal((await s.run('enable-all-cameras', 0)).status, 'success');
+  } finally { await s.close(); }
+});
+
+test('while Hubble refuses to watch the saved plan every press reads it first, and goes back to memory once the watch holds', async () => {
+  const s = await fleet();
+  try {
+    await planSettled(s);
+    const root = s.f.repository.root;
+    // The next two watches are refused: the one after this change, and the first retry.
+    s.f.refusePlanWatches(2);
+    const saved = await retireSecondController(s);
+    await eventually(() => s.f.requests.filter(request => request.method === 'watch' && request.id === root).length >= 2 && !s.f.watchingAfter(root, saved.revision));
+    await delay(10);
+    let from = s.f.requests.length;
+    assert.equal((await s.run('toggle-camera-enabled', 0, 1)).status, 'success');
+    assert.deepEqual(s.f.planReads(from), [root, root + '-c1-0', root], 'a press with nothing watching must read the saved plan');
+    // A lasting refusal would be logged; two in a row are not.
+    assert.equal(s.f.traces.filter(entry => object(entry).stage === 'control-plan').length, 0);
+    await planSettled(s);
+    from = s.f.requests.length;
+    assert.equal((await s.run('toggle-camera-enabled', 0, 1)).status, 'success');
+    assert.deepEqual(s.f.planReads(from), []);
+  } finally { await s.close(); }
+});
+
+test('a watch that goes quiet without failing is caught: a press has the plan read again behind it, and the next press has the change', async () => {
+  const s = await fleet({ planRecheckMs: 0 });
+  try {
+    await planSettled(s);
+    const root = s.f.repository.root;
+    s.f.quietWatches(root);
+    const current = await s.f.repository.read(s.f.signal);
+    const row = current.plan.cameras.find(row => row.device === s.ids[0] && Number(row.number) === 2)!;
+    row.number = '3';
+    await s.f.repository.write(current.revision, current.plan, s.f.signal);
+    await delay(20);
+    // Nothing told the module, so this press still goes by the plan it has. It starts a read behind itself.
+    const from = s.f.requests.length;
+    assert.equal((await s.run('toggle-camera-enabled', 0, 3)).status, 'failure');
+    await eventually(() => s.f.planReads(from).length >= 3);
+    const tick = await s.run('toggle-camera-enabled', 0, 3);
+    assert.equal(tick.status, 'success', JSON.stringify(tick));
+    assert.equal((await s.state()).enabled[row.id], true);
   } finally { await s.close(); }
 });
 

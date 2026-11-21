@@ -68,6 +68,26 @@ export class CyanviewClient {
     this.heartbeat.unref?.();
   }
   get serial(): string { return String(this.config.Product?.Serial ?? ''); }
+  /** How long since the controller last sent anything on this socket, its answer to the heartbeat included. */
+  get quietMs(): number { return Date.now() - this.lastMessage; }
+  /** True on a socket lent by `lend()`, which its borrower can't close. */
+  readonly lent: boolean = false;
+  /**
+   * This open socket, lent to a piece of work that would otherwise open another. Everything the work sends goes
+   * down the same socket, in turn with whoever else is using it, and the controller's reports reach them all.
+   * `close()` on the loan only ends that work's use of it: the socket stays open for whoever holds it.
+   */
+  lend(): CyanviewClient {
+    const giveBack = () => {};
+    return new Proxy(this, {
+      get: (target, key) => {
+        if (key === 'close') return giveBack;
+        if (key === 'lent') return true;
+        const value = Reflect.get(target, key, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+  }
   get connected(): boolean { return !this.disconnected && this.socket?.readyState === WebSocket.OPEN; }
   onConfig(listener: (config: RecordValue) => void) { this.configListeners.add(listener); return () => this.configListeners.delete(listener); }
   onDisconnect(listener: () => void) { this.disconnectListeners.add(listener); return () => this.disconnectListeners.delete(listener); }

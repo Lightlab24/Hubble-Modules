@@ -1,5 +1,50 @@
 # Hubble module developer kit
 
+## Start here
+
+New to Hubble modules? Read [Build a Hubble module: start here](getting-started.md).
+It covers what you need, trying your module in Hubble and sending it in for testing.
+The short version, run from this folder with Node 22 or newer:
+
+```sh
+node ./module-tool.mjs create ./my-device my-device
+node ./module-tool.mjs build ./my-device
+node ./module-tool.mjs test ./my-device
+node ./module-tool.mjs validate ./my-device
+node ./module-tool.mjs pack ./my-device my-device-1.0.0.hubble-module
+```
+
+Then import `my-device-1.0.0.hubble-module` in HubDash: **Module Connections** >
+**Add module** > **Import a module file**.
+
+## What each kit adds
+
+Developer kit **1.8.1-dev.7** brings the SDK and the module-author skill up to Hubble
+2.3.1. Each addition is optional and named by a host feature, so check for it in the
+actual host's `describe` response and keep it out of releases meant for older hosts.
+
+- Pages: `module-frontend-settings-v1` lets a custom page save its module's own
+  settings with `saveSettings`; `module-frontend-restart-v1` keeps a page with
+  `restart: 'keep-open'` open while its module restarts, with `onRestart`.
+  `module-page-badges-v1` shows a count on a page's sidebar tab, and
+  `module-page-wide-icons-v1` a wide logo beside its label.
+- Controls: `module-controls-inline-v1` puts a switch or segmented choice on one line
+  in a toolbar.
+- Dialogs: `module-prompt-v1` asks the operator for values in a HubDash dialog, and
+  `module-prompt-update-v1` refreshes the open dialog in place.
+- Matrix feedback: `module-feedback-key-parts-v1` and `module-feedback-key-effects-v1`
+  light a key's outline or bar and make it blink or fade; `module-feedback-triggers-v1`,
+  `module-feedback-trigger-conditions-v1`, `module-feedback-trigger-groups-v1` and
+  `module-feedback-triggers-64-v1` declare named feedback triggers, the rows they belong
+  to, groups and up to 64 of them; `module-matrix-feedback-colors-v1` starts a column
+  without live cell colours.
+- Matrix holds: `module-matrix-hold-v1` lets press rows answer a hold too, and
+  `module-matrix-hold-color-v1` colours the disc that fills while the key is held.
+
+The skill also gains the naming guide and Hubble's look by name. Page settings, staying
+open, page badges and inline controls need Hubble 2.3.1. See the custom pages, controls,
+matrix and theme skill references.
+
 Developer kit **1.8.1-dev.6** adds `module-page-icons-v1`: a sidebar page can name its
 own icon with `pages[].icon`, an SVG, PNG, JPEG or WebP file under `ui/` that is listed
 in `files` and is at most 256 KB. Hubble shows it in full colour in the sidebar and in

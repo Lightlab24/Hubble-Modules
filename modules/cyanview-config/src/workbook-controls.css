@@ -220,7 +220,6 @@ body:has(#cyanview-design .hc-veil:not([hidden])) .hubble-column-resize-handles 
 #cyanview-design .hc-remi-view button { white-space: nowrap; }
 /* The Devices sheet looks like the camera sheets, without being one of the shared spreadsheets. */
 #cyanview-design .hc-device-column { display: flex; flex: 1 1 auto; flex-direction: column; gap: 9px; min-width: 0; }
-#cyanview-design .hc-device-view { flex: 0 0 auto; }
 #cyanview-design .hc-grid[data-device-sheet] { min-width: 0; border-collapse: separate; border-spacing: 0; color: light-dark(#252525, #dedede); font: var(--hc-sheet-text-size, 13px) system-ui, sans-serif; --hc-matrix-heading: light-dark(#eaeaea, #222); --hc-matrix-grid: light-dark(#d9d9d9, #3b3b3b); }
 #cyanview-design .hc-grid[data-device-sheet] :is(td, th) { border-color: var(--hc-matrix-grid); font-size: var(--hc-sheet-text-size, 13px); }
 #cyanview-design .hc-controller .hc-grid[data-device-sheet] thead th { height: 30px; background: var(--hc-matrix-heading); text-align: left; font-weight: 600; }
@@ -242,15 +241,17 @@ body:has(#cyanview-design .hc-veil:not([hidden])) .hubble-column-resize-handles 
 #cyanview-design .hc-grid[data-device-sheet] tr.hc-device-found .hc-button { font-style: normal; font-size: 11px; padding: 3px 8px; }
 #cyanview-design .hc-grid[data-device-sheet] .hc-row-remove-button { display: inline-grid; place-items: center; min-height: 0; width: 26px; height: 24px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--hc-secondary); cursor: pointer; }
 #cyanview-design .hc-grid[data-device-sheet] .hc-row-remove-button:hover { background: light-dark(#f3dede, #3a2222); color: var(--hc-red); }
+/* A controller's own web page, one click from its address. A shown address is the link; a typed one gets a button beside it. */
+#cyanview-design .hc-grid[data-device-sheet] .hc-ip-link { min-height: 0; padding: 0; border: 0; border-radius: 2px; background: none; color: var(--hc-secondary); font-size: var(--hc-sheet-text-size, 13px); line-height: 1.35; cursor: pointer; text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 35%, transparent); text-underline-offset: 3px; }
+#cyanview-design .hc-grid[data-device-sheet] .hc-ip-link:is(:hover, :focus-visible) { color: var(--hc-focus); text-decoration-color: currentColor; }
+#cyanview-design .hc-grid[data-device-sheet] td:has(> .hc-ip-open) { position: relative; }
+#cyanview-design .hc-grid[data-device-sheet] .hc-ip-open { position: absolute; top: 50%; right: 4px; translate: 0 -50%; display: none; place-items: center; min-height: 0; width: 24px; height: 22px; padding: 0; border: 0; border-radius: 4px; background: var(--hc-surface); color: var(--hc-secondary); cursor: pointer; }
+#cyanview-design .hc-grid[data-device-sheet] td:is(:hover, :focus-within) > .hc-ip-open { display: inline-grid; }
+#cyanview-design .hc-grid[data-device-sheet] td:has(> .hc-device-waiting) > .hc-ip-open { right: 82px; }
+#cyanview-design .hc-grid[data-device-sheet] .hc-ip-open:is(:hover, :focus-visible) { color: var(--hc-focus); }
+#cyanview-design .hc-grid[data-device-sheet] .hc-ip-open .hc-icon { width: 14px; height: 14px; }
 #cyanview-design .hc-danger-solid { padding: 6px 12px; border: 1px solid currentColor; border-radius: 6px; }
 /* What Hubble didn't configure: keep it as it is, or clear it. */
-#cyanview-design .hc-controller-tools .hc-foreign-review { font-weight: 600; padding: 4px 10px; }
-#cyanview-design .hc-controller-tools .hc-foreign-note { color: var(--hc-amber); }
-#cyanview-design .hc-review-modal { width: min(720px, 92vw); max-width: none; }
-#cyanview-design .hc-review-item { display: flex; align-items: center; gap: 16px; }
-#cyanview-design .hc-review-item .hc-review-text { flex: 1; min-width: 0; }
-#cyanview-design .hc-review-item .hc-segment { flex: none; }
-#cyanview-design .hc-review-item [data-review-choice="clear"][aria-pressed="true"] { color: var(--hc-red); }
 
 /* One toolbar per sheet: its view controls sit at the end of the row. The hints that used to sit
    above and below the sheets are gone; the counts stay in the footer. */
@@ -360,3 +361,14 @@ body:has(#cyanview-design .hc-veil:not([hidden])) .hubble-column-resize-handles 
   --hc-secondary: light-dark(#626262, var(--hubble-text-secondary, #aaaaaa));
 }
 #cyanview-design :is(button, input, select):focus-visible { outline-color: var(--hubble-focus, var(--hc-focus)); }
+/* Not set up by Hubble: cameras Cyanview has that Hubble didn't make, apart from yours until moved in. */
+#cyanview-design .hc-outside { margin-top: 22px; display: grid; gap: 10px; }
+#cyanview-design .hc-outside[hidden] { display: none; }
+#cyanview-design .hc-outside .hc-controller-tools { border-top: 0; border-bottom: 1px solid var(--hc-grid); }
+#cyanview-design .hc-outside-title { display: flex; align-items: center; }
+#cyanview-design .hc-outside-note { color: var(--hc-text); font-size: 12px; }
+#cyanview-design .hc-controller .hc-outside-grid tbody td { height: 36px; padding-top: 0; padding-bottom: 0; font-size: 13px; }
+#cyanview-design .hc-controller .hc-outside-grid thead th { height: 36px; font-size: 12.5px; font-weight: 500; }
+#cyanview-design .hc-outside-grid td.hc-outside-tools { padding: 0 6px; }
+#cyanview-design .hc-outside-grid td.hc-outside-tools button { min-height: 0; height: 24px; line-height: 22px; padding: 0 10px; margin-right: 6px; font-size: 12px; vertical-align: middle; }
+#cyanview-design .hc-outside-grid tr.hc-remove-staged td:not(.hc-outside-tools) { color: var(--hc-faint); text-decoration: line-through; }

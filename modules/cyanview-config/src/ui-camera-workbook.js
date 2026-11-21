@@ -18,12 +18,6 @@
   }
 
   function syncCameraDeleteButton(group) {
-    const clear = group.querySelector('[data-action="clear-selected"]');
-    if (clear) {
-      const count = selectedCameras(group.querySelector('table[data-camera-device]')).length, text = count > 1 ? 'Clear ' + count + ' from view' : 'Clear from view', label = clear.querySelector('[data-camera-clear-label]');
-      if (label.textContent !== text) label.textContent = text;
-      clear.disabled = !count;
-    }
     const button = group.querySelector('[data-action="delete-controller"]');
     const camera = activeCamera(group.querySelector('table[data-camera-device]'));
     const label = button.querySelector('[data-camera-delete-label]');
@@ -35,22 +29,23 @@
 
   function reviewCameraDeletion(camera) {
     if (!camera || camera.deleting) return;
-    if (importedCamera(camera) && !camera.remi) {
-      toast('Refresh the REMI assignment before removing this camera');
+    if (importedCamera(camera) && !camera.elementKey) {
+      toast('Refresh this controller before removing this copy');
       return;
     }
     showReview([camera], 'camera', true);
     $('modal-layer').querySelector('.hc-modal-foot [data-action="close-modal"]').focus();
   }
 
+  // A copy whose source is off or gone isn't imported any more, so its controller deletes it on its own.
   function deleteReviewedCamera(camera) {
     if (!camera || camera.deleting) return;
     if (!importedCamera(camera)) {
       void sendItems([camera], 'camera', true);
-    } else if (camera.remi) {
+    } else if (camera.elementKey) {
       remiStage(camera.device, [{
         id: 'remove:' + camera.elementKey, kind: 'remove', key: camera.elementKey, enable: false,
-        selector: camera.remi.selector, connection: camera.remi.connection, label: camera.name,
+        ...(camera.remi ? { selector: camera.remi.selector, connection: camera.remi.connection } : {}), label: camera.name,
       }]);
     }
   }

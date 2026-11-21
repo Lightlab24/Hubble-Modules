@@ -73,7 +73,10 @@ try {
   );
   await writeFile(
     path.join(kit, "README.md"),
-    readme.replaceAll("](../skills/", "](skills/"),
+    readme
+      .replaceAll("](../skills/", "](skills/")
+      // The kit's README sits at its root, beside docs/ rather than in it.
+      .replaceAll("](getting-started.md)", "](docs/getting-started.md)"),
   );
   await cp(path.join(root, "docs"), path.join(kit, "docs"), {
     recursive: true,
