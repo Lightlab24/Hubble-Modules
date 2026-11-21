@@ -1,4 +1,5 @@
 // Module-owned SDK fixture. Every device connection is redirected to a loopback simulator.
+import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { createConnection, type Socket } from 'node:net';
@@ -146,6 +147,19 @@ const server = createServer(async (request, response) => {
       const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk));
       const input = JSON.parse(Buffer.concat(chunks).toString() || '{}');
       if (url.pathname === '/__reset') { await reset(input.sample !== false && input.simulated !== true, input.remi === true, input.gateway === true, input.direct === true, input.extra === true, input.live === true, input.wan === true, input.reachAll === true, input.simulated === true, input.tour === true); send({ reset: true }); return; }
+      if (url.pathname === '/__load') {
+        // A copy of a workspace's Cyanview documents, to see the page at a real setup's size and layout.
+        // The worker restarts on them as a real one, not Simulated; every connection still reaches only
+        // the loopback simulator above, so a copied address goes nowhere else.
+        const documents = Array.isArray(input.documents) ? input.documents : [];
+        const workspaceId = randomUUID(), records = new Map(documents.map((item: any) => [item.id, { workspaceId, owner: { kind: 'host' as const, capabilityId: 'lightlab-cyanview-config', moduleId: 'lightlab-cyanview-config' }, id: item.id, version: item.version ?? 1, revision: item.revision ?? null, value: item.value, canUndo: false, canRedo: false }]));
+        await session.instance.dispose();
+        sampleSetting = false; pageFixtures = false;
+        session = fixture({ sampleData: false }, sessionOptions, records as any);
+        await session.instance.start();
+        await session.call('setup-guide', { offered: true, confirmed: [] });
+        send({ loaded: records.size }); return;
+      }
       if (url.pathname === '/__restart') {
         // The equipment and saved documents stay, as they do when Hubble restarts a module's worker.
         // The tour's progress lives in the worker's runtime folder, which the preview keeps in memory.
@@ -223,7 +237,7 @@ const server = createServer(async (request, response) => {
     if (!url.pathname.startsWith(pagePath) || !['/ui/index.html', '/ui/app.js', '/ui/app.css'].includes(asset)) { response.writeHead(404); response.end(); return; }
     response.writeHead(200, { 'Content-Type': url.pathname.endsWith('.js') ? 'text/javascript' : url.pathname.endsWith('.css') ? 'text/css' : 'text/html', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
     response.end(await readFile(path.resolve('dist', '.' + asset)));
-  } catch { if (!response.headersSent) send({ error: 'Preview request failed' }, 500); else response.end(); }
+  } catch (error) { console.error('Preview request failed:', url.pathname, error); if (!response.headersSent) send({ error: 'Preview request failed' }, 500); else response.end(); }
 });
 const port = Number(process.env.CYANVIEW_PREVIEW_PORT || 43127);
 server.listen(port, '127.0.0.1', () => console.log(`Cyanview module preview: http://127.0.0.1:${port} (simulated equipment only)`));

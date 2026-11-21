@@ -4013,12 +4013,13 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from
     };
     const top = [], fields = [];
     for (const [index, column] of columns.entries()) {
-      if (!column.group) { top.push('<th scope="col" rowspan="2">' + sortHead(column) + '</th>'); continue; }
+      // Each heading names its column, as the camera sheets' do, so the setup tour finds it whatever it says.
+      if (!column.group) { top.push('<th scope="col" rowspan="2" data-device-header="' + column.id + '">' + sortHead(column) + '</th>'); continue; }
       if (columns[index - 1]?.group !== column.group) {
         const open = deviceSheet[column.group + 'Open'], label = deviceGroups[column.group].label;
-        top.push('<th scope="colgroup" class="hc-device-group-head" colspan="' + columns.filter(item => item.group === column.group).length + '"><button type="button" class="hc-device-group" data-action="toggle-device-group" data-group="' + column.group + '" aria-expanded="' + open + '" aria-label="' + (open ? 'Collapse ' : 'Expand ') + label + '"><span class="hc-device-group-box" aria-hidden="true">' + (open ? '−' : '+') + '</span>' + label + '</button></th>');
+        top.push('<th scope="colgroup" class="hc-device-group-head" data-device-group-header="' + column.group + '" colspan="' + columns.filter(item => item.group === column.group).length + '"><button type="button" class="hc-device-group" data-action="toggle-device-group" data-group="' + column.group + '" aria-expanded="' + open + '" aria-label="' + (open ? 'Collapse ' : 'Expand ') + label + '"><span class="hc-device-group-box" aria-hidden="true">' + (open ? '−' : '+') + '</span>' + label + '</button></th>');
       }
-      fields.push('<th scope="col">' + sortHead(column) + '</th>');
+      fields.push('<th scope="col" data-device-header="' + column.id + '">' + sortHead(column) + '</th>');
     }
     return '<colgroup>' + columns.map(column => '<col style="width:' + column.width + 'px">').join('') + '</colgroup><thead><tr>' + top.join('') + '</tr><tr>' + fields.join('') + '</tr></thead>';
   }
@@ -5010,9 +5011,10 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from
   root.addEventListener('scroll', () => { if (savedPopover && !savedPopover.hidden) placeSavedPopover(); }, true);
 
   // The setup tour: Next and Back walk through this page in the order Cyanview is set up. Each stop
-  // lights up one part of the page, points at it, and says what it is for and what to do there.
-  // Nothing has to be done to go on, and Exit tour leaves at any stop. It starts by itself once on a
-  // new setup, and Setup tour in the header starts it again from the beginning.
+  // rings one part of the page and points at it with a short arrow and its name; a panel fixed at the
+  // bottom says what that part is for and what to do there, and keeps Exit tour, Back and Next in the
+  // same place on every stop so the mouse never has to follow them. Nothing has to be done to go on.
+  // It starts by itself once on a new setup, and Setup tour in the header starts it again.
   // Progress belongs to this Mac, not the workspace. The page's frame has no storage, so the worker keeps it.
   let setupGuideProgress = parseSetupGuideProgress(null), setupGuideSaving = Promise.resolve();
   let setupGuideLoaded = false, setupGuideKeys = 0, setupGuidePressed = false, setupGuideQueued = false;
@@ -5059,15 +5061,17 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from
   }
   const plural = (count, one, many = one + 's') => count + ' ' + (count === 1 ? one : many);
 
-  // Where each stop points. A sheet heading lights its whole column, heading to last row, so the
-  // arrow never crosses the rows under it; in a sheet turned on its side the heading starts a row,
-  // and the row is lit instead.
+  // What each stop rings. Headings are found by the column they name, never by what they say, since
+  // a sort arrow or an open group changes the words. A sheet heading rings its whole column down to the
+  // last row that can be seen; in a sheet turned on its side the heading starts a row, and the row is
+  // rung instead.
   const shown = el => !!el && !el.hidden && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
   const openPanel = () => root.querySelector('.hc-panel:not([hidden])');
   const tabButton = id => root.querySelector('.hc-tabs [data-tab="' + id + '"]');
   const inPanel = selector => openPanel()?.querySelector(selector) ?? null;
   const dropdownFor = select => select?.nextElementSibling?.matches('.hc-dropdown') ? select.nextElementSibling : select;
-  const deviceHead = text => [...(root.querySelectorAll('[data-role="device-sheet"] thead th'))].find(h => h.textContent.replace(/^\+/, '').trim() === text) ?? null;
+  const deviceHead = id => root.querySelector('[data-role="device-sheet"] th[data-device-header="' + id + '"]');
+  const deviceGroupHead = id => root.querySelector('[data-role="device-sheet"] th[data-device-group-header="' + id + '"]');
   const fieldHead = (sheet, field) => root.querySelector('[data-controller="' + sheet + '"] th[data-field-header="' + field + '"]');
   function sheetLine(...heads) {
     return heads.filter(shown).map(head => ({
@@ -5081,31 +5085,23 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from
   }
   const remiTab = () => tab === 'assignment' || tab === 'cameras';
 
-  // Each stop: its setup step, the tab it is on, what it lights, its title, what that part is for and
-  // what to do there. A stop with nothing to light is about something that happens in HubDash.
+  // The stops, in the order Cyanview is set up and, within a tab, the order the page reads. Each has
+  // its setup step, the tab it is on, what it rings, a short name for the ring's tag, what that part is
+  // for, and what to do there. A stop with nothing to ring is about something that happens in HubDash.
   const setupTourStops = [
-    { step: 'find', tab: 'devices', at: () => tabButton('devices'), title: 'Devices', what: 'Every RIO, RCP and Gateway this workspace uses. The number is how many there are.', todo: 'Start here. Finding your controllers happens on this tab.' },
-    { step: 'find', tab: 'devices', at: () => dropdownFor($('scan-range')), title: 'Network range', what: 'The network your Cyanview gear is on. Hubble only looks inside this range.', todo: 'Pick your network, or Custom range to type one.' },
-    { step: 'find', tab: 'devices', at: () => dropdownFor($('discovery-method')), title: 'Discovery method', what: 'Fast IP discovery asks every address in the range. Broadcast asks the whole network and waits for answers.', todo: 'Leave it on Fast IP discovery unless a controller is missing.' },
-    { step: 'find', tab: 'devices', at: () => action('scan'), title: 'Discover', what: f => 'Looks for controllers in the range. It only reads, so nothing on them changes.' + (f.simulated ? ' This is Simulated: it finds a simulated RIO and two RCPs on any network.' : ''), todo: 'Press Discover, then Add them to Devices.' },
-    { step: 'find', tab: 'devices', at: () => action('toggle-saved-devices'), title: 'Saved devices', what: 'Controllers this Mac has found before, ready to add back without searching again.' },
-    { step: 'find', tab: 'devices', at: () => action('refresh-all'), title: 'Refresh all', what: 'Reads every controller again, to catch changes made on the controllers themselves. It sends nothing.' },
-    { step: 'find', tab: 'devices', at: () => root.querySelector('[data-role="device-sheet"] input[aria-label="IP address of a device to add"]'), title: 'Add by address', what: 'Know a controller’s IP? Type it in the New device row and press Enter, and Hubble reads it in.' },
-    { step: 'name', tab: 'devices', at: () => sheetLine(deviceHead('Name')), title: 'Name', what: 'The name your crew uses. Keys, lists and the REMI Matrix all show it.', todo: 'Click a name and type over it.' },
-    { step: 'name', tab: 'devices', at: () => sheetLine(deviceHead('Status'), deviceHead('Base IP')), title: 'Status and Base IP', what: 'Online or Offline, read from the controller. Click the IP to open the controller’s own page in Safari.' },
-    { step: 'name', tab: 'devices', at: () => sheetLine(deviceHead('LAN IP settings'), deviceHead('WAN settings')), title: 'LAN and WAN settings', what: 'The controller’s network addresses. A change waits in Pending sends until you send it.' },
-    { step: 'name', tab: 'devices', at: () => sheetLine(deviceHead('Cameras')), title: 'Cameras on each controller', what: 'How many cameras the controller holds. Clear all takes them off when you send.' },
-    { step: 'cameras', tab: 'setup', at: () => tabButton('setup'), title: 'Camera Configuration', what: 'One row for every camera: what it is, how it’s reached and where it’s plugged in.' },
-    { step: 'cameras', tab: 'setup', at: () => inPanel('input[aria-label="Number of cameras"]')?.parentElement, title: 'Number of cameras', what: 'Adds or removes camera rows. New rows join the end.', todo: 'Set how many cameras you have.' },
-    { step: 'cameras', tab: 'setup', at: () => sheetLine(...['model', 'ip', 'port', 'login', 'password'].map(field => fieldHead(cameraSetupSheet, field))), title: 'Model, address and login', what: 'How the controller reaches the camera.', todo: 'Fill these in for each camera.' },
+    { step: 'find', tab: 'devices', at: () => [dropdownFor($('scan-range')), dropdownFor($('discovery-method')), action('scan')].filter(Boolean), title: 'Discover',
+      what: f => 'Pick the network your controllers are on and press Discover. It only reads them, so nothing on them changes.' + (f.simulated ? ' This is Simulated: it finds a simulated RIO and two RCPs on any network.' : '') + ' Know a controller’s address? Type it in the New device row at the bottom of the list instead.',
+      todo: 'Pick your network, press Discover, then Add them to Devices.' },
+    { step: 'name', tab: 'devices', at: () => sheetLine(deviceHead('name')), title: 'Name', what: 'The name your crew uses. Keys, lists and the REMI Matrix all show it.', todo: 'Click a name and type over it.' },
+    { step: 'name', tab: 'devices', at: () => sheetLine(deviceHead('status'), deviceHead('base')), title: 'Status and Base IP', what: 'Online or Offline, read from the controller. Click an IP to open the controller’s own page in Safari. Refresh all, top right, reads every controller again.' },
+    { step: 'name', tab: 'devices', at: () => sheetLine(deviceGroupHead('lan'), deviceGroupHead('wan')), title: 'LAN and WAN', what: 'The controller’s network addresses. A change waits in Pending sends until you send it.' },
+    { step: 'cameras', tab: 'setup', at: () => inPanel('input[aria-label="Number of cameras"]')?.parentElement, title: 'Number of cameras', what: 'Adds or removes camera rows on Camera Configuration. New rows join the end.', todo: 'Set how many cameras you have.' },
+    { step: 'cameras', tab: 'setup', at: () => sheetLine(...['name', 'model', 'ip', 'port', 'login', 'password'].map(field => fieldHead(cameraSetupSheet, field))), title: 'Camera details',
+      what: 'Each camera’s name, model, address and login, so the controller can reach it. Camera logins, above the sheet, sets one login for every camera of a model.', todo: 'Fill these in for each camera.' },
     { step: 'cameras', tab: 'setup', at: () => sheetLine(fieldHead(cameraSetupSheet, 'source')), title: 'Source', what: 'The RIO or RCP the camera is plugged into. A camera needs one before it can be sent.', todo: 'Pick the controller for each camera.' },
-    { step: 'cameras', tab: 'setup', at: () => inPanel('[data-action="toggle-camera-logins"]'), title: 'Camera logins', what: 'One login for every camera of a model, so you don’t type it on each row.' },
-    { step: 'cameras', tab: 'setup', at: () => inPanel('[aria-label="Sheet layout for this tab"]')?.parentElement, title: 'Sheet layout', what: 'Turns the sheet on its side or hides columns. It only changes what you see.' },
-    { step: 'send', tab: 'setup', at: () => inPanel('[data-action="toggle-pending-sends"]'), title: 'Pending sends', what: 'Every change waits here. Nothing reaches a controller until it is sent.', todo: 'Open it and press Send.' },
+    { step: 'send', tab: 'setup', at: () => inPanel('[data-action="toggle-pending-sends"]'), title: 'Pending sends', what: 'Every change waits here, and nothing reaches a controller until it is sent. The bottom right says All changes verified once the controllers have it.', todo: 'Open Pending sends and press Send.' },
     { step: 'send', tab: 'setup', at: () => root.querySelector('[aria-label="Spreadsheet send mode"]'), title: 'Send mode', what: 'Manual waits for you to press Send. Auto send sends each edit as you make it.' },
-    { step: 'send', tab: 'setup', at: () => $('pending-summary'), title: 'Send status', what: 'Says when everything is on the controllers: All changes verified.' },
-    { step: 'remi', tab: 'assignment', at: () => tabButton('assignment'), title: 'REMI Matrix', what: 'Which RCPs can control each camera. You only need it if cameras go on to other RCPs.' },
-    { step: 'remi', tab: 'assignment', at: () => sheetLine(fieldHead(allCamerasSheet, 'remiMaster')), title: 'Master RCP', what: 'The RCP that controls the camera first.' },
+    { step: 'remi', tab: 'assignment', at: () => sheetLine(fieldHead(allCamerasSheet, 'remiMaster')), title: 'Master RCP', what: 'REMI Matrix shares cameras with other RCPs, and you only need it if they go on to more than one. Master RCP controls the camera first.' },
     { step: 'remi', tab: 'assignment', at: () => sheetLine(root.querySelector('[data-controller="' + allCamerasSheet + '"] th.hc-camera-band-remi')), title: 'REMI to', what: 'One column per RCP. Fill a circle to put the camera on that RCP too, and empty it to take it off.', todo: 'Optional. Skip it if each camera stays on one RCP.' },
     { step: 'actions', title: 'Add Cyanview actions', what: 'Keys get their Cyanview actions in HubDash’s Button Matrix, not on this page.', todo: 'In the Button Matrix, choose + Action, then Cyanview. Pick an Action, the Cyanview Controller and the camera.' },
     { step: 'press', title: 'Press a key', what: f => 'Press a Select camera key on your deck. The ' + (f.simulated ? 'simulated ' : '') + 'RCP switches to that camera, and the key’s bar turns blue while the camera is online.' },
@@ -5129,33 +5125,69 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from
   setupTour.hidden = true;
   setupTour.innerHTML = '<div class="cv-tour-dim" aria-hidden="true"></div><div class="cv-tour-spot" aria-hidden="true"></div>' +
     '<svg class="cv-tour-lines" aria-hidden="true"><defs><marker id="cv-tour-tip" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"/></marker></defs>' +
-    '<g class="cv-tour-lead"><path marker-end="url(#cv-tour-tip)"/></g></svg>' +
-    '<section class="cv-tour-card" role="dialog" aria-modal="false" aria-labelledby="cv-tour-title" aria-describedby="cv-tour-what">' +
+    '<g class="cv-tour-lead"><path marker-end="url(#cv-tour-tip)"/></g></svg><div class="cv-tour-tag" aria-hidden="true"></div>' +
+    '<section class="cv-tour-panel" role="dialog" aria-modal="false" aria-labelledby="cv-tour-title" aria-describedby="cv-tour-what">' +
     '<div class="cv-tour-progress" aria-hidden="true"><span></span></div>' +
-    '<div class="cv-tour-step"><b class="cv-tour-marker"></b><span class="cv-tour-step-title"></span><span class="cv-tour-done">Done</span><span class="cv-tour-count"></span></div>' +
+    '<div class="cv-tour-step"><b class="cv-tour-marker"></b><span class="cv-tour-step-title"></span><span class="cv-tour-count"></span></div>' +
     '<h3 id="cv-tour-title"></h3><p id="cv-tour-what" class="cv-tour-what"></p><p class="cv-tour-status"></p>' +
-    '<p class="cv-tour-todo"><strong>What to do:</strong> <span></span></p>' +
-    '<footer><button type="button" class="cv-tour-exit" data-tour="exit">Exit tour</button><button type="button" class="cv-tour-back" data-tour="back">Back</button><button type="button" class="cv-tour-next" data-tour="next">Next</button></footer>' +
+    '<footer><p class="cv-tour-todo"><strong>What to do:</strong> <span></span></p><span class="cv-tour-buttons"><button type="button" class="cv-tour-exit" data-tour="exit">Exit tour</button>' +
+    '<button type="button" class="cv-tour-back" data-tour="back">Back</button><button type="button" class="cv-tour-next" data-tour="next">Next</button></span></footer>' +
     '</section>';
   document.body.append(setupTour);
   const tourDim = setupTour.querySelector('.cv-tour-dim'), tourSpot = setupTour.querySelector('.cv-tour-spot'), tourLines = setupTour.querySelector('.cv-tour-lines');
-  const tourLead = setupTour.querySelector('.cv-tour-lead'), tourLine = setupTour.querySelector('.cv-tour-lead path'), tourCard = setupTour.querySelector('.cv-tour-card');
-  const tourPart = selector => tourCard.querySelector(selector);
+  const tourLead = setupTour.querySelector('.cv-tour-lead'), tourLine = setupTour.querySelector('.cv-tour-lead path'), tourTag = setupTour.querySelector('.cv-tour-tag');
+  const tourPanel = setupTour.querySelector('.cv-tour-panel');
+  const tourPart = selector => tourPanel.querySelector(selector);
   let setupTourAt = 0, setupTourTimer = null, setupTourPlaced = '';
+  // Scroll positions the tour changed, put back when it ends.
+  const setupTourScrolled = new Map();
 
   const tourParts = stop => {
     const found = stop.at?.();
     const list = Array.isArray(found) ? found : found ? [found] : [];
     return list.map(part => part instanceof Element ? { el: part, rect: () => part.getBoundingClientRect() } : part).filter(part => shown(part.el));
   };
-  function paintTourCard(facts = setupGuideFacts()) {
+  // The panel sits just above the page's status line, so that line stays readable, and the tab gets as
+  // much room at its end as the panel covers, so its last rows can still be scrolled into view.
+  function placeTourPanel() {
+    const status = $('saved-label')?.parentElement, bar = status && shown(status) ? status.getBoundingClientRect() : null;
+    tourPanel.style.bottom = (bar && bar.top > innerHeight / 2 ? innerHeight - bar.top + 8 : 12) + 'px';
+    const scroller = openPanel()?.getBoundingClientRect(), top = tourPanel.getBoundingClientRect().top;
+    root.style.setProperty('--cv-tour-room', Math.max(0, Math.round((scroller?.bottom ?? innerHeight) - top + 12)) + 'px');
+  }
+  // Brings a stop into view: past a sheet's frozen columns sideways, and wholly above the panel when it
+  // fits there, or else from its top down.
+  function bringTourPartIntoView(part) {
+    const target = part.el, scrollers = [];
+    for (let el = target.parentElement; el && el !== document.body; el = el.parentElement) {
+      const style = getComputedStyle(el);
+      if (/(auto|scroll)/.test(style.overflowX + style.overflowY)) scrollers.push(el);
+    }
+    const remember = el => { if (!setupTourScrolled.has(el)) setupTourScrolled.set(el, { left: el.scrollLeft, top: el.scrollTop }); };
+    for (const scroller of scrollers) {
+      const box = scroller.getBoundingClientRect(), r = target.getBoundingClientRect();
+      if (scroller.scrollWidth > scroller.clientWidth) {
+        const frozen = [...(target.closest('table')?.querySelectorAll('th[data-hubble-frozen]') ?? [])].filter(shown).map(th => th.getBoundingClientRect().right);
+        const left = Math.max(box.left, target.matches('[data-hubble-frozen]') ? box.left : Math.max(box.left, ...frozen)) + 8, right = box.right - 8;
+        const shift = r.left < left ? r.left - left : r.right > right ? Math.min(r.right - right, r.left - left) : 0;
+        if (shift) { remember(scroller); scroller.scrollLeft += shift; }
+      }
+      if (scroller.scrollHeight > scroller.clientHeight) {
+        const lit = part.rect(), panelTop = tourPanel.getBoundingClientRect().top - 16, top = box.top + 8, bottom = Math.min(box.bottom, panelTop) - 8;
+        const shift = lit.top < top || lit.bottom - lit.top > bottom - top ? lit.top - top : lit.bottom > bottom ? lit.bottom - bottom : 0;
+        if (shift) { remember(scroller); scroller.scrollTop += shift; }
+      }
+    }
+  }
+  function paintTourPanel(facts = setupGuideFacts()) {
     const stop = setupTourStops[setupTourAt], steps = setupGuideSteps(facts, setupGuideProgress);
     const index = steps.findIndex(step => step.id === stop.step), done = steps[index]?.status === 'done';
     const first = setupTourStops.findIndex(item => item.step === stop.step) === setupTourAt, last = setupTourAt === setupTourStops.length - 1;
     const status = first ? setupTourStatus(stop.step, facts, done) : '';
     tourPart('.cv-tour-progress span').style.width = (setupTourAt + 1) / setupTourStops.length * 100 + '%';
-    tourCard.dataset.done = String(done);
+    tourPanel.dataset.done = String(done);
     tourPart('.cv-tour-marker').innerHTML = done ? setupTourSvg.check : String(index + 1);
+    tourPart('.cv-tour-marker').setAttribute('aria-label', done ? 'Done' : 'Step ' + (index + 1));
     tourPart('.cv-tour-step-title').textContent = steps[index]?.title ?? '';
     tourPart('.cv-tour-count').textContent = (setupTourAt + 1) + ' of ' + setupTourStops.length;
     tourPart('#cv-tour-title').textContent = stop.title;
@@ -5163,52 +5195,46 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from
     tourPart('.cv-tour-status').textContent = status;
     tourPart('.cv-tour-status').hidden = !status;
     tourPart('.cv-tour-todo span').textContent = stop.todo ?? '';
-    tourPart('.cv-tour-todo').hidden = !stop.todo;
+    tourPart('.cv-tour-todo').style.visibility = stop.todo ? '' : 'hidden';
     tourPart('.cv-tour-back').disabled = setupTourAt === 0;
     tourPart('.cv-tour-next').textContent = last ? 'Done' : 'Next';
+    tourTag.textContent = stop.title;
   }
-  // Below the lit part if the card fits, then above it, then beside it. With nothing to light (a step
-  // that happens in HubDash, or a part this setup doesn't have yet), the card waits in the middle.
+  // The ring goes round what can be seen of the stop, above the panel. Its arrow and name tag sit below
+  // it when there is room, then above, then beside it, and never on the panel.
   function placeTour() {
     if (setupTour.hidden) return;
+    placeTourPanel();
     const parts = tourParts(setupTourStops[setupTourAt]);
+    const vw = innerWidth, vh = innerHeight, floor = tourPanel.getBoundingClientRect().top - 10, pad = 5, gap = 34, edge = 10;
     const rects = parts.map(part => part.rect());
-    const vw = innerWidth, vh = innerHeight, cw = tourCard.offsetWidth, ch = tourCard.offsetHeight, pad = 5, gap = 50, edge = 12;
-    const r = rects.length ? { left: Math.min(...rects.map(x => x.left)), top: Math.min(...rects.map(x => x.top)), right: Math.max(...rects.map(x => x.right)), bottom: Math.max(...rects.map(x => x.bottom)) } : null;
-    const onScreen = r && r.right > 0 && r.left < vw && r.bottom > 0 && r.top < vh;
-    const key = onScreen ? [r.left, r.top, r.right, r.bottom, cw, ch, vw, vh].map(Math.round).join(',') : 'none,' + cw + ',' + ch + ',' + vw + ',' + vh;
+    let r = rects.length ? { left: Math.min(...rects.map(x => x.left)), top: Math.min(...rects.map(x => x.top)), right: Math.max(...rects.map(x => x.right)), bottom: Math.max(...rects.map(x => x.bottom)) } : null;
+    if (r) r = { left: Math.max(r.left, 2), top: Math.max(r.top, 2), right: Math.min(r.right, vw - 2), bottom: Math.min(r.bottom, floor - pad) };
+    const onScreen = r && r.right - r.left > 4 && r.bottom - r.top > 4;
+    const tw = tourTag.offsetWidth, th = tourTag.offsetHeight;
+    const key = onScreen ? [r.left, r.top, r.right, r.bottom, tw, th, vw, vh, floor].map(Math.round).join(',') : 'none,' + vw + ',' + vh;
     if (key === setupTourPlaced) return;
     setupTourPlaced = key;
-    tourSpot.hidden = !onScreen;
+    tourSpot.hidden = tourTag.hidden = !onScreen;
     tourLines.toggleAttribute('hidden', !onScreen);
-    if (!onScreen) {
-      tourDim.style.clipPath = 'none';
-      Object.assign(tourCard.style, { left: Math.max(edge, (vw - cw) / 2) + 'px', top: Math.max(edge, (vh - ch) / 2) + 'px' });
-      return;
-    }
+    if (!onScreen) { tourDim.style.clipPath = 'none'; return; }
     const hx = r.left - pad, hy = r.top - pad, hw = r.right - r.left + pad * 2, hh = r.bottom - r.top + pad * 2, k = Math.min(9, hw / 2, hh / 2);
     Object.assign(tourSpot.style, { left: hx + 'px', top: hy + 'px', width: hw + 'px', height: hh + 'px' });
     tourDim.style.clipPath = 'path(evenodd, "M0 0 H' + vw + ' V' + vh + ' H0 Z M' + (hx + k) + ' ' + hy + ' H' + (hx + hw - k) + ' A' + k + ' ' + k + ' 0 0 1 ' + (hx + hw) + ' ' + (hy + k) +
       ' V' + (hy + hh - k) + ' A' + k + ' ' + k + ' 0 0 1 ' + (hx + hw - k) + ' ' + (hy + hh) + ' H' + (hx + k) + ' A' + k + ' ' + k + ' 0 0 1 ' + hx + ' ' + (hy + hh - k) + ' V' + (hy + k) + ' A' + k + ' ' + k + ' 0 0 1 ' + (hx + k) + ' ' + hy + ' Z")';
     const clamp = (value, low, high) => Math.max(low, Math.min(value, high));
-    const clampX = value => clamp(value, edge, vw - cw - edge), clampY = value => clamp(value, edge, vh - ch - edge);
-    let x, y, from, to, nudge;
-    if (r.bottom + pad + gap + ch <= vh - edge || r.top - pad - gap - ch >= edge) {
-      const below = r.bottom + pad + gap + ch <= vh - edge;
-      x = clampX(r.left); y = below ? r.bottom + pad + gap : r.top - pad - gap - ch;
-      const tx = r.right - r.left < 24 ? (r.left + r.right) / 2 : clamp(x + 40, r.left + 12, r.right - 12);
-      from = [clamp(tx, x + 24, x + cw - 24), below ? y - 2 : y + ch + 2]; to = [tx, below ? r.bottom + pad + 6 : r.top - pad - 6];
-      nudge = below ? '--cv-tour-ny: -5px' : '--cv-tour-ny: 5px';
-    } else {
-      const right = r.right + pad + gap + cw <= vw - edge;
-      x = right ? r.right + pad + gap : clampX(r.left - pad - gap - cw); y = clampY(r.top);
-      const ty = r.bottom - r.top < 24 ? (r.top + r.bottom) / 2 : clamp(y + 30, r.top + 10, r.bottom - 10);
-      from = [right ? x - 2 : x + cw + 2, clamp(ty, y + 20, y + ch - 20)]; to = [right ? r.right + pad + 6 : r.left - pad - 6, ty];
-      nudge = right ? '--cv-tour-nx: -5px' : '--cv-tour-nx: 5px';
-    }
-    Object.assign(tourCard.style, { left: x + 'px', top: y + 'px' });
-    tourLine.setAttribute('d', 'M ' + from[0] + ' ' + from[1] + ' L ' + to[0] + ' ' + to[1]);
-    tourLead.style.cssText = nudge;
+    const cx = (r.left + r.right) / 2, cy = r.top + Math.min((r.bottom - r.top) / 2, 18);
+    const places = [
+      { fits: r.bottom + pad + gap + th <= floor, x: clamp(cx - tw / 2, edge, vw - tw - edge), y: r.bottom + pad + gap, from: y => [cx, y - 2], to: [cx, r.bottom + pad + 6], nudge: '--cv-tour-ny: -4px' },
+      { fits: r.top - pad - gap - th >= edge, x: clamp(cx - tw / 2, edge, vw - tw - edge), y: r.top - pad - gap - th, from: y => [cx, y + th + 2], to: [cx, r.top - pad - 6], nudge: '--cv-tour-ny: 4px' },
+      { fits: r.right + pad + gap + tw <= vw - edge, x: r.right + pad + gap, y: clamp(cy - th / 2, edge, floor - th), from: () => [r.right + pad + gap - 2, cy], to: [r.right + pad + 6, cy], nudge: '--cv-tour-nx: -4px' },
+      { fits: true, x: Math.max(edge, r.left - pad - gap - tw), y: clamp(cy - th / 2, edge, floor - th), from: () => [r.left - pad - gap + 2, cy], to: [r.left - pad - 6, cy], nudge: '--cv-tour-nx: 4px' },
+    ];
+    const place = places.find(item => item.fits);
+    Object.assign(tourTag.style, { left: place.x + 'px', top: place.y + 'px' });
+    const from = place.from(place.y);
+    tourLine.setAttribute('d', 'M ' + from[0] + ' ' + from[1] + ' L ' + place.to[0] + ' ' + place.to[1]);
+    tourLead.style.cssText = place.nudge;
   }
   function showTourStop(at) {
     setupTourAt = Math.max(0, Math.min(setupTourStops.length - 1, at));
@@ -5217,32 +5243,39 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from
     if (stop.tab && tab !== stop.tab && !(stop.tab === 'assignment' && remiTab())) tabButton(stop.tab)?.click();
     const wasOpen = !setupTour.hidden;
     setupTour.hidden = false;
+    root.classList.add('cv-touring');
     setupTourToggle.setAttribute('aria-pressed', 'true');
-    paintTourCard();
-    tourParts(stop)[0]?.el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-    tourCard.classList.remove('cv-tour-fresh'); void tourCard.offsetWidth; tourCard.classList.add('cv-tour-fresh');
+    paintTourPanel();
+    placeTourPanel();
+    const parts = tourParts(stop);
+    if (parts[0]) bringTourPartIntoView(parts[0]);
+    tourTag.classList.remove('cv-tour-fresh'); void tourTag.offsetWidth; tourTag.classList.add('cv-tour-fresh');
     setupTourPlaced = '';
     placeTour();
     if (setupTourTimer === null) setupTourTimer = setInterval(placeTour, 150);
-    if (!wasOpen || tourCard.contains(document.activeElement)) tourPart('.cv-tour-next').focus({ preventScroll: true });
+    if (!wasOpen || tourPanel.contains(document.activeElement)) tourPart('.cv-tour-next').focus({ preventScroll: true });
   }
   function endTour() {
     if (setupTour.hidden) return;
-    const hadFocus = tourCard.contains(document.activeElement);
+    const hadFocus = tourPanel.contains(document.activeElement);
     setupTour.hidden = true;
+    root.classList.remove('cv-touring');
+    root.style.removeProperty('--cv-tour-room');
     setupTourToggle.setAttribute('aria-pressed', 'false');
     if (setupTourTimer !== null) { clearInterval(setupTourTimer); setupTourTimer = null; }
     setupTourPlaced = '';
+    for (const [scroller, at] of setupTourScrolled) { scroller.scrollLeft = at.left; scroller.scrollTop = at.top; }
+    setupTourScrolled.clear();
     if (hadFocus) setupTourToggle.focus();
   }
-  tourCard.addEventListener('click', event => {
+  tourPanel.addEventListener('click', event => {
     switch (event.target.closest('[data-tour]')?.dataset.tour) {
       case 'next': if (setupTourAt === setupTourStops.length - 1) endTour(); else showTourStop(setupTourAt + 1); break;
       case 'back': showTourStop(setupTourAt - 1); break;
       case 'exit': endTour(); break;
     }
   });
-  tourCard.addEventListener('keydown', event => {
+  tourPanel.addEventListener('keydown', event => {
     if (event.key === 'Escape') { event.preventDefault(); endTour(); }
     else if (event.key === 'ArrowRight') { event.preventDefault(); if (setupTourAt < setupTourStops.length - 1) showTourStop(setupTourAt + 1); }
     else if (event.key === 'ArrowLeft') { event.preventDefault(); if (setupTourAt > 0) showTourStop(setupTourAt - 1); }
@@ -5256,7 +5289,7 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from
     const startsItself = !setupGuideProgress.offered && next.offered;
     if (next !== setupGuideProgress) { setupGuideProgress = next; saveSetupGuide(next); }
     simulatedPill.hidden = !facts.simulated;
-    if (!setupTour.hidden) paintTourCard(facts);
+    if (!setupTour.hidden) paintTourPanel(facts);
     if (startsItself && setupTour.hidden) showTourStop(0);
   }
   function scheduleSetupGuide() {

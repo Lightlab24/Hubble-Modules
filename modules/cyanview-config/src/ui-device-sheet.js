@@ -93,12 +93,13 @@
     };
     const top = [], fields = [];
     for (const [index, column] of columns.entries()) {
-      if (!column.group) { top.push('<th scope="col" rowspan="2">' + sortHead(column) + '</th>'); continue; }
+      // Each heading names its column, as the camera sheets' do, so the setup tour finds it whatever it says.
+      if (!column.group) { top.push('<th scope="col" rowspan="2" data-device-header="' + column.id + '">' + sortHead(column) + '</th>'); continue; }
       if (columns[index - 1]?.group !== column.group) {
         const open = deviceSheet[column.group + 'Open'], label = deviceGroups[column.group].label;
-        top.push('<th scope="colgroup" class="hc-device-group-head" colspan="' + columns.filter(item => item.group === column.group).length + '"><button type="button" class="hc-device-group" data-action="toggle-device-group" data-group="' + column.group + '" aria-expanded="' + open + '" aria-label="' + (open ? 'Collapse ' : 'Expand ') + label + '"><span class="hc-device-group-box" aria-hidden="true">' + (open ? '−' : '+') + '</span>' + label + '</button></th>');
+        top.push('<th scope="colgroup" class="hc-device-group-head" data-device-group-header="' + column.group + '" colspan="' + columns.filter(item => item.group === column.group).length + '"><button type="button" class="hc-device-group" data-action="toggle-device-group" data-group="' + column.group + '" aria-expanded="' + open + '" aria-label="' + (open ? 'Collapse ' : 'Expand ') + label + '"><span class="hc-device-group-box" aria-hidden="true">' + (open ? '−' : '+') + '</span>' + label + '</button></th>');
       }
-      fields.push('<th scope="col">' + sortHead(column) + '</th>');
+      fields.push('<th scope="col" data-device-header="' + column.id + '">' + sortHead(column) + '</th>');
     }
     return '<colgroup>' + columns.map(column => '<col style="width:' + column.width + 'px">').join('') + '</colgroup><thead><tr>' + top.join('') + '</tr><tr>' + fields.join('') + '</tr></thead>';
   }
