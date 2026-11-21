@@ -1,7 +1,7 @@
 import { createModuleDocumentClient, ModuleDocumentConflictError, ModuleDocumentValueSchema, type HubbleModule, type ModuleJsonValue } from '@hubble/module-sdk';
 import { CameraClient, CameraOfflineError } from './camera-client.js';
 import { pingCamera } from './camera-ping.js';
-import { alertChoices, applyMutation, fieldById, fields, liveOn, readFieldIds, validateDocument, type CameraDocument, type Mutation, type Camera, type Field } from './model.js';
+import { alertChoices, applyMutation, fieldById, fields, liveOn, readFieldIds, sameValue, validateDocument, type CameraDocument, type Mutation, type Camera, type Field } from './model.js';
 import { readFields, decodeField, writeField, fieldProperties, baseIsoChoices, ndChoices, recordingProperties, recordingState, recordingSignals, clipNameProperty } from './protocol.js';
 export interface Observation { state:'offline'|'online'|'error'; host:string; values:Record<string,string>; choices:Record<string,{value:string;label:string}[]>; updatedAt?:string; errors:Record<string,string>; sending:string[]; queued:string[]; live?:boolean; recording?:string }
 export type Observations=Record<string,Observation>;
@@ -281,7 +281,7 @@ export function createBackend(context:Parameters<HubbleModule['createInstance']>
           const latest=(await snapshot(signal)).document.cameras.find(r=>r.id===row.id);
           if(!latest||latest.values['camera-host']!==row.values['camera-host'])break;
           const value=latest.values[field.id];delete state.errors[field.id];
-          if(!value||value===state.values[field.id])continue;
+          if(!value||sameValue(field,value,state.values[field.id]))continue;
           state.sending=[field.id];publish();
           try {const after=await writeField(client,field,value,latest,signal);for(const other of selected){const decoded=decodeField(other,after);if(decoded!=='')state.values[other.id]=decoded;}state.values[field.id]=decodeField(field,after);state.state='online';state.updatedAt=new Date().toISOString();delete state.errors[field.id];outcomes.push({fieldId:field.id,status:'verified'});context.log({level:'info',stage:'camera-send',message:valueLabel(row)+' '+field.id+' confirmed'});}
           catch(error){if(signal.aborted||error instanceof CameraOfflineError)throw error;const message=error instanceof Error?error.message:'Camera setting failed.',readback=(error as {readback?:unknown}).readback;context.log({level:'error',stage:'camera-send',message:(valueLabel(row)+' '+field.id+': '+message+(readback?' Camera reports '+JSON.stringify(readback):'')).slice(0,600)});state.errors[field.id]=message;outcomes.push({fieldId:field.id,status:'failed',message});}

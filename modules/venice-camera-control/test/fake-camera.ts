@@ -3,7 +3,7 @@ import { once } from 'node:events';
 import { WebSocketServer } from 'ws';
 import { encode,decode } from '@msgpack/msgpack';
 
-export interface FakeCameraOptions { values?:Record<string,string>; status?:(property:string)=>unknown; readDelay?:number; writeDelay?:number; loginDelay?:number; statusFails?:boolean; rejectLogin?:boolean; dropSocket?:boolean; camProperties?:string[]; shutterMenu?:boolean; rejectSubscribe?:boolean }
+export interface FakeCameraOptions { values?:Record<string,string>; status?:(property:string)=>unknown; readDelay?:number; writeDelay?:number; loginDelay?:number; statusFails?:boolean; rejectLogin?:boolean; dropSocket?:boolean; camProperties?:string[]; shutterMenu?:boolean; rejectSubscribe?:boolean; keeps?:(written:Record<string,unknown>)=>Record<string,unknown> }
 /** Answers the camera's login and its property calls on a loopback port. No real camera is involved. */
 export async function fakeCamera(options:FakeCameraOptions={}) {
   const values={...options.values},writes:Record<string,unknown>[]=[],reads:string[][]=[],statusRequests:Record<string,unknown>[]=[],capabilityRequests:unknown[]=[];
@@ -28,7 +28,7 @@ export async function fakeCamera(options:FakeCameraOptions={}) {
     else if(method==='Capability.GetValue'){capabilityRequests.push(params);result={};}
     else if(method==='Property.SetValue'){writes.push(params);setTimeout(()=>{
       if(options.shutterMenu&&'P.System.Menu.ShutterMode' in params)values['Camera.Shutter.Mode']=String(params['P.System.Menu.ShutterMode'])==='1'?'Angle':'Speed';
-      const{['Camera.Shutter.Mode']:ignored,...kept}=params;Object.assign(values,options.shutterMenu?kept:params);
+      const{['Camera.Shutter.Mode']:ignored,...kept}=params;const stored=options.shutterMenu?kept:params;Object.assign(values,options.keeps?.(stored)??stored);
     },options.writeDelay??5);}
     const reply=()=>socket.send(encode([1,id,error,result]));
     if(wait)setTimeout(reply,wait);else reply();

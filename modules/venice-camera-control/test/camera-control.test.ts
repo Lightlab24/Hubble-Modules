@@ -8,7 +8,7 @@ import { WebSocketServer } from 'ws';
 import { encode,decode } from '@msgpack/msgpack';
 import { createModuleHarness } from '@hubble/module-sdk/testing';
 import module from '../src/index.js';
-import { groups,fields,defaultDocument,applyMutation,clone,visibleFields,withColumnVisibility,validateDocument,addSheet,renameSheet,removeSheet,moveSheet,setOrientation,sheetList,activeSheetId,isFlipped,viewChange,setCameraCount,cameraHasData,loginVisible,sheetRowCount,withNoColumns,alertChoices,inverse,liveOn,autoSendOn,readFieldIds,type AlertChoices,type Mutation,type View } from '../src/model.js';
+import { groups,fields,defaultDocument,applyMutation,clone,visibleFields,withColumnVisibility,validateDocument,addSheet,renameSheet,removeSheet,moveSheet,setOrientation,sheetList,activeSheetId,isFlipped,viewChange,setCameraCount,cameraHasData,loginVisible,sheetRowCount,withNoColumns,alertChoices,inverse,liveOn,autoSendOn,readFieldIds,sameValue,validateValue,type AlertChoices,type Mutation,type View } from '../src/model.js';
 import { DraftStore } from '../src/draft-store.js';
 import { CameraClient } from '../src/camera-client.js';
 import { encodeField,decodeField,writeField,recordingState,fieldProperties } from '../src/protocol.js';
@@ -850,6 +850,53 @@ test('the reel comes from the clip name the camera reports, and the Reel Number 
   assert.equal(decodeField(reelField,{[menu]:'9','Clip.Mediabox.ClipName':{main:'unexpected'}}),'9');
   assert.equal(decodeField(reelField,{'Clip.Mediabox.ClipName':{main:'C502C001\u0000'}}),'502');
   assert.deepEqual(fieldProperties(reelField),[menu,'Clip.Mediabox.ClipName']);
+});
+
+test('a reel is a number, so 1, 01 and 001 are the same reel wherever they are compared',()=>{
+  const row=defaultDocument().cameras[0]!,menu=reelField.property;
+  for(const typed of ['1','01','001'])assert.equal(validateValue(reelField.id,typed),undefined,typed+' is a reel the sheet accepts');
+  for(const [staged,reported]of [['001','1'],['01','1'],['1','001'],['010','10'],['101','101']])assert.ok(sameValue(reelField,staged,reported),staged+' and '+reported+' are one reel');
+  for(const [staged,reported]of [['001','2'],['10','1'],['001',undefined],['1','']])assert.ok(!sameValue(reelField,staged,reported as string|undefined),staged+' and '+reported+' are different');
+  assert.ok(!sameValue(cameraField,'01','1'),'only the reel is read as a number');
+  for(const typed of ['1','01','001'])assert.deepEqual(encodeField(reelField,typed,row,{[menu]:'502'}),{[menu]:'1'},typed+' goes out as the camera keeps it');
+  assert.deepEqual(encodeField(reelField,'007',row,{[menu]:7}),{[menu]:7},'a camera reporting a number gets a number');
+});
+
+test('a reel typed with leading zeros confirms when the camera reads it back with or without them',async()=>{
+  const row=defaultDocument().cameras[0]!,menu=reelField.property;
+  for(const [typed,keeps]of [['001',(v:string)=>String(Number(v))],['1',(v:string)=>v.padStart(3,'0')],['01',(v:string)=>v]] as const){
+    let stored='502',written:unknown;
+    const client={close(){},async rpc(method:string,params:any){
+      if(method==='Property.GetStatus')return {};
+      if(method==='Property.SetValue'){written=params[menu];stored=keeps(String(params[menu]));return null;}
+      return {[menu]:stored};
+    }};
+    const started=Date.now();
+    await writeField(client,reelField,typed,row,signalNow());
+    assert.ok(Date.now()-started<1000,typed+' should confirm on the first readback, took '+(Date.now()-started)+'ms');
+    assert.equal(written,'1');
+  }
+});
+
+test('a reel sent as 001 to a camera that keeps 1 is confirmed, leaves Pending sends and is not sent again',async()=>{
+  const menu=reelField.property;
+  const camera=await fakeCamera({values:{[menu]:'502'},keeps:written=>menu in written?{...written,[menu]:String(Number(written[menu]))}:written});
+  const plan=cameraPlan([camera.host],[{[reelField.id]:'001'}],undefined,{view:showing(reelField.id)});
+  const {harness,run,last}=await startBackend(plan);
+  try {
+    await run('refresh',{rowId:'cam-0',host:camera.host,fieldIds:[reelField.id]});
+    assert.equal(last()['cam-0'].values[reelField.id],'502');
+    const sent=await run('send',{rowId:'cam-0',host:camera.host,fieldIds:[reelField.id]});
+    assert.deepEqual(sent.outcomes.map((o:any)=>[o.fieldId,o.status]),[[reelField.id,'verified']]);
+    assert.deepEqual(camera.writes,[{[menu]:'1'}]);
+    assert.equal(camera.values[menu],'1');
+    assert.equal(last()['cam-0'].values[reelField.id],'1');
+    assert.equal(last()['cam-0'].errors[reelField.id],undefined,'no readback failure is left on the cell');
+    assert.ok(sameValue(reelField,plan.saved().cameras[0]!.values[reelField.id],last()['cam-0'].values[reelField.id]),'the staged 001 now matches what the camera reports, so the page drops it');
+    const again=await run('send',{rowId:'cam-0',host:camera.host,fieldIds:[reelField.id]});
+    assert.deepEqual(again.outcomes,[],'001 is already reel 1, so nothing is sent again');
+    assert.equal(camera.writes.length,1);
+  } finally {await harness.instance.dispose?.();await camera.close();}
 });
 
 test('Live shows the reel the clip name reports, follows it when it moves, and a reel write still confirms on the setting',async()=>{

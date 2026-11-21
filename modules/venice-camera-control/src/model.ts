@@ -26,6 +26,16 @@ export const clone = <T>(value:T):T => structuredClone(value);
 const sortedKeys = (value:unknown):unknown => Array.isArray(value) ? value.map(sortedKeys) : value && typeof value==='object' ? Object.fromEntries(Object.entries(value).sort(([a],[b])=>a<b?-1:a>b?1:0).map(([key,item])=>[key,sortedKeys(item)])) : value;
 export const same = (a:unknown,b:unknown):boolean => JSON.stringify(sortedKeys(a))===JSON.stringify(sortedKeys(b));
 export const valueOf = (row:Camera,columnId:string):string => row.values[columnId] ?? '';
+export const reelProperty='P.System.Menu.ClipnamingReelNum';
+const wholeNumber=/^\d+$/;
+/** A reel is a number: 1, 01 and 001 are all reel 1. A VENICE keeps it without the zeros, so a write of 001 reads back as 1. */
+export const reelNumber=(value:string):string=>wholeNumber.test(value)?String(Number(value)):value;
+/** Whether a staged value is what the camera reports, so it needs no send and stops being pending. */
+export function sameValue(field:Field|undefined,staged:string|undefined,reported:string|undefined):boolean {
+  if(staged===reported)return true;
+  if(field?.property!==reelProperty||staged===undefined||reported===undefined)return false;
+  return wholeNumber.test(staged)&&wholeNumber.test(reported)&&reelNumber(staged)===reelNumber(reported);
+}
 export function validHost(value:string):boolean {
   const match=/^([a-zA-Z0-9.-]+)(?::([0-9]{1,5}))?$/.exec(value);
   if(!match || (match[2] && (+match[2]<1 || +match[2]>65535)))return false;
@@ -46,7 +56,7 @@ export function validateValue(columnId:string,value:string):string|undefined {
   if(field.kind==='boolean')return ['TRUE','FALSE'].includes(value)?undefined:'Choose On or Off.';
   if(field.choices.length && !field.choices.some(c=>c.value===value))return 'Choose a value from the camera setting list.';
   if(field.kind==='number' && (!/^-?(?:\d+(?:\.\d*)?|\.\d+)$/.test(value)||!Number.isFinite(Number(value))))return 'Enter a finite number.';
-  if(field.property==='P.System.Menu.ClipnamingReelNum' && (!/^\d+$/.test(value)||+value<1||+value>999))return 'Use a reel number from 1 to 999 for this initial profile.';
+  if(field.property===reelProperty && (!/^\d+$/.test(value)||+value<1||+value>999))return 'Use a reel number from 1 to 999 for this initial profile.';
   return undefined;
 }
 export function defaultDocument():CameraDocument {
