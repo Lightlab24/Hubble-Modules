@@ -268,6 +268,9 @@ const server = createServer(async (request, response) => {
         if (typeof input.settingsDelayMs === "number") settingsDelayMs = input.settingsDelayMs;
         if (input.switcher) Object.assign(fake.options, input.switcher);
         if (input.holdSwitcher) fake.hold();
+        if (Array.isArray(input.routingRows))
+          // Cameras saved by something other than the page, as an import or a migration saves them.
+          routingSaved = { ...routingSaved, revision: `rev-${++writes}`, value: { rows: input.routingRows } };
         if (typeof input.routerReady === "boolean") {
           routerReady = input.routerReady;
           tellRouter();

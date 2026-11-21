@@ -23,6 +23,8 @@ export const ROUTING_DOCUMENT_ID = "routing";
 const SELF = "self";
 const COALESCE_MS = 10;
 const REFRESH_MS = 1000;
+/** How often the saved cameras are read again, for a change made elsewhere: an import, another window. */
+const DOCUMENT_MS = 2000;
 
 export const RoutingRowSchema = z.strictObject({
   id: z.string().regex(/^[A-Za-z0-9_-]{1,96}$/u),
@@ -62,10 +64,11 @@ export interface RoutingLive {
   readonly statuses: readonly RoutingStatus[];
   readonly routers: readonly RoutingRouter[];
   readonly notice: string;
+  /** The saved cameras' revision; a page holding another one reads them again. */
+  readonly revision: string | null;
 }
 export interface RoutingSnapshot extends RoutingLive {
   readonly rows: readonly RoutingRow[];
-  readonly revision: string | null;
 }
 export type RoutingSave =
   | { status: "saved"; rows: RoutingRow[]; revision: string | null }
@@ -104,6 +107,8 @@ export class TslRouting {
   private readonly subscriptions = new Map<string, () => Promise<void>>();
   private readonly controller = new AbortController();
   private timer: ReturnType<typeof setInterval> | undefined;
+  private documentTimer: ReturnType<typeof setInterval> | undefined;
+  private reading = false;
   private tallyTimer: ReturnType<typeof setTimeout> | undefined;
   private refreshing = false;
   private reconciled: string | undefined;
@@ -182,6 +187,29 @@ export class TslRouting {
     await this.refresh();
     this.timer = setInterval(() => void this.refresh(), REFRESH_MS);
     this.timer.unref?.();
+    if (this.context.services) {
+      this.documentTimer = setInterval(() => void this.reread(), DOCUMENT_MS);
+      this.documentTimer.unref?.();
+    }
+  }
+
+  /** Takes in cameras saved elsewhere. This module's own saves already hold that revision. */
+  private async reread(): Promise<void> {
+    if (this.closed || this.reading) return;
+    this.reading = true;
+    try {
+      const saved = await this.documents().read(ROUTING_DOCUMENT_ID, this.controller.signal);
+      if (this.closed || saved.revision === this.revision) return;
+      const parsed = RoutingDocumentSchema.safeParse(saved.value);
+      this.rows = parsed.success ? parsed.data.rows : [];
+      this.revision = saved.revision;
+      this.engine = this.build(this.engine);
+      this.feed();
+    } catch {
+      // The next read tries again.
+    } finally {
+      this.reading = false;
+    }
   }
 
   /** The receiver changed. Coalesced: a switcher sends hundreds of packets in a burst. */
@@ -356,17 +384,18 @@ export class TslRouting {
       program: row.values.program,
       status: row.values.status,
     }));
-    return { following: this.following, statuses, routers: this.routers, notice: this.notice };
+    return { following: this.following, statuses, routers: this.routers, notice: this.notice, revision: this.revision };
   }
 
   snapshot(): RoutingSnapshot {
-    return { ...this.live(), rows: this.rows, revision: this.revision };
+    return { ...this.live(), rows: this.rows };
   }
 
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
     clearInterval(this.timer);
+    clearInterval(this.documentTimer);
     clearTimeout(this.tallyTimer);
     this.controller.abort();
     this.engine.close();

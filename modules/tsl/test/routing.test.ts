@@ -299,3 +299,14 @@ it("connects to every router with only route allowed, saves the cameras, and tak
     ]),
   });
 });
+
+it("takes in cameras saved elsewhere, such as an import, within a couple of seconds", async () => {
+  const test = await world();
+  await test.routing.start();
+  expect(test.routing.snapshot().rows).toHaveLength(2);
+  const moved = [{ ...cameras[0]!, name: "Jib", source: 40 }];
+  test.setSaved(moved);
+  await new Promise((resolve) => setTimeout(resolve, 2300));
+  expect(test.routing.snapshot()).toMatchObject({ rows: moved, revision: test.document().revision });
+  expect(test.changed).toHaveBeenCalled();
+}, 10_000);

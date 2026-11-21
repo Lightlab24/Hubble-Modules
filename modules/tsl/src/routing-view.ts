@@ -75,6 +75,8 @@ export async function mountRoutingView(options: RoutingViewOptions) {
   let followPending = 0;
   let saving: Promise<void> | undefined;
   let dirty = false;
+  /** Cameras saved elsewhere are being read in. */
+  let rereading = false;
   const rowElements = new Map<string, HTMLTableRowElement>();
   const cells = new Map<string, HTMLTableCellElement>();
   const key = (address: SpreadsheetAddress) => `${address.rowId}/${address.columnId}`;
@@ -444,9 +446,25 @@ export async function mountRoutingView(options: RoutingViewOptions) {
 
   draw();
   return {
-    /** Live tally and routing status: drawn in place. */
+    /** Live tally and routing status: drawn in place. Cameras saved elsewhere are read in. */
     live(next: RoutingLive) {
       live = next;
+      if (next.revision !== revision && !saving && !dirty && !editor && !rereading) {
+        rereading = true;
+        void (options.ask("snapshot") as Promise<{ routing: RoutingSnapshot }>)
+          .then((fresh) => {
+            // A change of the page's own, made meanwhile, wins: it saves on top.
+            if (saving || dirty || editor || options.isDisposed()) return;
+            rows = structuredClone([...fresh.routing.rows]);
+            saved = structuredClone(rows);
+            revision = fresh.routing.revision;
+            draw();
+          })
+          .catch(() => undefined)
+          .finally(() => {
+            rereading = false;
+          });
+      }
       if (!followPending) following = next.following;
       for (const row of rows) {
         const element = rowElements.get(row.id);
