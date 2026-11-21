@@ -34,6 +34,12 @@ export interface TslReceiverSnapshot {
 
 const MAX_DISCOVERED_DISPLAYS = 4096
 const MAX_TCP_CLIENTS = 8
+/**
+ * The listen address isn't on this computer yet (its network is down or not joined), or another
+ * program holds the port. Both can clear by themselves, so the listener keeps trying.
+ */
+const RETRYABLE_LISTEN_ERRORS: ReadonlySet<string> = new Set(['EADDRNOTAVAIL', 'EADDRINUSE'])
+export const LISTEN_RETRY_MS = 3000
 
 export type TslReceiverContract = Pick<
   TslReceiver,
@@ -51,13 +57,29 @@ export class TslReceiver {
   #timer: ReturnType<typeof setInterval> | undefined
   #phase: TslReceiverSnapshot['phase'] = 'stopped'
   #error: string | null = null
+  #errorCode: string | null = null
+  #retry: ReturnType<typeof setTimeout> | undefined
+  /** Moves on at each stop, so a retry scheduled before it never starts a stopped listener. */
+  #generation = 0
+  readonly #retryMs: number
   #sequence = 0
   #invalidPackets = 0
 
-  constructor(settings: TslReceiverSettings, changed: () => void, now = Date.now) {
+  constructor(
+    settings: TslReceiverSettings,
+    changed: () => void,
+    now = Date.now,
+    retryMs = LISTEN_RETRY_MS,
+  ) {
     this.#settings = settings
     this.#changed = changed
     this.#now = now
+    this.#retryMs = retryMs
+  }
+
+  /** Whether the listener is waiting to try its address or port again. */
+  get retrying(): boolean {
+    return this.#retry !== undefined
   }
 
   health(): Pick<TslReceiverSnapshot, 'phase' | 'error'> {
@@ -113,17 +135,25 @@ export class TslReceiver {
   }
 
   async start(): Promise<void> {
+    if (this.#retry !== undefined) clearTimeout(this.#retry)
+    this.#retry = undefined
     if (this.#udp !== undefined || this.#tcp !== undefined) return
-    this.#error = null
+    const generation = this.#generation
     const ready = () => {
       this.#phase = 'listening'
+      this.#error = null
+      this.#errorCode = null
       this.#changed()
     }
     const failed = (error: Error) => {
+      const message = error.message.slice(0, 256)
+      // A retry that fails the same way changes nothing anyone needs to redraw.
+      const same = this.#phase === 'error' && this.#error === message && this.#entries.size === 0
       this.#phase = 'error'
-      this.#error = error.message.slice(0, 256)
+      this.#error = message
+      this.#errorCode = (error as NodeJS.ErrnoException).code ?? null
       this.#entries.clear()
-      this.#changed()
+      if (!same) this.#changed()
     }
     if (this.#settings.transport === 'udp') {
       const socket = dgram.createSocket('udp4')
@@ -197,6 +227,23 @@ export class TslReceiver {
         server.listen(this.#settings.port, this.#settings.bindAddress)
       })
     }
+    if (
+      this.#phase === 'error' &&
+      RETRYABLE_LISTEN_ERRORS.has(this.#errorCode ?? '') &&
+      generation === this.#generation
+    ) {
+      // Let go of the socket that couldn't bind, then try again: it starts listening as soon as
+      // the address is on this computer or the port is free.
+      await this.#closeSockets()
+      if (generation === this.#generation && this.#retry === undefined) {
+        this.#retry = setTimeout(() => {
+          this.#retry = undefined
+          if (generation === this.#generation) void this.start()
+        }, this.#retryMs)
+        this.#retry.unref?.()
+      }
+      return
+    }
     if (this.#settings.staleAfterMs > 0 && this.#phase === 'listening') {
       this.#timer = setInterval(
         () => {
@@ -222,8 +269,20 @@ export class TslReceiver {
   }
 
   async stop(): Promise<void> {
+    this.#generation += 1
+    if (this.#retry !== undefined) clearTimeout(this.#retry)
+    this.#retry = undefined
     if (this.#timer !== undefined) clearInterval(this.#timer)
     this.#timer = undefined
+    await this.#closeSockets()
+    this.#entries.clear()
+    this.#phase = 'stopped'
+    this.#error = null
+    this.#errorCode = null
+    this.#changed()
+  }
+
+  async #closeSockets(): Promise<void> {
     for (const socket of this.#clients) socket.destroy()
     this.#clients.clear()
     const udp = this.#udp
@@ -251,9 +310,6 @@ export class TslReceiver {
           })
       }),
     ])
-    this.#entries.clear()
-    this.#phase = 'stopped'
-    this.#changed()
   }
 
   #acceptSource(address: string): boolean {

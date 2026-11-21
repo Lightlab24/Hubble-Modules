@@ -291,9 +291,11 @@ export function listenerProblem(input: {
   port: number;
   localAddresses: readonly string[];
 }): string {
+  // The listener keeps trying both of these, so it says it will start rather than that it failed.
   if (input.bindAddress !== "0.0.0.0" && !input.localAddresses.includes(input.bindAddress))
-    return `${input.bindAddress} isn't one of this computer's addresses`;
-  if (/EADDRINUSE/u.test(input.error ?? "")) return `port ${input.port} is in use by something else`;
+    return `${input.bindAddress} isn't one of this computer's addresses yet · listening starts as soon as it is`;
+  if (/EADDRINUSE/u.test(input.error ?? ""))
+    return `port ${input.port} is in use by something else · trying again every few seconds`;
   if (/EACCES/u.test(input.error ?? "")) return `this computer doesn't allow port ${input.port}`;
   return input.error ?? "the port could not be opened";
 }

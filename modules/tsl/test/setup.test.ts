@@ -259,9 +259,9 @@ describe("a listener that could not start", () => {
     // The saved address belongs to a network this computer is no longer on.
     expect(
       listenerProblem({ error: "listen EADDRNOTAVAIL: address not available 10.20.100.236:5727", bindAddress: "10.20.100.236", port: 5727, localAddresses: local }),
-    ).toBe("10.20.100.236 isn't one of this computer's addresses");
+    ).toBe("10.20.100.236 isn't one of this computer's addresses yet · listening starts as soon as it is");
     expect(listenerProblem({ error: "listen EADDRINUSE: address already in use 0.0.0.0:5727", bindAddress: "0.0.0.0", port: 5727, localAddresses: local })).toBe(
-      "port 5727 is in use by something else",
+      "port 5727 is in use by something else · trying again every few seconds",
     );
     expect(listenerProblem({ error: "listen EACCES: permission denied 0.0.0.0:80", bindAddress: "0.0.0.0", port: 80, localAddresses: local })).toBe(
       "this computer doesn't allow port 80",
