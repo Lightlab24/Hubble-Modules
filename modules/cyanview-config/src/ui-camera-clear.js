@@ -214,3 +214,62 @@
     else if (data.clearRcpConfirm) { $('modal-layer').hidden = true; void clearFromRcp(row(data.clearRcpConfirm)); }
     else if (data.action === 'clear-workspace') clearFromWorkspace(assignmentRows(), cameraSetupSheet);
   });
+
+  // ── Quick tooltips ──
+  // The browser's own title text takes more than a second to show (Nov 21, 2026: "takes way too long to show
+  // up"), so the eye, the bin and Clear workspace carry data-tip and show it here after a moment. It floats
+  // over the page and never moves anything.
+  const tipDelay = 120;
+  let tip = null, tipTarget = null, tipTimer = 0, tipFrame = 0;
+  function hideTip() {
+    clearTimeout(tipTimer);
+    cancelAnimationFrame(tipFrame);
+    tipTarget = null;
+    if (tip) tip.hidden = true;
+  }
+  function placeTip() {
+    if (!tipTarget || !tip) return;
+    if (!tipTarget.isConnected || tipTarget.disabled) { hideTip(); return; }
+    const box = tipTarget.getBoundingClientRect(), width = tip.offsetWidth, height = tip.offsetHeight, gap = 6;
+    const below = box.bottom + gap + height <= window.innerHeight - 8;
+    tip.style.left = Math.max(8, Math.min(box.left + box.width / 2 - width / 2, window.innerWidth - width - 8)) + 'px';
+    tip.style.top = (below ? box.bottom + gap : Math.max(8, box.top - gap - height)) + 'px';
+    tipFrame = requestAnimationFrame(placeTip);
+  }
+  function showTip(target, delay) {
+    const text = target?.dataset.tip;
+    if (!text || target.disabled) { hideTip(); return; }
+    if (tipTarget === target && tip && !tip.hidden) return;
+    hideTip();
+    tipTarget = target;
+    tipTimer = setTimeout(() => {
+      if (tipTarget !== target || !target.isConnected) return;
+      if (!tip) {
+        tip = document.createElement('div');
+        tip.className = 'hc-quick-tip';
+        tip.setAttribute('role', 'tooltip');
+        tip.id = 'hc-quick-tip';
+        root.append(tip);
+      }
+      tip.textContent = text;
+      tip.hidden = false;
+      placeTip();
+    }, delay);
+  }
+  root.addEventListener('pointerover', event => {
+    const target = event.target.closest?.('[data-tip]');
+    if (target && root.contains(target)) showTip(target, tipDelay);
+    else if (tipTarget) hideTip();
+  });
+  root.addEventListener('pointerout', event => {
+    if (tipTarget && !tipTarget.contains(event.relatedTarget)) hideTip();
+  });
+  root.addEventListener('focusin', event => {
+    const target = event.target.closest?.('[data-tip]');
+    if (target && target.matches(':focus-visible')) showTip(target, 0);
+  });
+  root.addEventListener('focusout', hideTip);
+  root.addEventListener('pointerdown', hideTip, true);
+  root.addEventListener('keydown', event => { if (event.key === 'Escape') hideTip(); });
+  window.addEventListener('blur', hideTip);
+

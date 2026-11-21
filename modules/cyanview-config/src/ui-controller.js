@@ -2660,7 +2660,7 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from
       '<div class="hc-assignment-body" data-pending-host="setup"><div class="hc-controller-list"><section class="hc-controller" data-role="setup-group">' +
         '<div class="hc-controller-tools">' +
           cameraCountControl(cameraSetupSheet) + '<span class="hc-caption hc-count-hint">New rows join the end</span>' +
-          '<span class="hc-right"></span><button class="hc-button" data-action="clear-workspace" title="Clear every camera from this workspace. Nothing on the controllers changes, and ⌘Z puts them back." disabled>' + icon('eye-off') + 'Clear workspace</button>' +
+          '<span class="hc-right"></span><button class="hc-button" data-action="clear-workspace" data-tip="Clear every camera from this workspace. Nothing on the controllers changes, and ⌘Z puts them back." disabled>' + icon('eye-off') + 'Clear workspace</button>' +
         '</div>' +
         '<div data-role="setup-sheet"></div>' +
       '</section></div></div>' +
@@ -3000,8 +3000,8 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from
     const binTitle = staged ? binLabel : copy ? binLabel + '. The camera it copies stays where it is.' : binLabel + '. It is deleted there, with its REMI copies.';
     const disabled = busy ? ' disabled' : '';
     return '<td class="hc-camera-frozen hc-row-remove" style="left:' + column.frozen + 'px">' +
-      '<button type="button" class="hc-row-remove-button hc-row-hide-button" data-action="clear-workspace-row" data-clear-row="' + id + '" aria-label="Clear camera ' + number + ' from the workspace" title="' + hide + '"' + disabled + '>' + icon('eye-off') + '</button>' +
-      '<button type="button" class="hc-row-remove-button" data-action="' + (staged ? 'stage-remove' : 'clear-rcp-row') + '" data-remove-row="' + id + '" data-clear-row="' + id + '" aria-label="' + binLabel + '" title="' + binTitle + '"' + disabled + '>' + icon(staged ? 'undo-2' : 'trash-2') + '</button></td>';
+      '<button type="button" class="hc-row-remove-button hc-row-hide-button" data-action="clear-workspace-row" data-clear-row="' + id + '" aria-label="Clear camera ' + number + ' from the workspace" data-tip="' + hide + '"' + disabled + '>' + icon('eye-off') + '</button>' +
+      '<button type="button" class="hc-row-remove-button" data-action="' + (staged ? 'stage-remove' : 'clear-rcp-row') + '" data-remove-row="' + id + '" data-clear-row="' + id + '" aria-label="' + binLabel + '" data-tip="' + binTitle + '"' + disabled + '>' + icon(staged ? 'undo-2' : 'trash-2') + '</button></td>';
   }
 
   const requestFailure = (items, error) => ({ results: items.map(item => ({ id: item.id, error: error.message || 'REMI changes could not be confirmed' })), refresh: true });
@@ -5298,6 +5298,65 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from
     else if (data.clearRcpConfirm) { $('modal-layer').hidden = true; void clearFromRcp(row(data.clearRcpConfirm)); }
     else if (data.action === 'clear-workspace') clearFromWorkspace(assignmentRows(), cameraSetupSheet);
   });
+
+  // ── Quick tooltips ──
+  // The browser's own title text takes more than a second to show (Nov 21, 2026: "takes way too long to show
+  // up"), so the eye, the bin and Clear workspace carry data-tip and show it here after a moment. It floats
+  // over the page and never moves anything.
+  const tipDelay = 120;
+  let tip = null, tipTarget = null, tipTimer = 0, tipFrame = 0;
+  function hideTip() {
+    clearTimeout(tipTimer);
+    cancelAnimationFrame(tipFrame);
+    tipTarget = null;
+    if (tip) tip.hidden = true;
+  }
+  function placeTip() {
+    if (!tipTarget || !tip) return;
+    if (!tipTarget.isConnected || tipTarget.disabled) { hideTip(); return; }
+    const box = tipTarget.getBoundingClientRect(), width = tip.offsetWidth, height = tip.offsetHeight, gap = 6;
+    const below = box.bottom + gap + height <= window.innerHeight - 8;
+    tip.style.left = Math.max(8, Math.min(box.left + box.width / 2 - width / 2, window.innerWidth - width - 8)) + 'px';
+    tip.style.top = (below ? box.bottom + gap : Math.max(8, box.top - gap - height)) + 'px';
+    tipFrame = requestAnimationFrame(placeTip);
+  }
+  function showTip(target, delay) {
+    const text = target?.dataset.tip;
+    if (!text || target.disabled) { hideTip(); return; }
+    if (tipTarget === target && tip && !tip.hidden) return;
+    hideTip();
+    tipTarget = target;
+    tipTimer = setTimeout(() => {
+      if (tipTarget !== target || !target.isConnected) return;
+      if (!tip) {
+        tip = document.createElement('div');
+        tip.className = 'hc-quick-tip';
+        tip.setAttribute('role', 'tooltip');
+        tip.id = 'hc-quick-tip';
+        root.append(tip);
+      }
+      tip.textContent = text;
+      tip.hidden = false;
+      placeTip();
+    }, delay);
+  }
+  root.addEventListener('pointerover', event => {
+    const target = event.target.closest?.('[data-tip]');
+    if (target && root.contains(target)) showTip(target, tipDelay);
+    else if (tipTarget) hideTip();
+  });
+  root.addEventListener('pointerout', event => {
+    if (tipTarget && !tipTarget.contains(event.relatedTarget)) hideTip();
+  });
+  root.addEventListener('focusin', event => {
+    const target = event.target.closest?.('[data-tip]');
+    if (target && target.matches(':focus-visible')) showTip(target, 0);
+  });
+  root.addEventListener('focusout', hideTip);
+  root.addEventListener('pointerdown', hideTip, true);
+  root.addEventListener('keydown', event => { if (event.key === 'Escape') hideTip(); });
+  window.addEventListener('blur', hideTip);
+
 
   // ⌘+ and ⌘− make the text on every sheet bigger or smaller, and ⌘0 puts it back to 13. It's the text
   // size each sheet already keeps, now set for all of them at once. Zooming the whole page from inside

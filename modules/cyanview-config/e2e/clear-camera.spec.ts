@@ -54,8 +54,8 @@ async function copyWideToMaster(f: FrameLocator) {
 test('the eye clears a camera from the workspace with its controller off, sends nothing, and ⌘Z puts it back', async ({ page, request }) => {
   const f = await open(page, request);
   await expect(named(setup(f), 'Jib')).toHaveCount(1);
-  await expect(eye(named(setup(f), 'Jib'))).toHaveAttribute('title', /Nothing on Master RCP changes/);
-  await expect(bin(named(setup(f), 'Jib'))).toHaveAttribute('title', 'Clear camera 7 from Master RCP. It is deleted there, with its REMI copies.');
+  await expect(eye(named(setup(f), 'Jib'))).toHaveAttribute('data-tip', /Nothing on Master RCP changes/);
+  await expect(bin(named(setup(f), 'Jib'))).toHaveAttribute('data-tip', 'Clear camera 7 from Master RCP. It is deleted there, with its REMI copies.');
   await request.post('/__simulate', { data: { power: { device: 1, on: false } } });
   const before = await written(request);
   await eye(named(setup(f), 'Jib')).click();
@@ -157,7 +157,7 @@ test('a REMI copy whose camera is no longer in the workspace comes off its contr
   await showSetup(f);
   const copy = named(setup(f), 'Wide');
   await expect(copy).toHaveCount(1);
-  await expect(bin(copy)).toHaveAttribute('title', 'Clear the REMI copy of camera 1 from Master RCP. The camera it copies stays where it is.');
+  await expect(bin(copy)).toHaveAttribute('data-tip', 'Clear the REMI copy of camera 1 from Master RCP. The camera it copies stays where it is.');
   await bin(copy).click();
   const dialog = f.getByRole('dialog');
   await expect(dialog.locator('h3')).toHaveText('Clear the REMI copy of camera 1 from Master RCP?');
@@ -208,3 +208,24 @@ test('a controller added by hand brings what is on it in under Not set up by Hub
   await outside(f).getByRole('button', { name: 'Move 7 Jib to my cameras' }).click();
   await expect(named(setup(f), 'Jib')).toHaveCount(1);
 });
+
+// Nov 21, 2026: the browser's own hover text "takes way too long to show up for both trash and hide".
+test('the eye, the bin and Clear workspace show their hover text at once, and it moves nothing', async ({ page, request }) => {
+  const f = await open(page, request);
+  const jib = named(setup(f), 'Jib'), tip = f.locator('.hc-quick-tip');
+  await expect(eye(jib)).not.toHaveAttribute('title', /./);
+  const before = await cell(jib, 'model').boundingBox();
+  const started = Date.now();
+  await eye(jib).hover();
+  await expect(tip).toBeVisible({ timeout: 1000 });
+  expect(Date.now() - started).toBeLessThan(800);
+  await expect(tip).toContainText('Clear camera 7 from the workspace. Nothing on Master RCP changes');
+  expect(await cell(jib, 'model').boundingBox()).toEqual(before);
+  await bin(jib).hover();
+  await expect(tip).toHaveText('Clear camera 7 from Master RCP. It is deleted there, with its REMI copies.');
+  await setup(f).locator('[data-action="clear-workspace"]').hover();
+  await expect(tip).toContainText('Clear every camera from this workspace.');
+  await f.locator('[data-tab="setup"]').hover();
+  await expect(tip).toBeHidden();
+});
+

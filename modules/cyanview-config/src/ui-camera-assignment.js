@@ -43,7 +43,7 @@
       '<div class="hc-assignment-body" data-pending-host="setup"><div class="hc-controller-list"><section class="hc-controller" data-role="setup-group">' +
         '<div class="hc-controller-tools">' +
           cameraCountControl(cameraSetupSheet) + '<span class="hc-caption hc-count-hint">New rows join the end</span>' +
-          '<span class="hc-right"></span><button class="hc-button" data-action="clear-workspace" title="Clear every camera from this workspace. Nothing on the controllers changes, and ⌘Z puts them back." disabled>' + icon('eye-off') + 'Clear workspace</button>' +
+          '<span class="hc-right"></span><button class="hc-button" data-action="clear-workspace" data-tip="Clear every camera from this workspace. Nothing on the controllers changes, and ⌘Z puts them back." disabled>' + icon('eye-off') + 'Clear workspace</button>' +
         '</div>' +
         '<div data-role="setup-sheet"></div>' +
       '</section></div></div>' +
@@ -383,8 +383,8 @@
     const binTitle = staged ? binLabel : copy ? binLabel + '. The camera it copies stays where it is.' : binLabel + '. It is deleted there, with its REMI copies.';
     const disabled = busy ? ' disabled' : '';
     return '<td class="hc-camera-frozen hc-row-remove" style="left:' + column.frozen + 'px">' +
-      '<button type="button" class="hc-row-remove-button hc-row-hide-button" data-action="clear-workspace-row" data-clear-row="' + id + '" aria-label="Clear camera ' + number + ' from the workspace" title="' + hide + '"' + disabled + '>' + icon('eye-off') + '</button>' +
-      '<button type="button" class="hc-row-remove-button" data-action="' + (staged ? 'stage-remove' : 'clear-rcp-row') + '" data-remove-row="' + id + '" data-clear-row="' + id + '" aria-label="' + binLabel + '" title="' + binTitle + '"' + disabled + '>' + icon(staged ? 'undo-2' : 'trash-2') + '</button></td>';
+      '<button type="button" class="hc-row-remove-button hc-row-hide-button" data-action="clear-workspace-row" data-clear-row="' + id + '" aria-label="Clear camera ' + number + ' from the workspace" data-tip="' + hide + '"' + disabled + '>' + icon('eye-off') + '</button>' +
+      '<button type="button" class="hc-row-remove-button" data-action="' + (staged ? 'stage-remove' : 'clear-rcp-row') + '" data-remove-row="' + id + '" data-clear-row="' + id + '" aria-label="' + binLabel + '" data-tip="' + binTitle + '"' + disabled + '>' + icon(staged ? 'undo-2' : 'trash-2') + '</button></td>';
   }
 
   const requestFailure = (items, error) => ({ results: items.map(item => ({ id: item.id, error: error.message || 'REMI changes could not be confirmed' })), refresh: true });

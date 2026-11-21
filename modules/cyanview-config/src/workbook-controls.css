@@ -394,3 +394,6 @@ body:has(#cyanview-design .hc-veil:not([hidden])) .hubble-column-resize-handles 
 #cyanview-design .hc-setup-review-item > input { flex: none; margin-top: 2px; }
 #cyanview-design .hc-setup-review-lines { display: grid; gap: 4px; }
 #cyanview-design .hc-setup-review-lines small { margin-top: 0; }
+/* Hover text that shows at once, where the browser's own title text is too slow. It floats and moves nothing. */
+#cyanview-design .hc-quick-tip { position: fixed; z-index: 1400; box-sizing: border-box; max-width: min(340px, calc(100vw - 16px)); padding: 6px 9px; border: 1px solid light-dark(#c9c9c9, #555); border-radius: 6px; background: light-dark(#fff, #222); box-shadow: 0 6px 18px rgb(0 0 0 / 35%); color: var(--hc-text); font-size: 12px; line-height: 1.4; pointer-events: none; white-space: normal; }
+#cyanview-design .hc-quick-tip[hidden] { display: none; }
