@@ -46,12 +46,13 @@ export interface SetupGuideFacts {
   readonly simulated: boolean;
 }
 
-export interface SetupGuideProgress {
+// A type rather than an interface: the worker returns it to the page as is, and only a type counts as plain JSON there.
+export type SetupGuideProgress = {
   /** The tour has started by itself once, on a new setup. It never does again. */
   readonly offered: boolean;
   /** Steps seen done once that stay done: a press is over as soon as it happens. */
   readonly confirmed: readonly SetupGuideStepId[];
-}
+};
 
 export const INITIAL_SETUP_GUIDE_PROGRESS: SetupGuideProgress = Object.freeze({ offered: false, confirmed: [] });
 

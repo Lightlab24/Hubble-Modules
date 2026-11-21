@@ -106,7 +106,7 @@ test('a WAN on DHCP is only switched off, and each part of a clear can be left o
     assert.equal(Object.keys(fake.config.IP).length, 5, 'no LAN address was deleted');
     fake.actions.length = 0;
     await operations.clearNetwork({ device: plan.devices[0]!.id, wan: false }, f.signal);
-    assert.ok(fake.actions.every(action => action.delete), 'only deletes');
+    assert.ok((fake.actions as RecordValue[]).every(action => action.delete), 'only deletes');
     assert.deepEqual(Object.keys(fake.config.IP).sort(), ['protected', 'wan']);
   } finally { await f.instance.dispose(); await fake.close(); }
 });
