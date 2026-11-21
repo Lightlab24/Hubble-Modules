@@ -372,3 +372,6 @@ body:has(#cyanview-design .hc-veil:not([hidden])) .hubble-column-resize-handles 
 #cyanview-design .hc-outside-grid td.hc-outside-tools { padding: 0 6px; }
 #cyanview-design .hc-outside-grid td.hc-outside-tools button { min-height: 0; height: 24px; line-height: 22px; padding: 0 10px; margin-right: 6px; font-size: 12px; vertical-align: middle; }
 #cyanview-design .hc-outside-grid tr.hc-remove-staged td:not(.hc-outside-tools) { color: var(--hc-faint); text-decoration: line-through; }
+/* A device's place in the Devices list, typed over to move it. */
+#cyanview-design .hc-grid .hc-device-position { text-align: center; color: var(--hc-secondary); }
+#cyanview-design .hc-grid .hc-device-position:focus { color: inherit; }

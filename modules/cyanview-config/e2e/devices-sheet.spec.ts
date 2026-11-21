@@ -72,6 +72,47 @@ test('Devices is one sheet with a row per controller, and its groups and sort ar
   await expect(group(f, 'lan')).toHaveAttribute('aria-expanded', 'false');
 });
 
+test('a number typed in # moves the device there, with the save held, and the order is kept', async ({ page, request }) => {
+  const f = await open(page, request);
+  await expect.poll(() => order(f)).toEqual([RIO, MASTER, LEAF]);
+  await expect(cell(f, LEAF, 'row')).toHaveValue('3');
+  await request.post('/__simulate', { data: { holdPlanWrites: true } });
+  // Typed and left with Tab: the device moves at once and the keyboard goes on to its Name.
+  await cell(f, LEAF, 'row').fill('1');
+  await cell(f, LEAF, 'row').press('Tab');
+  await expect.poll(() => order(f)).toEqual([LEAF, RIO, MASTER]);
+  await expect(cell(f, LEAF, 'name')).toBeFocused();
+  for (const [index, id] of [LEAF, RIO, MASTER].entries()) await expect(cell(f, id, 'row')).toHaveValue(String(index + 1));
+  // A second move lands while the first save is still held. A number past the end puts it last.
+  await cell(f, LEAF, 'row').fill('9');
+  await cell(f, LEAF, 'row').press('Enter');
+  await expect.poll(() => order(f)).toEqual([RIO, MASTER, LEAF]);
+  await cell(f, MASTER, 'row').fill('1');
+  await cell(f, MASTER, 'row').press('Enter');
+  await expect.poll(() => order(f)).toEqual([MASTER, RIO, LEAF]);
+  // Something that isn't a place in the list changes nothing and says why.
+  await cell(f, RIO, 'row').fill('x');
+  await cell(f, RIO, 'row').press('Tab');
+  await expect(f.locator('[data-role="toast"]')).toContainText('Enter a number from 1 to 3');
+  await expect(cell(f, RIO, 'row')).toHaveValue('2');
+  await expect.poll(() => order(f)).toEqual([MASTER, RIO, LEAF]);
+  await request.post('/__simulate', { data: { releasePlanWrites: true } });
+  await expect(f.locator('[data-role="saved-label"]')).toContainText('Workspace saved');
+  // A move after a heading sort takes the arrow off the heading.
+  await sheet(f).locator('[data-device-sort="name"]').click();
+  await expect(sheet(f).locator('[data-device-sort="name"]')).toContainText('↑');
+  await cell(f, RIO, 'row').fill('1');
+  await cell(f, RIO, 'row').press('Tab');
+  await expect(sheet(f).locator('[data-device-sort="name"]')).not.toContainText('↑');
+  await expect.poll(async () => (await order(f))[0]).toBe(RIO);
+  const kept = await order(f);
+  await expect(f.locator('[data-role="saved-label"]')).toContainText('Workspace saved');
+  await page.reload();
+  await expect(rows(f).first()).toBeVisible();
+  await expect.poll(() => order(f)).toEqual(kept);
+  expect((await fleet(request)).map(device => device.actions.length)).toEqual([0, 0, 0]);
+});
+
 test('a device is renamed in its Name cell, with the save held', async ({ page, request }) => {
   const f = await open(page, request);
   await request.post('/__simulate', { data: { holdPlanWrites: true } });

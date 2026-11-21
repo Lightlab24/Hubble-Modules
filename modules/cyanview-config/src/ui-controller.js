@@ -4142,7 +4142,7 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from
   function deviceSheetColumns() {
     const group = name => (deviceGroups[name][deviceSheet[name + 'Open'] ? 'open' : 'closed']).map(([id, label, width]) => ({ id, label, width, group: name }));
     const plain = list => list.map(([id, label, width]) => ({ id, label, width }));
-    return [...plain([['row', '#', 36], ['name', 'Name', 170], ['remove', '', 40], ['type', 'Type', 82], ['serial', 'Serial', 172], ['status', 'Status', 104], ['base', 'Base IP', 130]]),
+    return [...plain([['row', '#', 44], ['name', 'Name', 170], ['remove', '', 40], ['type', 'Type', 82], ['serial', 'Serial', 172], ['status', 'Status', 104], ['base', 'Base IP', 130]]),
       ...group('lan'), ...group('wan'), ...plain([['connected', 'Connected on', 116], ['cameras', 'Cameras', 128], ['sync', 'Sync', 96]])];
   }
   function deviceSheetHeader(columns) {
@@ -4171,7 +4171,8 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from
     const waiting = rows => { const count = rows.filter(row => row?.pending).length; return count ? '<span class="hc-device-waiting">+' + count + ' pending</span>' : ''; };
     const quiet = text => '<span class="hc-muted">' + esc(text) + '</span>';
     switch (column.id) {
-      case 'row': return cell(quiet(String(index + 1)));
+      // Typing a number here moves the device to that place in the list.
+      case 'row': return cell('<input class="hc-cell-input hc-mono hc-device-position" data-device-cell="' + id + ':row" value="' + (index + 1) + '" inputmode="numeric" aria-label="' + esc('Position of ' + d.name + ' in the list') + '" title="Type a number to move this device there" spellcheck="false" autocomplete="off">');
       case 'name': return cell('<input class="hc-cell-input hc-device-name" data-device-cell="' + id + ':name" value="' + esc(d.name) + '" aria-label="Device name for ' + esc(d.serial) + '" maxlength="160">');
       case 'type': return cell(quiet(d.kind));
       case 'serial': return cell('<span class="hc-mono hc-muted">' + esc(d.serial) + '</span>');
@@ -4283,7 +4284,7 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from
     addAll.disabled = deviceAddBusy;
     addAll.querySelector('[data-add-all-label]').textContent = 'Add all ' + found;
     $('device-summary').textContent = devices.length + (devices.length === 1 ? ' device' : ' devices') + ' · ' + devices.filter(d => d.online).length + ' online';
-    $('lan-foot').textContent = 'Click a heading to sort. Address changes wait in Pending sends until you press Send.';
+    $('lan-foot').textContent = 'Click a heading to sort, or type a number in # to move a device there. Address changes wait in Pending sends until you press Send.';
     releaseHeldDeviceEdits();
   }
   function releaseHeldDeviceEdits() {
@@ -4320,6 +4321,19 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from
     const d = device(id);
     if (!d) return;
     const value = String(raw).trim(), refuse = message => { toast(message); renderLans(); };
+    // A position moves the device and every device after it, as a drag would. It sends nothing.
+    if (field === 'row') {
+      const ids = orderedDevices().map(item => item.id), from = ids.indexOf(id);
+      if (!/^\d+$/.test(value) || Number(value) < 1) { refuse('Enter a number from 1 to ' + ids.length); return; }
+      const to = Math.min(Number(value), ids.length) - 1;
+      if (to === from) { renderLans(); return; }
+      ids.splice(from, 1);
+      ids.splice(to, 0, id);
+      // The list is in the order typed now, not sorted by a heading.
+      deviceSheet.sort = null;
+      setOrder(ids);
+      return;
+    }
     if (field === 'name') {
       if (!value || value.length > 160) { refuse('Enter a device name'); return; }
       if (value !== d.name) { d.name = value; syncFilter(); renderLans(); renderCameras(); remember(); }
