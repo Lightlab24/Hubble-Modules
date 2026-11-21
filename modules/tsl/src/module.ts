@@ -11,6 +11,7 @@ import {
 import { TslReceiver } from "./receiver.js";
 import { TslPresentation } from "./presentation.js";
 import { PAGE_ID, TslPage, type PageDependencies } from "./page.js";
+import { TslRouting } from "./routing.js";
 
 /**
  * Hubble's own older TSL code still reads the reports the managed helper publishes, so the
@@ -23,7 +24,23 @@ export function createTslModule(dependencies: Partial<PageDependencies> = {}): H
   createInstance(context) {
     let receiver: TslReceiver;
     const presentation = new TslPresentation(context, () => receiver);
-    const matrixFeedback = new MatrixFeedback(context, () => receiver);
+    // Routing on tally, merged in from TALLY Switch, reads this module's own tally.
+    const routing = new TslRouting(
+      context,
+      () => {
+        try {
+          return presentation.shared();
+        } catch {
+          // No receiver yet: nothing is known about tally.
+          return null;
+        }
+      },
+      () => {
+        page.changed();
+        matrixFeedback.emit();
+      },
+    );
+    const matrixFeedback = new MatrixFeedback(context, () => receiver, routing);
     const tallySwitches = async () =>
       ((await context.modules?.discover()) ?? [])
         .filter(
@@ -35,7 +52,7 @@ export function createTslModule(dependencies: Partial<PageDependencies> = {}): H
           id: peer.peer.kind === "connection" ? peer.peer.connectionId : "",
           label: peer.name,
         }));
-    const page = new TslPage(context, () => receiver, tallySwitches, dependencies);
+    const page = new TslPage(context, () => receiver, tallySwitches, routing, dependencies);
     const legacy = managedModule<ConnectionDefinition, ActionDefinition>(
       "tsl",
       (definition, context) => {
@@ -53,6 +70,7 @@ export function createTslModule(dependencies: Partial<PageDependencies> = {}): H
           presentation.emit();
           matrixFeedback.emit();
           page.changed();
+          routing.tallyChanged();
         };
         return {
           start: () => receiver.start(),
@@ -103,6 +121,7 @@ export function createTslModule(dependencies: Partial<PageDependencies> = {}): H
       async start() {
         await matrixFeedback.start();
         await legacy.start();
+        await routing.start();
       },
       subscribeFeedback(subscriptions) {
         matrixFeedback.subscribe(subscriptions);
@@ -246,6 +265,7 @@ export function createTslModule(dependencies: Partial<PageDependencies> = {}): H
       },
       async dispose() {
         await page.close();
+        await routing.close();
         presentation.close();
         await matrixFeedback.close();
         await legacy.dispose();

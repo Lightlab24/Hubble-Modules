@@ -52,6 +52,18 @@ table.sheet td.lamp[data-tally=amber]{background:var(--tally-amber);color:#fff}
 table.sheet td.lamp[data-tally=unknown]{color:var(--hubble-text-disabled,#7a7a7a);font-style:italic}
 table.sheet tr[data-stale=true] td{color:var(--hubble-text-disabled,#7a7a7a)}
 table.sheet tr[data-mine=true] td{background:var(--hubble-selected,#2a2b2c);color:var(--hubble-text-strong,#f4f4f4)}
+/* Routing: an editable sheet. The camera on air has TALLY Switch's red row. */
+table.sheet.routes{width:max-content;outline:none}
+table.sheet.routes:focus-visible{outline:none}
+table.sheet.routes td{cursor:default;user-select:none}
+table.sheet.routes td[aria-readonly=true]{color:var(--hubble-text-secondary,#b2b2b2)}
+table.sheet.routes td.check{text-align:center}
+table.sheet.routes td.missing{color:var(--tsl-warn)}
+table.sheet.routes tr[data-air=true] td{background:#602a2a;color:#fff}
+table.sheet.routes td .cell-input{width:100%;height:100%;min-height:24px;margin:0;padding:0 2px;border:1px solid #6aa9ff;border-radius:2px;background:var(--hubble-sheet,#111);color:var(--hubble-text-strong,#f4f4f4);font:inherit;outline:none}
+.follow-state{display:inline-flex;align-items:center;gap:7px;min-width:0;color:var(--hubble-text-secondary,#b2b2b2);font-size:var(--hubble-text-size-small,12px);white-space:nowrap;overflow:hidden}
+.follow-state span:last-child{overflow:hidden;text-overflow:ellipsis}
+.control.follow{flex:none}
 /* The switcher's devices: any row can be picked to edit, and the picked one has a bar at its start. */
 table.sheet.pick tbody tr{cursor:pointer}
 table.sheet.pick tbody tr:hover:not([data-mine=true]) td{background:var(--hubble-hover,#1d1d1d)}

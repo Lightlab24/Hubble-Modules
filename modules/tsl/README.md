@@ -1,15 +1,32 @@
 # TSL Tally
 
-Official module `hubble-tsl`, version **1.3.2**, using stable Hubble module API **1**.
-It receives TSL UMD 3.1 and 5.0 tally over UDP or TCP, shows what a switcher sends, feeds
-TALLY Switch and Button Matrix tally feedback, and can set a Ross Carbonite switcher to send
-its tally to this computer.
+Official module `hubble-tsl`, version **1.4.0**, using stable Hubble module API **1**.
+It receives TSL UMD 3.1 and 5.0 tally over UDP or TCP, shows what a switcher sends, routes a
+router on tally (what TALLY Switch did, merged in at 1.4.0), feeds Button Matrix tally
+feedback, and can set a Ross Carbonite switcher to send its tally to this computer.
 
 ## The page
 
-`TSL Tally` fills the app area (`layout: "full-page"`) with two tabs.
+`TSL Tally` fills the app area (`layout: "full-page"`) with three tabs. It takes Hubble's own
+Tally Switch place in the sidebar (`navigation.replaces: "tally-switch"`), which TALLY Switch
+held before the merge, so Hubble's older Tally Switch page stays hidden.
 
 - **Tally** lists every address received, with its name and tally colours, as it changes.
+- **Routing** is TALLY Switch, merged in: one row per camera (name, enabled, TSL address and
+  screen, on-air lamp, router, output, source, level) with its live tally and routing
+  status, and **Follow tally** in the toolbar. Each output follows the one camera on air.
+  The rules are TALLY Switch's, carried over unchanged in `src/routing-engine.ts`: startup and
+  a router coming back hold the route they find, only a fresh tally change routes, a route
+  whose result was uncertain is never retried, two cameras on air or a missing router hold.
+  Following on, chosen by the operator, catches up to the camera on air now. Cameras are the
+  `routing` module document, saved with the workspace; Follow is kept on this computer
+  (`routing-following.json`), never in the workspace, and starts off on a new computer.
+  Routes go to router modules through module exchange (`exchange.peers`: `router` data,
+  `route` action only), as TALLY Switch sent them. The sheet uses Hubble's spreadsheet
+  controls: type, F2 or double-click to edit, Enter moves down, copy, paste, fill, Space for
+  Enabled, the router list, Add camera and the row menu to add or delete. Edits show at once
+  and save in order; a save the workspace refuses puts back what is saved. Button Matrix
+  "TALLY Switch follow" actions now drive this module's own Follow.
 - **Setup** holds every setting of the link in one place:
   - **This computer** is the receiver. These are the module's own settings; the page saves
     them through Hubble (`settings` on the custom section, `module-frontend-settings-v1`),

@@ -14,6 +14,7 @@ import type { ModuleContext, ModuleInstance } from "@hubble/module-sdk";
 import { createTslModule } from "../src/module.js";
 import { PAGE_ID, PAGE_SECTION_ID, PAGE_SETTINGS, localAddresses } from "../src/page.js";
 import { defaultSwitcherDocument, SWITCHER_DOCUMENT_ID } from "../src/setup.js";
+import { defaultRoutingDocument, ROUTING_DOCUMENT_ID, type RoutingRow } from "../src/routing.js";
 import { FAKE_DRIVER, FakeSwitcher } from "../test/fixtures/fake-switcher.js";
 import { packet31, packet50, stream50 } from "../test/fixtures/tsl-packets.js";
 
@@ -80,6 +81,37 @@ const settings: Record<string, unknown> = {
   staleAfterMs: 0,
 };
 let saved = { id: SWITCHER_DOCUMENT_ID, version: 1, revision: null as string | null, value: { ...defaultSwitcherDocument(), host: realSwitcher || (process.env.TSL_PREVIEW_EMPTY ? "" : `127.0.0.1:${fake.port}`) } };
+// The camera mappings. TSL_PREVIEW_CAMERAS=n starts with n cameras on the pretend router,
+// TSL addresses 1..n to output 2 from sources 21.., as the live workspace has them.
+const ROUTER_BINDING = "preview-router";
+const cameraCount = Number(process.env.TSL_PREVIEW_CAMERAS || 0);
+let routingSaved = {
+  id: ROUTING_DOCUMENT_ID,
+  version: 1,
+  revision: null as string | null,
+  value: {
+    ...defaultRoutingDocument(),
+    rows: Array.from({ length: cameraCount }, (_, index): RoutingRow => ({
+      id: `camera-${index + 1}`,
+      name: `Camera ${index + 1}`,
+      enabled: true,
+      screen: 0,
+      address: index + 1,
+      indicator: "default",
+      router: ROUTER_BINDING,
+      destination: 2,
+      source: 21 + index,
+      level: 1,
+    })),
+  } as unknown,
+};
+// A pretend router module, reached through module exchange as a real one is. Routes are recorded.
+const routes: { at: number; source: number; destination: number; level: number }[] = [];
+const routerPeer = { kind: "connection" as const, connectionId: "33333333-3333-4333-8333-333333333333", moduleId: "hubble-pretend-router" };
+let routerReady = true;
+let routerListener: ((event: unknown) => void) | undefined;
+const tellRouter = () =>
+  routerListener?.({ kind: "data", provider: routerPeer, generation: "router-run-1", observedAt: new Date().toISOString(), id: "router", version: 1, value: { ready: routerReady } });
 let writes = 0;
 let holdSaves: Promise<void> | undefined;
 let releaseSaves: (() => void) | undefined;
@@ -95,7 +127,19 @@ let generation = 0;
 const logs: unknown[] = [];
 let state: unknown = null;
 const services = {
-  async request(_service: string, _version: number, input: { method: string; expectedRevision?: string | null; value?: typeof saved.value }) {
+  async request(_service: string, _version: number, input: { method: string; id?: string; expectedRevision?: string | null; value?: typeof saved.value }) {
+    if (input.id === ROUTING_DOCUMENT_ID) {
+      if (input.method === "write") {
+        await holdSaves;
+        if (failNextSave) {
+          failNextSave = false;
+          throw new Error("The workspace refused this save.");
+        }
+        if (input.expectedRevision !== routingSaved.revision) return { status: "conflict", document: routingSaved };
+        routingSaved = { ...routingSaved, revision: `rev-${++writes}`, value: structuredClone(input.value as unknown) };
+      }
+      return { status: "document", document: routingSaved };
+    }
     if (input.method === "write") {
       await holdSaves;
       if (failNextSave) {
@@ -128,7 +172,27 @@ const startInstance = async () => {
     scope: { kind: "connection", workspaceId: "11111111-1111-4111-8111-111111111111", connectionId: "22222222-2222-4222-8222-222222222222" },
     settings: structuredClone(settings),
     services,
-    modules: { discover: async () => [], bindings: async () => [], publish: async () => undefined, subscribe: async () => async () => undefined, query: async () => null, execute: async () => ({ status: "failure", category: "unavailable", message: "No peers in the preview" }) },
+    modules: {
+      discover: async () => [{ peer: routerPeer, name: "Pretend router", available: true, actionsAllowed: true, data: [{ id: "router", label: "Router", version: 1, query: true }], actions: [] }],
+      bindings: async () => [{ id: ROUTER_BINDING, name: "Pretend router", consumer: { kind: "connection", connectionId: "22222222-2222-4222-8222-222222222222", moduleId: "hubble-tsl" }, target: routerPeer, allowActions: true }],
+      publish: async () => undefined,
+      subscribe: async (subscription: { id: string }, listener: (event: unknown) => void) => {
+        if (subscription.id === "router") {
+          routerListener = listener;
+          setTimeout(tellRouter, 10);
+        }
+        return async () => {
+          if (subscription.id === "router") routerListener = undefined;
+        };
+      },
+      query: async () => null,
+      execute: async (_target: unknown, action: string, input: { source: number; destination: number; level: number }) => {
+        if (action !== "route") return { status: "failure", category: "invalid-config", message: "Unknown action" };
+        if (!routerReady) return { status: "failure", category: "unavailable", message: "Router is offline" };
+        routes.push({ at: Date.now(), ...input });
+        return { status: "success", evidence: { kind: "submitted", summary: "pretend router" } };
+      },
+    },
     log: (trace: unknown) => logs.push(trace),
     publishState: (value: unknown) => (state = value),
     publishFeedback: () => undefined,
@@ -204,6 +268,10 @@ const server = createServer(async (request, response) => {
         if (typeof input.settingsDelayMs === "number") settingsDelayMs = input.settingsDelayMs;
         if (input.switcher) Object.assign(fake.options, input.switcher);
         if (input.holdSwitcher) fake.hold();
+        if (typeof input.routerReady === "boolean") {
+          routerReady = input.routerReady;
+          tellRouter();
+        }
         if (input.releaseSwitcher) fake.release();
         if (input.settings) {
           // A save made somewhere else, such as Module Connections. The open page hears of the
@@ -250,7 +318,7 @@ const server = createServer(async (request, response) => {
       return void response.end(html);
     }
     if (url.pathname === "/__inspect")
-      return send({ settings, generation, document: saved.value, revision: saved.revision, switcher: { port: fake.port, devices: fake.devices, writes: fake.writes, form: fake.form, connections: fake.openConnections }, logs: logs.slice(-40), state, declaredSettings: [...PAGE_SETTINGS] });
+      return send({ settings, generation, routing: routingSaved.value, routingRevision: routingSaved.revision, routes, document: saved.value, revision: saved.revision, switcher: { port: fake.port, devices: fake.devices, writes: fake.writes, form: fake.form, connections: fake.openConnections }, logs: logs.slice(-40), state, declaredSettings: [...PAGE_SETTINGS] });
     if (url.pathname.startsWith("/api/module-controls/")) {
       const name = path.basename(url.pathname);
       const served = /^(spreadsheet|controls|slider|workbook-tools)-v1\.js$|^theme-v1\.css$/u.test(name) ? `module-${name}` : name;

@@ -26,6 +26,7 @@ import {
   type SwitcherDocument,
 } from "./setup.js";
 import type { SwitcherDeviceRow, SwitcherDeviceSettings, SwitcherReading } from "./switcher/index.js";
+import { mountRoutingView } from "./routing-view.js";
 import "./frontend.css";
 
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -102,6 +103,8 @@ try {
   let routeAddress = snapshot.routeAddress;
   let tab = snapshot.tab;
   let live: LiveReply = snapshot.live;
+  /** The Routing tab, once mounted. */
+  let routingView: Awaited<ReturnType<typeof mountRoutingView>> | undefined;
   let note = "";
   let noteIsError = false;
   let disposed = false;
@@ -328,6 +331,7 @@ try {
         for (const key of reply.removed) rows.delete(key);
         for (const row of reply.rows) rows.set(row.key, row);
         live = reply;
+        routingView?.live(reply.routing);
         scheduleTally();
       } catch {
         if (disposed) return;
@@ -374,6 +378,7 @@ try {
     rows.clear();
     for (const row of fresh.live.rows) rows.set(row.key, row);
     live = fresh.live;
+    routingView?.take(fresh.routing, fresh.live.routing);
     if (versionChanged) headTally();
     redraw();
   };
@@ -530,10 +535,6 @@ try {
   box("sender", (raw) => (raw === "" || IPV4.test(raw) ? raw : undefined), (value) => setReceiver({ sourceAddress: value }));
   show(el<HTMLInputElement>("stale"), () => String(receiver.staleAfterMs));
   box("stale", (raw) => (raw === "0" ? 0 : whole(1000, 3_600_000)(raw)), (value) => setReceiver({ staleAfterMs: value }));
-  const peer = el<HTMLSelectElement>("peer");
-  fill(peer, [{ id: "", label: "Automatic (the only TALLY Switch)" }, ...snapshot.peers], receiver.routingPeer);
-  show(peer, () => receiver.routingPeer);
-  peer.addEventListener("change", () => setReceiver({ routingPeer: peer.value }));
   el("match").addEventListener("click", () => {
     if (!match) return;
     port.value = String(match.port);
@@ -848,9 +849,22 @@ try {
     });
   });
 
+  // ----- Routing: each output follows the one camera on air (merged in from TALLY Switch) -----
+  routingView = await mountRoutingView({
+    snapshot: snapshot.routing,
+    live: snapshot.live.routing,
+    ask,
+    failed: (message) => {
+      say(message, true);
+      toast("failure", message);
+    },
+    isDisposed: () => disposed,
+  });
+
   // ----- Tabs -----
   const showTab = () => {
     el("tally-view").hidden = tab !== "tally";
+    el("routing-view").hidden = tab !== "routing";
     el("setup-view").hidden = tab !== "setup";
     for (const item of document.querySelectorAll<HTMLElement>("[data-for]")) item.hidden = item.dataset.for !== tab;
   };
@@ -860,9 +874,16 @@ try {
       label: "View",
       // One line in the toolbar (module-controls-inline-v1).
       ...({ layout: "inline" } as object),
-      getState: () => ({ value: tab, options: [{ value: "tally", label: "Tally" }, { value: "setup", label: "Setup" }] }),
+      getState: () => ({
+        value: tab,
+        options: [
+          { value: "tally", label: "Tally" },
+          { value: "routing", label: "Routing" },
+          { value: "setup", label: "Setup" },
+        ],
+      }),
       onValueChange: (value) => {
-        tab = value as "tally" | "setup";
+        tab = value as typeof tab;
         showTab();
         // Remembered on this computer, so the page comes back to the same tab after a restart.
         void ask("view", { tab }).catch(() => undefined);
@@ -879,6 +900,7 @@ try {
     disposed = true;
     clearTimeout(saveTimer);
     for (const control of controls) control.dispose();
+    routingView?.dispose();
     client.dispose();
   });
 } catch (error) {

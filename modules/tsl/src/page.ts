@@ -27,6 +27,12 @@ import {
   sendDevice,
   type SwitcherReading,
 } from "./switcher/index.js";
+import {
+  RoutingRowSchema,
+  type RoutingLive,
+  type RoutingSnapshot,
+  type TslRouting,
+} from "./routing.js";
 
 export const PAGE_ID = "tsl";
 export const PAGE_SECTION_ID = "app";
@@ -38,6 +44,8 @@ export const PAGE_COMMANDS = [
   { id: "read-switcher", label: "Read the switcher" },
   { id: "send-switcher", label: "Send to the switcher" },
   { id: "delete-switcher", label: "Delete from the switcher" },
+  { id: "routing-save", label: "Save the camera mappings" },
+  { id: "routing-follow", label: "Follow tally, or stop" },
 ] as const;
 /** The module settings the page saves itself, through Hubble's own settings save. */
 export const PAGE_SETTINGS = [
@@ -47,7 +55,6 @@ export const PAGE_SETTINGS = [
   "bindAddress",
   "sourceAddress",
   "staleAfterMs",
-  "routingPeer",
 ] as const;
 
 export interface TallyRow {
@@ -78,10 +85,12 @@ export interface LiveReply {
     readonly lastPacketAt: number | null;
     readonly lastSender: string | null;
   };
+  /** Each camera's tally and routing status, the routers here, and whether tally is followed. */
+  readonly routing: RoutingLive;
 }
 export interface PageSnapshot {
   readonly name: string;
-  readonly tab: "tally" | "setup";
+  readonly tab: "tally" | "routing" | "setup";
   readonly receiver: ReceiverSettings;
   readonly addresses: readonly { id: string; label: string }[];
   readonly peers: readonly { id: string; label: string }[];
@@ -92,10 +101,12 @@ export interface PageSnapshot {
   readonly readAt: number | null;
   readonly readError: string | null;
   readonly live: LiveReply;
+  /** The camera mappings as saved, with their revision. */
+  readonly routing: RoutingSnapshot;
 }
 
 const LocalState = z.object({
-  tab: z.enum(["tally", "setup"]).default("tally"),
+  tab: z.enum(["tally", "routing", "setup"]).default("tally"),
   reading: z.unknown().optional(),
   readAt: z.number().nullable().default(null),
   readError: z.string().nullable().default(null),
@@ -204,6 +215,7 @@ export class TslPage {
     private readonly context: ModuleContext,
     private readonly receiver: () => TslReceiver | undefined,
     private readonly peers: () => Promise<readonly { id: string; label: string }[]>,
+    private readonly routing: TslRouting,
     dependencies: Partial<PageDependencies> = {},
   ) {
     this.switcher = { readSwitcher, sendDevice, deleteDevice, routeAddress, localAddresses: () => localAddresses(), ...dependencies };
@@ -277,6 +289,7 @@ export class TslPage {
         lastPacketAt,
         lastSender,
       },
+      routing: this.routing.live(),
     };
   }
 
@@ -373,6 +386,7 @@ export class TslPage {
       readAt: this.local.readHost === switcher.value.host ? this.local.readAt : null,
       readError: this.local.readHost === switcher.value.host ? this.local.readError : null,
       live: this.live(0),
+      routing: this.routing.snapshot(),
     };
   }
   private collectNow(): void {
@@ -443,7 +457,7 @@ export class TslPage {
         return json(await this.waitLive(after, run, signal));
       }
       case "view": {
-        const { tab } = z.object({ tab: z.enum(["tally", "setup"]) }).parse(request.value);
+        const { tab } = z.object({ tab: z.enum(["tally", "routing", "setup"]) }).parse(request.value);
         this.local = { ...this.local, tab };
         await this.remember();
         return null;
@@ -511,6 +525,16 @@ export class TslPage {
             });
           }),
         );
+      }
+      case "routing-save": {
+        const input = z
+          .object({ rows: z.array(RoutingRowSchema).max(512), revision: z.string().nullable() })
+          .parse(request.value);
+        return json(await this.routing.save(input.rows, input.revision, signal));
+      }
+      case "routing-follow": {
+        const { mode } = z.object({ mode: z.enum(["follow", "unfollow", "toggle"]) }).parse(request.value);
+        return json({ following: await this.routing.follow(mode) });
       }
       case "delete-switcher": {
         const { value: document } = await this.document(signal);

@@ -6,6 +6,7 @@ import type { ModuleContext, ModuleJsonValue } from "@hubble/module-sdk";
 import { TslPage, switcherTarget, type LiveReply, type PageSnapshot } from "../src/page.js";
 import type { TslDiscoveredDisplay, TslReceiver } from "../src/receiver.js";
 import { defaultSwitcherDocument, SWITCHER_DOCUMENT_ID, type SwitcherDocument } from "../src/setup.js";
+import { TslRouting } from "../src/routing.js";
 import type { SwitcherReading } from "../src/switcher/index.js";
 import { FakeSwitcher, FAKE_DRIVER, FAKE_OID, realDevices as realDevicesForPage } from "./fixtures/fake-switcher.js";
 
@@ -60,7 +61,9 @@ async function world(options: { settings?: Record<string, unknown>; runtimeDirec
   const receiver = {
     snapshot: () => ({ phase: "listening", error: null, invalidPackets: 0, displays: [...displays] }),
   } as unknown as TslReceiver;
-  const page = new TslPage(context, () => receiver, async () => [{ id: "peer-1", label: "TALLY Switch" }], {
+  const routing = new TslRouting(context, () => null, () => page.changed());
+  cleanups.push(() => routing.close());
+  const page = new TslPage(context, () => receiver, async () => [{ id: "peer-1", label: "TALLY Switch" }], routing, {
     localAddresses: () => [{ id: "127.0.0.1", label: "127.0.0.1 · this computer" }],
     routeAddress: async (host) => (host === "127.0.0.1" ? "127.0.0.1" : null),
   });

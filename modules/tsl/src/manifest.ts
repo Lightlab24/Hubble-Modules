@@ -9,6 +9,7 @@ import {
   PAGE_SETTINGS,
 } from "./page.js";
 import { defaultSwitcherDocument, SWITCHER_DOCUMENT_ID } from "./setup.js";
+import { defaultRoutingDocument, ROUTING_DOCUMENT_ID } from "./routing.js";
 
 export default defineModuleManifest({
   formatVersion: 1,
@@ -29,6 +30,12 @@ export default defineModuleManifest({
       "module-frontend-settings-v1",
       // And it stays open while the listener restarts for them.
       "module-frontend-restart-v1",
+      // The Routing tab: camera mappings in Hubble's own sheet controls.
+      "module-spreadsheet-controls-v1",
+      "module-spreadsheet-extended-editing-v1",
+      "module-spreadsheet-layout-v1",
+      // The page takes Hubble's Tally Switch place, which TALLY Switch held before the merge.
+      "module-page-navigation-v1",
       "module-theme-v1",
       "module-controls-v1",
       // The Tally and Setup tabs sit on one line in the toolbar.
@@ -54,6 +61,12 @@ export default defineModuleManifest({
       label: "Ross switcher setup",
       version: 1,
       defaultValue: ModuleDocumentValueSchema.parse(defaultSwitcherDocument()),
+    },
+    {
+      id: ROUTING_DOCUMENT_ID,
+      label: "Camera routing",
+      version: 1,
+      defaultValue: ModuleDocumentValueSchema.parse(defaultRoutingDocument()),
     },
   ],
   settings: listenerFields,
@@ -166,9 +179,10 @@ export default defineModuleManifest({
       },
       { id: "tally", label: "TSL tally observations", version: 1, query: true },
     ],
-    // Follow buttons and cross-receiver indication work with no approval step.
+    // Routers, for routing on tally, and cross-receiver indication work with no approval step.
+    // Routing used to be TALLY Switch's; it is this module's own now, so Follow needs no peer.
     peers: [
-      { data: "following", version: 1, actions: ["follow"] },
+      { data: "router", version: 1, actions: ["route"] },
       {
         data: "matrix-columns",
         version: 1,
@@ -182,6 +196,8 @@ export default defineModuleManifest({
       label: "TSL Tally",
       icon: "ui/tsl.svg",
       layout: "full-page",
+      // Hubble's own Tally Switch page stays hidden: routing on tally is on this page now.
+      navigation: { replaces: "tally-switch" },
       sections: [
         {
           type: "custom",

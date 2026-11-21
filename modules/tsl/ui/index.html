@@ -11,12 +11,18 @@
     <div id="tabs"></div>
     <span class="toolbar-divider" data-for="tally"></span>
     <label class="field" data-for="tally">Find <input id="find" type="search" autocomplete="off" spellcheck="false" placeholder="Address or name" aria-label="Find an address or name"></label>
+    <span class="toolbar-divider" data-for="routing" hidden></span>
+    <div class="control follow" id="follow" data-for="routing" hidden></div>
+    <span class="follow-state" id="follow-state" data-for="routing" data-tone="idle" hidden><span class="status-dot"></span><span id="follow-state-text">&nbsp;</span></span>
     <span class="toolbar-spacer"></span>
     <span class="count" id="count" data-for="tally"></span>
+    <button id="add-camera" class="quiet" type="button" data-for="routing" hidden>Add camera</button>
+    <span class="count" id="routing-count" data-for="routing" hidden></span>
     <span class="note" data-for="setup">Changes to This computer save as you make them. The switcher changes only when you send.</span>
   </div>
   <main class="work-area">
     <div class="sheet-scroll" id="tally-view"><table id="tally-grid" class="sheet" role="grid" aria-label="Received tally"></table><div id="tally-empty" class="empty" hidden><h2>No tally received yet</h2><p>Addresses appear here as soon as the switcher sends them. Use Setup to point the switcher at this computer.</p></div><p id="tally-none" class="none" hidden>No addresses match your search</p></div>
+    <div class="sheet-scroll" id="routing-view" hidden><table id="routing-grid" class="sheet routes" role="grid" aria-label="Camera routing" tabindex="0"><colgroup></colgroup><thead></thead><tbody></tbody></table><div id="routing-empty" class="empty" hidden><h2>No cameras yet</h2><p>Add camera, then give it the tally address it lights on and the router output and source it takes when it is on air.</p></div></div>
     <div class="setup-scroll" id="setup-view" hidden>
       <div class="setup">
         <p class="link" id="link" data-tone="idle"><span class="status-dot"></span><strong id="link-title">Not checked</strong><span id="link-text">&nbsp;</span></p>
@@ -30,7 +36,6 @@
               <label class="box">Listen on<select id="bind"></select></label>
               <label class="box">Allowed sender<input id="sender" type="text" autocomplete="off" spellcheck="false" placeholder="Any sender"></label>
               <label class="box">Stale timeout (ms)<input id="stale" type="number" min="0" max="3600000" step="1000" inputmode="numeric" autocomplete="off"></label>
-              <label class="box wide">TALLY Switch module<select id="peer"></select></label>
             </div>
             <div class="panel-actions"><button id="match" class="primary" type="button">Match switcher</button><span class="action-hint" id="match-hint">Listens for exactly what the switcher sends</span></div>
           </section>
