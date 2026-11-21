@@ -5084,10 +5084,13 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from
     }));
   }
   const remiTab = () => tab === 'assignment' || tab === 'cameras';
+  const ticksHead = () => fieldHead(cameraSetupSheet, 'controlEnabled'), ticksShown = () => shown(ticksHead());
 
   // The stops, in the order Cyanview is set up and, within a tab, the order the page reads. Each has
-  // its setup step, the tab it is on, what it rings, a short name for the ring's tag, what that part is
-  // for, and what to do there. A stop with nothing to ring is about something that happens in HubDash.
+  // its setup step, the tab it is on, what it rings, its title (and the ring's tag, when that differs),
+  // what that part is for, and what to do there. Moving to another tab is a stop of its own: it stays
+  // on the tab just finished and rings the next one, so the change of tab is never a surprise. A stop
+  // with nothing to ring is about something that happens in HubDash.
   const setupTourStops = [
     { step: 'find', tab: 'devices', at: () => [dropdownFor($('scan-range')), dropdownFor($('discovery-method')), action('scan')].filter(Boolean), title: 'Discover',
       what: f => 'Pick the network your controllers are on and press Discover. It only reads them, so nothing on them changes.' + (f.simulated ? ' This is Simulated: it finds a simulated RIO and two RCPs on any network.' : '') + ' Know a controller’s address? Type it in the New device row at the bottom of the list instead.',
@@ -5095,15 +5098,67 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from
     { step: 'name', tab: 'devices', at: () => sheetLine(deviceHead('name')), title: 'Name', what: 'The name your crew uses. Keys, lists and the REMI Matrix all show it.', todo: 'Click a name and type over it.' },
     { step: 'name', tab: 'devices', at: () => sheetLine(deviceHead('status'), deviceHead('base')), title: 'Status and Base IP', what: 'Online or Offline, read from the controller. Click an IP to open the controller’s own page in Safari. Refresh all, top right, reads every controller again.' },
     { step: 'name', tab: 'devices', at: () => sheetLine(deviceGroupHead('lan'), deviceGroupHead('wan')), title: 'LAN and WAN', what: 'The controller’s network addresses. A change waits in Pending sends until you send it.' },
-    { step: 'cameras', tab: 'setup', at: () => inPanel('input[aria-label="Number of cameras"]')?.parentElement, title: 'Number of cameras', what: 'Adds or removes camera rows on Camera Configuration. New rows join the end.', todo: 'Set how many cameras you have.' },
+    { step: 'cameras', tab: 'devices', at: () => tabButton('setup'), title: 'On to Camera Configuration', tag: 'Camera Configuration',
+      what: 'That’s your controllers. Your cameras come next, on the Camera Configuration tab: one row for each camera, with the controller it’s plugged into.', todo: 'Press Next to go to Camera Configuration.' },
+    { step: 'cameras', tab: 'setup', at: () => inPanel('input[aria-label="Number of cameras"]')?.parentElement, title: 'Number of cameras', what: 'Adds or removes camera rows. New rows join the end.', todo: 'Set how many cameras you have.' },
     { step: 'cameras', tab: 'setup', at: () => sheetLine(...['name', 'model', 'ip', 'port', 'login', 'password'].map(field => fieldHead(cameraSetupSheet, field))), title: 'Camera details',
       what: 'Each camera’s name, model, address and login, so the controller can reach it. Camera logins, above the sheet, sets one login for every camera of a model.', todo: 'Fill these in for each camera.' },
     { step: 'cameras', tab: 'setup', at: () => sheetLine(fieldHead(cameraSetupSheet, 'source')), title: 'Source', what: 'The RIO or RCP the camera is plugged into. A camera needs one before it can be sent.', todo: 'Pick the controller for each camera.' },
+    // A sheet can hide this column; then the tour rings Columns, where it is turned back on.
+    { step: 'cameras', tab: 'setup', at: () => ticksShown() ? sheetLine(ticksHead()) : inPanel('[aria-label="Choose visible columns"]'), title: 'Camera Control Enabled', tag: () => ticksShown() ? 'Camera Control Enabled' : 'Columns',
+      what: () => 'The cameras a key for a group acts on. Start, Stop and Toggle Recording, ND, ISO, Base Gain, White Balance and Add preset go to the ticked cameras on their controller. A tick is saved at once and sends nothing to the camera.' + (ticksShown() ? '' : ' This sheet hides the column: show it from Columns.'),
+      todo: 'Tick the cameras your group keys should act on.' },
     { step: 'send', tab: 'setup', at: () => inPanel('[data-action="toggle-pending-sends"]'), title: 'Pending sends', what: 'Every change waits here, and nothing reaches a controller until it is sent. The bottom right says All changes verified once the controllers have it.', todo: 'Open Pending sends and press Send.' },
     { step: 'send', tab: 'setup', at: () => root.querySelector('[aria-label="Spreadsheet send mode"]'), title: 'Send mode', what: 'Manual waits for you to press Send. Auto send sends each edit as you make it.' },
-    { step: 'remi', tab: 'assignment', at: () => sheetLine(fieldHead(allCamerasSheet, 'remiMaster')), title: 'Master RCP', what: 'REMI Matrix shares cameras with other RCPs, and you only need it if they go on to more than one. Master RCP controls the camera first.' },
+    { step: 'remi', tab: 'setup', at: () => tabButton('assignment'), title: 'On to REMI Matrix', tag: 'REMI Matrix',
+      what: 'That’s your cameras. REMI Matrix, the next tab, shares a camera with other RCPs. You only need it if a camera goes on to more than one RCP.', todo: 'Press Next to go to REMI Matrix.' },
+    { step: 'remi', tab: 'assignment', at: () => sheetLine(fieldHead(allCamerasSheet, 'remiMaster')), title: 'Master RCP', what: 'The RCP that controls the camera first.' },
     { step: 'remi', tab: 'assignment', at: () => sheetLine(root.querySelector('[data-controller="' + allCamerasSheet + '"] th.hc-camera-band-remi')), title: 'REMI to', what: 'One column per RCP. Fill a circle to put the camera on that RCP too, and empty it to take it off.', todo: 'Optional. Skip it if each camera stays on one RCP.' },
-    { step: 'actions', title: 'Add Cyanview actions', what: 'Keys get their Cyanview actions in HubDash’s Button Matrix, not on this page.', todo: 'In the Button Matrix, choose + Action, then Cyanview. Pick an Action, the Cyanview Controller and the camera.' },
+    // The actions are set up in HubDash's Button Matrix, which this page can't show, so these stops draw an
+    // example of it here (the stage) and ring its parts: + Action, then the Action, Cyanview Controller and
+    // Camera columns, then each group of the Action list with rows that use it and what each Action does.
+    { step: 'actions', stage: { group: false, rows: () => [['CAM 1'], ['CAM 2'], ['REC']] }, at: () => stagePart('add-action'), prefer: 'right', title: 'On to the Button Matrix', tag: '+ Action',
+      what: 'Keys get their Cyanview actions in HubDash’s Button Matrix. This is an example of it. + Action adds an action column: pick Cyanview · Module actions and press Add action.', todo: 'In the Button Matrix, press + Action and add Cyanview.' },
+    { step: 'actions', stage: { group: true, list: true, rows: () => [['CAM 1', '', '', ''], ['CAM 2', '', '', ''], ['REC', '', '', '']] }, at: () => [stageColumn('action'), { el: stagePart('list'), rect: () => stagePart('list').getBoundingClientRect() }], title: 'Action',
+      what: 'What the key does. The list has two headings: RCP set active camera, which has Select camera, and Cyanview, which has the rest. The next stops say what each one does.', todo: 'Pick an Action on each row.' },
+    { step: 'actions', stage: { group: true, rows: n => [['CAM 1', 'Select camera', n.rcp, n.cam1], ['CAM 2', 'Select camera', n.rcp, n.cam2], ['REC', 'Start Recording', n.rio, '']] },
+      at: () => [stageColumn('controller'), stageColumn('camera')], title: 'Cyanview Controller and Camera', tag: 'Controller and Camera',
+      what: 'Cyanview Controller is the controller the key talks to, by the name it has on Devices; Select camera lists RCPs and Gateways. Camera is the camera’s number, for Select camera, Record camera and Enable / Disable Camera. Feedback, further right, lights the key from what Cyanview reports.',
+      todo: 'Pick the controller, and the camera where the Action needs one.' },
+    { step: 'actions', stage: { group: true, rows: n => [['CAM 1', 'Select camera', n.rcp, n.cam1], ['REC 1', 'Record camera (Toggle)', n.rio, n.cam1]] }, at: () => stageColumn('action'), tag: 'Action', title: 'One camera',
+      what: 'Select camera is under RCP set active camera in the Action list; Record camera is under Cyanview.', items: [
+      ['Select camera', 'Switches an RCP to that camera, so its panel controls it. Pick the RCP or Gateway and the camera. The key lights Selected while that camera is up.'],
+      ['Record camera (Toggle)', 'A tap starts that camera recording. A 2-second hold stops it, so a stray tap can’t cut a take. The key’s outline rings while it records.'],
+    ] },
+    { step: 'actions', stage: { group: true, rows: n => [['CAM 1 ON', 'Enable / Disable Camera', n.rio, n.cam1], ['ALL ON', 'Enable / Disable All Cameras', n.rio, ''], ['SINGLE', 'Single switch', '', '']] }, at: () => stageColumn('action'), tag: 'Action', title: 'Which cameras a group key uses',
+      what: 'These change the Camera Control Enabled ticks and send nothing to the cameras. Leave Cyanview Controller blank to cover every controller.', items: [
+      ['Enable / Disable Camera', 'Ticks or clears one camera.'],
+      ['Enable / Disable All Cameras', 'Ticks or clears every camera on the controller.'],
+      ['Single switch', 'Keeps one camera ticked at a time. Enable / Disable All Cameras ends it.'],
+    ] },
+    { step: 'actions', stage: { group: true, rows: n => [['REC', 'Start Recording', n.rio, ''], ['STOP', 'Stop Recording', n.rio, ''], ['REC / STOP', 'Toggle Recording', n.rio, '']] }, at: () => stageColumn('action'), tag: 'Action', title: 'Recording',
+      what: 'Each goes to the ticked cameras on the controller. A camera that isn’t connected is sent nothing, and the press says so.', items: [
+      ['Start Recording', 'Starts every ticked camera recording.'],
+      ['Stop Recording', 'Stops every ticked camera.'],
+      ['Toggle Recording', 'Stops each ticked camera that is recording and starts each one that isn’t.'],
+    ] },
+    { step: 'actions', stage: { group: true, rows: n => [['ND +', 'ND Up', n.rio, ''], ['ND −', 'ND Down', n.rio, ''], ['ND IN', 'ND In', n.rio, ''], ['ND OUT', 'ND Out (Clear)', n.rio, ''], ['ND IN / OUT', 'ND In / Out (Toggle)', n.rio, '']] }, at: () => stageColumn('action'), tag: 'Action', title: 'ND',
+      what: 'Each goes to the ticked cameras on the controller.', items: [
+      ['ND Up / ND Down', 'Steps the ND filter one step up or down.'],
+      ['ND In', 'Puts the ND in, on cameras that have an ND in/out switch.'],
+      ['ND Out (Clear)', 'Takes the ND out.'],
+      ['ND In / Out (Toggle)', 'Takes it out when every such camera has it in, and puts it in otherwise.'],
+    ] },
+    { step: 'actions', stage: { group: true, rows: n => [['ISO +', 'ISO Up', n.rio, ''], ['ISO −', 'ISO Down', n.rio, ''], ['BASE +', 'Base Gain Up', n.rio, ''], ['BASE −', 'Base Gain Down', n.rio, '']] }, at: () => stageColumn('action'), tag: 'Action', title: 'ISO and Base Gain',
+      what: 'Each goes to the ticked cameras on the controller.', items: [
+      ['ISO Up / ISO Down', 'Steps the ISO one step up or down.'],
+      ['Base Gain Up / Base Gain Down', 'Steps the base gain of cameras that report one. On a two-base camera such as the Burano, Up is High and Down is Low.'],
+    ] },
+    { step: 'actions', stage: { group: true, rows: n => [['WB', 'White Balance', n.rio, ''], ['PRESET', 'Add preset (Sony VENICE)', n.rio, '']] }, at: () => stageColumn('action'), tag: 'Action', title: 'White Balance and presets',
+      what: 'Each goes to the ticked cameras on the controller.', items: [
+      ['White Balance', 'Opens a box in HubDash to type a colour temperature (2,000 to 15,000 K) and tint (−99 to +99) for them.'],
+      ['Add preset (Sony VENICE)', 'Stores each VENICE’s current white balance as a preset. It doesn’t pick a preset or run auto white balance.'],
+    ] },
     { step: 'press', title: 'Press a key', what: f => 'Press a Select camera key on your deck. The ' + (f.simulated ? 'simulated ' : '') + 'RCP switches to that camera, and the key’s bar turns blue while the camera is online.' },
   ];
   // What the page can already see about a step, said on the step's first stop.
@@ -5123,22 +5178,46 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from
   const setupTour = document.createElement('div');
   setupTour.className = 'cv-tour';
   setupTour.hidden = true;
-  setupTour.innerHTML = '<div class="cv-tour-dim" aria-hidden="true"></div><div class="cv-tour-spot" aria-hidden="true"></div>' +
+  setupTour.innerHTML = '<div class="cv-tour-dim" aria-hidden="true"></div><div class="cv-tour-stage" aria-hidden="true" hidden></div><div class="cv-tour-spot" aria-hidden="true"></div>' +
     '<svg class="cv-tour-lines" aria-hidden="true"><defs><marker id="cv-tour-tip" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"/></marker></defs>' +
     '<g class="cv-tour-lead"><path marker-end="url(#cv-tour-tip)"/></g></svg><div class="cv-tour-tag" aria-hidden="true"></div>' +
     '<section class="cv-tour-panel" role="dialog" aria-modal="false" aria-labelledby="cv-tour-title" aria-describedby="cv-tour-what">' +
     '<div class="cv-tour-progress" aria-hidden="true"><span></span></div>' +
     '<div class="cv-tour-step"><b class="cv-tour-marker"></b><span class="cv-tour-step-title"></span><span class="cv-tour-count"></span></div>' +
-    '<h3 id="cv-tour-title"></h3><p id="cv-tour-what" class="cv-tour-what"></p><p class="cv-tour-status"></p>' +
+    '<h3 id="cv-tour-title"></h3><p id="cv-tour-what" class="cv-tour-what"></p><dl class="cv-tour-defs"></dl><p class="cv-tour-status"></p>' +
     '<footer><p class="cv-tour-todo"><strong>What to do:</strong> <span></span></p><span class="cv-tour-buttons"><button type="button" class="cv-tour-exit" data-tour="exit">Exit tour</button>' +
     '<button type="button" class="cv-tour-back" data-tour="back">Back</button><button type="button" class="cv-tour-next" data-tour="next">Next</button></span></footer>' +
     '</section>';
   document.body.append(setupTour);
   const tourDim = setupTour.querySelector('.cv-tour-dim'), tourSpot = setupTour.querySelector('.cv-tour-spot'), tourLines = setupTour.querySelector('.cv-tour-lines');
   const tourLead = setupTour.querySelector('.cv-tour-lead'), tourLine = setupTour.querySelector('.cv-tour-lead path'), tourTag = setupTour.querySelector('.cv-tour-tag');
-  const tourPanel = setupTour.querySelector('.cv-tour-panel');
+  const tourPanel = setupTour.querySelector('.cv-tour-panel'), tourStage = setupTour.querySelector('.cv-tour-stage');
   const tourPart = selector => tourPanel.querySelector(selector);
   let setupTourAt = 0, setupTourTimer = null, setupTourPlaced = '';
+  // The example Button Matrix: names from this setup where it has them, so the example reads like the user's own.
+  const stagePart = name => tourStage.querySelector('[data-stage="' + name + '"]');
+  const stageColumn = name => sheetLine(tourStage.querySelector('th[data-stage="' + name + '"]'))[0] ?? null;
+  function stageNames() {
+    const kind = (d, re) => re.test(String(d.kind ?? d.type ?? ''));
+    const rcp = devices.find(d => kind(d, /rcp/i)), rio = devices.find(d => kind(d, /rio/i)) ?? devices.find(d => !kind(d, /rcp/i));
+    const numbers = matrixRows().map(row => Number(row.number)).filter(Number.isFinite).sort((a, b) => a - b);
+    return { rcp: String(rcp?.name || 'RCP 1'), rio: String(rio?.name || 'RIO 1'), cam1: String(numbers[0] ?? 1), cam2: String(numbers[1] ?? 2) };
+  }
+  const stageCheck = '<span class="cv-stage-check">' + setupTourSvg.check + '</span>';
+  const stageList = '<div class="cv-stage-list" data-stage="list"><span class="cv-stage-search">Type to search</span><b>RCP set active camera</b><span class="cv-stage-on">Select camera</span><b>Cyanview</b>' +
+    ['Record camera (Toggle)', 'Enable / Disable Camera', 'Enable / Disable All Cameras', 'Single switch', 'Start Recording', 'Stop Recording'].map(item => '<span>' + item + '</span>').join('') + '<em>Clear</em></div>';
+  function paintTourStage(stop) {
+    tourStage.hidden = !stop.stage;
+    if (!stop.stage) return;
+    const { group, list } = stop.stage, rows = stop.stage.rows(stageNames());
+    const head = '<tr class="cv-stage-groups"><th></th><th colspan="3">BUTTON DEFINITION</th>' + (group ? '<th colspan="4" data-stage="group"><span class="cv-stage-collapse">−</span>Cyanview — Cyanview</th>' : '') + '<th class="cv-stage-fill"></th></tr>' +
+      '<tr><th></th><th>Button ID</th><th>Button Text</th><th>Enabled</th>' + (group ? '<th class="cv-stage-first">Enabled</th><th data-stage="action">Action</th><th data-stage="controller">Cyanview Controller</th><th data-stage="camera">Camera</th>' : '') + '<th class="cv-stage-fill"></th></tr>';
+    const body = rows.map((row, index) => '<tr><td class="cv-stage-row">' + (index + 1) + '</td><td>' + (index + 1) + '</td><td class="cv-stage-text">' + esc(row[0]) + '</td><td>' + stageCheck + '</td>' +
+      (group ? '<td class="cv-stage-first">' + stageCheck + '</td><td class="cv-stage-action">' + esc(row[1] ?? '') + (list && index === 0 ? stageList : '') + '</td><td>' + esc(row[2] ?? '') + '</td><td>' + esc(row[3] ?? '') + '</td>' : '') + '<td class="cv-stage-fill"></td></tr>').join('');
+    tourStage.innerHTML = '<div class="cv-stage-head"><b>Button Matrix</b><span>In HubDash · an example</span></div>' +
+      '<div class="cv-stage-toolbar"><span data-stage="add-button">+ Button</span><span data-stage="add-action">+ Action</span></div>' +
+      '<table class="cv-stage-grid"><colgroup>' + [34, 84, 118, 76, ...(group ? [76, 230, 190, 90] : [])].map(width => '<col style="width:' + width + 'px">').join('') + '<col></colgroup><thead>' + head + '</thead><tbody>' + body + '</tbody></table>';
+  }
   // Scroll positions the tour changed, put back when it ends.
   const setupTourScrolled = new Map();
 
@@ -5153,6 +5232,8 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from
     const status = $('saved-label')?.parentElement, bar = status && shown(status) ? status.getBoundingClientRect() : null;
     tourPanel.style.bottom = (bar && bar.top > innerHeight / 2 ? innerHeight - bar.top + 8 : 12) + 'px';
     const scroller = openPanel()?.getBoundingClientRect(), top = tourPanel.getBoundingClientRect().top;
+    const tabs = root.querySelector('.hc-tabs')?.getBoundingClientRect();
+    Object.assign(tourStage.style, { top: Math.round((tabs?.bottom ?? 60) + 14) + 'px', bottom: Math.round(innerHeight - top + 14) + 'px' });
     root.style.setProperty('--cv-tour-room', Math.max(0, Math.round((scroller?.bottom ?? innerHeight) - top + 12)) + 'px');
   }
   // Brings a stop into view: past a sheet's frozen columns sideways, and wholly above the panel when it
@@ -5192,13 +5273,19 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from
     tourPart('.cv-tour-count').textContent = (setupTourAt + 1) + ' of ' + setupTourStops.length;
     tourPart('#cv-tour-title').textContent = stop.title;
     tourPart('.cv-tour-what').textContent = typeof stop.what === 'function' ? stop.what(facts) : stop.what;
+    const defs = tourPart('.cv-tour-defs');
+    defs.replaceChildren(...(stop.items ?? []).map(([name, meaning]) => {
+      const row = document.createElement('div'), term = document.createElement('dt'), text = document.createElement('dd');
+      term.textContent = name; text.textContent = meaning; row.append(term, text); return row;
+    }));
+    defs.hidden = !stop.items;
     tourPart('.cv-tour-status').textContent = status;
     tourPart('.cv-tour-status').hidden = !status;
     tourPart('.cv-tour-todo span').textContent = stop.todo ?? '';
     tourPart('.cv-tour-todo').style.visibility = stop.todo ? '' : 'hidden';
     tourPart('.cv-tour-back').disabled = setupTourAt === 0;
     tourPart('.cv-tour-next').textContent = last ? 'Done' : 'Next';
-    tourTag.textContent = stop.title;
+    tourTag.textContent = (typeof stop.tag === 'function' ? stop.tag() : stop.tag) ?? stop.title;
   }
   // The ring goes round what can be seen of the stop, above the panel. Its arrow and name tag sit below
   // it when there is room, then above, then beside it, and never on the panel.
@@ -5230,7 +5317,9 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from
       { fits: r.right + pad + gap + tw <= vw - edge, x: r.right + pad + gap, y: clamp(cy - th / 2, edge, floor - th), from: () => [r.right + pad + gap - 2, cy], to: [r.right + pad + 6, cy], nudge: '--cv-tour-nx: -4px' },
       { fits: true, x: Math.max(edge, r.left - pad - gap - tw), y: clamp(cy - th / 2, edge, floor - th), from: () => [r.left - pad - gap + 2, cy], to: [r.left - pad - 6, cy], nudge: '--cv-tour-nx: 4px' },
     ];
-    const place = places.find(item => item.fits);
+    // A stop can ask for a side, as a toolbar button with room beside it does, when the tag fits there.
+    const preferred = { below: 0, above: 1, right: 2, left: 3 }[setupTourStops[setupTourAt].prefer];
+    const place = (preferred !== undefined && places[preferred].fits ? places[preferred] : null) ?? places.find(item => item.fits);
     Object.assign(tourTag.style, { left: place.x + 'px', top: place.y + 'px' });
     const from = place.from(place.y);
     tourLine.setAttribute('d', 'M ' + from[0] + ' ' + from[1] + ' L ' + place.to[0] + ' ' + place.to[1]);
@@ -5246,6 +5335,7 @@ import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from
     root.classList.add('cv-touring');
     setupTourToggle.setAttribute('aria-pressed', 'true');
     paintTourPanel();
+    paintTourStage(stop);
     placeTourPanel();
     const parts = tourParts(stop);
     if (parts[0]) bringTourPartIntoView(parts[0]);

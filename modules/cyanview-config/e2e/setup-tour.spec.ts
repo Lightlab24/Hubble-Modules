@@ -4,7 +4,8 @@ import { test, expect, type Page, type APIRequestContext, type Locator } from '@
 // name, and a panel fixed at the bottom says what it is for and what to do there, with Next always in
 // the same place. Next moves on whether or not it was done. These drive it with real clicks and keys
 // against the preview's controllers, real or simulated.
-const STOPS = 13;
+const STOPS = 24;
+const stage = (page: Page) => ui(page).locator('.cv-tour-stage');
 const ui = (page: Page) => page.frameLocator('iframe');
 const card = (page: Page) => ui(page).locator('.cv-tour-panel');
 const spot = (page: Page) => ui(page).locator('.cv-tour-spot');
@@ -67,10 +68,10 @@ test('starts by itself on a new setup, and Next walks the page in setup order wi
   await expect(title(page)).toHaveText('Name');
   await expect(card(page).locator('.cv-tour-step-title')).toHaveText('Name your controllers');
   // The tour opens each stop's tab itself.
-  await goTo(page, 5);
+  await goTo(page, 6);
   await expect(title(page)).toHaveText('Number of cameras');
   await expect(f.locator('.hc-tabs [data-tab="setup"]')).toHaveAttribute('aria-selected', 'true');
-  await goTo(page, 10);
+  await goTo(page, 13);
   await expect(title(page)).toHaveText('Master RCP');
   await expect(f.locator('.hc-tabs [data-tab="assignment"]')).toHaveAttribute('aria-selected', 'true');
   // Walking through changed nothing on the page.
@@ -97,6 +98,93 @@ test('Next, Back and Exit tour stay in the same place on every stop, at the bott
   await expect(card(page)).toHaveAttribute('data-done', 'true');
   await expect(card(page).locator('.cv-tour-step')).not.toContainText('Done');
   await expect(f.locator('.cv-tour-marker svg')).toBeVisible();
+});
+
+test('moving to another tab is a stop of its own: the next tab is rung before the tour goes there', async ({ page, request }) => {
+  await open(page, request, true);
+  const f = ui(page);
+  const selected = (id: string) => f.locator('.hc-tabs [data-tab="' + id + '"]');
+  await goTo(page, 4);
+  await expect(title(page)).toHaveText('LAN and WAN');
+  // Still on Devices, with Camera Configuration rung and named.
+  await card(page).getByRole('button', { name: 'Next', exact: true }).click();
+  await expect(title(page)).toHaveText('On to Camera Configuration');
+  await expect(card(page).locator('.cv-tour-step-title')).toHaveText('Add your cameras');
+  await expect(tag(page)).toHaveText('Camera Configuration');
+  await expect(selected('devices')).toHaveAttribute('aria-selected', 'true');
+  await ringsAround(page, around(selected('setup')));
+  await expect(card(page).locator('.cv-tour-todo')).toHaveText('What to do: Press Next to go to Camera Configuration.');
+  // Next opens it; Back comes back to the move, on Devices again.
+  await card(page).getByRole('button', { name: 'Next', exact: true }).click();
+  await expect(title(page)).toHaveText('Number of cameras');
+  await expect(selected('setup')).toHaveAttribute('aria-selected', 'true');
+  await card(page).getByRole('button', { name: 'Back', exact: true }).click();
+  await expect(title(page)).toHaveText('On to Camera Configuration');
+  await expect(selected('devices')).toHaveAttribute('aria-selected', 'true');
+  // REMI Matrix is reached the same way, from Camera Configuration.
+  await goTo(page, 12);
+  await expect(title(page)).toHaveText('On to REMI Matrix');
+  await expect(tag(page)).toHaveText('REMI Matrix');
+  await expect(selected('setup')).toHaveAttribute('aria-selected', 'true');
+  await ringsAround(page, around(selected('assignment')));
+  await card(page).getByRole('button', { name: 'Next', exact: true }).click();
+  await expect(title(page)).toHaveText('Master RCP');
+  await expect(selected('assignment')).toHaveAttribute('aria-selected', 'true');
+});
+
+test('it goes through every Cyanview action, group by group, and says what each does', async ({ page, request }) => {
+  await open(page, request, true);
+  const f = ui(page);
+  // First, the column most of them act on.
+  await goTo(page, 9);
+  await expect(title(page)).toHaveText('Camera Control Enabled');
+  const ticks = f.locator('[data-controller="__camera-setup__"] th[data-field-header="controlEnabled"]');
+  await ringsAround(page, async () => {
+    const [h, t] = await Promise.all([ticks.boundingBox(), ticks.locator('xpath=ancestor::table[1]').boundingBox()]);
+    return h && t ? { x: h.x, y: h.y, width: h.width, height: t.y + t.height - h.y } : null;
+  });
+  // A sheet that hides the column has Columns rung instead, and is told where to turn it on.
+  await card(page).getByRole('button', { name: 'Exit tour' }).click();
+  await f.getByRole('button', { name: 'Choose visible columns' }).click();
+  const menu = f.getByRole('menu');
+  await menu.getByRole('searchbox', { name: 'Search columns' }).fill('Camera Control');
+  await menu.getByRole('menuitemcheckbox', { name: 'Camera Control Enabled', exact: true }).click();
+  await menu.getByRole('searchbox').press('Escape');
+  await expect(ticks).toBeHidden();
+  await toggle(page).click();
+  await goTo(page, 9);
+  await expect(tag(page)).toHaveText('Columns');
+  await expect(card(page).locator('.cv-tour-what')).toContainText('This sheet hides the column: show it from Columns.');
+  await ringsAround(page, around(f.getByRole('button', { name: 'Choose visible columns' })));
+  // Then every action in the Action list, each named once with what it does, and used in the example
+  // Button Matrix's rows, whose Action column is rung.
+  const named: string[] = [];
+  for (let stop = 18; stop <= 23; stop += 1) {
+    await goTo(page, stop);
+    await expect(card(page).locator('.cv-tour-step-title')).toHaveText('Add Cyanview actions');
+    await expect(stage(page)).toBeVisible();
+    await expect(tag(page)).toHaveText('Action');
+    const column = stage(page).locator('th[data-stage="action"]');
+    await ringsAround(page, async () => {
+      const [h, t] = await Promise.all([column.boundingBox(), stage(page).locator('table').boundingBox()]);
+      return h && t ? { x: h.x, y: h.y, width: h.width, height: t.y + t.height - h.y } : null;
+    });
+    const rows = card(page).locator('.cv-tour-defs dt');
+    await expect(rows.first()).toBeVisible();
+    for (const text of await rows.allTextContents()) named.push(...text.split(' / '));
+    for (const meaning of await card(page).locator('.cv-tour-defs dd').allTextContents()) expect(meaning.length).toBeGreaterThan(10);
+    const used = await stage(page).locator('td.cv-stage-action').allTextContents();
+    for (const text of await rows.allTextContents()) for (const action of text.split(' / ').map(part => part.startsWith('Out') || part.startsWith('Disable') ? null : part).filter(Boolean)) expect(used.some(cell => cell.startsWith(action!))).toBe(true);
+  }
+  expect(named.sort()).toEqual(['Add preset (Sony VENICE)', 'Base Gain Down', 'Base Gain Up', 'Disable All Cameras', 'Disable Camera', 'Enable', 'Enable', 'ISO Down', 'ISO Up', 'ND Down',
+    'ND In', 'ND In', 'ND Out (Clear)', 'ND Up', 'Out (Toggle)', 'Record camera (Toggle)', 'Select camera', 'Single switch', 'Start Recording', 'Stop Recording', 'Toggle Recording', 'White Balance'].sort());
+  await goTo(page, 20);
+  await expect(title(page)).toHaveText('Recording');
+  await expect(card(page).locator('.cv-tour-defs')).toContainText('Toggle RecordingStops each ticked camera that is recording and starts each one that isn’t.');
+  // A stop without actions shows no list, and no example.
+  await goTo(page, 24);
+  await expect(card(page).locator('.cv-tour-defs')).toBeHidden();
+  await expect(stage(page)).toBeHidden();
 });
 
 test('Back goes back, Exit tour and Esc leave, and it starts by itself only once', async ({ page, request }) => {
@@ -146,9 +234,9 @@ test('on a simulated rig each step says where it stands, counting cameras as the
   await goTo(page, 5);
   await expect(f.locator('[data-role="camera-count"]')).toHaveText('2');
   await expect(card(page).locator('.cv-tour-status')).toHaveText('You have 2 cameras.');
-  await goTo(page, 8);
-  await expect(card(page).locator('.cv-tour-status')).toHaveText('Everything has been sent and confirmed.');
   await goTo(page, 10);
+  await expect(card(page).locator('.cv-tour-status')).toHaveText('Everything has been sent and confirmed.');
+  await goTo(page, 12);
   await expect(card(page).locator('.cv-tour-status')).toHaveText('4 REMI copies on other RCPs.');
 });
 
@@ -179,7 +267,7 @@ test('a column is rung whole however its heading reads, sorted or with its group
   const ring = (await spot(page).boundingBox())!;
   expect(ring.x + ring.width - 5).toBeGreaterThanOrEqual(Math.min(wan!.x + wan!.width, page.viewportSize()!.width) - 4);
   // Source on Camera Configuration is rung the same way, and its tag sits clear of the panel.
-  await goTo(page, 7);
+  await goTo(page, 8);
   const source = f.locator('[data-controller="__camera-setup__"] th[data-field-header="source"]');
   const setup = source.locator('xpath=ancestor::table[1]');
   await ringsAround(page, async () => {
@@ -214,19 +302,43 @@ test('on a short window a column is scrolled clear of the panel, and leaving put
   await expect.poll(() => tabPanel.evaluate(el => el.scrollTop)).toBe(before);
 });
 
-test('the steps that happen in HubDash have nothing rung, and tick from keys and a press', async ({ page, request }) => {
-  await open(page, request, false);
-  await goTo(page, 12);
-  await expect(title(page)).toHaveText('Add Cyanview actions');
-  await expect(spot(page)).toBeHidden();
-  await expect(tag(page)).toBeHidden();
-  await expect(ui(page).locator('.cv-tour-lines')).toBeHidden();
+test('the Button Matrix steps draw an example of it with this setup’s names, and tick from keys and a press', async ({ page, request }) => {
+  await open(page, request, true);
+  await card(page).getByRole('button', { name: 'Exit tour' }).click();
+  await findRig(page);
+  await toggle(page).click();
+  // Before the Button Matrix stops there is no example.
+  await goTo(page, 14);
+  await expect(stage(page)).toBeHidden();
+  await card(page).getByRole('button', { name: 'Next', exact: true }).click();
+  await expect(title(page)).toHaveText('On to the Button Matrix');
+  await expect(stage(page)).toBeVisible();
+  await expect(stage(page)).toContainText('In HubDash · an example');
+  await expect(tag(page)).toHaveText('+ Action');
+  await ringsAround(page, around(stage(page).locator('[data-stage="add-action"]')));
   await expect(card(page).locator('.cv-tour-status')).toBeHidden();
   await request.post('/__simulate', { data: { keys: [{ id: 'key-1', fields: { values: { enabled: true, actionType: 'select-camera', 'module.controllerId': '', 'module.cameraNumber': 1 } } }] } });
   await expect(card(page).locator('.cv-tour-status')).toHaveText('1 key uses Cyanview.');
   await expect(card(page)).toHaveAttribute('data-done', 'true');
+  // The Action list opens in the example, with its two headings.
   await card(page).getByRole('button', { name: 'Next', exact: true }).click();
+  await expect(title(page)).toHaveText('Action');
+  const list = stage(page).locator('[data-stage="list"]');
+  await expect(list).toContainText('RCP set active camera');
+  await expect(list.locator('b')).toHaveText(['RCP set active camera', 'Cyanview']);
+  // Controller and Camera use this setup's own controllers and cameras.
+  await card(page).getByRole('button', { name: 'Next', exact: true }).click();
+  await expect(title(page)).toHaveText('Cyanview Controller and Camera');
+  await expect(tag(page)).toHaveText('Controller and Camera');
+  const rows = stage(page).locator('tbody tr');
+  await expect(rows.nth(0)).toContainText('Select camera');
+  await expect(rows.nth(0)).toContainText('CY-RCP-1-20');
+  await expect(rows.nth(0).locator('td').nth(7)).toHaveText('1');
+  await expect(rows.nth(2)).toContainText('CY-RIO-1-10');
+  await goTo(page, STOPS);
   await expect(title(page)).toHaveText('Press a key');
+  await expect(spot(page)).toBeHidden();
+  await expect(stage(page)).toBeHidden();
   await expect(card(page).getByRole('button', { name: 'Done', exact: true })).toBeVisible();
   await request.post('/__simulate', { data: { press: { actionType: 'select-camera', 'module.controllerId': '', 'module.cameraNumber': 1 } } });
   await expect(card(page).locator('.cv-tour-status')).toHaveText('A Cyanview key has been pressed.');
@@ -234,6 +346,7 @@ test('the steps that happen in HubDash have nothing rung, and tick from keys and
   await expect.poll(async () => (await (await request.post('/__rpc', { data: { commandId: 'setup-guide', value: null } })).json()).result?.confirmed).toEqual(['press']);
   await card(page).getByRole('button', { name: 'Done', exact: true }).click();
   await expect(card(page)).toBeHidden();
+  await expect(stage(page)).toBeHidden();
 });
 
 test('the page stays usable under the tour, which keeps still for reduced motion and follows light mode', async ({ page, request }) => {
