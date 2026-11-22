@@ -105,7 +105,7 @@ export async function mountPresetsView({client,report,onChange}:PresetsViewOptio
   // Reading a camera asks for everything a preset can hold, so the comparison and a capture see the whole camera.
   async function readCamera(camera:CameraSummary,reason:'pressed'|'quiet'):Promise<boolean>{
     if(!camera.host)return false;
-    if(!camera.login){if(reason==='pressed')report(camera.name+' needs a Username and Password. Add them on a camera tab.');return false;}
+    if(!camera.login){if(reason==='pressed')report(camera.name+' needs a Username and Password. Add them on the Cameras tab.');return false;}
     reading.add(camera.id);
     try {
       const reply=await client.call('refresh',{rowId:camera.id,host:camera.host,fieldIds:presetFields.map(f=>f.id)}) as unknown as Live&{status?:string};
@@ -148,7 +148,7 @@ export async function mountPresetsView({client,report,onChange}:PresetsViewOptio
   }
   const cameraState=(camera:CameraSummary)=>{const obs=observationOf(camera);return !camera.host?'No address':!camera.login?'No login':obs?.state==='online'?(obs.recording==='recording'?'Rolling':'Ready'):obs?.state==='error'?'Read failed':obs?'Offline':'Not read';};
   el('preset-capture').addEventListener('click',()=>{
-    if(!cameras.length){report('Add cameras on a camera tab first.');return;}
+    if(!cameras.length){report('Add cameras on the Cameras tab first.');return;}
     openMenu(el('preset-capture'),'Capture every setting from',cameras.map(camera=>({id:camera.id,label:camera.name+' · '+cameraState(camera),disabled:!camera.host||!camera.login,items:[
       {id:'base',label:'Into Base (replaces '+plural(Object.keys(basePreset(doc()).values).length,'setting')+')',run:()=>void capture(camera,'base')},
       {id:'new',label:'As a new preset',icon:'add' as const,run:()=>void capture(camera,'new')}
@@ -156,7 +156,7 @@ export async function mountPresetsView({client,report,onChange}:PresetsViewOptio
   });
   el('pick-preset').addEventListener('click',()=>openMenu(el('pick-preset'),'Send which preset',doc().presets.map(preset=>({id:preset.id,label:preset.name+(preset.id===chosenPreset().id?'  ✓':''),run:()=>setSend({presetId:preset.id})}))));
   el('pick-camera').addEventListener('click',()=>{
-    if(!cameras.length){report('Add cameras on a camera tab first.');return;}
+    if(!cameras.length){report('Add cameras on the Cameras tab first.');return;}
     openMenu(el('pick-camera'),'Send to which camera',cameras.map(camera=>({id:camera.id,label:camera.name+(camera.host?' · '+camera.host:'')+' · '+cameraState(camera)+(camera.id===chosenCamera()?.id?'  ✓':''),disabled:!camera.host,run:()=>{setSend({cameraId:camera.id});void readCamera(camera,'pressed');}})));
   });
   el('preset-send').addEventListener('click',()=>void sendPreset());

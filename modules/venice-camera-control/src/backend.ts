@@ -352,7 +352,7 @@ export function createBackend(context:Parameters<HubbleModule['createInstance']>
       const command=raw as {sectionId?:string;commandId?:string;value?:any};
       if(command.sectionId!=='frontend')throw Error('Unknown camera view.');
       const {signal}=execution;signal.throwIfAborted();
-      // The Presets tab keeps its own saved document. Reading cameras and following their changes are shared with the camera tabs.
+      // The Presets tab keeps its own saved document. Reading cameras and following their changes are shared with the Cameras tab.
       if(['presets-snapshot','presets-save','send-preset','cancel-preset'].includes(command.commandId??'')){
         watchPresets();
         if(command.commandId==='presets-snapshot'){await snapshot(signal);await readPresets(signal);return presetsReply() as unknown as ModuleJsonValue;}

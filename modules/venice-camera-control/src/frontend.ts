@@ -39,29 +39,25 @@ try {
     onChange(textSize){store.submit(viewChange(store.document,{...clone(store.document.view),textSize}));}
   }});
   const submitSheets=(operation:Mutation|null)=>{if(operation)store.submit(operation);};
-  // Presets is the last tab, after the camera tabs. It is a view of its own saved presets, not a camera layout,
-  // so it can't be renamed, removed or moved. Whether it is open is saved with the plan, like the open camera tab.
-  const presetsTabId='presets-tab';
-  let presets:Awaited<ReturnType<typeof mountPresetsView>>|undefined,presetsLoading:Promise<void>|undefined,presetsOpen=false,presetsCount=0;
   const sheetTabs=await mountSpreadsheetSheets({
     root:el('sheet-tabs'),
-    getState(){const document=store.document,list=sheetList(document);return {sheets:[...list.map(({id,name})=>({id,name})),{id:presetsTabId,name:'Presets'}],activeSheetId:presetsOpen?presetsTabId:activeSheetId(document),counts:new Map([...list.map(sheet=>[sheet.id,sheetRowCount(document,sheet)] as const),[presetsTabId,presetsCount]])};},
-    onSelect(sheetId){
-      if(sheetId===presetsTabId){openPresets(true);return;}
-      openPresets(false);
-      if(sheetId!==activeSheetId(store.document))store.submit({kind:'select-sheet',sheetId},false);
-    },
-    onCreate:name=>{openPresets(false);submitSheets(addSheet(store.document,crypto.randomUUID(),name));},
-    onRename:(sheetId,name)=>{if(sheetId===presetsTabId){report('The Presets tab keeps its name.');sheetTabs.refresh();return;}submitSheets(renameSheet(store.document,sheetId,name));},
-    onRemove:sheetId=>{if(sheetId===presetsTabId){report('The Presets tab can’t be removed.');return;}submitSheets(removeSheet(store.document,sheetId));},
-    onReorder:(sheetId,beforeId)=>{if(sheetId===presetsTabId){sheetTabs.refresh();return;}submitSheets(moveSheet(store.document,sheetId,beforeId===presetsTabId?null:beforeId));}
+    getState(){const document=store.document,list=sheetList(document);return {sheets:list.map(({id,name})=>({id,name})),activeSheetId:activeSheetId(document),counts:new Map(list.map(sheet=>[sheet.id,sheetRowCount(document,sheet)]))};},
+    onSelect(sheetId){if(sheetId!==activeSheetId(store.document))store.submit({kind:'select-sheet',sheetId},false);},
+    onCreate:name=>submitSheets(addSheet(store.document,crypto.randomUUID(),name)),
+    onRename:(sheetId,name)=>submitSheets(renameSheet(store.document,sheetId,name)),
+    onRemove:sheetId=>submitSheets(removeSheet(store.document,sheetId)),
+    onReorder:(sheetId,beforeId)=>submitSheets(moveSheet(store.document,sheetId,beforeId))
   });
-  const cameraArea=document.querySelector<HTMLElement>('main.work-area:not(#preset-area)')!;
+  // Cameras and Presets are the tabs at the top. Presets has its own toolbar and sheet; the camera sheets and their
+  // tab bar along the bottom belong to Cameras. Which one is open is saved with the plan, like the open camera sheet.
+  let presets:Awaited<ReturnType<typeof mountPresetsView>>|undefined,presetsLoading:Promise<void>|undefined,presetsOpen=false;
+  const cameraTab=el<HTMLButtonElement>('tab-cameras'),presetsTab=el<HTMLButtonElement>('tab-presets');
+  function showPresetsCount(){const count=el('tab-presets-count');count.hidden=!presets;if(presets)count.textContent=String(presets.count);}
   function loadPresets():Promise<void>{
     return presetsLoading??=(async()=>{
       try {
-        presets=await mountPresetsView({client,report,onChange(){if(presets&&presets.count!==presetsCount){presetsCount=presets.count;sheetTabs.refresh();}}});
-        presetsCount=presets.count;sheetTabs.refresh();
+        presets=await mountPresetsView({client,report,onChange:showPresetsCount});
+        showPresetsCount();
         if(presetsOpen)presets.show();
       } catch(error){el('preset-loading').textContent='Presets could not load. '+(error instanceof Error?error.message:'');presetsLoading=undefined;}
     })();
@@ -71,12 +67,20 @@ try {
     presetsOpen=open;
     const saved=store.document.presetsOpen===true;
     if(saved!==open)store.submit({kind:'presets-open',open,expected:saved},false);
-    el('camera-toolbar').hidden=open;cameraArea.hidden=open;el('pending-status').hidden=open;
+    cameraTab.setAttribute('aria-selected',String(!open));presetsTab.setAttribute('aria-selected',String(open));
+    cameraTab.tabIndex=open?-1:0;presetsTab.tabIndex=open?0:-1;
+    el('camera-toolbar').hidden=open;el('camera-area').hidden=open;el('sheet-tabs').hidden=open;el('pending-status').hidden=open;
     el('preset-toolbar').hidden=!open;el('preset-area').hidden=!open;el('preset-status').hidden=!open;
     if(open){if(presets)presets.show();else void loadPresets();}
     else {presets?.hide();grid.refresh();update();}
-    sheetTabs.refresh();
   }
+  cameraTab.addEventListener('click',()=>openPresets(false));
+  presetsTab.addEventListener('click',()=>openPresets(true));
+  // Left and right move between the two tabs, as in any tab list.
+  for(const tab of [cameraTab,presetsTab])tab.addEventListener('keydown',event=>{
+    if(event.key!=='ArrowLeft'&&event.key!=='ArrowRight')return;
+    event.preventDefault();const next=tab===cameraTab?presetsTab:cameraTab;next.focus();openPresets(next===presetsTab);
+  });
   const orientationButtons=[['view-rows','rows'],['view-columns','columns']] as [string,Orientation][];
   const activeRow=()=>store.document.cameras.find(row=>row.id===active?.rowId)??store.document.cameras[0];
   const rowObservation=(id:string)=>{
@@ -103,6 +107,7 @@ try {
     sendBar.disabled=sendBlocked()||sendable===0;el('send-all-bar-count').textContent=String(sendable);el('send-all-bar-count').hidden=sendable===0;
     sendBar.title=sendable?'Send '+sendable+' staged setting'+(sendable===1?'':'s')+' to the cameras that are online':'Nothing is waiting to send to an online camera';
     const ready=store.document.cameras.filter(r=>rowObservation(r.id)?.state==='online').length;
+    el('tab-cameras-count').textContent=String(store.document.cameras.length);
     el('fleet-status').textContent=store.document.cameras.length+' camera'+(store.document.cameras.length===1?'':'s')+(ready?' / '+ready+' ready':' / offline');
     el('fleet-status').parentElement!.dataset.ready=String(ready>0);
     const cameraCount=input('camera-count');if(document.activeElement!==cameraCount)cameraCount.value=String(store.document.cameras.length);
@@ -435,7 +440,7 @@ try {
   void watchCameras();
   if(store.document.presetsOpen===true)openPresets(true);
   else {const first=store.document.cameras[0];if(first)grid.select({rowId:first.id,columnId:'camera-name'});}
-  // Loaded behind the camera tab, so the Presets tab shows its count and opens at once.
+  // Loaded behind the Cameras tab, so the Presets tab shows its count and opens at once.
   setTimeout(()=>void loadPresets(),0);
   window.addEventListener('pagehide',()=>{disposed=true;clearTimeout(watchTimer);stop();grid.dispose();textControls.dispose();sheetTabs.dispose();presets?.dispose();client.dispose();},{once:true});
 }catch(error){el('loading').hidden=true;report(error instanceof Error?error.message:'Camera Control could not start.');saveStatus.textContent='Workspace unavailable';}

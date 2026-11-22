@@ -86,9 +86,10 @@ run in order; different cameras run at the same time.
 
 ## Presets
 
-The last tab along the bottom, **Presets**, holds camera roles. It can't be renamed, moved or
-removed, and swaps the toolbar and sheet for its own while it is open. Presets are saved in the
-scoped `camera-presets` document, so they travel with workspace exports.
+Camera Control has two tabs at the top: **Cameras** (the camera sheets, with their own tab bar
+along the bottom) and **Presets**, which holds camera roles with its own toolbar and sheet. Which
+of the two is open is saved with the camera plan. Presets are saved in the scoped
+`camera-presets` document, so they travel with workspace exports.
 
 - **Base** holds a whole camera. **Capture from camera** reads every setting a preset can hold
   from one camera (everything but the reel number) into Base or into a new preset. Undo puts the
@@ -103,10 +104,10 @@ scoped `camera-presets` document, so they travel with workspace exports.
   base ISO before EI, shutter mode before angle or speed, look category before the look. After a
   setting that changes what the camera offers, the rest is read and planned again. Only the
   shutter angle or speed that the preset's mode uses is sent.
-- The send runs in the camera worker, so leaving the tab or the page doesn't stop it. **Stop** lets the
+- The send runs in the camera worker, so switching tabs or leaving the page doesn't stop it. **Stop** lets the
   setting being written finish and sends nothing after it. A camera that is rolling is refused,
-  and the camera tabs' own Send waits until a preset send to that camera has finished.
-- Staged values on the camera tabs for the settings a preset holds are cleared when it is sent,
+  and the Cameras tab's own Send waits until a preset send to that camera has finished.
+- Staged values on the Cameras tab for the settings a preset holds are cleared when it is sent,
   so Send all there can't put an older value back.
 
 ## Settings with special handling

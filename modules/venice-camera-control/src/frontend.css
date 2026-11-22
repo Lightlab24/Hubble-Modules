@@ -57,7 +57,13 @@ dialog::backdrop{background:#0009}dialog header{display:flex;align-items:center;
 @media(max-width:560px){.header-status{font-size:11px}.toolbar{gap:5px}.toolbar button{font-size:12px;padding:5px 8px}.app-footer{padding:8px 10px;flex-wrap:wrap;gap:4px}#expand-all,#collapse-all,#preset-expand-all,#preset-collapse-all{display:none}}
 @media(pointer:coarse){button{min-height:40px}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
-.app-header{grid-row:1}.toolbar{grid-row:2}.work-area{grid-row:4}.sheet-tabs{grid-row:5}.app-footer{grid-row:6}
+.app-header{grid-row:1}.page-tabs{grid-row:2}.toolbar{grid-row:3}.work-area{grid-row:4}.sheet-tabs{grid-row:5}.app-footer{grid-row:6}
+/* Cameras and Presets: the same top tabs as Cyanview's pages. */
+.page-tabs{display:flex;gap:18px;padding:0 18px;border-bottom:1px solid var(--hubble-line,#292929);background:var(--hubble-bar,#151515)}
+.page-tab{border:0;border-radius:0;background:transparent;min-height:0;padding:9px 0 11px;color:var(--hubble-text-secondary,#b2b2b2);border-bottom:2px solid transparent;gap:6px}
+.page-tab:hover:not(:disabled){background:transparent;border-color:transparent;color:var(--hubble-text-strong,#f4f4f4)}
+.page-tab[aria-selected=true],.page-tab[aria-selected=true]:hover:not(:disabled){color:var(--hubble-text-strong,#f4f4f4);border-bottom-color:var(--hubble-text-strong,#f4f4f4);font-weight:500}
+.tab-count{font-size:11px;min-width:16px;border-radius:4px;background:var(--hubble-selected,#373737);padding:1px 4px;font-variant-numeric:tabular-nums;color:var(--hubble-text-secondary,#b2b2b2)}
 .sheet-tabs{min-width:0;background:#171717;border-top:1px solid #3b3b3b}
 .segment{display:inline-flex;gap:2px;padding:2px;border:1px solid #414141;border-radius:6px;background:#111}.segment button{border:0;background:none;min-height:24px;padding:3px 9px;border-radius:4px;color:#aaa}.segment button:hover:not(:disabled){background:#2a2a2a;color:#dedede}.segment button[aria-pressed=true]{background:#373737;color:#f4f4f4}
 :is(#camera-grid,#preset-grid)[data-orientation=columns] thead th,:is(#camera-grid,#preset-grid)[data-orientation=columns] thead td{height:auto;z-index:5}

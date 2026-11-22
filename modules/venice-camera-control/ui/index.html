@@ -7,6 +7,10 @@
     <div class="app-title"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="14" height="12" rx="2"/><path d="m17 10 4-3v10l-4-3M7 6V4h6v2"/></svg><div><h1>Camera Control</h1><p>Sony VENICE 2</p></div></div>
     <div class="header-status"><span class="status-dot"></span><span id="fleet-status">Loading workspace…</span><div class="segment send-mode" role="group" aria-label="Send mode"><button id="send-manual" aria-pressed="true" title="Edits wait in Pending sends until you press Send all">Manual</button><button id="send-auto" aria-pressed="false" title="Enter, Tab or leaving a cell sends that edit to the camera">Auto send</button></div></div>
   </header>
+  <nav class="page-tabs" role="tablist" aria-label="Camera Control pages">
+    <button class="page-tab" role="tab" id="tab-cameras" aria-selected="true" aria-controls="camera-area">Cameras <span class="tab-count" id="tab-cameras-count"></span></button>
+    <button class="page-tab" role="tab" id="tab-presets" aria-selected="false" aria-controls="preset-area" tabindex="-1">Presets <span class="tab-count" id="tab-presets-count" hidden></span></button>
+  </nav>
   <div class="toolbar" id="camera-toolbar" role="toolbar" aria-label="Camera controls">
     <button id="add-camera" class="primary"><span aria-hidden="true">+</span> Add camera</button>
     <label class="camera-count">Cameras<input id="camera-count" type="number" min="0" max="24" step="1" autocomplete="off" aria-label="Number of cameras"></label>
@@ -39,7 +43,7 @@
     <div id="preset-column-editor" title="Choose which settings show"></div>
   </div>
   <div id="error" class="notice error" role="alert" hidden></div>
-  <main class="work-area">
+  <main class="work-area" id="camera-area" role="tabpanel" aria-labelledby="tab-cameras">
     <div class="sheet-scroll" id="viewport"><table id="camera-grid" role="grid" aria-label="VENICE camera settings" tabindex="0"><colgroup></colgroup></table></div>
     <aside id="setting-details" hidden aria-label="Setting details"><h2>Setting details</h2><div id="detail-content">Select a setting.</div></aside>
     <aside id="alerts-panel" hidden aria-label="Alerts"><header><h2>Alerts</h2><button id="alerts-close" class="icon-button" aria-label="Close alerts">×</button></header><p>Camera Control can tell you on this Mac when a camera stops answering. Everything here starts off.</p><div class="alert-group" role="group" aria-labelledby="alerts-offline-title"><h3 id="alerts-offline-title">A camera stops answering</h3><label class="alert-row"><span>Show a notification<small>“Camera offline: Camera 3”</small></span><span class="live-switch"><input id="alert-offline-notification" type="checkbox" role="switch"></span></label><label class="alert-row"><span>Bounce the HubDash Dock icon<small>Keeps bouncing until you click HubDash</small></span><span class="live-switch"><input id="alert-offline-bounce" type="checkbox" role="switch"></span></label></div><div class="alert-group" role="group" aria-labelledby="alerts-online-title"><h3 id="alerts-online-title">A camera answers again</h3><label class="alert-row"><span>Show a notification<small>“Camera back online: Camera 3”</small></span><span class="live-switch"><input id="alert-online-notification" type="checkbox" role="switch"></span></label></div><p class="alerts-note">Only cameras that have answered since Hubble started can alert, so cameras that are off at the start of the day stay quiet. No banner? Set up this Mac in Hubble → Service Settings → Alerts.</p></aside>
@@ -47,7 +51,7 @@
     <div id="loading" class="loading" role="status">Connecting to workspace…</div>
     <div id="empty" class="empty" hidden><h2>Add a camera</h2><p>Set how many cameras you want in the toolbar, then drag to fill their IPs. Or add one by name and address.</p><button id="empty-add" class="primary">Add camera</button></div>
   </main>
-  <main class="work-area" id="preset-area" hidden>
+  <main class="work-area" id="preset-area" role="tabpanel" aria-labelledby="tab-presets" hidden>
     <div class="sheet-scroll" id="preset-viewport"><table id="preset-grid" role="grid" aria-label="Camera presets" tabindex="0" data-orientation="columns"><colgroup></colgroup></table></div>
     <div id="preset-loading" class="loading" role="status">Loading presets…</div>
   </main>

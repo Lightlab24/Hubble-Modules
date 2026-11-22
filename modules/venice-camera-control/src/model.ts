@@ -19,7 +19,7 @@ export interface AlertChoices { offlineNotification: boolean; offlineBounce: boo
 export const noAlerts:AlertChoices={offlineNotification:false,offlineBounce:false,onlineNotification:false};
 /** `live`: the worker holds a connection to every reachable camera until the operator switches Live off, whether or not the page is open.
  *  `autoSend`: a committed edit goes to its camera as soon as it saves. Both stay as set until switched back. */
-/** `presetsOpen`: the Presets tab is the open one. Saved like the open camera tab, never an Undo step. */
+/** `presetsOpen`: the Presets tab is the open one. Saved like the open camera sheet, never an Undo step. */
 export interface CameraDocument { version: 1; cameras: Camera[]; view: View; sheets?: CameraSheet[]; activeSheetId?: string; alerts?: AlertChoices; live?: boolean; autoSend?: boolean; presetsOpen?: boolean }
 export interface CellEdit { rowId: string; columnId: string; value: string; expected: string }
 export type Mutation = { kind:'edit'; edits:CellEdit[] } | {kind:'view'; view:View; expected:View; sheetId?:string} | {kind:'select-sheet'; sheetId:string} | {kind:'sheets'; sheets:FullSheet[]; expected:FullSheet[]; activeSheetId?:string} | {kind:'cameras'; add:Camera[]; remove:Camera[]} | {kind:'add'; camera:Camera} | {kind:'remove'; camera:Camera} | {kind:'alerts'; alerts:AlertChoices; expected:AlertChoices} | {kind:'live'; live:boolean; expected:boolean} | {kind:'auto-send'; autoSend:boolean; expected:boolean} | {kind:'presets-open'; open:boolean; expected:boolean};
