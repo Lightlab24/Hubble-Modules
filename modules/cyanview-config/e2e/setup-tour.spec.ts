@@ -280,7 +280,8 @@ test('a column is rung whole however its heading reads, sorted or with its group
 });
 
 test('on a short window a column is scrolled clear of the panel, and leaving puts the page back', async ({ page, request }) => {
-  await page.setViewportSize({ width: 1300, height: 560 });
+  // Tall enough for the Devices sheet with its RCP and RIO section headings (0.1.105), short enough to scroll.
+  await page.setViewportSize({ width: 1300, height: 620 });
   await open(page, request, true);
   const f = ui(page);
   await card(page).getByRole('button', { name: 'Exit tour' }).click();

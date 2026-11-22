@@ -14,7 +14,7 @@
     lan: { label: 'LAN IP settings', open: [['lan1', 'LAN IP', 158], ['lan2', 'LAN IP 2', 158]], closed: [['lan1', 'LAN IP', 190]] },
     wan: { label: 'WAN settings', open: [['wanMode', 'Mode', 96], ['wanIp', 'WAN IP', 158], ['gateway', 'Gateway', 130], ['dns1', 'DNS 1', 122], ['dns2', 'DNS 2', 122]], closed: [['wan', 'WAN', 150]] },
   };
-  const deviceSortable = new Set(['name', 'type', 'serial', 'status', 'base', 'lan1', 'lan2', 'wan', 'wanIp', 'connected', 'cameras']);
+  const deviceSortable = new Set(['row', 'name', 'type', 'serial', 'status', 'base', 'lan1', 'lan2', 'wan', 'wanIp', 'connected', 'cameras']);
 
   function deviceNetwork(d) {
     const rows = lans.filter(row => row.device === d.id);
@@ -66,16 +66,19 @@
   function deviceSortValue(d, field) {
     const net = deviceNetwork(d);
     return String({
-      name: d.name, type: d.kind, serial: d.serial, status: d.online ? '1 Online' : d.online === false ? '2 Offline' : '3', base: d.base,
+      row: String(deviceNumber(d.number) ?? '').padStart(3, '0'), name: d.name, type: d.kind, serial: d.serial, status: d.online ? '1 Online' : d.online === false ? '2 Offline' : '3', base: d.base,
       lan1: plainAddress(net.lan[0]?.planned), lan2: plainAddress(net.lan[1]?.planned), wan: net.wan ? (net.wan.dhcp ? 'DHCP' : plainAddress(net.wan.planned)) : '',
       wanIp: net.wan && !net.wan.dhcp ? plainAddress(net.wan.planned) : '', connected: deviceConnectedOn(d), cameras: String(deviceCameraCount(d)),
     }[field] ?? '');
   }
-  // Sorting reorders the devices themselves, so every other list of them follows.
+  // Sorting reorders the devices themselves, so every other list of them follows. RCPs, RIOs and Gateways
+  // keep their own sections, so a sort orders each section on its own.
   function sortDevices(field) {
     const previous = deviceSheet.sort, direction = previous?.field === field && previous.direction === 'asc' ? 'desc' : 'asc', sign = direction === 'desc' ? -1 : 1;
     deviceSheet.sort = { field, direction };
     setOrder(orderedDevices().map((d, index) => ({ d, index, value: deviceSortValue(d, field) })).sort((a, b) => {
+      const kinds = kindRank(kindOf(a.d)) - kindRank(kindOf(b.d)) || kindOf(a.d).localeCompare(kindOf(b.d));
+      if (kinds) return kinds;
       if (!a.value || !b.value) return a.value ? -1 : b.value ? 1 : a.index - b.index;
       return sign * a.value.localeCompare(b.value, undefined, { numeric: true, sensitivity: 'base' }) || a.index - b.index;
     }).map(entry => entry.d.id));
@@ -105,7 +108,7 @@
     }
     return '<colgroup>' + columns.map(column => '<col style="width:' + column.width + 'px">').join('') + '</colgroup><thead><tr>' + top.join('') + '</tr><tr>' + fields.join('') + '</tr></thead>';
   }
-  function deviceCell(d, column, index) {
+  function deviceCell(d, column) {
     const net = deviceNetwork(d), id = esc(d.id), busy = deviceBusy(d.id);
     const held = field => heldDeviceEdits.get(d.id + ':' + field);
     const input = (field, value, label, disabled = false) => '<input class="hc-cell-input hc-mono" data-device-cell="' + id + ':' + field + '" value="' + esc(held(field) ?? value ?? '') + '" aria-label="' + esc(label + ' for ' + d.name) + '"' + (disabled ? ' disabled' : '') + ' spellcheck="false" autocomplete="off">';
@@ -113,8 +116,8 @@
     const waiting = rows => { const count = rows.filter(row => row?.pending).length; return count ? '<span class="hc-device-waiting">+' + count + ' pending</span>' : ''; };
     const quiet = text => '<span class="hc-muted">' + esc(text) + '</span>';
     switch (column.id) {
-      // Typing a number here moves the device to that place in the list.
-      case 'row': return cell('<input class="hc-cell-input hc-mono hc-device-position" data-device-cell="' + id + ':row" value="' + (index + 1) + '" inputmode="numeric" aria-label="' + esc('Position of ' + d.name + ' in the list') + '" title="Type a number to move this device there" spellcheck="false" autocomplete="off">');
+      // The device's own number among its kind, which its default name and LAN IP are made from. Typing one renumbers it.
+      case 'row': return cell('<input class="hc-cell-input hc-mono hc-device-position" data-device-cell="' + id + ':row" value="' + esc(held('row') ?? deviceNumber(d.number) ?? '') + '" inputmode="numeric" maxlength="3" aria-label="' + esc('Number of ' + d.name) + '" title="Type a number to renumber this ' + esc(kindSingular[kindOf(d)] ?? 'device') + '" spellcheck="false" autocomplete="off">');
       case 'name': return cell('<input class="hc-cell-input hc-device-name" data-device-cell="' + id + ':name" value="' + esc(d.name) + '" aria-label="Device name for ' + esc(d.serial) + '" maxlength="160">');
       case 'type': return cell(quiet(d.kind));
       case 'serial': return cell('<span class="hc-mono hc-muted">' + esc(d.serial) + '</span>');
@@ -162,7 +165,14 @@
     if (!host) return;
     const focus = deviceSheetFocus(), left = host.querySelector('.hc-scroll')?.scrollLeft || 0, columns = deviceSheetColumns(), list = orderedDevices(), found = foundDevices();
     if (selectedDeviceId && !device(selectedDeviceId)) selectedDeviceId = '';
-    const rows = list.map((d, index) => '<tr data-device-row="' + esc(d.id) + '"' + (d.id === selectedDeviceId ? ' class="hc-device-selected"' : '') + '>' + columns.map(column => deviceCell(d, column, index)).join('') + '</tr>').join('');
+    // A section for each kind, each with its own numbers. The order within it is the list's own.
+    const kinds = [...new Set(list.map(kindOf))].sort((a, b) => kindRank(a) - kindRank(b) || a.localeCompare(b));
+    const rows = kinds.map(kind => {
+      const members = list.filter(d => kindOf(d) === kind);
+      return '<tr class="hc-device-section" data-device-section="' + esc(kind) + '"><td colspan="' + columns.length + '"><span class="hc-device-section-name">' + esc(kindPlural[kind] ?? kind) + '</span><span class="hc-device-section-count">' + members.length + '</span>' +
+        '<span class="hc-device-section-note">' + esc(deviceSectionNote(kind)) + '</span><button type="button" class="hc-ip-link hc-device-section-link" data-action="open-defaults">Defaults</button></td></tr>' +
+        members.map(d => '<tr data-device-row="' + esc(d.id) + '"' + (d.id === selectedDeviceId ? ' class="hc-device-selected"' : '') + '>' + columns.map(column => deviceCell(d, column)).join('') + '</tr>').join('');
+    }).join('');
     const span = columns.length - 7;
     // Saved devices a search is checking come first, in the order they were saved.
     // A saved device shows here only once it answers, to be added. Until then it stays in Saved devices, which
@@ -228,7 +238,7 @@
     addAll.disabled = deviceAddBusy;
     addAll.querySelector('[data-add-all-label]').textContent = 'Add all ' + found;
     $('device-summary').textContent = devices.length + (devices.length === 1 ? ' device' : ' devices') + ' · ' + devices.filter(d => d.online).length + ' online';
-    $('lan-foot').textContent = 'Click a heading to sort, or type a number in # to move a device there. Address changes wait in Pending sends until you press Send.';
+    $('lan-foot').textContent = 'RCPs, RIOs and Gateways are numbered separately. Type a number in # to renumber a device: a name and LAN IP from Defaults change with it. Address changes wait in Pending sends until you press Send.';
     releaseHeldDeviceEdits();
   }
   function releaseHeldDeviceEdits() {
@@ -265,19 +275,7 @@
     const d = device(id);
     if (!d) return;
     const value = String(raw).trim(), refuse = message => { toast(message); renderLans(); };
-    // A position moves the device and every device after it, as a drag would. It sends nothing.
-    if (field === 'row') {
-      const ids = orderedDevices().map(item => item.id), from = ids.indexOf(id);
-      if (!/^\d+$/.test(value) || Number(value) < 1) { refuse('Enter a number from 1 to ' + ids.length); return; }
-      const to = Math.min(Number(value), ids.length) - 1;
-      if (to === from) { renderLans(); return; }
-      ids.splice(from, 1);
-      ids.splice(to, 0, id);
-      // The list is in the order typed now, not sorted by a heading.
-      deviceSheet.sort = null;
-      setOrder(ids);
-      return;
-    }
+    // A number in # is taken by ui-defaults.js, which renumbers the device.
     if (field === 'name') {
       if (!value || value.length > 160) { refuse('Enter a device name'); return; }
       if (value !== d.name) { d.name = value; syncFilter(); renderLans(); renderCameras(); remember(); }

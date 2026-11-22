@@ -1,5 +1,5 @@
   function plainRow(item){const {deleting,...saved}=item;return {...saved,dirty:[...(item.dirty||[])],jobs:0};}
-  function snapshotPlan(uiState){return {formatVersion:1,devices:devices.map(({modelCatalog,models,lensOptions,snapshot,...item})=>({...item})),cameras:cameras.filter(row=>row.device!=='').map(plainRow),lans:lans.map(plainRow),uiState,cameraLogins:savedCameraLogins(),savedDevices:savedDeviceList()};}
+  function snapshotPlan(uiState){return {formatVersion:1,devices:devices.map(({modelCatalog,models,lensOptions,snapshot,...item})=>({...item})),cameras:cameras.filter(row=>row.device!=='').map(plainRow),lans:lans.map(plainRow),uiState,cameraLogins:savedCameraLogins(),savedDevices:savedDeviceList(),defaults:savedDefaults()};}
   function persistPlan(uiState){
     const sequence=++saveSequence;persistence='saving';syncSummary();
     const plan=copyPresentation(snapshotPlan(uiState)),ticket=presentationLedger.ticket();

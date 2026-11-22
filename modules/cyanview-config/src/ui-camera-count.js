@@ -1,5 +1,5 @@
   // How many cameras a sheet has is a number box. Raising it adds rows at the end, numbered on from
-  // the highest camera, and lowering it takes rows off the end. A row that never reached a controller
+  // the highest camera (the first on a RIO can take the RIO's own number, see ui-defaults.js), and lowering it takes rows off the end. A row that never reached a controller
   // goes at once; one that did is only marked for delete, and waits in Pending sends like any delete.
   // Copies made on another controller aren't counted, because they're removed from where they came from.
   const cameraCountLimit = 512;
@@ -51,12 +51,21 @@
     const last = [...own].sort((a, b) => (Number(a.number) || 0) - (Number(b.number) || 0)).at(-1);
     // A new row takes the model of the last camera, so a rig of one kind fills in without choosing each time.
     const model = last?.model && last.model !== 'Choose model…' ? last.model : 'Choose model…', usb = model === 'Alpha-USB';
-    let next = Math.max(0, ...(deviceId ? cameras.filter(camera => camera.device === deviceId) : cameras).map(camera => Number(camera.number)).filter(Number.isFinite)) + 1;
-    const added = Array.from({ length: Math.min(count, room) }, () => {
-      const number = String(next++);
+    const used = new Set((deviceId ? cameras.filter(camera => camera.device === deviceId) : cameras).map(camera => Number(camera.number)).filter(Number.isFinite));
+    let next = Math.max(0, ...used) + 1;
+    // On a RIO the first new camera takes the RIO's own number, when Defaults says so and it is free.
+    const rio = deviceId ? rioCameraNumber(deviceId) : null;
+    const added = Array.from({ length: Math.min(count, room) }, (_, index) => {
+      let taken = index === 0 && rio !== null ? rio : next;
+      while (used.has(taken)) taken++;
+      used.add(taken);
+      next = Math.max(next, taken + 1);
+      const number = String(taken);
       const row = { id: 'new-camera-' + crypto.randomUUID(), device: deviceId, number, name: 'Camera ' + number, model, ip: '', lens: 'None', lensPort: 'None', online: null, pending: true, result: usb ? 'Pending' : 'Incomplete', port: usb ? '' : '80', login: usb ? '' : 'admin', password: '', isNew: true, dirty: new Set(['number', 'name', 'model', 'ip']), revision: 0, jobs: 0 };
-      // Its model's saved login, if Camera logins has one.
-      applyCameraLogin(row);
+      // Its name, address and login from Defaults.
+      applyCameraDefaults(row);
+      // A model and an address from Defaults make the row complete, so it waits to be sent rather than for more typing.
+      if (!usb && row.model !== 'Choose model…' && row.name && ipv4(row.ip)) row.result = 'Pending';
       return row;
     });
     cameras.push(...added);

@@ -1,13 +1,19 @@
 import type { ModuleJsonValue } from '@hubble/module-sdk';
+import { validateDefaults, type CyanviewDefaults } from './defaults-model.js';
 export type RecordValue = Record<string, any>;
 /**
- * cameraLogins: a Username and Password per camera model, filled into a camera when it is added or its model changes.
+ * cameraLogins: one row per camera model on the Defaults tab: its Username and Password, and since 0.1.105 the
+ * type %type% puts in a camera's name and its own camera IP pattern. They are filled into a camera when it
+ * is added or its model changes. The two newer fields are optional, so an older version reads the rows and
+ * drops them.
+ * defaults: the name and LAN IP patterns for RCPs, RIOs and Gateways, and the camera name, IP and
+ * username patterns (0.1.105, see defaults-model.ts).
  * savedDevices: every controller ever added, kept after it leaves the list, which Discover checks first.
  * They are kept by serial with their addresses. A name saved by 0.1.74 is read and dropped, because a
  * device is named for the job it is on.
  * Both are optional so a workspace saved before they existed still reads.
  */
-export type Plan = { formatVersion: 1; devices: RecordValue[]; cameras: RecordValue[]; lans: RecordValue[]; uiState: RecordValue | null; cameraLogins?: RecordValue[]; savedDevices?: RecordValue[] };
+export type Plan = { formatVersion: 1; devices: RecordValue[]; cameras: RecordValue[]; lans: RecordValue[]; uiState: RecordValue | null; cameraLogins?: RecordValue[]; savedDevices?: RecordValue[]; defaults?: CyanviewDefaults };
 export const savedDeviceCapacity = 256, cameraLoginCapacity = 128;
 const shortText = (value: unknown, limit = 160) => typeof value === 'string' && value.length <= limit;
 function validateCameraLogins(value: unknown) {
@@ -15,8 +21,8 @@ function validateCameraLogins(value: unknown) {
   if (!Array.isArray(value) || value.length > cameraLoginCapacity) throw new Error('Invalid camera logins');
   return value.map(item => {
     const row = object(item);
-    if (!shortText(row.model) || !shortText(row.login) || !shortText(row.password)) throw new Error('Invalid camera logins');
-    return { model: row.model, login: row.login, password: row.password };
+    if (!shortText(row.model) || !shortText(row.login) || !shortText(row.password) || !shortText(row.type ?? '') || !shortText(row.ip ?? '')) throw new Error('Invalid camera logins');
+    return { model: row.model, login: row.login, password: row.password, ...(row.type ? { type: row.type } : {}), ...(row.ip ? { ip: row.ip } : {}) };
   });
 }
 function validateSavedDevices(value: unknown) {
@@ -70,8 +76,9 @@ export function validatePlan(value: unknown): Plan {
   if ([...data.cameras, ...data.lans].some(row => !ids.has(row.device))) throw new Error('A row refers to an unknown controller');
   for (const device of data.devices) if (!validIp(device.address || device.base || '')) throw new Error('A controller has an invalid address');
   if (JSON.stringify(data).length > 2_000_000) throw new Error('Configuration exceeds the module storage budget');
-  const cameraLogins = validateCameraLogins(data.cameraLogins), savedDevices = validateSavedDevices(data.savedDevices);
-  return json({ ...data, uiState: data.uiState ?? null, ...(cameraLogins ? { cameraLogins } : {}), ...(savedDevices ? { savedDevices } : {}) }) as unknown as Plan;
+  const cameraLogins = validateCameraLogins(data.cameraLogins), savedDevices = validateSavedDevices(data.savedDevices), defaults = validateDefaults(data.defaults);
+  // json() drops a key left undefined, so defaults that weren't given stay out.
+  return json({ ...data, uiState: data.uiState ?? null, ...(cameraLogins ? { cameraLogins } : {}), ...(savedDevices ? { savedDevices } : {}), defaults }) as unknown as Plan;
 }
 export function stripEphemeral(row: RecordValue): RecordValue {
   const { jobs, ...saved } = row;

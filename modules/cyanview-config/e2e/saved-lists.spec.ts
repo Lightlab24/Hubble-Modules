@@ -5,7 +5,7 @@ const setup = (f: FrameLocator) => f.locator('[data-controller="__camera-setup__
 const named = (scope: Locator, name: string) => scope.locator('tbody tr[data-id]:has(input[data-field="name"][value="' + name + '"])');
 const cell = (r: Locator, column: string) => r.locator('[data-column="' + column + '"]');
 const gridOf = (r: Locator) => r.locator('xpath=ancestor::table[1]');
-const logins = (f: FrameLocator) => f.locator('[data-role="camera-logins"]');
+const logins = (f: FrameLocator) => f.locator('#hc-defaults');
 const saved = (f: FrameLocator) => f.locator('[data-role="saved-devices"]');
 const sheet = (f: FrameLocator) => f.locator('[data-role="device-sheet"]');
 const deviceRow = (f: FrameLocator, id: string) => sheet(f).locator('tr[data-device-row="' + id + '"]');
@@ -36,13 +36,18 @@ async function choose(f: FrameLocator, r: Locator, column: string, label: string
   await dialog.getByRole('combobox').fill(label.toLowerCase());
   await dialog.getByRole('option', { name: label, exact: true }).click();
 }
+async function showDefaults(f: FrameLocator) {
+  await f.locator('[data-tab="defaults"]').click();
+  await expect(logins(f)).toBeVisible();
+}
+// Camera logins live in the camera model rows on the Defaults tab since 0.1.105.
 async function addLogin(f: FrameLocator, model: string, password: string, username?: string) {
   await logins(f).getByRole('button', { name: 'Add a camera model' }).click();
-  const index = await logins(f).locator('tbody tr').count();
-  const pick = logins(f).getByRole('button', { name: 'Camera model for login ' + index, exact: true });
+  const index = await logins(f).locator('tbody tr[data-defaults-type]').count();
+  const pick = logins(f).getByRole('button', { name: 'Camera model ' + index, exact: true });
   await expect(pick).toBeFocused();
   await pick.click();
-  await f.getByRole('listbox', { name: 'Camera model for login ' + index }).getByRole('option', { name: model, exact: true }).click();
+  await f.getByRole('listbox', { name: 'Camera model ' + index }).getByRole('option', { name: model, exact: true }).click();
   if (username !== undefined) await logins(f).getByRole('textbox', { name: 'Username for ' + model }).fill(username);
   const box = logins(f).getByRole('textbox', { name: 'Password for ' + model });
   await box.fill(password);
@@ -50,27 +55,24 @@ async function addLogin(f: FrameLocator, model: string, password: string, userna
 }
 
 test('Camera logins fill a new camera and a model change, in plain text, and the login goes to the controller', async ({ page, request }) => {
-  const f = await open(page, request);
-  await showSetup(f);
-  const button = setup(f).getByRole('button', { name: /^Camera logins/ });
-  await button.click();
-  await expect(logins(f)).toBeVisible();
-  await expect(logins(f)).toContainText('No logins yet');
+  const f = await open(page, request, { defaults: true });
+  await showDefaults(f);
+  await expect(logins(f)).toContainText('No camera models yet');
   await addLogin(f, 'Burano', 'Burano2026');
   await addLogin(f, 'Venice-IP', 'venice1', 'operator');
   // The models already used aren't offered again.
   await logins(f).getByRole('button', { name: 'Add a camera model' }).click();
-  await logins(f).getByRole('button', { name: 'Camera model for login 3', exact: true }).click();
-  const third = f.getByRole('listbox', { name: 'Camera model for login 3' });
+  await logins(f).getByRole('button', { name: 'Camera model 3', exact: true }).click();
+  const third = f.getByRole('listbox', { name: 'Camera model 3' });
   await expect(third.getByRole('option', { name: 'Burano', exact: true })).toHaveCount(0);
   await third.press('Escape');
-  await logins(f).getByRole('button', { name: 'Remove the login for login 3' }).click();
-  await expect(logins(f).locator('tbody tr')).toHaveCount(2);
-  await expect(button).toContainText('2');
+  await logins(f).getByRole('button', { name: 'Remove the row for row 3' }).click();
+  await expect(logins(f).locator('tbody tr[data-defaults-type]')).toHaveCount(2);
   // Passwords show as typed.
   await expect(logins(f).getByRole('textbox', { name: 'Password for Burano' })).toHaveValue('Burano2026');
-  await f.locator('#hc-setup .hc-toolbar h3').click();
-  await expect(logins(f)).toBeHidden();
+  // The Camera logins button that used to sit on Camera Configuration is gone.
+  await showSetup(f);
+  await expect(setup(f).getByRole('button', { name: /^Camera logins/ })).toHaveCount(0);
 
   // A new row takes the last camera's model, Venice-IP, and its login.
   const rows = setup(f).locator('tbody tr[data-id]'), before = await rows.count();
@@ -79,17 +81,19 @@ test('Camera logins fill a new camera and a model change, in plain text, and the
   const name = await cell(rows.last(), 'name').locator('input').inputValue(), added = named(setup(f), name);
   await expect(cell(added, 'login').locator('input')).toHaveValue('operator');
   await expect(cell(added, 'password').locator('input')).toHaveValue('venice1');
-  // Changing the model brings that model's login, and the cells show the change.
+  // Changing the model brings that model's login, and the cells show the change. Burano has no username
+  // of its own, so it takes the one Defaults gives every model.
   await choose(f, added, 'model', 'Burano');
-  await expect(cell(added, 'model')).toContainText('Burano');
-  await expect(cell(added, 'login').locator('input')).toHaveValue('admin');
-  await expect(cell(added, 'password').locator('input')).toHaveValue('Burano2026');
-  await expect(cell(added, 'password')).toHaveClass(/hc-changed/);
+  const burano = named(setup(f), name.replace('Venice-IP', 'Burano'));
+  await expect(cell(burano, 'model')).toContainText('Burano');
+  await expect(cell(burano, 'login').locator('input')).toHaveValue('admin');
+  await expect(cell(burano, 'password').locator('input')).toHaveValue('Burano2026');
+  await expect(cell(burano, 'password')).toHaveClass(/hc-changed/);
   // The selected cell's value reads in plain text too.
-  await cell(added, 'password').click();
+  await cell(burano, 'password').click();
   await expect(f.locator('[data-camera-value]').first()).toHaveText('Burano2026');
   // Back to Venice-IP, the one model the simulated RIO and Hubble both offer here, brings its login back.
-  await choose(f, added, 'model', 'Venice-IP');
+  await choose(f, burano, 'model', 'Venice-IP');
   await expect(cell(added, 'login').locator('input')).toHaveValue('operator');
   await expect(cell(added, 'password').locator('input')).toHaveValue('venice1');
   // Typing over the login wins over the saved one.
@@ -102,15 +106,13 @@ test('Camera logins fill a new camera and a model change, in plain text, and the
   // Kept with the workspace.
   await settled(request);
   const plan = (await rpc(request)('read-plan')).plan;
-  expect(plan.cameraLogins).toEqual([{ model: 'Burano', login: 'admin', password: 'Burano2026' }, { model: 'Venice-IP', login: 'operator', password: 'venice1' }]);
+  expect(plan.cameraLogins).toEqual([{ model: 'Burano', login: '', password: 'Burano2026' }, { model: 'Venice-IP', login: 'operator', password: 'venice1' }]);
   // And still there after the page opens again.
   await page.reload();
   await expect(f.locator('[data-role="saved-label"]')).toContainText('Workspace saved');
-  await showSetup(f);
-  await setup(f).getByRole('button', { name: /^Camera logins/ }).click();
+  await showDefaults(f);
   await expect(logins(f).getByRole('textbox', { name: 'Password for Burano' })).toHaveValue('Burano2026');
-  await logins(f).press('Escape');
-  await expect(logins(f)).toBeHidden();
+  await showSetup(f);
 
   // Sent with a Source, the camera reaches its RIO with the login.
   const again = named(setup(f), name);

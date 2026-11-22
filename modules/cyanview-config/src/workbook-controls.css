@@ -324,7 +324,6 @@ body:has(#cyanview-design .hc-veil:not([hidden])) .hubble-column-resize-handles 
 /* Camera logins and Saved devices share one pop-up, opened from their buttons. */
 #cyanview-design .hc-list-count { margin-left: 6px; padding: 0 6px; border-radius: 999px; background: var(--hc-line); font-size: 11px; line-height: 17px; }
 #cyanview-design .hc-list-count[hidden] { display: none; }
-#cyanview-design .hc-logins-button { margin-left: 10px; }
 #cyanview-design .hc-saved-devices-button { margin-left: 8px; }
 #cyanview-design .hc-list-popover { position: fixed; z-index: 1290; box-sizing: border-box; display: flex; flex-direction: column; overflow: auto; border: 1px solid light-dark(#c9c9c9, #555); border-radius: 8px; background: light-dark(#fff, #222); box-shadow: 0 10px 28px rgb(0 0 0 / 40%); font-size: 12px; }
 #cyanview-design .hc-list-popover[hidden] { display: none; }
@@ -397,3 +396,36 @@ body:has(#cyanview-design .hc-veil:not([hidden])) .hubble-column-resize-handles 
 /* Hover text that shows at once, where the browser's own title text is too slow. It floats and moves nothing. */
 #cyanview-design .hc-quick-tip { position: fixed; z-index: 1400; box-sizing: border-box; max-width: min(340px, calc(100vw - 16px)); padding: 6px 9px; border: 1px solid light-dark(#c9c9c9, #555); border-radius: 6px; background: light-dark(#fff, #222); box-shadow: 0 6px 18px rgb(0 0 0 / 35%); color: var(--hc-text); font-size: 12px; line-height: 1.4; pointer-events: none; white-space: normal; }
 #cyanview-design .hc-quick-tip[hidden] { display: none; }
+/* Devices: a section per kind, each with its own numbers (0.1.105). */
+#cyanview-design .hc-grid[data-device-sheet] tr.hc-device-section td { height: 28px; padding: 0 10px; background: var(--hc-chrome); color: var(--hc-secondary); font-size: 11px; white-space: nowrap; }
+#cyanview-design .hc-device-section-name { font-weight: 600; color: var(--hc-text); }
+#cyanview-design .hc-device-section-count { margin-left: 6px; }
+#cyanview-design .hc-device-section-note { margin-left: 14px; font-style: italic; }
+#cyanview-design .hc-grid[data-device-sheet] .hc-device-section-link { margin-left: 12px; font-size: 11px; }
+/* Defaults (0.1.105). */
+#cyanview-design #hc-defaults { overflow: auto; }
+#cyanview-design .hc-defaults { padding: 2px 2px 8px; }
+#cyanview-design .hc-defaults-intro { margin: 4px 0 0; max-width: 1100px; color: var(--hc-secondary); font-size: 12px; line-height: 1.6; }
+#cyanview-design .hc-defaults-code { font-family: var(--hc-mono, ui-monospace, monospace); font-size: 11.5px; color: var(--hc-text); }
+#cyanview-design .hc-defaults-section { margin-top: 20px; }
+#cyanview-design .hc-defaults-heading { display: flex; align-items: baseline; gap: 10px; margin: 0 0 8px; }
+#cyanview-design .hc-defaults-heading h4 { margin: 0; font-size: 13px; font-weight: 600; color: var(--hc-text); }
+#cyanview-design .hc-defaults-heading span { color: var(--hc-secondary); font-size: 12px; }
+#cyanview-design .hc-defaults-table { width: 100%; table-layout: fixed; }
+#cyanview-design .hc-defaults-table th[scope="row"] { text-align: left; font-weight: 400; }
+#cyanview-design .hc-defaults-table .hc-cell-input { width: 100%; box-sizing: border-box; }
+#cyanview-design .hc-defaults-table .hc-defaults-remove { text-align: center; }
+#cyanview-design .hc-defaults-empty { padding: 0 10px; height: 36px; }
+#cyanview-design .hc-defaults-fields { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px 26px; margin: 0 0 12px; }
+#cyanview-design .hc-defaults-field { display: flex; flex-direction: column; gap: 6px; font-size: 11px; color: var(--hc-secondary); }
+#cyanview-design .hc-defaults-field .hc-cell-input { width: 240px; box-sizing: border-box; border: 1px solid var(--hc-line); border-radius: 5px; padding: 5px 8px; font-size: 13px; color: var(--hc-text); background: var(--hc-surface); }
+#cyanview-design .hc-defaults-field .hc-cell-input:focus { border-color: var(--hc-focus); outline: none; }
+#cyanview-design .hc-defaults-under { display: flex; gap: 6px; align-items: center; min-height: 20px; }
+#cyanview-design .hc-defaults-check { display: flex; align-items: center; gap: 8px; margin-top: 24px; font-size: 12px; color: var(--hc-text); }
+#cyanview-design .hc-defaults-chips { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 11px; color: var(--hc-secondary); }
+#cyanview-design .hc-defaults-chip { min-height: 0; padding: 2px 8px; border: 1px solid var(--hc-line); border-radius: 10px; background: var(--hc-chrome); color: var(--hc-text); font-family: var(--hc-mono, ui-monospace, monospace); font-size: 11px; cursor: pointer; }
+#cyanview-design .hc-defaults-chip:is(:hover, :focus-visible) { border-color: var(--hc-focus); }
+#cyanview-design .hc-defaults-actions { display: flex; align-items: center; gap: 14px; margin-top: 8px; font-size: 12px; }
+#cyanview-design .hc-defaults-problem { display: flex; flex-direction: column; gap: 2px; min-height: 18px; margin: 6px 0 0; font-size: 12px; line-height: 18px; }
+#cyanview-design .hc-defaults-warning { color: var(--hc-amber); }
+#cyanview-design .hc-cell-input.hc-defaults-invalid { box-shadow: inset 0 0 0 1px var(--hc-red); }

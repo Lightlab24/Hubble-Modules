@@ -32,7 +32,11 @@ const rendererState = () => {
   const state = session.states.at(-1) as Parameters<typeof session.context.publishState>[0];
   return pageFixtures && state?.values ? { ...state, values: { ...state.values, cameraControl: fixtureControl(state.values.cameraControl) } } : state;
 };
-async function reset(sample: boolean, remi = false, gateway = false, direct = false, extra = false, live = false, wan = false, reachAll = false, simulated = false, tour = false) {
+// Specs written before Defaults (0.1.105) start with every default empty, which is how the page behaved
+// then: new devices keep their serial and get no LAN IP, and new cameras are "Camera n" with no address.
+// A spec about Defaults asks for the ones a new workspace starts with.
+const emptyDefaults = { devices: { RCP: { name: '', lan: '', mask: '' }, RIO: { name: '', lan: '', mask: '' }, Gateway: { name: '', lan: '', mask: '' } }, camera: { name: '', ip: '', login: 'admin', rioNumber: false } };
+async function reset(sample: boolean, remi = false, gateway = false, direct = false, extra = false, live = false, wan = false, reachAll = false, simulated = false, tour = false, defaults = false) {
   statePaused = false;
   pingDelayMs = 0;
   releaseControlWrites?.(); releaseControlWrites = undefined;
@@ -108,9 +112,9 @@ async function reset(sample: boolean, remi = false, gateway = false, direct = fa
     const names = ['Stage RIO','Master RCP','Downstream RCP','Truck RCP','Cart RCP'];
     await session.call('save-plan',{revision:null,plan:{
       formatVersion:1,devices:snapshots.map((snapshot,index)=>({...snapshot.device,name:names[index]})),
-      cameras:snapshots.flatMap(snapshot=>snapshot.cameras),lans:[],uiState:null,
+      cameras:snapshots.flatMap(snapshot=>snapshot.cameras),lans:[],uiState:null,...(defaults?{}:{defaults:emptyDefaults}),
     }});
-  }
+  } else if (!defaults && !sample && !simulated) await session.call('save-plan',{revision:null,plan:{formatVersion:1,devices:[],cameras:[],lans:[],uiState:null,defaults:emptyDefaults}});
 }
 await reset(true);
 const manifest = JSON.parse(await readFile(path.resolve('dist/hubble-module.json'), 'utf8'));
@@ -146,7 +150,7 @@ const server = createServer(async (request, response) => {
     if (request.method === 'POST') {
       const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk));
       const input = JSON.parse(Buffer.concat(chunks).toString() || '{}');
-      if (url.pathname === '/__reset') { await reset(input.sample !== false && input.simulated !== true, input.remi === true, input.gateway === true, input.direct === true, input.extra === true, input.live === true, input.wan === true, input.reachAll === true, input.simulated === true, input.tour === true); send({ reset: true }); return; }
+      if (url.pathname === '/__reset') { await reset(input.sample !== false && input.simulated !== true, input.remi === true, input.gateway === true, input.direct === true, input.extra === true, input.live === true, input.wan === true, input.reachAll === true, input.simulated === true, input.tour === true, input.defaults === true); send({ reset: true }); return; }
       if (url.pathname === '/__load') {
         // A copy of a workspace's Cyanview documents, to see the page at a real setup's size and layout.
         // The worker restarts on them as a real one, not Simulated; every connection still reaches only

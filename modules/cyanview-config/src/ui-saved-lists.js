@@ -1,20 +1,15 @@
-  // Camera logins and Saved devices. Both are kept with the workspace's configuration, so they go into
-  // its exports. Camera logins fill a camera's Username and Password when it is added or its model
-  // changes; anything typed afterwards wins. Saved devices hold every controller ever added. Discover
-  // checks the ones that aren't in the list before anything else and lists them straight away.
-  let cameraLogins = [], savedDevices = null, savedScan = null, savedPopover = null;
+  // Saved devices, kept with the workspace's configuration so they go into its exports. They hold every
+  // controller ever added. Discover checks the ones that aren't in the list before anything else and lists
+  // them straight away. Camera logins moved to the Defaults tab in 0.1.105 (ui-defaults.js).
+  let savedDevices = null, savedScan = null, savedPopover = null;
   const savedKey = serial => String(serial ?? '').toUpperCase();
   const savedSerial = serial => /^CY-[A-Z0-9-]+$/i.test(String(serial ?? '')) && String(serial).length <= 64;
   const shortText = value => String(value ?? '').slice(0, 160);
 
   function restoreSavedLists(plan) {
-    cameraLogins = Array.isArray(plan?.cameraLogins) ? plan.cameraLogins.map(item => ({ model: shortText(item.model), login: shortText(item.login), password: shortText(item.password) })) : [];
     // A workspace saved before Saved devices existed starts from the devices in it.
     savedDevices = Array.isArray(plan?.savedDevices) ? plan.savedDevices.filter(item => savedSerial(item.serial)).map(item => ({ serial: item.serial, kind: item.kind, base: item.base, address: item.address })) : null;
-    // The buttons are drawn before the workspace is read; Saved devices repaints once its devices are in.
-    paintCameraLoginsButton();
   }
-  function savedCameraLogins() { return cameraLogins.slice(0, 128).map(item => ({ model: item.model, login: item.login, password: item.password })); }
   // Every device in the list is on the saved list, by serial, with its addresses. Its name isn't
   // kept: a device is named for the job it is on, and that changes from one job to the next.
   function savedDeviceList() {
@@ -32,66 +27,6 @@
     return list.map(item => ({ serial: item.serial, kind: item.kind, base: item.base, address: item.address }));
   }
   const savedNotInList = () => savedDeviceList().filter(item => !devices.some(d => savedKey(d.serial) === savedKey(item.serial)));
-
-  // ----- Camera logins -----
-  function cameraLoginFor(model) {
-    const key = String(model ?? '');
-    return key && key !== 'Choose model…' ? cameraLogins.find(item => item.model === key) ?? null : null;
-  }
-  /** Fills a camera's Username and Password from Camera logins. A USB camera has neither. */
-  function applyCameraLogin(camera, fields) {
-    if (!camera || camera.model === 'Alpha-USB') return false;
-    const login = cameraLoginFor(camera.model);
-    if (!login) return false;
-    for (const field of ['login', 'password']) {
-      camera[field] = login[field];
-      camera.dirty?.add(field);
-      if (fields && !fields.includes(field)) fields.push(field);
-    }
-    return true;
-  }
-  // Typing, picking from the list, paste and fill all stage a model through here.
-  const stageCellBeforeLogins = stageCell;
-  stageCell = function(item, field, value, isLan) {
-    const fields = stageCellBeforeLogins(item, field, value, isLan);
-    if (!isLan && field === 'model' && fields.length) applyCameraLogin(item, fields);
-    return fields;
-  };
-  function cameraLoginsButton() {
-    return '<button type="button" class="hc-button hc-logins-button" data-action="toggle-camera-logins" aria-haspopup="dialog" aria-expanded="false">' + icon('key-round') + 'Camera logins<span class="hc-list-count" data-camera-logins-count></span></button>';
-  }
-  function paintCameraLoginsButton() {
-    const count = cameraLogins.filter(item => item.model).length;
-    for (const badge of root.querySelectorAll('[data-camera-logins-count]')) { badge.textContent = count ? String(count) : ''; badge.hidden = !count; }
-  }
-  function cameraLoginModelOptions(current) {
-    const taken = new Set(cameraLogins.map(item => item.model).filter(model => model && model !== current));
-    const groups = new Map();
-    for (const option of everyModelChoice()) {
-      if (option.value === 'Alpha-USB' || taken.has(option.value)) continue;
-      const group = option.group ?? '';
-      if (!groups.has(group)) groups.set(group, []);
-      groups.get(group).push(option);
-    }
-    if (current && ![...groups.values()].flat().some(option => option.value === current)) groups.set('', [{ value: current, label: current }, ...(groups.get('') ?? [])]);
-    let markup = '<option value=""' + (current ? '' : ' selected') + '>Choose a model…</option>';
-    for (const [group, options] of groups) {
-      const items = options.map(option => '<option value="' + esc(option.value) + '"' + (option.value === current ? ' selected' : '') + '>' + esc(option.label) + '</option>').join('');
-      markup += group ? '<optgroup label="' + esc(group) + '">' + items + '</optgroup>' : items;
-    }
-    return markup;
-  }
-  function cameraLoginsMarkup() {
-    const rows = cameraLogins.map((item, index) => '<tr data-login-row="' + index + '">' +
-      '<td><select class="hc-cell-input" data-login-field="model" data-login-index="' + index + '" aria-label="Camera model for login ' + (index + 1) + '">' + cameraLoginModelOptions(item.model) + '</select></td>' +
-      '<td><input class="hc-cell-input" data-login-field="login" data-login-index="' + index + '" value="' + esc(item.login) + '" maxlength="160" aria-label="Username for ' + esc(item.model || 'login ' + (index + 1)) + '" spellcheck="false" autocomplete="off"></td>' +
-      '<td><input class="hc-cell-input" data-login-field="password" data-login-index="' + index + '" value="' + esc(item.password) + '" maxlength="160" aria-label="Password for ' + esc(item.model || 'login ' + (index + 1)) + '" spellcheck="false" autocomplete="off"></td>' +
-      '<td class="hc-list-remove"><button type="button" class="hc-row-remove-button" data-action="remove-camera-login" data-login-index="' + index + '" aria-label="Remove the login for ' + esc(item.model || 'login ' + (index + 1)) + '" title="Remove this login. Cameras already set up keep theirs.">' + icon('trash-2') + '</button></td></tr>').join('');
-    return '<header><h3 id="hc-camera-logins-title">Camera logins</h3><button type="button" class="hc-list-close" data-action="close-list-popover" aria-label="Close">' + icon('x') + '</button></header>' +
-      '<p>Filled into Username and Password when you add a camera or change its model. You can still type over them on any camera.</p>' +
-      (rows ? '<table class="hc-list-table"><thead><tr><th style="width:44%">Camera model</th><th>Username</th><th>Password</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' : '<div class="hc-list-empty">No logins yet. Add a camera model to fill its Username and Password in.</div>') +
-      '<footer><button type="button" class="hc-button" data-action="add-camera-login"' + (cameraLogins.length >= 128 ? ' disabled' : '') + '>' + icon('plus') + 'Add a camera model</button></footer>';
-  }
 
   // ----- Saved devices -----
   function savedDevicesButton() {
@@ -164,23 +99,18 @@
     return applied;
   };
 
-  // ----- The pop-up the two lists share -----
+  // ----- The Saved devices pop-up -----
   function renderSavedPopover() {
     if (!savedPopover || savedPopover.hidden) return;
-    const kind = savedPopover.dataset.list, focused = document.activeElement, key = focused?.closest?.('.hc-list-popover') ? (focused.dataset.loginField ? focused.dataset.loginField + ':' + focused.dataset.loginIndex : focused.dataset.action ? 'action:' + focused.dataset.action : '') : '';
-    savedPopover.innerHTML = kind === 'logins' ? cameraLoginsMarkup() : savedDevicesMarkup();
-    upgradeSelects(savedPopover);
-    savedPopover.setAttribute('aria-labelledby', kind === 'logins' ? 'hc-camera-logins-title' : 'hc-saved-devices-title');
+    const focused = document.activeElement, key = focused?.closest?.('.hc-list-popover') && focused.dataset.action ? focused.dataset.action : '';
+    savedPopover.innerHTML = savedDevicesMarkup();
+    savedPopover.setAttribute('aria-labelledby', 'hc-saved-devices-title');
     icons();
     placeSavedPopover();
-    if (key) {
-      const [kindOf, value] = key.split(':');
-      const element = kindOf === 'action' ? savedPopover.querySelector('[data-action="' + value + '"]') : savedPopover.querySelector('[data-login-field="' + kindOf + '"][data-login-index="' + value + '"]');
-      element?.focus({ preventScroll: true });
-    }
+    if (key) savedPopover.querySelector('[data-action="' + key + '"]')?.focus({ preventScroll: true });
   }
   function placeSavedPopover() {
-    const anchor = root.querySelector(savedPopover.dataset.list === 'logins' ? '[data-action="toggle-camera-logins"]:not([hidden])' : '[data-action="toggle-saved-devices"]');
+    const anchor = root.querySelector('[data-action="toggle-saved-devices"]');
     if (!anchor) return;
     const box = anchor.getBoundingClientRect(), width = savedPopover.offsetWidth;
     savedPopover.style.left = Math.max(8, Math.min(box.left, window.innerWidth - width - 8)) + 'px';
@@ -198,76 +128,41 @@
     closeSavedPopover();
     if (reopening) return;
     savedPopover.dataset.list = kind;
-    savedPopover.dataset.role = kind === 'logins' ? 'camera-logins' : 'saved-devices';
+    savedPopover.dataset.role = 'saved-devices';
     savedPopover.hidden = false;
-    for (const button of root.querySelectorAll(kind === 'logins' ? '[data-action="toggle-camera-logins"]' : '[data-action="toggle-saved-devices"]')) button.setAttribute('aria-expanded', 'true');
+    for (const button of root.querySelectorAll('[data-action="toggle-saved-devices"]')) button.setAttribute('aria-expanded', 'true');
     renderSavedPopover();
-    savedPopover.querySelector(kind === 'logins' ? 'select, input, [data-action="add-camera-login"]' : '[data-action="close-list-popover"]')?.focus({ preventScroll: true });
+    savedPopover.querySelector('[data-action="close-list-popover"]')?.focus({ preventScroll: true });
   }
   function closeSavedPopover(returnFocus = false) {
     if (!savedPopover || savedPopover.hidden) return;
-    const kind = savedPopover.dataset.list;
     savedPopover.hidden = true;
-    const button = root.querySelector(kind === 'logins' ? '[data-action="toggle-camera-logins"]' : '[data-action="toggle-saved-devices"]');
-    for (const toggle of root.querySelectorAll('[data-action="toggle-camera-logins"],[data-action="toggle-saved-devices"]')) toggle.setAttribute('aria-expanded', 'false');
+    const button = root.querySelector('[data-action="toggle-saved-devices"]');
+    for (const toggle of root.querySelectorAll('[data-action="toggle-saved-devices"]')) toggle.setAttribute('aria-expanded', 'false');
     if (returnFocus) button?.focus({ preventScroll: true });
   }
-  function commitCameraLogin(element) {
-    const item = cameraLogins[Number(element.dataset.loginIndex)];
-    if (!item) return;
-    const field = element.dataset.loginField, value = shortText(element.value);
-    if (item[field] === value) return;
-    item[field] = value;
-    if (field === 'model') renderSavedPopover();
-    paintCameraLoginsButton();
-    remember();
-  }
-
   const initializeBeforeSavedLists = initializeDeviceWorkflow;
   initializeDeviceWorkflow = function() {
     initializeBeforeSavedLists();
     action('stop-scan')?.insertAdjacentHTML('afterend', savedDevicesButton());
-    root.querySelector('[data-role="setup-group"] .hc-count-hint')?.insertAdjacentHTML('afterend', cameraLoginsButton());
     paintSavedDevicesButton();
-    paintCameraLoginsButton();
     icons();
   };
   const renderLansBeforeSavedLists = renderLans;
-  // Live updates redraw the sheet often, so only the device list follows them; a login being typed is left alone.
+  // Live updates redraw the sheet often, so the device list follows them.
   renderLans = function(...args) { const drawn = renderLansBeforeSavedLists(...args); paintSavedDevicesButton(); if (savedPopover?.dataset.list === 'devices') renderSavedPopover(); return drawn; };
 
   root.addEventListener('click', event => {
     const button = event.target.closest?.('button');
     const action = button?.dataset.action;
-    if (action === 'toggle-camera-logins') { openSavedPopover('logins'); return; }
     if (action === 'toggle-saved-devices') { openSavedPopover('devices'); return; }
     if (action === 'close-list-popover') { closeSavedPopover(true); return; }
-    if (action === 'add-camera-login') {
-      if (cameraLogins.length >= 128) return;
-      cameraLogins.push({ model: '', login: 'admin', password: '' });
-      renderSavedPopover();
-      savedPopover.querySelector('[data-login-field="model"][data-login-index="' + (cameraLogins.length - 1) + '"]')?.focus({ preventScroll: true });
-      paintCameraLoginsButton();
-      remember();
-      return;
-    }
-    if (action === 'remove-camera-login') {
-      cameraLogins.splice(Number(button.dataset.loginIndex), 1);
-      renderSavedPopover();
-      paintCameraLoginsButton();
-      remember();
-      return;
-    }
     if (action === 'forget-saved-device') { forgetSavedDevice(button.dataset.serial); return; }
     // A click anywhere else puts the list away. Hubble's own pop-up lists sit outside it.
     if (savedPopover && !savedPopover.hidden && !event.target.closest?.('.hc-list-popover, .hc-dropdown-menu')) closeSavedPopover();
   });
-  root.addEventListener('change', event => {
-    if (event.target.dataset?.loginField) commitCameraLogin(event.target);
-  });
   root.addEventListener('keydown', event => {
     if (event.key === 'Escape' && savedPopover && !savedPopover.hidden && !document.querySelector('.hc-dropdown-menu')) { event.preventDefault(); closeSavedPopover(true); }
-    if (event.key === 'Enter' && event.target.dataset?.loginField && event.target.tagName === 'INPUT') { event.preventDefault(); commitCameraLogin(event.target); }
   });
   window.addEventListener('resize', () => { if (savedPopover && !savedPopover.hidden) placeSavedPopover(); });
   root.addEventListener('scroll', () => { if (savedPopover && !savedPopover.hidden) placeSavedPopover(); }, true);

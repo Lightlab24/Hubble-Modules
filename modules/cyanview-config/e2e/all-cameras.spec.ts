@@ -74,15 +74,16 @@ async function sendAll(f: FrameLocator) {
   await panel(f).locator('[data-action="send-all-pending"]').click();
 }
 // The count box adds a row at the end, named for its number. The Add camera menu it replaced also
-// chose a model, so a test that wants one picks it.
+// chose a model, so a test that wants one picks it. Since 0.1.105 the default name carries the model's
+// type, so the row is found by its id and the name it ends up with is returned.
 async function addCamera(f: FrameLocator, scope: Locator, model = 'Venice-IP') {
   const rows = scope.locator('tbody tr[data-id]'), before = await rows.count();
   await scope.locator('[data-count-step="1"]').click();
   await expect(rows).toHaveCount(before + 1);
-  const name = await cell(rows.last(), 'name').locator('input').inputValue();
-  if (!(await cell(named(scope, name), 'model').innerText()).includes(model)) await choose(f, named(scope, name), 'model', model);
-  await expect(cell(named(scope, name), 'model')).toContainText(model);
-  return name;
+  const added = scope.locator('tbody tr[data-id="' + await rows.last().getAttribute('data-id') + '"]');
+  if (!(await cell(added, 'model').innerText()).includes(model)) await choose(f, added, 'model', model);
+  await expect(cell(added, 'model')).toContainText(model);
+  return await cell(added, 'name').locator('input').inputValue();
 }
 const settle = (f: FrameLocator) => expect(panel(f)).toContainText('Nothing is waiting to send');
 type Device = { config: { Camera: Record<string, Record<string, any>> }; actions: Record<string, any>[] };

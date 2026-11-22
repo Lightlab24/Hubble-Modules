@@ -7,7 +7,8 @@
   const remiDeviceName = peer => devices.find(item => item.serial.toLowerCase() === String(peer || '').toLowerCase())?.name || peer || 'Remote source';
   function remiPanelState(id) {
     if (!remiPanels.has(id)) remiPanels.set(id, {
-      source: remiPeers(id)[0]?.id || '', drafts: new Map(), overrides: {}, picks: new Set(),
+      // The first other device with cameras of its own, since RCPs now come first in the list (0.1.105).
+      source: (remiPeers(id).find(item => cameras.some(camera => camera.device === item.id && !importedCamera(camera))) ?? remiPeers(id)[0])?.id || '', drafts: new Map(), overrides: {}, picks: new Set(),
       data: null, open: false, settings: false, busy: false, loading: false, error: '', retry: false,
     });
     return remiPanels.get(id);

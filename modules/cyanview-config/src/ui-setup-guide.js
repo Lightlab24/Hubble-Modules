@@ -90,7 +90,7 @@
       what: 'That’s your controllers. Your cameras come next, on the Camera Configuration tab: one row for each camera, with the controller it’s plugged into.', todo: 'Press Next to go to Camera Configuration.' },
     { step: 'cameras', tab: 'setup', at: () => inPanel('input[aria-label="Number of cameras"]')?.parentElement, title: 'Number of cameras', what: 'Adds or removes camera rows. New rows join the end.', todo: 'Set how many cameras you have.' },
     { step: 'cameras', tab: 'setup', at: () => sheetLine(...['name', 'model', 'ip', 'port', 'login', 'password'].map(field => fieldHead(cameraSetupSheet, field))), title: 'Camera details',
-      what: 'Each camera’s name, model, address and login, so the controller can reach it. Camera logins, above the sheet, sets one login for every camera of a model.', todo: 'Fill these in for each camera.' },
+      what: 'Each camera’s name, model, address and login, so the controller can reach it. The Defaults tab fills in a new camera’s name, address and login.', todo: 'Fill these in for each camera.' },
     { step: 'cameras', tab: 'setup', at: () => sheetLine(fieldHead(cameraSetupSheet, 'source')), title: 'Source', what: 'The RIO or RCP the camera is plugged into. A camera needs one before it can be sent.', todo: 'Pick the controller for each camera.' },
     // A sheet can hide this column; then the tour rings Columns, where it is turned back on.
     { step: 'cameras', tab: 'setup', at: () => ticksShown() ? sheetLine(ticksHead()) : inPanel('[aria-label="Choose visible columns"]'), title: 'Camera Control Enabled', tag: () => ticksShown() ? 'Camera Control Enabled' : 'Columns',

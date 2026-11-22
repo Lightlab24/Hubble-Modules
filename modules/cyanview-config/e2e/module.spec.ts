@@ -350,12 +350,12 @@ test('mixed device order and expand all retain the approved interactions', async
   await expect(f.locator('[data-action="toggle-controller"][aria-expanded="true"]')).toHaveCount(0);
   await f.locator('[data-tab="devices"]').click();
   await expect(f.locator('[data-tab="discovery"]')).toHaveCount(0);
-  // The Devices sheet lists the devices in the same order.
+  // The Devices sheet lists RCPs and RIOs in sections of their own (0.1.105), each in that order.
   const sheetOrder = () => deviceRows(f).evaluateAll(elements => elements.map(element => (element as HTMLElement).dataset.deviceRow));
-  expect(await sheetOrder()).toEqual(['rcp1', 'rio1', 'rcp2', 'rio2', 'rio3']);
+  expect(await sheetOrder()).toEqual(['rcp1', 'rcp2', 'rio1', 'rio2', 'rio3']);
   await expect.poll(async () => (await saved(request))?.uiState?.privateContent?.deviceOrder).toEqual(['rcp1', 'rio1', 'rcp2', 'rio2', 'rio3']);
   await page.reload(); await expect(deviceRows(f).first()).toBeVisible();
-  expect(await sheetOrder()).toEqual(['rcp1', 'rio1', 'rcp2', 'rio2', 'rio3']);
+  expect(await sheetOrder()).toEqual(['rcp1', 'rcp2', 'rio1', 'rio2', 'rio3']);
   await f.locator('[data-tab="assignment"]').click().then(() => f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());
   await expect(f.locator('[data-action="toggle-controller"][aria-expanded="true"]')).toHaveCount(0);
   expect(await f.locator('[data-controller]').evaluateAll(elements => elements.map(element => (element as HTMLElement).dataset.controller))).toEqual(['rcp1', 'rio1', 'rcp2', 'rio2', 'rio3']);
