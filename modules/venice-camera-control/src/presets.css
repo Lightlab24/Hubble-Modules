@@ -26,3 +26,4 @@ button.picker[aria-expanded=true],#preset-capture[aria-expanded=true]{background
 #preset-grid thead td[data-connection=offline],#preset-grid thead td[data-connection=error]{color:#999}
 #preset-grid thead td[data-recording=recording]{color:#ff5f57;font-weight:700}
 .notice.info{border-color:#3f6f5f;background:#1f3a31;color:#e6fff6}
+#preset-grid td[data-bad=true]{color:#f2aaa5;background-color:#342021}

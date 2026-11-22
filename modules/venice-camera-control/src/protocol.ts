@@ -1,14 +1,14 @@
 import { setTimeout as delay } from 'node:timers/promises';
-import { type Field, type Camera, valueOf, validateValue, reelProperty, reelNumber, sameValue } from './model.js';
+import { type Field, type Camera, valueOf, validateValue, reelProperty, reelNumber, sameValue, ndChoices } from './model.js';
 import type { RpcClient } from './camera-client.js';
 
 // The camera ignores a Speed/Angle change sent to Camera.Shutter.Mode. Sony's page changes it through this menu setting.
 const shutterModeMenu='P.System.Menu.ShutterMode';
 const shutterModeLock='P.System.Menu.ShutterModeForWifiFull.MenuItem';
 // The camera reports ND as a filter factor. Crew read it as density, as Sony's page does, and like that page this goes by the number alone.
-const ndDensity:Record<number,string>={1:'Clear',2:'0.3',4:'0.6',8:'0.9',16:'1.2',32:'1.5',64:'1.8',128:'2.1',256:'2.4'};
+const ndDensity:Record<number,string>=Object.fromEntries([1,2,4,8,16,32,64,128,256].map((factor,index)=>[factor,ndChoices[index]!]));
 const ndClearAbove=1000,ndCustom=[65529,65532],ndNoReading=[65534,65535];
-export const ndChoices=Object.values(ndDensity);
+export { ndChoices };
 function ndLabel(factor:number):string {
   if(ndNoReading.includes(factor))return '';
   if(factor>=ndCustom[0]!&&factor<=ndCustom[1]!)return 'Custom '+(factor-ndCustom[0]!+1);

@@ -7,7 +7,7 @@ import { Drafts } from '../src/draft-store.js';
 import { createBackend } from '../src/backend.js';
 import {
   applyPresetMutation,inversePreset,defaultPresetDocument,resolvedValues,presetValue,newRole,uniqueName,capturedValues,planSend,sendOrder,
-  validatePresetDocument,presetFields,isPresetField,roleFieldIds,cameraIdField,baseId,nameRowId,heldFieldIds,capturedOffers,offeredChange,type PresetDocument,type PresetMutation
+  validatePresetDocument,presetFields,isPresetField,roleFieldIds,cameraIdField,baseId,nameRowId,heldFieldIds,capturedOffers,offeredChange,knownValues,allowedValues,type PresetDocument,type PresetMutation
 } from '../src/presets-model.js';
 import { fakeCamera } from './fake-camera.js';
 
@@ -149,6 +149,23 @@ test('only settings a preset holds show, and a capture keeps the values the came
   const huge=Object.fromEntries(presetFields.filter(f=>f.kind==='number').map(f=>[f.id,Array.from({length:300},(_,n)=>({value:String(n*7)}))]));
   const kept=capturedOffers(huge,Object.fromEntries(Object.keys(huge).map(id=>[id,'0'])));
   assert.ok(JSON.stringify(kept).length<=120000,'long lists are dropped before the saved presets grow too large');
+});
+
+test('settings whose values are known are always lists, and a value outside the list is refused but an old one still opens',()=>{
+  assert.deepEqual(knownValues('nd'),['Clear','0.3','0.6','0.9','1.2','1.5','1.8','2.1','2.4']);
+  assert.deepEqual(knownValues('base-iso'),['500','800','2500','3200']);
+  assert.deepEqual(knownValues(sdiField.id),['TRUE','FALSE']);
+  assert.deepEqual(knownValues(cameraIdField.id)!.slice(0,3),['A','B','C']);
+  assert.equal(knownValues('ei'),undefined,'EI depends on the camera, so only a camera can give its list');
+  const doc=roles();
+  assert.throws(()=>applyPresetMutation(doc,{kind:'edit',edits:[{rowId:'nd',columnId:baseId,value:'F',expected:''}]}),/F isn’t a value ND filter allows/);
+  assert.equal(applyPresetMutation(doc,{kind:'edit',edits:[{rowId:'nd',columnId:baseId,value:'0.9',expected:''}]}).presets[0]!.values.nd,'0.9');
+  assert.equal(applyPresetMutation(doc,{kind:'edit',edits:[{rowId:'ei',columnId:'c',value:'900',expected:''}]}).presets[2]!.values.ei,'900','with no camera list any EI number is kept');
+  const captured={...doc,offered:{ei:['800','1600']}};
+  assert.deepEqual(allowedValues(captured,'ei'),['800','1600']);
+  assert.throws(()=>applyPresetMutation(captured,{kind:'edit',edits:[{rowId:'ei',columnId:'c',value:'900',expected:''}]}),/900 isn’t a value Exposure Index allows/);
+  const older={...doc,presets:[{...doc.presets[0]!,values:{...doc.presets[0]!.values,nd:'F'}},...doc.presets.slice(1)]};
+  assert.deepEqual(validatePresetDocument(clone(older)),older,'presets saved before the lists existed still open');
 });
 
 // Everything below talks to loopback fake cameras only.

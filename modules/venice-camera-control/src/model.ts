@@ -27,6 +27,8 @@ export const clone = <T>(value:T):T => structuredClone(value);
 const sortedKeys = (value:unknown):unknown => Array.isArray(value) ? value.map(sortedKeys) : value && typeof value==='object' ? Object.fromEntries(Object.entries(value).sort(([a],[b])=>a<b?-1:a>b?1:0).map(([key,item])=>[key,sortedKeys(item)])) : value;
 export const same = (a:unknown,b:unknown):boolean => JSON.stringify(sortedKeys(a))===JSON.stringify(sortedKeys(b));
 export const valueOf = (row:Camera,columnId:string):string => row.values[columnId] ?? '';
+/** ND filter densities as crew read them and Sony's page shows them. The camera's own filter factors are in protocol.ts. */
+export const ndChoices=['Clear','0.3','0.6','0.9','1.2','1.5','1.8','2.1','2.4'];
 export const reelProperty='P.System.Menu.ClipnamingReelNum';
 const wholeNumber=/^\d+$/;
 /** A reel is a number: 1, 01 and 001 are all reel 1. A VENICE keeps it without the zeros, so a write of 001 reads back as 1. */

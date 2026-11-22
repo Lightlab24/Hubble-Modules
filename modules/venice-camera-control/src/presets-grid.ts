@@ -3,7 +3,7 @@ import {
   type SpreadsheetAddress,type SpreadsheetCell,type SpreadsheetColumnGroup,type SpreadsheetColumnGroupControls,type SpreadsheetEdit,type SpreadsheetMenuItem
 } from '@hubble/module-sdk/spreadsheet-controls';
 import { groups,fieldById,clone,visibleFields,withColumnVisibility,withNoColumns,type View,type Field } from './model.js';
-import { nameRowId,holdsRowId,isPresetField,isBase,presetById,resolvedValues,roleFieldIds,heldCount,heldFieldIds,type PlannedSend,type PresetDocument,type PresetEdit,type PresetMutation } from './presets-model.js';
+import { nameRowId,holdsRowId,isPresetField,isBase,presetById,resolvedValues,roleFieldIds,heldCount,heldFieldIds,allowedValues,type PlannedSend,type PresetDocument,type PresetEdit,type PresetMutation } from './presets-model.js';
 import type { Drafts } from './draft-store.js';
 import type { CameraSummary,Observation,PresetSend } from './backend.js';
 
@@ -229,7 +229,7 @@ export async function createPresetGrid(options:PresetGridOptions){
     cell.dataset.chosen=String(chosen);cell.dataset.cameraColumn=String(address.columnId===cameraColumnId);
     cell.setAttribute('aria-readonly',String(!value||!!value.readOnly));
     cell.toggleAttribute('aria-invalid',!!invalid);if(invalid)cell.setAttribute('aria-invalid','true');
-    for(const mark of ['pending','sending','failed','skip','match','connection','recording','held','presetName'])delete cell.dataset[mark];
+    for(const mark of ['pending','sending','failed','skip','match','connection','recording','held','presetName','bad'])delete cell.dataset[mark];
     if(address.columnId===cameraColumnId){
       const shown=cameraCell(address.rowId);
       Object.assign(cell.dataset,shown.marks);cell.title=shown.title;
@@ -245,7 +245,10 @@ export async function createPresetGrid(options:PresetGridOptions){
     const shown=invalid?.edit.value??own??inherited??'';
     cell.dataset.held=invalid||own!==undefined?(isBase(preset)?'base':'own'):inherited!==undefined?'inherited':'';
     cell.textContent=shown?label(field,shown):'';
-    cell.title=invalid?.message??(own===undefined&&inherited!==undefined?'From Base. Type a value to give '+preset.name+' its own.':field.note);
+    // A value saved before the setting had a list, like a typed ND of "F", stays but shows as wrong until it is picked again.
+    const allowed=allowedValues(doc(),field.id),wrong=!invalid&&!!shown&&!!allowed&&!allowed.includes(shown);
+    if(wrong)cell.dataset.bad='true';else delete cell.dataset.bad;
+    cell.title=invalid?.message??(wrong?shown+' isn’t a value '+field.label+' allows. Pick one from the list.':own===undefined&&inherited!==undefined?'From Base. Pick a value to give '+preset.name+' its own.':field.note);
     if(!cell.textContent)cell.dataset.empty='true';else delete cell.dataset.empty;
   }
   function render(){

@@ -1,7 +1,7 @@
 import { ModuleFrontendValueSchema, type connectModuleFrontend } from '@hubble/module-sdk/frontend';
 import { mountSpreadsheetToolbar,createSpreadsheetContextMenu,type SpreadsheetMenuItem } from '@hubble/module-sdk/spreadsheet-controls';
 import { clone,groups,type Field } from './model.js';
-import { applyPresetMutation,basePreset,capturedOffers,capturedValues,heldFieldIds,inversePreset,isBase,newRole,nameRowId,offeredChange,planSend,presetById,presetFields,resolvedValues,uniqueName,type PlannedSend,type PresetDocument,type PresetMutation,type SendChoice } from './presets-model.js';
+import { applyPresetMutation,basePreset,capturedOffers,capturedValues,heldFieldIds,inversePreset,isBase,knownValues,newRole,nameRowId,offeredChange,planSend,presetById,presetFields,resolvedValues,uniqueName,type PlannedSend,type PresetDocument,type PresetMutation,type SendChoice } from './presets-model.js';
 import { Drafts,type Receipt } from './draft-store.js';
 import { createPresetGrid,type Chosen } from './presets-grid.js';
 import type { CameraSummary,Observations,PresetSends } from './backend.js';
@@ -54,7 +54,9 @@ export async function mountPresetsView({client,report,onChange}:PresetsViewOptio
   }
   const chosen=():Chosen=>{const camera=chosenCamera(),preset=chosenPreset(),job=camera?presetSends[camera.id]:undefined;return {presetId:preset.id,camera,observation:observationOf(camera),job:job?.host===camera?.host?job:undefined,plan:plan()};};
   function choices(field:Field){
-    if(field.choices.length)return field.choices.map(c=>({value:c.value,label:c.label}));
+    // What the module knows comes first, so these are dropdowns with or without a camera.
+    const known=knownValues(field.id);
+    if(known)return known.map(value=>({value,label:field.choices.find(c=>c.value===value)?.label??(field.kind==='boolean'?(value==='TRUE'?'On':'Off'):value)}));
     const seen=new Map<string,{value:string;label:string}>();
     for(const obs of Object.values(observations))for(const choice of obs.choices[field.id]??[])if(!seen.has(choice.value))seen.set(choice.value,choice);
     return [...seen.values()];

@@ -1,4 +1,4 @@
-import { fields, fieldById, groups, clone, same, sameValue, validateValue, validateView, reelProperty, type Field, type View } from './model.js';
+import { fields, fieldById, groups, clone, same, sameValue, validateValue, validateView, reelProperty, ndChoices, type Field, type View } from './model.js';
 
 /**
  * Presets are camera roles. Base holds a whole camera's settings, usually captured from one.
@@ -57,6 +57,17 @@ export function presetValue(doc:PresetDocument,presetId:string,fieldId:string):{
   return {value:isBase(presetId)?'':basePreset(doc).values[fieldId]??'',own:false};
 }
 export const heldCount=(preset:Preset):number=>Object.keys(preset.values).length;
+/** The values the module itself knows a setting can take on any VENICE: On/Off, Sony's lists, ND densities and the two base ISO pairs. */
+export function knownValues(fieldId:string):string[]|undefined {
+  const field=fieldById.get(fieldId);if(!field)return undefined;
+  if(field.kind==='boolean')return ['TRUE','FALSE'];
+  if(field.choices.length)return field.choices.map(c=>c.value);
+  if(field.id==='nd')return [...ndChoices];
+  if(field.id==='base-iso')return ['500','800','2500','3200'];
+  return undefined;
+}
+/** What a preset may hold for a setting: what the camera allowed when it was captured, else what the module knows. Undefined means any value. */
+export const allowedValues=(doc:PresetDocument,fieldId:string):string[]|undefined=>doc.offered?.[fieldId]??knownValues(fieldId);
 /** Every setting some preset holds. Only these show: a setting no camera reported can't be sent anyway. */
 export const heldFieldIds=(doc:PresetDocument):Set<string>=>new Set(doc.presets.flatMap(p=>Object.keys(p.values)));
 /** Settings any role changes from Base. They always show, so a role's differences can't hide in a folded section. */
@@ -173,7 +184,11 @@ export function applyPresetMutation(before:PresetDocument,operation:PresetMutati
       }
       if((preset.values[edit.rowId]??'')!==edit.expected)throw Error('This cell changed in another editor. Your draft is retained.');
       if(!edit.value){if(!isPresetField(edit.rowId))throw Error('Unknown camera setting.');delete preset.values[edit.rowId];continue;}
-      validatePresetValue(edit.rowId,edit.value);preset.values[edit.rowId]=edit.value;
+      validatePresetValue(edit.rowId,edit.value);
+      // A typed or pasted value has to be one the setting allows. Values already saved are kept and shown as wrong.
+      const allowed=allowedValues(next,edit.rowId);
+      if(allowed&&!allowed.includes(edit.value))throw Error(edit.value+' isn’t a value '+fieldById.get(edit.rowId)!.label+' allows. Pick one from the list.');
+      preset.values[edit.rowId]=edit.value;
     }
   } else if(operation.kind==='view'){
     if(!same(next.view,operation.expected))throw Error('The layout changed in another editor.');
