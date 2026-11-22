@@ -84,6 +84,30 @@ A changed cell carries an amber pending mark until the camera confirms the value
 and what will be sent. Cancel removes a staged change as one Undo step. Sends to one camera
 run in order; different cameras run at the same time.
 
+## Presets
+
+A second sidebar page, **Presets**, holds camera roles. It is saved in the scoped
+`camera-presets` document, so presets travel with workspace exports.
+
+- **Base** holds a whole camera. **Capture from camera** reads every setting a preset can hold
+  from one camera (everything but the reel number) into Base or into a new preset. Undo puts the
+  old values back.
+- Every other preset (**New preset** makes A Cam, B Cam… with that Camera ID) holds only its
+  own values. Grey cells come from Base; typing gives the role its own value, and Delete or
+  **Use Base** puts it back. Sections show their usual settings plus anything a role changes.
+- **Send [preset] to [camera]** compares the preset with what the camera reports now. The
+  right-hand column shows each change as *now → preset*, a value the camera doesn't offer, or a
+  setting it doesn't report. **Send** writes only the differences, one at a time, each confirmed
+  by readback, in an order the camera accepts: frame rate and imager mode before shooting speed,
+  base ISO before EI, shutter mode before angle or speed, look category before the look. After a
+  setting that changes what the camera offers, the rest is read and planned again. Only the
+  shutter angle or speed that the preset's mode uses is sent.
+- The send runs in the camera worker, so leaving the page doesn't stop it. **Stop** lets the
+  setting being written finish and sends nothing after it. A camera that is rolling is refused,
+  and Camera Control's own Send waits until a preset send to that camera has finished.
+- Camera Control's staged values for the settings a preset holds are cleared when it is sent,
+  so Send all there can't put an older value back.
+
 ## Settings with special handling
 
 - **Recording** is a read-only column beside Connection showing REC, STBY or Starting.

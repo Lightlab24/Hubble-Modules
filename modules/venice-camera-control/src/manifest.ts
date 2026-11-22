@@ -1,6 +1,7 @@
 import { defineModuleManifest } from '@hubble/module-sdk/authoring';
 import { ModuleDocumentValueSchema } from '@hubble/module-sdk';
 import { defaultDocument } from './model.js';
+import { defaultPresetDocument } from './presets-model.js';
 export default defineModuleManifest({
   formatVersion: 1,
   apiVersion: 1,
@@ -11,9 +12,12 @@ export default defineModuleManifest({
     'module-spreadsheet-layout-v1', 'module-spreadsheet-extended-editing-v1', 'module-spreadsheet-workbook-tools-v1', 'module-documents-v1', 'host-service-registry-v1', 'host-alert-choices-v1'
   ] },
   configVersion: 1,
-  capabilities: ['host.documents', 'service.page.cameras'],
+  capabilities: ['host.documents', 'service.page.cameras', 'service.page.presets'],
   settings: [], actions: [], feedback: [],
-  documents: [{ id: 'camera-plan', label: 'Camera plan', version: 1, defaultValue: ModuleDocumentValueSchema.parse(defaultDocument()) }],
+  documents: [
+    { id: 'camera-plan', label: 'Camera plan', version: 1, defaultValue: ModuleDocumentValueSchema.parse(defaultDocument()) },
+    { id: 'camera-presets', label: 'Camera presets', version: 1, defaultValue: ModuleDocumentValueSchema.parse(defaultPresetDocument()) }
+  ],
   pages: [{ id: 'cameras', label: 'Camera Control', icon: 'ui/camera.svg', layout: 'full-page', sections: [{
     type: 'custom', id: 'frontend', label: 'VENICE camera controls', entry: 'ui/index.html', height: 560,
     commands: [
@@ -23,6 +27,16 @@ export default defineModuleManifest({
       { id: 'cancel-send', label: 'Cancel queued camera settings' },
       { id: 'ping', label: 'Check which cameras answer a ping' },
       { id: 'changes', label: 'Wait for the next camera change' }
+    ]
+  }] }, { id: 'presets', label: 'Presets', icon: 'ui/presets.svg', layout: 'full-page', sections: [{
+    type: 'custom', id: 'frontend', label: 'Camera presets', entry: 'ui/presets.html', height: 560,
+    commands: [
+      { id: 'snapshot', label: 'Read presets' }, { id: 'save', label: 'Save presets' },
+      { id: 'refresh', label: 'Read camera settings' },
+      { id: 'ping', label: 'Check which cameras answer a ping' },
+      { id: 'changes', label: 'Wait for the next camera change' },
+      { id: 'send-preset', label: 'Send a preset to a camera' },
+      { id: 'cancel-preset', label: 'Stop sending a preset' }
     ]
   }] }],
 });

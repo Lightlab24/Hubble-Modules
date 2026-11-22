@@ -3,16 +3,25 @@ import { CameraClient, CameraOfflineError } from './camera-client.js';
 import { pingCamera } from './camera-ping.js';
 import { alertChoices, applyMutation, fieldById, fields, liveOn, readFieldIds, sameValue, validateDocument, type CameraDocument, type Mutation, type Camera, type Field } from './model.js';
 import { readFields, decodeField, writeField, fieldProperties, baseIsoChoices, ndChoices, recordingProperties, recordingState, recordingSignals, clipNameProperty } from './protocol.js';
+import { applyPresetMutation, defaultPresetDocument, modeFieldIds, planSend, presetById, presetFields, resolvedValues, validatePresetDocument, type PresetDocument, type PresetMutation } from './presets-model.js';
 export interface Observation { state:'offline'|'online'|'error'; host:string; values:Record<string,string>; choices:Record<string,{value:string;label:string}[]>; updatedAt?:string; errors:Record<string,string>; sending:string[]; queued:string[]; live?:boolean; recording?:string }
 export type Observations=Record<string,Observation>;
+/** A preset going to one camera. It runs in the worker, so leaving the page doesn't stop it. */
+export interface PresetSend { presetId:string; name:string; host:string; running:boolean; total:number; settled:number; done:number; same:number; failed:{fieldId:string;message:string}[]; skipped:{fieldId:string;reason:string}[]; cancelled?:boolean; error?:string; startedAt:string; finishedAt?:string }
+export type PresetSends=Record<string,PresetSend>;
+/** What the Presets page needs to know about Camera Control's cameras. Never the login itself. */
+export interface CameraSummary { id:string; name:string; host:string; login:boolean }
 export function createBackend(context:Parameters<HubbleModule['createInstance']>[0],ping:typeof pingCamera=pingCamera,options:{keepAliveMs?:number;keepAliveTimeoutMs?:number;watchMs?:number}={}) {
   if(!context.services)throw Error('Camera Control requires Hubble portable documents.');
   const documents=createModuleDocumentClient(context.services),lifetime=new AbortController();
   const clients=new Set<CameraClient>(),observations:Observations={};
   let latestRevision:string|null=null,sequence=0,plan:CameraDocument|undefined;
+  let presetsRevision:string|null=null,presetDoc:PresetDocument|undefined;
+  const presetSends:PresetSends={},presetJobs=new Map<string,AbortController>(),sendingRows=new Set<string>();
+  const cameraSummary=():CameraSummary[]=>plan?.cameras.map(row=>({id:row.id,name:row.values['camera-name']??'',host:row.values['camera-host']??'',login:!!(row.values['camera-username']&&row.values['camera-password'])}))??[];
   // Clock-based so it keeps rising across a worker restart. The page uses it to ignore state that arrives late.
   const waiters=new Set<()=>void>();
-  const publish=()=>{sequence=Math.max(sequence+1,Date.now());context.publishState({phase:'ready',message:null,observedAt:new Date().toISOString(),values:{revision:latestRevision,sequence,observations:ModuleDocumentValueSchema.parse(observations)}});for(const wake of [...waiters])wake();};
+  const publish=()=>{sequence=Math.max(sequence+1,Date.now());context.publishState({phase:'ready',message:null,observedAt:new Date().toISOString(),values:{revision:latestRevision,presetsRevision,sequence,observations:ModuleDocumentValueSchema.parse(observations),cameras:ModuleDocumentValueSchema.parse(cameraSummary()),presetSends:ModuleDocumentValueSchema.parse(presetSends)}});for(const wake of [...waiters])wake();};
   // Pushes can come in bursts, so the page hears about them at most ten times a second.
   let publishTimer:ReturnType<typeof setTimeout>|undefined;
   const publishSoon=()=>{publishTimer??=setTimeout(()=>{publishTimer=undefined;publish();},100);};
@@ -20,6 +29,21 @@ export function createBackend(context:Parameters<HubbleModule['createInstance']>
     const saved=await documents.read('camera-plan',signal);latestRevision=saved.revision;const doc=validateDocument(saved.value);planChanged(doc);
     return {document:doc,revision:saved.revision,observations,sequence};
   };
+  const readPresets=async(signal:AbortSignal)=>{
+    const saved=await documents.read('camera-presets',signal);presetsRevision=saved.revision;
+    presetDoc=validatePresetDocument(saved.value??defaultPresetDocument());
+    return {document:presetDoc,revision:saved.revision};
+  };
+  // Followed from the first time the Presets page is used, so a workspace that never opens it does no more than before.
+  let watchingPresets=false;
+  function watchPresets(){
+    if(watchingPresets)return;watchingPresets=true;
+    void (async()=>{for await(const saved of documents.watch('camera-presets',lifetime.signal)){
+      try {presetDoc=validatePresetDocument(saved.value??defaultPresetDocument());presetsRevision=saved.revision;publish();}
+      catch {context.log({level:'error',stage:'camera-presets-watch',message:'Saved presets could not be read.'});}
+    }})().catch(()=>{if(!lifetime.signal.aborted)context.log({level:'error',stage:'camera-presets-watch',message:'Preset observation stopped.'});});
+  }
+  const presetsReply=()=>({document:presetDoc!,revision:presetsRevision,cameras:cameraSummary(),observations,sequence,presetSends});
   const activeCamera=(doc:CameraDocument,id:unknown):Camera=>{const row=doc.cameras.find(r=>r.id===id);if(!row)throw Error('Choose a camera in this workspace.');return row;};
   const selectFields=(raw:unknown):Field[]=>{
     if(!Array.isArray(raw)||raw.length>265)throw Error('Invalid setting selection.');
@@ -205,10 +229,112 @@ export function createBackend(context:Parameters<HubbleModule['createInstance']>
     publish();
     return raw;
   }
+  // Camera Control's staged copies of what the preset sets would put the old values back on its next Send all, so they go.
+  async function clearStaged(rowId:string,ids:string[],signal:AbortSignal){
+    for(let attempt=0;attempt<3;attempt++){
+      const saved=await documents.read('camera-plan',signal),doc=validateDocument(saved.value),row=doc.cameras.find(r=>r.id===rowId);
+      const edits=row?ids.filter(id=>row.values[id]).map(id=>({rowId,columnId:id,value:'',expected:row.values[id]!})):[];
+      if(!edits.length)return;
+      const next=applyMutation(doc,{kind:'edit',edits});
+      try {const result=await documents.write(saved,ModuleDocumentValueSchema.parse(next),signal);latestRevision=result.revision;planChanged(next);return;}
+      catch(error){if(!(error instanceof ModuleDocumentConflictError)||attempt===2)throw error;}
+    }
+  }
+  /** Reads the camera, works out what the preset changes and starts writing it. The writing carries on in the worker. */
+  async function startPresetSend(input:{presetId?:unknown;rowId?:unknown;host?:unknown},signal:AbortSignal){
+    const doc=(await snapshot(signal)).document,row=activeCamera(doc,input.rowId),name=valueLabel(row);
+    if(input.host!==(row.values['camera-host']??''))throw Error('Camera address changed. Choose the camera again.');
+    const presets=(await readPresets(signal)).document,preset=presetById(presets,typeof input.presetId==='string'?input.presetId:undefined);
+    if(!preset)throw Error('Choose a preset to send.');
+    if(presetSends[row.id]?.running||sendingRows.has(row.id))throw Error(name+' is already sending. Wait for it to finish.');
+    const resolved=resolvedValues(presets,preset.id),wanted=presetFields.filter(f=>resolved[f.id]);
+    if(!wanted.length)throw Error(preset.name+' holds no settings yet. Capture a camera into Base first.');
+    const job:PresetSend={presetId:preset.id,name:preset.name,host:row.values['camera-host']??'',running:true,total:0,settled:0,done:0,same:0,failed:[],skipped:[],startedAt:new Date().toISOString()};
+    const controller=new AbortController(),jobSignal=AbortSignal.any([controller.signal,signal]);
+    presetSends[row.id]=job;presetJobs.get(row.id)?.abort();presetJobs.set(row.id,controller);publish();
+    const state=stateFor(row),session=liveSessions.get(row.id);
+    let client:CameraClient|undefined;
+    try {
+      // The connection belongs to the send, not to this request, so it lives on after the reply.
+      client=session?.client??await open(row,controller.signal);
+      jobSignal.throwIfAborted();
+      // A fresh read of everything the preset holds: what the camera has now, what it offers, and whether it is rolling.
+      await update(client,row,wanted,jobSignal);
+      if(state.recording==='recording')throw Error(name+' is rolling. Send '+preset.name+' when it stops.');
+      const planned=planSend(resolved,state.values,state.choices);
+      job.total=planned.send.length;job.same=planned.same;job.skipped=planned.skipped.map(entry=>({fieldId:entry.id,reason:entry.reason}));
+      await clearStaged(row.id,wanted.map(f=>f.id),jobSignal);
+      state.queued=planned.send.map(entry=>entry.id);
+      context.log({level:'info',stage:'camera-preset',message:name+' ← '+preset.name+': '+planned.send.length+' to send, '+planned.same+' already match, '+planned.skipped.length+' skipped'});
+      if(!planned.send.length){job.running=false;job.finishedAt=new Date().toISOString();presetJobs.delete(row.id);if(!session)close(client);}
+      else void runPresetSend(row,client,!session,resolved,job,controller);
+      publish();
+      return {status:planned.send.length?'started':'nothing-to-send',job,observations,sequence,presetSends};
+    } catch(error) {
+      if(client&&!session)close(client);
+      presetJobs.delete(row.id);
+      const offline=error instanceof CameraOfflineError,message=offline?name+' didn’t answer.':error instanceof Error?error.message:'The preset couldn’t be sent.';
+      job.running=false;job.error=message;job.finishedAt=new Date().toISOString();state.queued=[];state.sending=[];
+      if(offline){state.state='offline';state.values={};state.choices={};}
+      publish();
+      throw Error(message);
+    }
+  }
+  async function runPresetSend(row:Camera,client:CameraClient,owned:boolean,resolved:Record<string,string>,job:PresetSend,controller:AbortController){
+    const state=stateFor(row),signal=AbortSignal.any([controller.signal,lifetime.signal]),name=valueLabel(row);
+    // The compound settings (shooting speed, FPS mode) are worked out from the rest of the preset, not from Camera Control's plan.
+    const target:Camera={id:row.id,values:{...row.values,...resolved}};
+    const settle=()=>{job.settled=Math.min(job.total,job.settled+1);};
+    try {
+      while(state.queued.length){
+        signal.throwIfAborted();
+        const current=plan?.cameras.find(r=>r.id===row.id);
+        if(!current||(current.values['camera-host']??'')!==job.host){job.error='The camera was removed or given a new address, so the rest wasn’t sent.';break;}
+        const id=state.queued.shift()!,field=fieldById.get(id)!,value=resolved[id]!;
+        state.sending=[id];delete state.errors[id];publish();
+        try {
+          const after=await writeField(client,field,value,target,signal);
+          state.values[id]=decodeField(field,after);state.state='online';state.updatedAt=new Date().toISOString();job.done++;
+        } catch(error) {
+          if(signal.aborted||error instanceof CameraOfflineError)throw error;
+          const message=error instanceof Error?error.message:'Camera setting failed.';
+          state.errors[id]=message;job.failed.push({fieldId:id,message});
+          context.log({level:'error',stage:'camera-preset',message:(name+' '+id+': '+message).slice(0,600)});
+        } finally {state.sending=[];settle();publish();}
+        // The camera may now offer different values for what is left, so that is read again and planned again.
+        if(modeFieldIds.has(id)&&state.queued.length){
+          const left=state.queued.map(q=>fieldById.get(q)!);
+          await update(client,row,left,signal);
+          const replanned=planSend(Object.fromEntries(left.map(f=>[f.id,resolved[f.id]!])),state.values,state.choices),keep=new Set(replanned.send.map(entry=>entry.id));
+          for(const entry of replanned.skipped){job.skipped.push({fieldId:entry.id,reason:entry.reason});settle();}
+          for(let n=0;n<replanned.same;n++){job.same++;settle();}
+          state.queued=state.queued.filter(q=>keep.has(q));publish();
+        }
+      }
+      if(state.queued.length===0&&job.settled<job.total&&!job.error)job.cancelled=true;
+    } catch(error) {
+      if(lifetime.signal.aborted)return;
+      const offline=error instanceof CameraOfflineError;
+      job.error=controller.signal.aborted?'Stopped.':offline?name+' stopped answering after '+job.done+' of '+job.total+'.':error instanceof Error?error.message:'The preset stopped.';
+      if(offline){state.state='offline';state.values={};state.choices={};}
+    } finally {
+      state.queued=[];state.sending=[];
+      job.running=false;job.finishedAt=new Date().toISOString();
+      if(presetJobs.get(row.id)===controller)presetJobs.delete(row.id);
+      if(owned)close(client);
+      if(!lifetime.signal.aborted){
+        context.log({level:job.failed.length||job.error?'error':'info',stage:'camera-preset',message:name+' ← '+job.name+': '+job.done+' confirmed, '+job.failed.length+' failed, '+job.skipped.length+' skipped'+(job.error?' ('+job.error+')':'')});
+        publish();
+      }
+    }
+  }
   return {
     async execute(){throw Error('This workspace module has no Matrix actions.');},
     async start(){
-      await snapshot(lifetime.signal);publish();
+      await snapshot(lifetime.signal);
+      // Camera Control never waits on the presets: if they can't be read, only the Presets page says so.
+      await readPresets(lifetime.signal).catch(error=>context.log({level:'error',stage:'camera-presets',message:'Saved presets could not be read: '+(error instanceof Error?error.message:String(error))}));
+      publish();
       if(watchMs>0&&context.connectionEnabled!==false)watch();
       void (async()=>{for await(const saved of documents.watch('camera-plan',lifetime.signal)){
         latestRevision=saved.revision;const doc=validateDocument(saved.value);planChanged(doc);
@@ -222,10 +348,35 @@ export function createBackend(context:Parameters<HubbleModule['createInstance']>
       }})().catch(()=>{if(!lifetime.signal.aborted)context.log({level:'error',stage:'camera-plan-watch',message:'Camera plan observation stopped.'});});
     },
     async call(method:string,raw:ModuleJsonValue|undefined,execution:{signal:AbortSignal}):Promise<ModuleJsonValue>{
-      if(method!=='page.cameras'||!raw||typeof raw!=='object'||Array.isArray(raw))throw Error('Unknown camera page command.');
+      if(!['page.cameras','page.presets'].includes(method)||!raw||typeof raw!=='object'||Array.isArray(raw))throw Error('Unknown camera page command.');
       const command=raw as {sectionId?:string;commandId?:string;value?:any};
       if(command.sectionId!=='frontend')throw Error('Unknown camera view.');
       const {signal}=execution;signal.throwIfAborted();
+      // The Presets page has its own saved document. Reading cameras and following their changes are shared with Camera Control.
+      if(method==='page.presets'){
+        watchPresets();
+        if(command.commandId==='snapshot'){await snapshot(signal);await readPresets(signal);return presetsReply() as unknown as ModuleJsonValue;}
+        if(command.commandId==='save'){
+          const operation=command.value?.operation as PresetMutation;
+          for(let attempt=0;attempt<3;attempt++){
+            const saved=await documents.read('camera-presets',signal),next=applyPresetMutation(validatePresetDocument(saved.value??defaultPresetDocument()),operation);
+            try {const result=await documents.write(saved,ModuleDocumentValueSchema.parse(next),signal);presetsRevision=result.revision;presetDoc=next;publish();return presetsReply() as unknown as ModuleJsonValue;}
+            catch(error){if(!(error instanceof ModuleDocumentConflictError)||attempt===2)throw error;}
+          }
+          throw Error('Presets changed before saving.');
+        }
+        if(command.commandId==='send-preset'){
+          if(context.connectionEnabled===false)throw Error('Device connections are disabled.');
+          return await startPresetSend(command.value??{},signal) as unknown as ModuleJsonValue;
+        }
+        if(command.commandId==='cancel-preset'){
+          // The setting being written finishes. Nothing after it goes.
+          const rowId=String(command.value?.rowId),state=observations[rowId];
+          if(presetSends[rowId]?.running&&state){state.queued=[];presetSends[rowId]!.cancelled=true;publish();}
+          return {status:'cancelled',presetSends} as unknown as ModuleJsonValue;
+        }
+        if(!['refresh','ping','changes'].includes(command.commandId??''))throw Error('Unknown presets command.');
+      }
       if(command.commandId==='snapshot')return await snapshot(signal) as unknown as ModuleJsonValue;
       if(command.commandId==='save') {
         const operation=command.value?.operation as Mutation;
@@ -250,7 +401,7 @@ export function createBackend(context:Parameters<HubbleModule['createInstance']>
           const timer=setTimeout(finish,20000);
           signal.addEventListener('abort',finish,{once:true});waiters.add(finish);
         });
-        return {observations,sequence} as unknown as ModuleJsonValue;
+        return {observations,sequence,presetSends,cameras:cameraSummary(),revision:latestRevision,presetsRevision} as unknown as ModuleJsonValue;
       }
       if(command.commandId==='ping') {
         if(context.connectionEnabled===false)return {answered:[],observations,sequence} as unknown as ModuleJsonValue;
@@ -264,6 +415,8 @@ export function createBackend(context:Parameters<HubbleModule['createInstance']>
       if(!['refresh','send'].includes(command.commandId??''))throw Error('Unknown camera operation.');
       if(command.commandId==='send') {
         if(selected.length>32)throw Error('Send up to 32 fields per camera batch.');
+        if(presetSends[row.id]?.running)throw Error('A preset is being sent to '+valueLabel(row)+'. Wait for it to finish.');
+        sendingRows.add(row.id);
         // Queued before connecting, so a cancel during the login still counts.
         state.queued=selected.map(f=>f.id);publish();
       }
@@ -298,8 +451,8 @@ export function createBackend(context:Parameters<HubbleModule['createInstance']>
         if(offline&&command.commandId==='refresh')return {status:'offline',observations,sequence} as unknown as ModuleJsonValue;
         throw error;
       }
-      finally{if(command.commandId==='send')state.queued=[];if(client&&client!==session?.client)close(client);}
+      finally{if(command.commandId==='send'){state.queued=[];sendingRows.delete(row.id);}if(client&&client!==session?.client)close(client);}
     },
-    async dispose(){endAllLive();clearTimeout(publishTimer);clearTimeout(watchTimer);for(const wake of [...waiters])wake();lifetime.abort();for(const client of clients)client.close();clients.clear();for(const id of Object.keys(observations))delete observations[id];}
+    async dispose(){for(const job of presetJobs.values())job.abort();presetJobs.clear();endAllLive();clearTimeout(publishTimer);clearTimeout(watchTimer);for(const wake of [...waiters])wake();lifetime.abort();for(const client of clients)client.close();clients.clear();for(const id of Object.keys(observations))delete observations[id];}
   };
 }
