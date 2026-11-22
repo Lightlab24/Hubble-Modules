@@ -94,8 +94,10 @@ of the two is open is saved with the camera plan. Presets are saved in the scope
 - **Base** holds a whole camera. **Capture from camera** reads every setting a preset can hold
   from one camera (everything but the reel number) into Base or into a new preset, together with
   the values the camera allows for each setting. Undo puts both back.
-- Only settings a preset holds show: what a camera reported, and what a role sets. Before the
-  first capture the tab says to capture a camera. Every setting with a known list is a dropdown:
+- Every setting a preset can hold has a row, cameras on or off. Folded, the sections show what a
+  camera role usually sets (Camera ID, Base ISO, EI, ND, shutter angle, frame rate, imager mode,
+  recording format, shooting FPS, white balance, look); Expand all, a section's + or Columns shows
+  the rest. Every setting with a known list is a dropdown:
   the values the camera allowed when it was captured, else the module's own list (On/Off, Sony's
   lists, ND densities, the base ISO pairs), else what a camera reports now. A value outside the
   list is refused, and one saved before the list existed is marked until it is picked again.

@@ -68,7 +68,19 @@ export function knownValues(fieldId:string):string[]|undefined {
 }
 /** What a preset may hold for a setting: what the camera allowed when it was captured, else what the module knows. Undefined means any value. */
 export const allowedValues=(doc:PresetDocument,fieldId:string):string[]|undefined=>doc.offered?.[fieldId]??knownValues(fieldId);
-/** Every setting some preset holds. Only these show: a setting no camera reported can't be sent anyway. */
+/**
+ * What each section shows folded on the Presets tab: the settings a camera role usually sets, Base ISO among them.
+ * A section the user has folded their own way keeps that.
+ */
+export const presetFolded:Record<string,string[]>={
+  identity:['L3_CAMERAID'],
+  exposure:['base-iso','ei','nd','shutter-angle'],
+  'frame-recording':['L3_SYSTEM_FRAME_RATE','L3_IMAGER_MODE','L3_AXS_MAIN_REC_FORMAT','shooting-fps'],
+  'white-balance':['wb-temperature','wb-tint'],
+  looks:['look-category','art-look']
+};
+export const withPresetFolding=(view:View):View=>({...view,collapsed:{...Object.fromEntries(Object.entries(presetFolded).filter(([id])=>view.collapsed[id]===undefined)),...view.collapsed}});
+/** Every setting some preset holds. */
 export const heldFieldIds=(doc:PresetDocument):Set<string>=>new Set(doc.presets.flatMap(p=>Object.keys(p.values)));
 /** Settings any role changes from Base. They always show, so a role's differences can't hide in a folded section. */
 export const roleFieldIds=(doc:PresetDocument):Set<string>=>new Set(doc.presets.filter(p=>!isBase(p)).flatMap(p=>Object.keys(p.values)));

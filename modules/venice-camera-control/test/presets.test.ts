@@ -7,7 +7,7 @@ import { Drafts } from '../src/draft-store.js';
 import { createBackend } from '../src/backend.js';
 import {
   applyPresetMutation,inversePreset,defaultPresetDocument,resolvedValues,presetValue,newRole,uniqueName,capturedValues,planSend,sendOrder,
-  validatePresetDocument,presetFields,isPresetField,roleFieldIds,cameraIdField,baseId,nameRowId,heldFieldIds,capturedOffers,offeredChange,knownValues,allowedValues,type PresetDocument,type PresetMutation
+  validatePresetDocument,presetFields,isPresetField,roleFieldIds,cameraIdField,baseId,nameRowId,heldFieldIds,capturedOffers,offeredChange,knownValues,allowedValues,withPresetFolding,type PresetDocument,type PresetMutation
 } from '../src/presets-model.js';
 import { fakeCamera } from './fake-camera.js';
 
@@ -166,6 +166,14 @@ test('settings whose values are known are always lists, and a value outside the 
   assert.throws(()=>applyPresetMutation(captured,{kind:'edit',edits:[{rowId:'ei',columnId:'c',value:'900',expected:''}]}),/900 isn’t a value Exposure Index allows/);
   const older={...doc,presets:[{...doc.presets[0]!,values:{...doc.presets[0]!.values,nd:'F'}},...doc.presets.slice(1)]};
   assert.deepEqual(validatePresetDocument(clone(older)),older,'presets saved before the lists existed still open');
+});
+
+test('folded, Presets shows what a camera role usually sets, Base ISO among them, and a section folded by hand keeps its own choice',async()=>{
+  const {visibleFields}=await import('../src/model.js');
+  const shown=visibleFields(withPresetFolding(defaultPresetDocument().view)).map(f=>f.id);
+  for(const id of [cameraIdField.id,'base-iso','ei','nd','shutter-angle','L3_SYSTEM_FRAME_RATE','L3_IMAGER_MODE','shooting-fps','wb-temperature','look-category'])assert.ok(shown.includes(id),id+' shows folded');
+  const own=defaultPresetDocument().view;own.collapsed.exposure=['gain'];
+  assert.deepEqual(visibleFields(withPresetFolding(own)).filter(f=>f.group==='exposure').map(f=>f.id),['gain']);
 });
 
 // Everything below talks to loopback fake cameras only.

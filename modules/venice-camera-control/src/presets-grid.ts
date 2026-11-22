@@ -3,7 +3,7 @@ import {
   type SpreadsheetAddress,type SpreadsheetCell,type SpreadsheetColumnGroup,type SpreadsheetColumnGroupControls,type SpreadsheetEdit,type SpreadsheetMenuItem
 } from '@hubble/module-sdk/spreadsheet-controls';
 import { groups,fieldById,clone,visibleFields,withColumnVisibility,withNoColumns,type View,type Field } from './model.js';
-import { nameRowId,holdsRowId,isPresetField,isBase,presetById,resolvedValues,roleFieldIds,heldCount,heldFieldIds,allowedValues,type PlannedSend,type PresetDocument,type PresetEdit,type PresetMutation } from './presets-model.js';
+import { nameRowId,holdsRowId,isPresetField,isBase,presetById,resolvedValues,roleFieldIds,heldCount,allowedValues,withPresetFolding,presetFolded,type PlannedSend,type PresetDocument,type PresetEdit,type PresetMutation } from './presets-model.js';
 import type { Drafts } from './draft-store.js';
 import type { CameraSummary,Observation,PresetSend } from './backend.js';
 
@@ -42,14 +42,14 @@ export async function createPresetGrid(options:PresetGridOptions){
   let active:SpreadsheetAddress|undefined,editor:{address:SpreadsheetAddress;cell:HTMLTableCellElement;input:HTMLInputElement;expected:string}|undefined,disposed=false,zoomRatio=1;
   const doc=()=>store.document,view=()=>doc().view;
   const columnIds=()=>[...doc().presets.map(p=>p.id),cameraColumnId];
-  // Only settings some preset holds exist here: what a camera reported when it was captured, and what a role sets.
-  // A setting no camera reported can't be sent, so it has no row, no section and no place in Columns.
+  // Every setting a preset can hold has a row, whether or not a camera has been read: presets are often set up with the cameras off.
   const allGroups=()=>[...view().order,...groups.map(g=>g.id).filter(id=>!view().order.includes(id))];
-  const orderedFields=(groupId:string)=>{const group=groups.find(g=>g.id===groupId)!,held=heldFieldIds(doc());return [...(view().fields[groupId]??[]),...group.fields.map(f=>f.id).filter(id=>!view().fields[groupId]?.includes(id))].map(id=>fieldById.get(id)!).filter(f=>isPresetField(f.id)&&held.has(f.id));};
-  const orderedGroups=()=>allGroups().filter(id=>!view().hiddenGroups?.includes(id)&&orderedFields(id).length>0);
+  const orderedFields=(groupId:string)=>{const group=groups.find(g=>g.id===groupId)!;return [...(view().fields[groupId]??[]),...group.fields.map(f=>f.id).filter(id=>!view().fields[groupId]?.includes(id))].map(id=>fieldById.get(id)!).filter(f=>isPresetField(f.id));};
+  const orderedGroups=()=>allGroups().filter(id=>!view().hiddenGroups?.includes(id));
+  const folded=()=>withPresetFolding(view());
   /** Folded sections show their chosen settings, plus anything a role changes, so a role's differences never hide. */
   function shownFields(groupId:string):Field[]{
-    const visible=new Set(visibleFields(view()).map(f=>f.id)),roles=roleFieldIds(doc());
+    const visible=new Set(visibleFields(folded()).map(f=>f.id)),roles=roleFieldIds(doc());
     return orderedFields(groupId).filter(f=>visible.has(f.id)||(roles.has(f.id)&&!view().hidden.includes(f.id)));
   }
   const shownRows=()=>orderedGroups().flatMap(id=>shownFields(id).map(f=>f.id));
@@ -127,9 +127,7 @@ export async function createPresetGrid(options:PresetGridOptions){
   function layout(next:View){store.submit({kind:'view',view:next,expected:clone(view())});}
   function groupDescriptor(id:string):SpreadsheetColumnGroup{
     const group=groups.find(g=>g.id===id)!;
-    // The host needs at least one field per section. A section nothing holds isn't drawn, so its header keeps the whole list.
-    const fields=orderedFields(id).length?orderedFields(id):group.fields.filter(f=>isPresetField(f.id)),ids=new Set(fields.map(f=>f.id));
-    return {id,label:group.label,columns:fields.map(f=>({id:f.id,label:f.label,fill:'copy'})),expanded:!!view().expanded[id],collapsedColumnIds:(view().collapsed[id]??group.collapsed).filter(fieldId=>ids.has(fieldId))};
+    return {id,label:group.label,columns:orderedFields(id).map(f=>({id:f.id,label:f.label,fill:'copy'})),expanded:!!view().expanded[id],collapsedColumnIds:(view().collapsed[id]??presetFolded[id]??group.collapsed).filter(isPresetField)};
   }
   for(const group of groups){
     const row=document.createElement('tr'),header=document.createElement('th'),filler=document.createElement('td'),slot=document.createElement('div');
@@ -143,8 +141,8 @@ export async function createPresetGrid(options:PresetGridOptions){
   const hideAllId='hide-all-settings';
   const columnEditor=await mountSpreadsheetColumnEditor({
     root:options.columnEditor,
-    getItems:()=>[{id:hideAllId,label:'Hide all settings',visible:groups.some(g=>!view().hiddenGroups?.includes(g.id))},...allGroups().filter(id=>orderedFields(id).length>0).map(id=>{
-      const group=groups.find(g=>g.id===id)!,visible=new Set(visibleFields({...view(),hiddenGroups:[]}).map(f=>f.id));
+    getItems:()=>[{id:hideAllId,label:'Hide all settings',visible:groups.some(g=>!view().hiddenGroups?.includes(g.id))},...allGroups().map(id=>{
+      const group=groups.find(g=>g.id===id)!,visible=new Set(visibleFields({...folded(),hiddenGroups:[]}).map(f=>f.id));
       return {id,label:group.label,visible:!view().hiddenGroups?.includes(id),fields:orderedFields(id).map(f=>({id:f.id,label:f.label,visible:visible.has(f.id)}))};
     })],
     onVisibilityChange:(id,visible)=>setVisibility([{id,visible}]),
@@ -153,7 +151,7 @@ export async function createPresetGrid(options:PresetGridOptions){
   function setVisibility(changes:readonly {id:string;visible:boolean}[]){
     const all=changes.find(change=>change.id===hideAllId);
     if(all){if(all.visible){columnEditor.refresh();return;}layout(withNoColumns(view()));return;}
-    layout(withColumnVisibility(view(),changes));
+    layout(withColumnVisibility(folded(),changes));
   }
   const menu=await createSpreadsheetContextMenu({root:table,onError:error=>options.onError(error.message)});disposers.push(menu);
   table.addEventListener('contextmenu',event=>{

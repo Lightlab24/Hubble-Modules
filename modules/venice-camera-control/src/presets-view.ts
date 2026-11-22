@@ -1,7 +1,7 @@
 import { ModuleFrontendValueSchema, type connectModuleFrontend } from '@hubble/module-sdk/frontend';
 import { mountSpreadsheetToolbar,createSpreadsheetContextMenu,type SpreadsheetMenuItem } from '@hubble/module-sdk/spreadsheet-controls';
 import { clone,groups,type Field } from './model.js';
-import { applyPresetMutation,basePreset,capturedOffers,capturedValues,heldFieldIds,inversePreset,isBase,knownValues,newRole,nameRowId,offeredChange,planSend,presetById,presetFields,resolvedValues,uniqueName,type PlannedSend,type PresetDocument,type PresetMutation,type SendChoice } from './presets-model.js';
+import { applyPresetMutation,basePreset,capturedOffers,capturedValues,inversePreset,isBase,knownValues,newRole,nameRowId,offeredChange,planSend,presetById,presetFields,resolvedValues,uniqueName,type PlannedSend,type PresetDocument,type PresetMutation,type SendChoice } from './presets-model.js';
 import { Drafts,type Receipt } from './draft-store.js';
 import { createPresetGrid,type Chosen } from './presets-grid.js';
 import type { CameraSummary,Observations,PresetSends } from './backend.js';
@@ -98,7 +98,6 @@ export async function mountPresetsView({client,report,onChange}:PresetsViewOptio
     const save=el('save-status');save.textContent=store.error||(store.pending.length?'Saving…':store.invalid.size?'Correct the highlighted cell':busy||'Workspace saved');
     save.dataset.error=String(!!store.error||store.invalid.size>0);
     el<HTMLButtonElement>('preset-capture').disabled=!!busy||!cameras.some(c=>c.host);
-    el('preset-empty').hidden=heldFieldIds(doc()).size>0;el<HTMLButtonElement>('preset-empty-capture').disabled=!!busy||!cameras.some(c=>c.host);
     // A camera that comes back, or a newly chosen one, is read in full so the comparison covers everything the preset holds.
     if(camera&&obs?.state==='online'&&fullyRead.get(camera.id)!==camera.host&&!reading.has(camera.id))void readCamera(camera,'quiet');
   }
@@ -161,7 +160,6 @@ export async function mountPresetsView({client,report,onChange}:PresetsViewOptio
     ]})));
   };
   el('preset-capture').addEventListener('click',()=>openCapture(el('preset-capture')));
-  el('preset-empty-capture').addEventListener('click',()=>openCapture(el('preset-empty-capture')));
   el('pick-preset').addEventListener('click',()=>openMenu(el('pick-preset'),'Send which preset',doc().presets.map(preset=>({id:preset.id,label:preset.name+(preset.id===chosenPreset().id?'  ✓':''),run:()=>setSend({presetId:preset.id})}))));
   el('pick-camera').addEventListener('click',()=>{
     if(!cameras.length){report('Add cameras on the Cameras tab first.');return;}
