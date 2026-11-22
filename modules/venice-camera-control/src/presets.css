@@ -1,28 +1,28 @@
-/* The Presets page reuses Camera Control's sheet with cameras in columns; these are only its differences. */
+/* The Presets tab reuses Camera Control's sheet with cameras in columns; these are only its differences. */
 .toolbar-word{color:#999;font-size:12px;margin:0 1px}
 .chevron{opacity:.6;font-size:10px;margin-left:1px}
 button.picker{max-width:280px}
 button.picker b{font-weight:600;overflow:hidden;text-overflow:ellipsis}
 button.picker small{color:#999;font-size:12px;margin-left:3px}
-button.picker[aria-expanded=true],#capture[aria-expanded=true]{background:#2e2e2e;border-color:#666}
+button.picker[aria-expanded=true],#preset-capture[aria-expanded=true]{background:#2e2e2e;border-color:#666}
 /* The label changes as a send runs, so it keeps one width and nothing beside it moves. */
-#send{min-width:168px}
-#send-status{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#send-status[data-kind=active]{color:#a2cad6}#send-status[data-kind=pending]{color:#dfbc72}#send-status[data-kind=failed]{color:#e58f80}#send-status[data-kind=done]{color:#86bca7}
+#preset-send{min-width:168px}
+#preset-status{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#preset-status[data-kind=active]{color:#a2cad6}#preset-status[data-kind=pending]{color:#dfbc72}#preset-status[data-kind=failed]{color:#e58f80}#preset-status[data-kind=done]{color:#86bca7}
 /* Base and a role's own values are plain; what a role takes from Base is dimmed. */
-#camera-grid td[data-held=own]{color:var(--hubble-text-strong,#f4f4f4);font-weight:650}
-#camera-grid td[data-held=base]{color:var(--hubble-text-strong,#f4f4f4)}
-#camera-grid td[data-held=inherited]{color:#6b6b6b}
-#camera-grid thead td[data-preset-name]{font-weight:600;color:var(--hubble-text-strong,#f4f4f4)}
-#camera-grid[data-orientation=columns] td[data-chosen=true]{background-color:#1f2228}
-#camera-grid[data-orientation=columns] thead td[data-chosen=true],#camera-grid[data-orientation=columns] thead th.column-number[data-chosen=true]{background-color:#262b33}
-#camera-grid [data-camera-column=true]{border-left:2px solid #4a4a4a}
-#camera-grid td[data-camera-column=true][aria-readonly=true]{color:#9a9a9a}
-#camera-grid td[data-match=true]{color:#8a8a8a}
-#camera-grid td[data-skip=true]{color:#e58f80}
-#camera-grid td .was{color:#9a9a9a}
-#camera-grid td .arrow{margin:0 6px;color:#9a9a9a}
-#camera-grid thead td[data-connection=online],#camera-grid thead td[data-connection=live]{color:#86bca7}
-#camera-grid thead td[data-connection=offline],#camera-grid thead td[data-connection=error]{color:#999}
-#camera-grid thead td[data-recording=recording]{color:#ff5f57;font-weight:700}
+#preset-grid td[data-held=own]{color:var(--hubble-text-strong,#f4f4f4);font-weight:650}
+#preset-grid td[data-held=base]{color:var(--hubble-text-strong,#f4f4f4)}
+#preset-grid td[data-held=inherited]{color:#6b6b6b}
+#preset-grid thead td[data-preset-name]{font-weight:600;color:var(--hubble-text-strong,#f4f4f4)}
+#preset-grid[data-orientation=columns] td[data-chosen=true]{background-color:#1f2228}
+#preset-grid[data-orientation=columns] thead td[data-chosen=true],#preset-grid[data-orientation=columns] thead th.column-number[data-chosen=true]{background-color:#262b33}
+#preset-grid [data-camera-column=true]{border-left:2px solid #4a4a4a}
+#preset-grid td[data-camera-column=true][aria-readonly=true]{color:#9a9a9a}
+#preset-grid td[data-match=true]{color:#8a8a8a}
+#preset-grid td[data-skip=true]{color:#e58f80}
+#preset-grid td .was{color:#9a9a9a}
+#preset-grid td .arrow{margin:0 6px;color:#9a9a9a}
+#preset-grid thead td[data-connection=online],#preset-grid thead td[data-connection=live]{color:#86bca7}
+#preset-grid thead td[data-connection=offline],#preset-grid thead td[data-connection=error]{color:#999}
+#preset-grid thead td[data-recording=recording]{color:#ff5f57;font-weight:700}
 .notice.info{border-color:#3f6f5f;background:#1f3a31;color:#e6fff6}

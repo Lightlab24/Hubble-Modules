@@ -7,7 +7,7 @@
     <div class="app-title"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="14" height="12" rx="2"/><path d="m17 10 4-3v10l-4-3M7 6V4h6v2"/></svg><div><h1>Camera Control</h1><p>Sony VENICE 2</p></div></div>
     <div class="header-status"><span class="status-dot"></span><span id="fleet-status">Loading workspace…</span><div class="segment send-mode" role="group" aria-label="Send mode"><button id="send-manual" aria-pressed="true" title="Edits wait in Pending sends until you press Send all">Manual</button><button id="send-auto" aria-pressed="false" title="Enter, Tab or leaving a cell sends that edit to the camera">Auto send</button></div></div>
   </header>
-  <div class="toolbar" role="toolbar" aria-label="Camera controls">
+  <div class="toolbar" id="camera-toolbar" role="toolbar" aria-label="Camera controls">
     <button id="add-camera" class="primary"><span aria-hidden="true">+</span> Add camera</button>
     <label class="camera-count">Cameras<input id="camera-count" type="number" min="0" max="24" step="1" autocomplete="off" aria-label="Number of cameras"></label>
     <span class="toolbar-divider"></span>
@@ -23,6 +23,21 @@
     <div id="column-editor" title="Choose which settings this tab shows"></div>
     <button id="details-toggle" class="icon-button" aria-label="Setting details" aria-expanded="false">ⓘ</button>
   </div>
+  <div class="toolbar" id="preset-toolbar" role="toolbar" aria-label="Preset controls" hidden>
+    <button id="new-preset" title="Add a camera role. It starts the same as Base, with the next camera letter."><span aria-hidden="true">+</span> New preset</button>
+    <button id="preset-capture" aria-haspopup="menu" title="Read every setting from a camera into Base or a new preset"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>Capture from camera<span class="chevron" aria-hidden="true">▾</span></button>
+    <span class="toolbar-divider"></span>
+    <span class="toolbar-word">Send</span>
+    <button id="pick-preset" class="picker" aria-haspopup="menu" aria-label="Preset to send"><b id="pick-preset-name">Choose preset</b><span class="chevron" aria-hidden="true">▾</span></button>
+    <span class="toolbar-word">to</span>
+    <button id="pick-camera" class="picker" aria-haspopup="menu" aria-label="Camera to send it to"><b id="pick-camera-name">Choose camera</b><small id="pick-camera-host"></small><span class="chevron" aria-hidden="true">▾</span></button>
+    <button id="preset-send" class="primary" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h13M12 6l6 6-6 6"/></svg><span id="preset-send-label">Send</span></button>
+    <button id="preset-stop" hidden>Stop</button>
+    <span class="toolbar-spacer"></span>
+    <div id="preset-text-size" aria-label="Preset text size"></div>
+    <button id="preset-expand-all">Expand all</button><button id="preset-collapse-all">Collapse all</button>
+    <div id="preset-column-editor" title="Choose which settings show"></div>
+  </div>
   <div id="error" class="notice error" role="alert" hidden></div>
   <main class="work-area">
     <div class="sheet-scroll" id="viewport"><table id="camera-grid" role="grid" aria-label="VENICE camera settings" tabindex="0"><colgroup></colgroup></table></div>
@@ -32,8 +47,12 @@
     <div id="loading" class="loading" role="status">Connecting to workspace…</div>
     <div id="empty" class="empty" hidden><h2>Add a camera</h2><p>Set how many cameras you want in the toolbar, then drag to fill their IPs. Or add one by name and address.</p><button id="empty-add" class="primary">Add camera</button></div>
   </main>
+  <main class="work-area" id="preset-area" hidden>
+    <div class="sheet-scroll" id="preset-viewport"><table id="preset-grid" role="grid" aria-label="Camera presets" tabindex="0" data-orientation="columns"><colgroup></colgroup></table></div>
+    <div id="preset-loading" class="loading" role="status">Loading presets…</div>
+  </main>
   <div id="sheet-tabs" class="sheet-tabs"></div>
-  <footer class="app-footer"><output id="save-status" aria-live="polite">Loading…</output><span title="Pinch or Ctrl+scroll to zoom the whole sheet"><output id="zoom-status" aria-label="Patch zoom">100%</output> · Pinch to zoom</span><span id="pending-status">Draft settings stay local until you send.</span></footer>
+  <footer class="app-footer"><output id="save-status" aria-live="polite">Loading…</output><span title="Pinch or Ctrl+scroll to zoom the whole sheet"><output id="zoom-status" aria-label="Patch zoom">100%</output> · Pinch to zoom</span><span id="pending-status">Draft settings stay local until you send.</span><span id="preset-status" aria-live="polite" hidden></span></footer>
 </div>
 <dialog id="camera-dialog"><form id="camera-form"><header><h2 id="dialog-title">Add camera</h2><button type="button" id="close-dialog" aria-label="Close">×</button></header><div class="dialog-body"><p id="dialog-context">Add a camera row to this workspace.</p><label id="name-label">Camera name<input id="camera-name" autocomplete="off" maxlength="96"></label><label id="host-label">Host / IP<input id="camera-host" autocomplete="off" spellcheck="false" placeholder="192.0.2.109"></label><p id="dialog-error" role="alert" hidden></p></div><footer><button type="button" id="cancel-dialog">Cancel</button><button id="dialog-submit" type="submit" class="primary">Add camera</button></footer></form></dialog>
 <dialog id="remove-dialog" aria-labelledby="remove-title"><header><h2 id="remove-title">Remove cameras?</h2></header><div class="dialog-body"><p id="remove-context">This takes the last cameras out of the plan, with their addresses, logins and staged settings. Undo brings them back.</p><p>Filled in: <span id="remove-names"></span></p></div><footer><button type="button" id="remove-cancel">Cancel</button><button type="button" id="remove-confirm" class="primary">Remove cameras</button></footer></dialog>

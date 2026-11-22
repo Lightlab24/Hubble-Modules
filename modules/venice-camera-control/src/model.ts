@@ -19,9 +19,10 @@ export interface AlertChoices { offlineNotification: boolean; offlineBounce: boo
 export const noAlerts:AlertChoices={offlineNotification:false,offlineBounce:false,onlineNotification:false};
 /** `live`: the worker holds a connection to every reachable camera until the operator switches Live off, whether or not the page is open.
  *  `autoSend`: a committed edit goes to its camera as soon as it saves. Both stay as set until switched back. */
-export interface CameraDocument { version: 1; cameras: Camera[]; view: View; sheets?: CameraSheet[]; activeSheetId?: string; alerts?: AlertChoices; live?: boolean; autoSend?: boolean }
+/** `presetsOpen`: the Presets tab is the open one. Saved like the open camera tab, never an Undo step. */
+export interface CameraDocument { version: 1; cameras: Camera[]; view: View; sheets?: CameraSheet[]; activeSheetId?: string; alerts?: AlertChoices; live?: boolean; autoSend?: boolean; presetsOpen?: boolean }
 export interface CellEdit { rowId: string; columnId: string; value: string; expected: string }
-export type Mutation = { kind:'edit'; edits:CellEdit[] } | {kind:'view'; view:View; expected:View; sheetId?:string} | {kind:'select-sheet'; sheetId:string} | {kind:'sheets'; sheets:FullSheet[]; expected:FullSheet[]; activeSheetId?:string} | {kind:'cameras'; add:Camera[]; remove:Camera[]} | {kind:'add'; camera:Camera} | {kind:'remove'; camera:Camera} | {kind:'alerts'; alerts:AlertChoices; expected:AlertChoices} | {kind:'live'; live:boolean; expected:boolean} | {kind:'auto-send'; autoSend:boolean; expected:boolean};
+export type Mutation = { kind:'edit'; edits:CellEdit[] } | {kind:'view'; view:View; expected:View; sheetId?:string} | {kind:'select-sheet'; sheetId:string} | {kind:'sheets'; sheets:FullSheet[]; expected:FullSheet[]; activeSheetId?:string} | {kind:'cameras'; add:Camera[]; remove:Camera[]} | {kind:'add'; camera:Camera} | {kind:'remove'; camera:Camera} | {kind:'alerts'; alerts:AlertChoices; expected:AlertChoices} | {kind:'live'; live:boolean; expected:boolean} | {kind:'auto-send'; autoSend:boolean; expected:boolean} | {kind:'presets-open'; open:boolean; expected:boolean};
 export const clone = <T>(value:T):T => structuredClone(value);
 const sortedKeys = (value:unknown):unknown => Array.isArray(value) ? value.map(sortedKeys) : value && typeof value==='object' ? Object.fromEntries(Object.entries(value).sort(([a],[b])=>a<b?-1:a>b?1:0).map(([key,item])=>[key,sortedKeys(item)])) : value;
 export const same = (a:unknown,b:unknown):boolean => JSON.stringify(sortedKeys(a))===JSON.stringify(sortedKeys(b));
@@ -179,6 +180,7 @@ export function validateDocument(value:unknown):CameraDocument {
   if(doc.alerts!==undefined)validateAlerts(doc.alerts);
   if(doc.live!==undefined&&typeof doc.live!=='boolean')throw Error('Invalid Live choice.');
   if(doc.autoSend!==undefined&&typeof doc.autoSend!=='boolean')throw Error('Invalid send mode.');
+  if(doc.presetsOpen!==undefined&&typeof doc.presetsOpen!=='boolean')throw Error('Invalid open tab.');
   if(JSON.stringify(doc).length>220000)throw Error('This camera plan exceeds the workspace document limit.');
   return doc;
 }
@@ -226,6 +228,10 @@ export function applyMutation(before:CameraDocument,operation:Mutation):CameraDo
     if(typeof operation.autoSend!=='boolean'||typeof operation.expected!=='boolean')throw Error('Invalid send mode.');
     if(autoSendOn(next)!==operation.expected)throw Error('The send mode was changed in another editor.');
     next.autoSend=operation.autoSend;
+  } else if(operation.kind==='presets-open') {
+    if(typeof operation.open!=='boolean'||typeof operation.expected!=='boolean')throw Error('Invalid open tab.');
+    if((next.presetsOpen===true)!==operation.expected)throw Error('The open tab was changed in another editor.');
+    if(operation.open)next.presetsOpen=true;else delete next.presetsOpen;
   } else if(operation.kind==='remove') {
     const row=next.cameras.find(r=>r.id===operation.camera.id);
     if(!row||!same(row,operation.camera))throw Error('The camera changed before removal.');
@@ -285,5 +291,6 @@ export function inverse(before:CameraDocument,operation:Mutation):Mutation {
   if(operation.kind==='alerts')return {kind:'alerts',alerts:clone(operation.expected),expected:clone(operation.alerts)};
   if(operation.kind==='live')return {kind:'live',live:operation.expected,expected:operation.live};
   if(operation.kind==='auto-send')return {kind:'auto-send',autoSend:operation.expected,expected:operation.autoSend};
+  if(operation.kind==='presets-open')return {kind:'presets-open',open:operation.expected,expected:operation.open};
   return {kind:'add',camera:clone(operation.camera)};
 }

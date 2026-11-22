@@ -34,7 +34,7 @@ export function createBackend(context:Parameters<HubbleModule['createInstance']>
     presetDoc=validatePresetDocument(saved.value??defaultPresetDocument());
     return {document:presetDoc,revision:saved.revision};
   };
-  // Followed from the first time the Presets page is used, so a workspace that never opens it does no more than before.
+  // Followed from the first time the Presets tab is used, so a workspace that never opens it does no more than before.
   let watchingPresets=false;
   function watchPresets(){
     if(watchingPresets)return;watchingPresets=true;
@@ -348,15 +348,15 @@ export function createBackend(context:Parameters<HubbleModule['createInstance']>
       }})().catch(()=>{if(!lifetime.signal.aborted)context.log({level:'error',stage:'camera-plan-watch',message:'Camera plan observation stopped.'});});
     },
     async call(method:string,raw:ModuleJsonValue|undefined,execution:{signal:AbortSignal}):Promise<ModuleJsonValue>{
-      if(!['page.cameras','page.presets'].includes(method)||!raw||typeof raw!=='object'||Array.isArray(raw))throw Error('Unknown camera page command.');
+      if(method!=='page.cameras'||!raw||typeof raw!=='object'||Array.isArray(raw))throw Error('Unknown camera page command.');
       const command=raw as {sectionId?:string;commandId?:string;value?:any};
       if(command.sectionId!=='frontend')throw Error('Unknown camera view.');
       const {signal}=execution;signal.throwIfAborted();
-      // The Presets page has its own saved document. Reading cameras and following their changes are shared with Camera Control.
-      if(method==='page.presets'){
+      // The Presets tab keeps its own saved document. Reading cameras and following their changes are shared with the camera tabs.
+      if(['presets-snapshot','presets-save','send-preset','cancel-preset'].includes(command.commandId??'')){
         watchPresets();
-        if(command.commandId==='snapshot'){await snapshot(signal);await readPresets(signal);return presetsReply() as unknown as ModuleJsonValue;}
-        if(command.commandId==='save'){
+        if(command.commandId==='presets-snapshot'){await snapshot(signal);await readPresets(signal);return presetsReply() as unknown as ModuleJsonValue;}
+        if(command.commandId==='presets-save'){
           const operation=command.value?.operation as PresetMutation;
           for(let attempt=0;attempt<3;attempt++){
             const saved=await documents.read('camera-presets',signal),next=applyPresetMutation(validatePresetDocument(saved.value??defaultPresetDocument()),operation);
@@ -375,7 +375,6 @@ export function createBackend(context:Parameters<HubbleModule['createInstance']>
           if(presetSends[rowId]?.running&&state){state.queued=[];presetSends[rowId]!.cancelled=true;publish();}
           return {status:'cancelled',presetSends} as unknown as ModuleJsonValue;
         }
-        if(!['refresh','ping','changes'].includes(command.commandId??''))throw Error('Unknown presets command.');
       }
       if(command.commandId==='snapshot')return await snapshot(signal) as unknown as ModuleJsonValue;
       if(command.commandId==='save') {

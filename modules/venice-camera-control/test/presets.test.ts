@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
 import module from '../src/index.js';
-import { fields,defaultDocument,clone,reelProperty,type CameraDocument } from '../src/model.js';
+import { fields,defaultDocument,clone,reelProperty,applyMutation,inverse,validateDocument,type CameraDocument } from '../src/model.js';
 import { Drafts } from '../src/draft-store.js';
 import { createBackend } from '../src/backend.js';
 import {
@@ -122,6 +122,16 @@ test('a new preset shows before its save, a rename lands while that save is held
   assert.match(store.error,/rejected|removed/);
 });
 
+test('an open Presets tab is saved with the plan, reverses as a pair and an older plan opens on its camera tab',()=>{
+  const before=defaultDocument();
+  assert.equal(before.presetsOpen,undefined);
+  const open=applyMutation(before,{kind:'presets-open',open:true,expected:false});
+  assert.equal(open.presetsOpen,true);assert.deepEqual(validateDocument(JSON.parse(JSON.stringify(open))),open);
+  assert.deepEqual(applyMutation(open,inverse(before,{kind:'presets-open',open:true,expected:false})),before,'closing leaves no field behind');
+  assert.throws(()=>applyMutation(open,{kind:'presets-open',open:true,expected:false}),/another editor/);
+  assert.throws(()=>validateDocument({...before,presetsOpen:'yes'}),/open tab/);
+});
+
 // Everything below talks to loopback fake cameras only.
 function workspace(plan:CameraDocument,presets:PresetDocument=defaultPresetDocument()){
   const docs:Record<string,any>={'camera-plan':{id:'camera-plan',version:1,revision:'1',value:plan},'camera-presets':{id:'camera-presets',version:1,revision:'1',value:presets}};
@@ -139,7 +149,8 @@ async function presetsBackend(ws:ReturnType<typeof workspace>){
   const states:any[]=[],logs:string[]=[];
   const backend=createBackend({services:ws.services,connectionEnabled:true,log:(trace:any)=>logs.push(trace.message),publishState:(state:any)=>states.push(state)} as any,async()=>'answered',{});
   await backend.start();
-  const call=(page:'presets'|'cameras',commandId:string,value?:any)=>backend.call('page.'+page,{sectionId:'frontend',commandId,value},{signal:new AbortController().signal} as any) as Promise<any>;
+  // Everything goes through Camera Control's page: the presets are one of its tabs.
+  const call=(commandId:string,value?:any)=>backend.call('page.cameras',{sectionId:'frontend',commandId,value},{signal:new AbortController().signal} as any) as Promise<any>;
   const values=()=>states.at(-1).values;
   return {backend,call,values,logs};
 }
@@ -151,11 +162,11 @@ test('the Presets page reads its own document and the cameras, never their login
   const ws=workspace(planFor(['127.0.0.1:9']),roles());
   const {backend,call}=await presetsBackend(ws);
   try {
-    const reply=await call('presets','snapshot');
+    const reply=await call('presets-snapshot');
     assert.deepEqual(reply.document,roles());
     assert.deepEqual(reply.cameras,[{id:'cam-0',name:'Camera 1',host:'127.0.0.1:9',login:true}]);
     assert.ok(!JSON.stringify(reply).includes('fixture-password'));
-    const saved=await call('presets','save',{operation:{kind:'edit',edits:[{rowId:'ei',columnId:'c',value:'1600',expected:''}]}});
+    const saved=await call('presets-save',{operation:{kind:'edit',edits:[{rowId:'ei',columnId:'c',value:'1600',expected:''}]}});
     assert.equal(saved.document.presets[2].values.ei,'1600');assert.equal(ws.saved('camera-presets').presets[2].values.ei,'1600');
     assert.equal(ws.saved('camera-plan').cameras.length,1,'the camera plan is untouched');
   } finally {await backend.dispose();}
@@ -166,7 +177,7 @@ test('a capture reads every setting a preset can hold, including ones no tab sho
   const ws=workspace(planFor([camera.host]));
   const {backend,call,values}=await presetsBackend(ws);
   try {
-    await call('presets','refresh',{rowId:'cam-0',host:camera.host,fieldIds:presetFields.map(f=>f.id)});
+    await call('refresh',{rowId:'cam-0',host:camera.host,fieldIds:presetFields.map(f=>f.id)});
     const read=new Set(camera.reads.flat());
     for(const id of [cameraIdField.id,'ei','wb-temperature',sdiField.id])for(const property of [field(id).property])assert.ok(read.has(property),property+' should be read');
     assert.ok(!read.has(reelProperty),'the reel is not part of a capture');
@@ -180,7 +191,7 @@ test('sending C Cam writes only what differs, confirms each one and clears Camer
   const ws=workspace(planFor([camera.host],[{'wb-temperature':'3000','ei':'1600'}]),roles());
   const {backend,call,values,logs}=await presetsBackend(ws);
   try {
-    const reply=await call('presets','send-preset',{presetId:'c',rowId:'cam-0',host:camera.host});
+    const reply=await call('send-preset',{presetId:'c',rowId:'cam-0',host:camera.host});
     assert.equal(reply.status,'started');assert.equal(reply.job.total,3);assert.equal(reply.job.same,2,'EI and base ISO already match');
     await until(()=>values().presetSends['cam-0']?.running===false);
     const job=values().presetSends['cam-0'];
@@ -192,7 +203,7 @@ test('sending C Cam writes only what differs, confirms each one and clears Camer
     assert.equal(ws.saved('camera-plan').cameras[0].values['wb-temperature']||'','', 'Send all in Camera Control can no longer put 3000 back');
     assert.equal(ws.saved('camera-plan').cameras[0].values.ei||'','');
     assert.ok(logs.some(line=>/Camera 1 ← C Cam: 3 confirmed, 0 failed/.test(line)));
-    const again=await call('presets','send-preset',{presetId:'c',rowId:'cam-0',host:camera.host});
+    const again=await call('send-preset',{presetId:'c',rowId:'cam-0',host:camera.host});
     assert.equal(again.status,'nothing-to-send');assert.equal(camera.writes.length,3);
   } finally {await backend.dispose();await camera.close();}
 });
@@ -203,14 +214,14 @@ test('a rolling camera, an empty preset and a changed address are refused before
   const ws=workspace(planFor([camera.host]),roles());
   const {backend,call,values}=await presetsBackend(ws);
   try {
-    await assert.rejects(call('presets','send-preset',{presetId:'c',rowId:'cam-0',host:camera.host}),/Camera 1 is rolling/);
+    await assert.rejects(call('send-preset',{presetId:'c',rowId:'cam-0',host:camera.host}),/Camera 1 is rolling/);
     assert.equal(camera.writes.length,0);assert.equal(values().presetSends['cam-0'].running,false);
-    await assert.rejects(call('presets','send-preset',{presetId:'c',rowId:'cam-0',host:'10.0.0.9'}),/address changed/);
-    await call('presets','save',{operation:{kind:'values',presetId:baseId,values:{},expected:roles().presets[0]!.values}});
-    await call('presets','save',{operation:{kind:'remove',preset:roles().presets[2],index:2}});
-    await call('presets','save',{operation:{kind:'remove',preset:roles().presets[1],index:1}});
+    await assert.rejects(call('send-preset',{presetId:'c',rowId:'cam-0',host:'10.0.0.9'}),/address changed/);
+    await call('presets-save',{operation:{kind:'values',presetId:baseId,values:{},expected:roles().presets[0]!.values}});
+    await call('presets-save',{operation:{kind:'remove',preset:roles().presets[2],index:2}});
+    await call('presets-save',{operation:{kind:'remove',preset:roles().presets[1],index:1}});
     assert.deepEqual(ws.saved('camera-presets').presets,empty.presets);
-    await assert.rejects(call('presets','send-preset',{presetId:baseId,rowId:'cam-0',host:camera.host}),/holds no settings/);
+    await assert.rejects(call('send-preset',{presetId:baseId,rowId:'cam-0',host:camera.host}),/holds no settings/);
   } finally {await backend.dispose();await camera.close();}
 });
 
@@ -219,11 +230,11 @@ test('Stop lets the setting being written finish and sends nothing after it, and
   const ws=workspace(planFor([camera.host],[{[sdiField.id]:'TRUE'}]),roles());
   const {backend,call,values}=await presetsBackend(ws);
   try {
-    await call('presets','send-preset',{presetId:'c',rowId:'cam-0',host:camera.host});
+    await call('send-preset',{presetId:'c',rowId:'cam-0',host:camera.host});
     await until(()=>camera.writes.length===1);
-    await assert.rejects(call('cameras','send',{rowId:'cam-0',host:camera.host,fieldIds:[sdiField.id]}),/preset is being sent/);
-    await assert.rejects(call('presets','send-preset',{presetId:'a',rowId:'cam-0',host:camera.host}),/already sending/);
-    await call('presets','cancel-preset',{rowId:'cam-0'});
+    await assert.rejects(call('send',{rowId:'cam-0',host:camera.host,fieldIds:[sdiField.id]}),/preset is being sent/);
+    await assert.rejects(call('send-preset',{presetId:'a',rowId:'cam-0',host:camera.host}),/already sending/);
+    await call('cancel-preset',{rowId:'cam-0'});
     await until(()=>values().presetSends['cam-0']?.running===false);
     const job=values().presetSends['cam-0'];
     assert.equal(camera.writes.length,1);assert.equal(job.done,1);assert.equal(job.cancelled,true);
@@ -235,7 +246,7 @@ test('a camera that drops part way through stops the send and shows offline',asy
   const ws=workspace(planFor([camera.host]),roles());
   const {backend,call,values}=await presetsBackend(ws);
   try {
-    await call('presets','send-preset',{presetId:'c',rowId:'cam-0',host:camera.host});
+    await call('send-preset',{presetId:'c',rowId:'cam-0',host:camera.host});
     await until(()=>camera.writes.length===1);
     await camera.close();
     await until(()=>values().presetSends['cam-0']?.running===false);
@@ -244,10 +255,12 @@ test('a camera that drops part way through stops the send and shows offline',asy
   } finally {await backend.dispose();await camera.close();}
 });
 
-test('the module declares the Presets page and its document',async()=>{
+test('Presets is a tab of Camera Control: one page, its own document and its commands',async()=>{
   const {default:manifest}=await import('../src/manifest.js');
-  assert.deepEqual(manifest.pages!.map(p=>[p.id,p.label]),[['cameras','Camera Control'],['presets','Presets']]);
-  assert.ok(manifest.capabilities.includes('service.page.presets'));
+  assert.deepEqual(manifest.pages!.map(p=>[p.id,p.label]),[['cameras','Camera Control']]);
+  assert.ok(!manifest.capabilities.includes('service.page.presets'));
+  const section=manifest.pages![0]!.sections[0] as {commands:{id:string}[]};
+  for(const id of ['presets-snapshot','presets-save','send-preset','cancel-preset'])assert.ok(section.commands.some(c=>c.id===id),id);
   assert.deepEqual(manifest.documents!.map(d=>d.id),['camera-plan','camera-presets']);
   assert.deepEqual(validatePresetDocument(manifest.documents![1]!.defaultValue),defaultPresetDocument());
   assert.equal(typeof module.createInstance,'function');

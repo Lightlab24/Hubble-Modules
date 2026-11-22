@@ -3,6 +3,7 @@ import { mountSpreadsheetSheets,mountSpreadsheetToolbar,type SpreadsheetAddress 
 import { alertChoices, alertsOn, autoSendOn, liveOn, readFieldIds, sameValue, type AlertChoices, groups, fields, fieldById, valueOf, clone, validHost, activeSheetId, isFlipped, sheetList, sheetRowCount, addSheet, renameSheet, removeSheet, moveSheet, setOrientation, viewChange, setCameraCount, cameraHasData, loginVisible, type Camera, type CameraDocument, type CellEdit, type Field, type Mutation, type Orientation } from './model.js';
 import { DraftStore, type SaveReceipt } from './draft-store.js';
 import { createCameraGrid } from './ui-grid.js';
+import { mountPresetsView } from './presets-view.js';
 import type { Observations } from './backend.js';
 import './frontend.css';
 
@@ -24,7 +25,7 @@ function adopt(next:{observations?:Observations;sequence?:number}){
   if(typeof next.sequence==='number'){if(next.sequence<newestState)return;newestState=next.sequence;}
   observations=next.observations;
 }
-function report(message:string){clearTimeout(errorTimer);errorBox.getAnimations().forEach(animation=>animation.cancel());errorBox.textContent=message;errorBox.hidden=!message;if(message){errorBox.animate([{opacity:1},{opacity:0}],{duration:250,delay:4250,fill:'forwards'});errorTimer=setTimeout(()=>{errorBox.hidden=true;},4500);}}
+function report(message:string,kind:'error'|'info'='error'){clearTimeout(errorTimer);errorBox.getAnimations().forEach(animation=>animation.cancel());errorBox.textContent=message;errorBox.hidden=!message;errorBox.classList.toggle('info',kind==='info');if(message){errorBox.animate([{opacity:1},{opacity:0}],{duration:250,delay:4250,fill:'forwards'});errorTimer=setTimeout(()=>{errorBox.hidden=true;},4500);}}
 try {
   const client=await connectModuleFrontend(window);
   const initial=await client.call('snapshot') as unknown as Snapshot;
@@ -38,15 +39,44 @@ try {
     onChange(textSize){store.submit(viewChange(store.document,{...clone(store.document.view),textSize}));}
   }});
   const submitSheets=(operation:Mutation|null)=>{if(operation)store.submit(operation);};
+  // Presets is the last tab, after the camera tabs. It is a view of its own saved presets, not a camera layout,
+  // so it can't be renamed, removed or moved. Whether it is open is saved with the plan, like the open camera tab.
+  const presetsTabId='presets-tab';
+  let presets:Awaited<ReturnType<typeof mountPresetsView>>|undefined,presetsLoading:Promise<void>|undefined,presetsOpen=false,presetsCount=0;
   const sheetTabs=await mountSpreadsheetSheets({
     root:el('sheet-tabs'),
-    getState(){const document=store.document,list=sheetList(document);return {sheets:list.map(({id,name})=>({id,name})),activeSheetId:activeSheetId(document),counts:new Map(list.map(sheet=>[sheet.id,sheetRowCount(document,sheet)]))};},
-    onSelect(sheetId){if(sheetId!==activeSheetId(store.document))store.submit({kind:'select-sheet',sheetId},false);},
-    onCreate:name=>submitSheets(addSheet(store.document,crypto.randomUUID(),name)),
-    onRename:(sheetId,name)=>submitSheets(renameSheet(store.document,sheetId,name)),
-    onRemove:sheetId=>submitSheets(removeSheet(store.document,sheetId)),
-    onReorder:(sheetId,beforeId)=>submitSheets(moveSheet(store.document,sheetId,beforeId))
+    getState(){const document=store.document,list=sheetList(document);return {sheets:[...list.map(({id,name})=>({id,name})),{id:presetsTabId,name:'Presets'}],activeSheetId:presetsOpen?presetsTabId:activeSheetId(document),counts:new Map([...list.map(sheet=>[sheet.id,sheetRowCount(document,sheet)] as const),[presetsTabId,presetsCount]])};},
+    onSelect(sheetId){
+      if(sheetId===presetsTabId){openPresets(true);return;}
+      openPresets(false);
+      if(sheetId!==activeSheetId(store.document))store.submit({kind:'select-sheet',sheetId},false);
+    },
+    onCreate:name=>{openPresets(false);submitSheets(addSheet(store.document,crypto.randomUUID(),name));},
+    onRename:(sheetId,name)=>{if(sheetId===presetsTabId){report('The Presets tab keeps its name.');sheetTabs.refresh();return;}submitSheets(renameSheet(store.document,sheetId,name));},
+    onRemove:sheetId=>{if(sheetId===presetsTabId){report('The Presets tab can’t be removed.');return;}submitSheets(removeSheet(store.document,sheetId));},
+    onReorder:(sheetId,beforeId)=>{if(sheetId===presetsTabId){sheetTabs.refresh();return;}submitSheets(moveSheet(store.document,sheetId,beforeId===presetsTabId?null:beforeId));}
   });
+  const cameraArea=document.querySelector<HTMLElement>('main.work-area:not(#preset-area)')!;
+  function loadPresets():Promise<void>{
+    return presetsLoading??=(async()=>{
+      try {
+        presets=await mountPresetsView({client,report,onChange(){if(presets&&presets.count!==presetsCount){presetsCount=presets.count;sheetTabs.refresh();}}});
+        presetsCount=presets.count;sheetTabs.refresh();
+        if(presetsOpen)presets.show();
+      } catch(error){el('preset-loading').textContent='Presets could not load. '+(error instanceof Error?error.message:'');presetsLoading=undefined;}
+    })();
+  }
+  function openPresets(open:boolean){
+    if(open===presetsOpen)return;
+    presetsOpen=open;
+    const saved=store.document.presetsOpen===true;
+    if(saved!==open)store.submit({kind:'presets-open',open,expected:saved},false);
+    el('camera-toolbar').hidden=open;cameraArea.hidden=open;el('pending-status').hidden=open;
+    el('preset-toolbar').hidden=!open;el('preset-area').hidden=!open;el('preset-status').hidden=!open;
+    if(open){if(presets)presets.show();else void loadPresets();}
+    else {presets?.hide();grid.refresh();update();}
+    sheetTabs.refresh();
+  }
   const orientationButtons=[['view-rows','rows'],['view-columns','columns']] as [string,Orientation][];
   const activeRow=()=>store.document.cameras.find(row=>row.id===active?.rowId)??store.document.cameras[0];
   const rowObservation=(id:string)=>{
@@ -78,8 +108,10 @@ try {
     const cameraCount=input('camera-count');if(document.activeElement!==cameraCount)cameraCount.value=String(store.document.cameras.length);
     el<HTMLButtonElement>('refresh-camera').disabled=busy||!store.document.cameras.some(r=>valueOf(r,'camera-host'));el('refresh-label').textContent=busy?'Working…':'Refresh all';
     el('pending-count').textContent=String(all);el('pending-count').hidden=all===0;el('pending-toggle').dataset.pending=String(all>0);
-    saveStatus.textContent=store.error|| (store.pending.length?'Saving…':store.invalid.size?'Correct the highlighted draft':'Workspace saved');
-    saveStatus.dataset.error=String(!!store.error||store.invalid.size>0);
+    if(!presetsOpen){
+      saveStatus.textContent=store.error|| (store.pending.length?'Saving…':store.invalid.size?'Correct the highlighted draft':'Workspace saved');
+      saveStatus.dataset.error=String(!!store.error||store.invalid.size>0);
+    }
     pendingStatus.textContent=inFlight?inFlight+' sending · '+Math.max(0,all-inFlight)+' pending':all?all+' change'+(all===1?'':'s')+' pending':'No changes pending';
     pendingStatus.dataset.pending=String(all>0);
     el('empty').hidden=store.document.cameras.length>0;
@@ -401,6 +433,9 @@ try {
   el('loading').hidden=true;pageReady=true;update();
   knownFields=new Set(readIds());store.subscribe(noticeNewFields);
   void watchCameras();
-  const first=store.document.cameras[0];if(first)grid.select({rowId:first.id,columnId:'camera-name'});
-  window.addEventListener('pagehide',()=>{disposed=true;clearTimeout(watchTimer);stop();grid.dispose();textControls.dispose();sheetTabs.dispose();client.dispose();},{once:true});
+  if(store.document.presetsOpen===true)openPresets(true);
+  else {const first=store.document.cameras[0];if(first)grid.select({rowId:first.id,columnId:'camera-name'});}
+  // Loaded behind the camera tab, so the Presets tab shows its count and opens at once.
+  setTimeout(()=>void loadPresets(),0);
+  window.addEventListener('pagehide',()=>{disposed=true;clearTimeout(watchTimer);stop();grid.dispose();textControls.dispose();sheetTabs.dispose();presets?.dispose();client.dispose();},{once:true});
 }catch(error){el('loading').hidden=true;report(error instanceof Error?error.message:'Camera Control could not start.');saveStatus.textContent='Workspace unavailable';}

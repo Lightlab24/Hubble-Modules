@@ -12,7 +12,7 @@ export default defineModuleManifest({
     'module-spreadsheet-layout-v1', 'module-spreadsheet-extended-editing-v1', 'module-spreadsheet-workbook-tools-v1', 'module-documents-v1', 'host-service-registry-v1', 'host-alert-choices-v1'
   ] },
   configVersion: 1,
-  capabilities: ['host.documents', 'service.page.cameras', 'service.page.presets'],
+  capabilities: ['host.documents', 'service.page.cameras'],
   settings: [], actions: [], feedback: [],
   documents: [
     { id: 'camera-plan', label: 'Camera plan', version: 1, defaultValue: ModuleDocumentValueSchema.parse(defaultDocument()) },
@@ -26,15 +26,8 @@ export default defineModuleManifest({
       { id: 'disconnect', label: 'Disconnect camera' }, { id: 'send', label: 'Send camera settings' },
       { id: 'cancel-send', label: 'Cancel queued camera settings' },
       { id: 'ping', label: 'Check which cameras answer a ping' },
-      { id: 'changes', label: 'Wait for the next camera change' }
-    ]
-  }] }, { id: 'presets', label: 'Presets', icon: 'ui/presets.svg', layout: 'full-page', sections: [{
-    type: 'custom', id: 'frontend', label: 'Camera presets', entry: 'ui/presets.html', height: 560,
-    commands: [
-      { id: 'snapshot', label: 'Read presets' }, { id: 'save', label: 'Save presets' },
-      { id: 'refresh', label: 'Read camera settings' },
-      { id: 'ping', label: 'Check which cameras answer a ping' },
       { id: 'changes', label: 'Wait for the next camera change' },
+      { id: 'presets-snapshot', label: 'Read presets' }, { id: 'presets-save', label: 'Save presets' },
       { id: 'send-preset', label: 'Send a preset to a camera' },
       { id: 'cancel-preset', label: 'Stop sending a preset' }
     ]
