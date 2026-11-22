@@ -11,15 +11,21 @@ export const maxPresets=32;
 export interface Preset { id:string; name:string; values:Record<string,string> }
 /** The Send box: which preset goes to which camera. Remembered, never an Undo step. */
 export interface SendChoice { presetId?:string; cameraId?:string }
-export interface PresetDocument { version:1; presets:Preset[]; view:View; send?:SendChoice }
+/**
+ * `offered`: for each setting, the values the camera allowed when it was captured. The Presets dropdowns offer only these,
+ * so a preset can't hold something the camera never offered. A send still checks the camera's own list at the time.
+ */
+export interface PresetDocument { version:1; presets:Preset[]; view:View; send?:SendChoice; offered?:Record<string,string[]> }
+/** Allowed values a capture changes: a list per setting, or null where there was none before. */
+export type OfferedChange=Record<string,string[]|null>;
 /** rowId is a setting (or the name row) and columnId is a preset, the way the page lays them out. */
 export interface PresetEdit { rowId:string; columnId:string; value:string; expected:string }
 export type PresetMutation =
   | {kind:'edit';edits:PresetEdit[]}
   | {kind:'view';view:View;expected:View}
-  | {kind:'add';preset:Preset;index:number}
-  | {kind:'remove';preset:Preset;index:number}
-  | {kind:'values';presetId:string;values:Record<string,string>;expected:Record<string,string>}
+  | {kind:'add';preset:Preset;index:number;offered?:OfferedChange;offeredBefore?:OfferedChange}
+  | {kind:'remove';preset:Preset;index:number;offered?:OfferedChange;offeredBefore?:OfferedChange}
+  | {kind:'values';presetId:string;values:Record<string,string>;expected:Record<string,string>;offered?:OfferedChange;offeredBefore?:OfferedChange}
   | {kind:'send';send:SendChoice;expected:SendChoice};
 
 /** Every setting a preset can hold. The reel belongs to the day's cards, not to a camera's role. */
@@ -51,6 +57,8 @@ export function presetValue(doc:PresetDocument,presetId:string,fieldId:string):{
   return {value:isBase(presetId)?'':basePreset(doc).values[fieldId]??'',own:false};
 }
 export const heldCount=(preset:Preset):number=>Object.keys(preset.values).length;
+/** Every setting some preset holds. Only these show: a setting no camera reported can't be sent anyway. */
+export const heldFieldIds=(doc:PresetDocument):Set<string>=>new Set(doc.presets.flatMap(p=>Object.keys(p.values)));
 /** Settings any role changes from Base. They always show, so a role's differences can't hide in a folded section. */
 export const roleFieldIds=(doc:PresetDocument):Set<string>=>new Set(doc.presets.filter(p=>!isBase(p)).flatMap(p=>Object.keys(p.values)));
 
@@ -81,6 +89,39 @@ export function capturedValues(values:Record<string,string>):{values:Record<stri
   return {values:kept,dropped};
 }
 
+const maxOffered=400,offeredBudget=120000;
+/**
+ * The allowed values a camera reported for the settings a capture keeps, limited to values a preset can hold.
+ * The longest lists go first if they would make the saved presets too large.
+ */
+export function capturedOffers(choices:Record<string,{value:string}[]|undefined>,values:Record<string,string>):Record<string,string[]> {
+  const kept:Record<string,string[]>={};
+  for(const id of Object.keys(values)){
+    const list=[...new Set((choices[id]??[]).map(choice=>choice.value).filter(value=>value&&!validateValue(id,value)))];
+    if(list.length&&list.length<=maxOffered)kept[id]=list;
+  }
+  while(JSON.stringify(kept).length>offeredBudget){
+    const longest=Object.entries(kept).sort((a,b)=>b[1].length-a[1].length)[0];if(!longest)break;delete kept[longest[0]];
+  }
+  return kept;
+}
+/** What a capture changes in the allowed values, and what was there before, so Undo puts it back. */
+export function offeredChange(doc:PresetDocument,offered:Record<string,string[]>):{offered:OfferedChange;offeredBefore:OfferedChange} {
+  const before:OfferedChange={};
+  for(const id of Object.keys(offered))before[id]=doc.offered?.[id]?clone(doc.offered[id]!):null;
+  return {offered:clone(offered),offeredBefore:before};
+}
+function applyOffered(next:PresetDocument,change:OfferedChange|undefined,before:OfferedChange|undefined):void {
+  if(!change)return;
+  if(!before||typeof change!=='object'||typeof before!=='object')throw Error('Invalid allowed values.');
+  const offered={...next.offered};
+  for(const [id,list]of Object.entries(change)){
+    if(!same(offered[id]??null,before[id]??null))throw Error('The allowed values changed in another editor.');
+    if(list===null)delete offered[id];else offered[id]=clone(list);
+  }
+  if(Object.keys(offered).length)next.offered=offered;else delete next.offered;
+}
+
 function validatePresetValue(fieldId:string,value:string):void {
   if(!isPresetField(fieldId))throw Error(fieldById.has(fieldId)?'The reel number is set per camera, not in a preset.':'Unknown camera setting.');
   if(typeof value!=='string'||!value)throw Error('A preset holds only settings with a value.');
@@ -107,6 +148,13 @@ export function validatePresetDocument(value:unknown):PresetDocument {
   }
   validateView(doc.view);
   if(doc.send!==undefined&&(typeof doc.send!=='object'||Object.entries(doc.send).some(([k,v])=>!['presetId','cameraId'].includes(k)||typeof v!=='string')))throw Error('Invalid send choice.');
+  if(doc.offered!==undefined){
+    if(!doc.offered||typeof doc.offered!=='object'||Array.isArray(doc.offered))throw Error('Invalid allowed values.');
+    for(const [id,list]of Object.entries(doc.offered)){
+      if(!isPresetField(id)||!Array.isArray(list)||!list.length||list.length>maxOffered||new Set(list).size!==list.length)throw Error('Invalid allowed values.');
+      for(const value of list)if(typeof value!=='string'||!value||validateValue(id,value))throw Error('Invalid allowed values.');
+    }
+  }
   if(JSON.stringify(doc).length>220000)throw Error('These presets exceed the workspace document limit.');
   return doc;
 }
@@ -135,16 +183,19 @@ export function applyPresetMutation(before:PresetDocument,operation:PresetMutati
     if(presetById(next,operation.preset.id))throw Error('This preset is already here.');
     if(!Number.isInteger(operation.index)||operation.index<1||operation.index>next.presets.length)throw Error('A preset goes after Base.');
     next.presets.splice(operation.index,0,clone(operation.preset));
+    applyOffered(next,operation.offered,operation.offeredBefore);
   } else if(operation.kind==='remove'){
     const index=next.presets.findIndex(p=>p.id===operation.preset.id);
     if(isBase(operation.preset.id))throw Error('Base can’t be removed.');
     if(index<0||!same(next.presets[index],operation.preset))throw Error('This preset changed before it could be removed.');
     next.presets.splice(index,1);
     if(next.send?.presetId===operation.preset.id)delete next.send.presetId;
+    applyOffered(next,operation.offered,operation.offeredBefore);
   } else if(operation.kind==='values'){
     const preset=presetById(next,operation.presetId);if(!preset)throw Error('This preset was removed before the capture saved.');
     if(!same(preset.values,operation.expected))throw Error('This preset changed in another editor.');
     preset.values=clone(operation.values);
+    applyOffered(next,operation.offered,operation.offeredBefore);
   } else if(operation.kind==='send'){
     if(!same(next.send??{},operation.expected))throw Error('The send choice changed in another editor.');
     next.send=clone(operation.send);
@@ -154,9 +205,10 @@ export function applyPresetMutation(before:PresetDocument,operation:PresetMutati
 export function inversePreset(before:PresetDocument,operation:PresetMutation):PresetMutation {
   if(operation.kind==='edit')return {kind:'edit',edits:operation.edits.map(e=>({...e,expected:e.rowId===nameRowId?e.value.trim():e.value,value:e.expected}))};
   if(operation.kind==='view')return {kind:'view',view:clone(operation.expected),expected:clone(operation.view)};
-  if(operation.kind==='add')return {kind:'remove',preset:clone(operation.preset),index:operation.index};
-  if(operation.kind==='remove')return {kind:'add',preset:clone(operation.preset),index:Math.max(1,before.presets.findIndex(p=>p.id===operation.preset.id))};
-  if(operation.kind==='values')return {kind:'values',presetId:operation.presetId,values:clone(operation.expected),expected:clone(operation.values)};
+  const offered=(op:{offered?:OfferedChange;offeredBefore?:OfferedChange})=>op.offered?{offered:clone(op.offeredBefore!),offeredBefore:clone(op.offered)}:{};
+  if(operation.kind==='add')return {kind:'remove',preset:clone(operation.preset),index:operation.index,...offered(operation)};
+  if(operation.kind==='remove')return {kind:'add',preset:clone(operation.preset),index:Math.max(1,before.presets.findIndex(p=>p.id===operation.preset.id)),...offered(operation)};
+  if(operation.kind==='values')return {kind:'values',presetId:operation.presetId,values:clone(operation.expected),expected:clone(operation.values),...offered(operation)};
   return {kind:'send',send:clone(operation.expected),expected:clone(operation.send)};
 }
 

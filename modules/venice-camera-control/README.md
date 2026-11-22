@@ -92,11 +92,14 @@ of the two is open is saved with the camera plan. Presets are saved in the scope
 `camera-presets` document, so they travel with workspace exports.
 
 - **Base** holds a whole camera. **Capture from camera** reads every setting a preset can hold
-  from one camera (everything but the reel number) into Base or into a new preset. Undo puts the
-  old values back.
+  from one camera (everything but the reel number) into Base or into a new preset, together with
+  the values the camera allows for each setting. Undo puts both back.
+- Only settings a preset holds show: what a camera reported, and what a role sets. Before the
+  first capture the tab says to capture a camera. Dropdowns offer the values the camera allowed
+  when it was captured, or the module's own list where the camera gave none.
 - Every other preset (**New preset** makes A Cam, B Cam… with that Camera ID) holds only its
-  own values. Grey cells come from Base; typing gives the role its own value, and Delete or
-  **Use Base** puts it back. Sections show their usual settings plus anything a role changes.
+  own values. Grey cells come from Base; typing or picking gives the role its own value, and
+  Delete or **Use Base** puts it back. Sections show their usual settings plus anything a role changes.
 - **Send [preset] to [camera]** compares the preset with what the camera reports now. The
   right-hand column shows each change as *now → preset*, a value the camera doesn't offer, or a
   setting it doesn't report. **Send** writes only the differences, one at a time, each confirmed

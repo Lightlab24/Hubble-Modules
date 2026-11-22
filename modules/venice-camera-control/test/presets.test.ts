@@ -7,7 +7,7 @@ import { Drafts } from '../src/draft-store.js';
 import { createBackend } from '../src/backend.js';
 import {
   applyPresetMutation,inversePreset,defaultPresetDocument,resolvedValues,presetValue,newRole,uniqueName,capturedValues,planSend,sendOrder,
-  validatePresetDocument,presetFields,isPresetField,roleFieldIds,cameraIdField,baseId,nameRowId,type PresetDocument,type PresetMutation
+  validatePresetDocument,presetFields,isPresetField,roleFieldIds,cameraIdField,baseId,nameRowId,heldFieldIds,capturedOffers,offeredChange,type PresetDocument,type PresetMutation
 } from '../src/presets-model.js';
 import { fakeCamera } from './fake-camera.js';
 
@@ -132,6 +132,25 @@ test('an open Presets tab is saved with the plan, reverses as a pair and an olde
   assert.throws(()=>validateDocument({...before,presetsOpen:'yes'}),/open tab/);
 });
 
+test('only settings a preset holds show, and a capture keeps the values the camera allows for them',()=>{
+  const doc=roles();
+  assert.deepEqual([...heldFieldIds(doc)].sort(),[cameraIdField.id,'ei','base-iso','wb-temperature',sdiField.id].sort());
+  assert.deepEqual(heldFieldIds(defaultPresetDocument()).size,0,'before a capture nothing shows');
+  const offers=capturedOffers({ei:[{value:'800'},{value:'1600'},{value:'800'}],[cameraIdField.id]:[{value:'A'},{value:'not a letter'},{value:'C'}],'wb-tint':[{value:'0'}],'gain':[]},{ei:'800',[cameraIdField.id]:'A',gain:'0'});
+  assert.deepEqual(offers,{ei:['800','1600'],[cameraIdField.id]:['A','C']},'duplicates and values a preset can’t hold go; settings not captured are left out');
+  const before=clone(doc.presets[0]!.values),capture:PresetMutation={kind:'values',presetId:baseId,values:{ei:'800'},expected:before,...offeredChange(doc,offers)};
+  const captured=applyPresetMutation(doc,capture);
+  assert.deepEqual(captured.offered,offers);
+  assert.deepEqual(applyPresetMutation(captured,inversePreset(doc,capture)),doc,'Undo takes the allowed values away again');
+  const again=applyPresetMutation(captured,{kind:'values',presetId:baseId,values:{ei:'800'},expected:{ei:'800'},...offeredChange(captured,{ei:['800','3200']})});
+  assert.deepEqual(again.offered,{ei:['800','3200'],[cameraIdField.id]:['A','C']},'a later capture replaces only what it read');
+  assert.throws(()=>validatePresetDocument({...doc,offered:{ei:['eight hundred']}}),/allowed values/);
+  assert.throws(()=>validatePresetDocument({...doc,offered:{[fields.find(f=>f.property===reelProperty)!.id]:['1']}}),/allowed values/);
+  const huge=Object.fromEntries(presetFields.filter(f=>f.kind==='number').map(f=>[f.id,Array.from({length:300},(_,n)=>({value:String(n*7)}))]));
+  const kept=capturedOffers(huge,Object.fromEntries(Object.keys(huge).map(id=>[id,'0'])));
+  assert.ok(JSON.stringify(kept).length<=120000,'long lists are dropped before the saved presets grow too large');
+});
+
 // Everything below talks to loopback fake cameras only.
 function workspace(plan:CameraDocument,presets:PresetDocument=defaultPresetDocument()){
   const docs:Record<string,any>={'camera-plan':{id:'camera-plan',version:1,revision:'1',value:plan},'camera-presets':{id:'camera-presets',version:1,revision:'1',value:presets}};
@@ -173,7 +192,7 @@ test('the Presets page reads its own document and the cameras, never their login
 });
 
 test('a capture reads every setting a preset can hold, including ones no tab shows',async()=>{
-  const camera=await fakeCamera({values:cameraValues(66)});
+  const camera=await fakeCamera({values:cameraValues(66),offers:{'Camera.Gain.ExposureIndex.Value':['800EI','1600EI','3200EI'],'P.System.Menu.ClipnamingCameraid':[65,66,67]}});
   const ws=workspace(planFor([camera.host]));
   const {backend,call,values}=await presetsBackend(ws);
   try {
@@ -181,8 +200,9 @@ test('a capture reads every setting a preset can hold, including ones no tab sho
     const read=new Set(camera.reads.flat());
     for(const id of [cameraIdField.id,'ei','wb-temperature',sdiField.id])for(const property of [field(id).property])assert.ok(read.has(property),property+' should be read');
     assert.ok(!read.has(reelProperty),'the reel is not part of a capture');
-    const {values:captured}=capturedValues(values().observations['cam-0'].values);
+    const obs=values().observations['cam-0'],{values:captured}=capturedValues(obs.values);
     assert.equal(captured[cameraIdField.id],'B');assert.equal(captured.ei,'800');assert.equal(captured[sdiField.id],'FALSE');
+    assert.deepEqual(capturedOffers(obs.choices,captured),{ei:['800','1600','3200'],[cameraIdField.id]:['A','B','C'],'base-iso':['800','3200']},'the camera’s allowed values come with the capture, and Base ISO its sensor’s pair');
   } finally {await backend.dispose();await camera.close();}
 });
 

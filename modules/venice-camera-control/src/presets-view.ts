@@ -1,7 +1,7 @@
 import { ModuleFrontendValueSchema, type connectModuleFrontend } from '@hubble/module-sdk/frontend';
 import { mountSpreadsheetToolbar,createSpreadsheetContextMenu,type SpreadsheetMenuItem } from '@hubble/module-sdk/spreadsheet-controls';
 import { clone,groups,type Field } from './model.js';
-import { applyPresetMutation,basePreset,capturedValues,inversePreset,isBase,newRole,nameRowId,planSend,presetById,presetFields,resolvedValues,uniqueName,type PlannedSend,type PresetDocument,type PresetMutation,type SendChoice } from './presets-model.js';
+import { applyPresetMutation,basePreset,capturedOffers,capturedValues,heldFieldIds,inversePreset,isBase,newRole,nameRowId,offeredChange,planSend,presetById,presetFields,resolvedValues,uniqueName,type PlannedSend,type PresetDocument,type PresetMutation,type SendChoice } from './presets-model.js';
 import { Drafts,type Receipt } from './draft-store.js';
 import { createPresetGrid,type Chosen } from './presets-grid.js';
 import type { CameraSummary,Observations,PresetSends } from './backend.js';
@@ -87,6 +87,7 @@ export async function mountPresetsView({client,report,onChange}:PresetsViewOptio
     if(job?.running){status='Sending '+job.name+' to '+camera!.name+': '+job.settled+' of '+job.total+(job.failed.length?' · '+job.failed.length+' failed':'');kind='active';}
     else if(job?.finishedAt&&job.presetId===preset.id&&!job.error&&count===0&&!job.failed.length){status=job.name+' is on '+camera!.name+': '+plural(job.done,'setting')+' confirmed'+(job.skipped.length?' · '+job.skipped.length+' skipped':'');kind='done';}
     else if(job?.finishedAt&&(job.error||job.failed.length)){status=job.name+' → '+camera!.name+': '+job.done+' confirmed'+(job.failed.length?', '+job.failed.length+' failed':'')+(job.skipped.length?', '+job.skipped.length+' skipped':'')+(job.error?' · '+job.error:'');kind='failed';}
+    else if(!Object.keys(resolvedValues(doc(),preset.id)).length)status=preset.name+' holds no settings yet. Capture a camera into Base.';
     else if(!camera)status='Choose a camera to compare with '+preset.name;
     else if(obs?.state!=='online')status=camera.name+(obs?.state==='error'?' couldn’t be read':' isn’t answering');
     else if(rolling)status=camera.name+' is rolling. Send when it stops.';
@@ -95,6 +96,7 @@ export async function mountPresetsView({client,report,onChange}:PresetsViewOptio
     const save=el('save-status');save.textContent=store.error||(store.pending.length?'Saving…':store.invalid.size?'Correct the highlighted cell':busy||'Workspace saved');
     save.dataset.error=String(!!store.error||store.invalid.size>0);
     el<HTMLButtonElement>('preset-capture').disabled=!!busy||!cameras.some(c=>c.host);
+    el('preset-empty').hidden=heldFieldIds(doc()).size>0;el<HTMLButtonElement>('preset-empty-capture').disabled=!!busy||!cameras.some(c=>c.host);
     // A camera that comes back, or a newly chosen one, is read in full so the comparison covers everything the preset holds.
     if(camera&&obs?.state==='online'&&fullyRead.get(camera.id)!==camera.host&&!reading.has(camera.id))void readCamera(camera,'quiet');
   }
@@ -123,9 +125,11 @@ export async function mountPresetsView({client,report,onChange}:PresetsViewOptio
       const obs=observationOf(camera);if(obs?.state!=='online'){report(camera.name+' couldn’t be read.');return;}
       const {values,dropped}=capturedValues(obs.values),count=Object.keys(values).length;
       if(!count){report(camera.name+' reported no settings a preset can hold.');return;}
-      if(into==='base'){const base=basePreset(doc());store.submit({kind:'values',presetId:base.id,values,expected:clone(base.values)});}
-      else{const id=crypto.randomUUID();store.submit({kind:'add',preset:{id,name:uniqueName(doc(),camera.name),values},index:doc().presets.length});grid.select({rowId:nameRowId,columnId:id});}
-      report('Captured '+plural(count,'setting')+' from '+camera.name+(into==='base'?' into Base':' as a new preset')+(dropped.length?'. '+plural(dropped.length,'setting')+' had values a preset can’t hold yet.':'.'),'info');
+      // The values the camera allows for each setting come with it, so the dropdowns offer only those.
+      const offers=capturedOffers(obs.choices,values),lists=Object.keys(offers).length,change=offeredChange(doc(),offers);
+      if(into==='base'){const base=basePreset(doc());store.submit({kind:'values',presetId:base.id,values,expected:clone(base.values),...change});}
+      else{const id=crypto.randomUUID();store.submit({kind:'add',preset:{id,name:uniqueName(doc(),camera.name),values},index:doc().presets.length,...change});grid.select({rowId:nameRowId,columnId:id});}
+      report('Captured '+plural(count,'setting')+' from '+camera.name+(into==='base'?' into Base':' as a new preset')+(lists?', with the values it allows for '+plural(lists,'setting'):'')+(dropped.length?'. '+plural(dropped.length,'setting')+' had values a preset can’t hold yet.':'.'),'info');
     } finally {busy='';refresh();}
   }
   async function sendPreset(){
@@ -147,13 +151,15 @@ export async function mountPresetsView({client,report,onChange}:PresetsViewOptio
     document.addEventListener('keydown',event=>{if(event.key==='Escape')reset();},{once:true});
   }
   const cameraState=(camera:CameraSummary)=>{const obs=observationOf(camera);return !camera.host?'No address':!camera.login?'No login':obs?.state==='online'?(obs.recording==='recording'?'Rolling':'Ready'):obs?.state==='error'?'Read failed':obs?'Offline':'Not read';};
-  el('preset-capture').addEventListener('click',()=>{
+  const openCapture=(button:HTMLElement)=>{
     if(!cameras.length){report('Add cameras on the Cameras tab first.');return;}
-    openMenu(el('preset-capture'),'Capture every setting from',cameras.map(camera=>({id:camera.id,label:camera.name+' · '+cameraState(camera),disabled:!camera.host||!camera.login,items:[
+    openMenu(button,'Capture every setting from',cameras.map(camera=>({id:camera.id,label:camera.name+' · '+cameraState(camera),disabled:!camera.host||!camera.login,items:[
       {id:'base',label:'Into Base (replaces '+plural(Object.keys(basePreset(doc()).values).length,'setting')+')',run:()=>void capture(camera,'base')},
       {id:'new',label:'As a new preset',icon:'add' as const,run:()=>void capture(camera,'new')}
     ]})));
-  });
+  };
+  el('preset-capture').addEventListener('click',()=>openCapture(el('preset-capture')));
+  el('preset-empty-capture').addEventListener('click',()=>openCapture(el('preset-empty-capture')));
   el('pick-preset').addEventListener('click',()=>openMenu(el('pick-preset'),'Send which preset',doc().presets.map(preset=>({id:preset.id,label:preset.name+(preset.id===chosenPreset().id?'  ✓':''),run:()=>setSend({presetId:preset.id})}))));
   el('pick-camera').addEventListener('click',()=>{
     if(!cameras.length){report('Add cameras on the Cameras tab first.');return;}
