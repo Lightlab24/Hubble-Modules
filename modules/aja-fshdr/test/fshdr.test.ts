@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { ModuleContext, ModuleInstance } from '@hubble/module-sdk';
 import manifest from '../src/manifest.js';
-import { createBackend, toWire, type Observed, type WireObserved } from '../src/backend.js';
+import { createBackend, toWire, withinLimit, type Observed, type WireObserved } from '../src/backend.js';
+import { packNumbers, unpackNumbers } from '../src/wire.js';
 import { PREREQUISITE, parameterId, readCatalog } from '../src/device.js';
 import { addSheet, applyMutation, channelRowId, defaultDocument, fieldById, fields, groups, inverse, moveSheet, newUnit, removeSheet, renameSheet, setUnitCount, sheetList, validateDocument, valueOf, visibleFields, watchedFieldIds, withColumnVisibility, withSectionVisibility, withShownWhenCollapsed, type FsDocument, type Mutation } from '../src/model.js';
 import { fromWire, masterRows, normalize, pendingFields, rowsFor, shownLabel, shownName } from '../src/rows.js';
@@ -73,7 +74,7 @@ test('the plan stages unit and channel settings, and clears them without leaving
   assert.ok(watchedFieldIds(doc).channel.includes('Vid#ColorHDRTransform'));
   const more = setUnitCount(doc, 3, (() => { let n = 0; return () => 'new-' + ++n; })())!;
   assert.deepEqual(applyMutation(doc, more).units.map(unit => unit.values['unit-name']), ['FS-HDR 1', 'FS-HDR 2', 'FS-HDR 3']);
-  assert.throws(() => setUnitCount(doc, 17, () => 'x'), /0 to 16/);
+  assert.throws(() => setUnitCount(doc, 41, () => 'x'), /0 to 40/);
 });
 test('Setup and Master are fixed tabs, and settings sheets can be added, renamed, moved and removed', () => {
   let doc = defaultDocument();
@@ -188,6 +189,8 @@ test('Send writes only what is staged, confirms by readback, and leaves a refuse
     await h.backend.start!();
     await until(() => h.observed().units.u1?.state === 'live');
     await h.save({ kind: 'view', sheetId: 'hdr', view: withColumnVisibility(sheetList(h.plan()).find(sheet => sheet.id === 'hdr')!.view, [{ id: 'Vid#CustomSizePos', visible: true }, { id: 'Vid#CustomSize', visible: true }, { id: 'Vid#RegionOfInterest', visible: true }, { id: 'Vid#ROILeft', visible: true }]), expected: sheetList(h.plan()).find(sheet => sheet.id === 'hdr')!.view });
+    // A save is published within a tenth of a second; the page that saved gets the rows in its reply at once.
+    await until(() => h.observed().rows['u1#1']?.limits['Vid#CustomSize'] !== undefined, 'the newly shown columns are published');
     // Custom Size/Pos is off, and the unit still takes Custom Size. ROI Left really does wait for Region Of Interest.
     assert.equal(h.observed().rows['u1#1']!.locked['Vid#CustomSize'], undefined);
     assert.match(h.observed().rows['u1#1']!.locked['Vid#ROILeft']!, /prerequisite/);
@@ -200,12 +203,14 @@ test('Send writes only what is staged, confirms by readback, and leaves a refuse
     const sent = await h.call('send', { rowId: 'u1#1', fieldIds: ['Vid#ColorHDRTransform', 'Vid#ROILeft'] });
     assert.equal(sent.outcomes![0]!.status, 'verified'); assert.equal(sent.outcomes![1]!.status, 'failed'); assert.match(sent.outcomes![1]!.message!, /prerequisite/);
     assert.equal(unit.values.eParamID_Vid1ColorHDRTransform, '8'); assert.equal(unit.values.eParamID_Vid1ROILeft, '100');
-    assert.match(h.observed().rows['u1#1']!.errors['Vid#ROILeft']!, /prerequisite/);
+    // The reply carries the rows as they are now, which is what the page shows; the published state follows within a tenth of a second.
+    assert.match(fromWire(sent).rows['u1#1']!.errors['Vid#ROILeft']!, /prerequisite/);
     // The setting that switches it on is listed later in the same Send, and Send puts it first.
     await h.save({ kind: 'edit', edits: [{ rowId: 'u1#1', columnId: 'Vid#RegionOfInterest', value: '3', expected: '' }, { rowId: 'u1#1', columnId: 'Vid#CustomSize', value: '120.0', expected: '' }] });
-    assert.deepEqual((await h.call('send', { rowId: 'u1#1', fieldIds: ['Vid#ROILeft', 'Vid#RegionOfInterest', 'Vid#CustomSize'] })).outcomes!.map(outcome => outcome.fieldId + ' ' + outcome.status), ['Vid#RegionOfInterest verified', 'Vid#ROILeft verified', 'Vid#CustomSize verified']);
+    const again = await h.call('send', { rowId: 'u1#1', fieldIds: ['Vid#ROILeft', 'Vid#RegionOfInterest', 'Vid#CustomSize'] });
+    assert.deepEqual(again.outcomes!.map(outcome => outcome.fieldId + ' ' + outcome.status), ['Vid#RegionOfInterest verified', 'Vid#ROILeft verified', 'Vid#CustomSize verified']);
     assert.equal(unit.values.eParamID_Vid1ROILeft, '500'); assert.equal(unit.values.eParamID_Vid1CustomSize, '1200'); assert.equal(unit.values.eParamID_Vid1CustomSizePos, '0');
-    assert.equal(h.observed().rows['u1#1']!.errors['Vid#ROILeft'], undefined);
+    assert.equal(fromWire(again).rows['u1#1']!.errors['Vid#ROILeft'], undefined);
     // AFD still holds Custom Size, as on the unit.
     unit.change('eParamID_Vid1AFDActive', '1');
     await until(() => !!h.observed().rows['u1#1']!.locked['Vid#CustomSize'], 'AFD locks Custom Size');
@@ -374,9 +379,9 @@ test('buttons never control a simulated unit, and it does not count towards All 
     assert.deepEqual(choices.choices.map(choice => choice.id), ['all', 'http://' + real.host]);
   } finally { await h.stop(); await real.close(); }
 });
-test('sixteen units that are not connected, with every column shown, stay well inside Hubble’s 256K state limit', async () => {
+test('forty units that are not connected, with every column shown, stay well inside Hubble’s 256K state limit', async () => {
   const plan = defaultDocument();
-  plan.units = Array.from({ length: 16 }, (_, index) => newUnit('u' + (index + 1), 'FS-HDR ' + (index + 1), '127.0.0.1:' + (9 + index)));
+  plan.units = Array.from({ length: 40 }, (_, index) => newUnit('u' + (index + 1), 'FS-HDR ' + (index + 1), '127.0.0.1:' + (9 + index)));
   // The worker reads every setting a sheet can show, so with nothing hidden it observes them all.
   const showAll = (view: FsDocument['view']) => ({ ...view, hidden: [], hiddenGroups: [] });
   plan.sheets = plan.sheets.map(sheet => sheet.view ? { ...sheet, view: showAll(sheet.view) } : sheet);
@@ -384,10 +389,10 @@ test('sixteen units that are not connected, with every column shown, stay well i
   const h = host(plan);
   try {
     await h.backend.start!();
-    await until(() => Object.values(h.observed().rows).filter(row => row.planned).length === 16 * 5, 'every unit and channel row is planned');
+    await until(() => Object.values(h.observed().rows).filter(row => row.planned).length === 40 * 5, 'every unit and channel row is planned');
     const sent = JSON.stringify(h.states.at(-1)!.values);
     assert.ok(sent.length < 128 * 1024, 'published state is ' + sent.length + ' characters');
-    const row = h.observed().rows['u16#4']!;
+    const row = h.observed().rows['u40#4']!;
     assert.deepEqual(row.limits['Vid#CustomSize'], { precision: 1, min: 10, max: 200, step: 0.1, units: '%' }, 'every row gets its limits back from the shared shape');
     assert.ok(h.observed().choiceSets[row.choices['Vid#ColorHDRTransform']!]!.some(choice => choice.label === 'BBC HLG LUT'));
   } finally { await h.stop(); }
@@ -406,11 +411,11 @@ test('the page gets back exactly what the worker observed, with setting names se
   assert.ok(['u1', 'u2'].every(rowId => !JSON.stringify(wire.rows[rowId]).includes('Name')), 'a row with nothing pending is values and cell numbers, no setting names');
 });
 
-test('sixteen live units, every column shown and each on its own transforms, stay well inside Hubble’s 256K state limit', async () => {
+test('forty live units, every column shown and each on its own transforms, stay well inside Hubble’s 256K state limit', async () => {
   // Past the limit the worker stops. Each channel here is on a different transform, so rows differ in their locks and choices.
   const transforms = ['0', '5', '8', '1', '7', '2', '3', '4'];
   const plan = defaultDocument();
-  plan.units = Array.from({ length: 16 }, (_, index) => { const unit = newUnit('s' + (index + 1), 'Sim ' + (index + 1), ''); unit.values['unit-simulated'] = 'TRUE'; return unit; });
+  plan.units = Array.from({ length: 40 }, (_, index) => { const unit = newUnit('s' + (index + 1), 'Sim ' + (index + 1), ''); unit.values['unit-simulated'] = 'TRUE'; return unit; });
   const showAll = (view: FsDocument['view']) => ({ ...view, hidden: [], hiddenGroups: [] });
   plan.sheets = plan.sheets.map(sheet => sheet.view ? { ...sheet, view: showAll(sheet.view) } : sheet);
   plan.view = showAll(plan.view);
@@ -418,14 +423,35 @@ test('sixteen live units, every column shown and each on its own transforms, sta
   const h = host(plan, { simulated: { version: 1, units: changes } });
   try {
     await h.backend.start!();
-    await until(() => Object.values(h.observed().units).filter(unit => unit.state === 'live').length === 16, 'all sixteen units live');
+    await until(() => Object.values(h.observed().units).filter(unit => unit.state === 'live').length === 40, 'all forty units live');
     const sent = JSON.stringify(h.states.at(-1)!.values);
     assert.ok(sent.length < 160 * 1024, 'published state is ' + sent.length + ' characters');
     const seen = h.observed();
     assert.deepEqual([1, 2, 3, 4].map(n => seen.rows['s3#' + n]!.values['Vid#ColorHDRTransform']), ['1', '7', '2', '3']);
-    assert.ok(seen.choiceSets[seen.rows['s16#4']!.choices['Vid#ColorHDRTransform']!]!.some(choice => choice.label === 'BBC HLG LUT'));
-    assert.ok(Object.keys(seen.rows['s16#4']!.locked).length > 0, 'locks come back too');
+    assert.ok(seen.choiceSets[seen.rows['s40#4']!.choices['Vid#ColorHDRTransform']!]!.some(choice => choice.label === 'BBC HLG LUT'));
+    assert.ok(Object.keys(seen.rows['s40#4']!.locked).length > 0, 'locks come back too');
   } finally { await h.stop(); }
+});
+
+test('row numbers pack into one character each where they can, and come back exactly', () => {
+  const list = [0, 1, 31, 32, 33, 1023, 1024, 40_000, 0, 5, 0, 0];
+  const text = packNumbers(list);
+  assert.match(text, /^[A-Za-z0-9_-]*$/, 'nothing JSON has to escape');
+  assert.deepEqual(unpackNumbers(text, list.length), list);
+  assert.equal(packNumbers([1, 2, 3]).length, 3);
+  assert.equal(packNumbers([0, 0, 0]), '', 'a row of nothing is empty');
+  assert.deepEqual(unpackNumbers('', 3), [0, 0, 0]);
+});
+
+test('state that would go past Hubble’s limit leaves the rows out and says so, instead of stopping the worker', () => {
+  const observed: Observed = { units: { u1: { state: 'live', host: '10.0.0.1', error: null, mode: 'HD/SD 4 Ch', channels: [1], remote: true, name: 'Truck A' } }, choiceSets: [], rows: {
+    u1: { values: { SystemName: 'Truck A'.repeat(50) }, locked: {}, choices: {}, limits: {}, errors: {}, sending: [], queued: [] },
+  } };
+  const fits = withinLimit(observed, { sequence: 7 });
+  assert.equal(fits.tooLarge, undefined); assert.ok(Object.keys(fits.rows as object).length === 1);
+  const over = withinLimit(observed, { sequence: 7 }, 300);
+  assert.equal(over.tooLarge, true); assert.deepEqual(over.rows, {}); assert.equal(over.sequence, 7);
+  assert.equal((over.units as Observed['units']).u1!.name, 'Truck A', 'units still go, so Setup still shows them');
 });
 
 test('a slider being dragged sends straight to the unit, without staging or logging, and only where sends are allowed', async () => {

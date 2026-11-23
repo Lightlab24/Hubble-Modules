@@ -19,11 +19,14 @@ let active: SpreadsheetAddress | undefined, observed: Observed = { units: {}, ro
 const unsent = new Map<string, { id: string; value: string }[]>();
 let errorTimer: ReturnType<typeof setTimeout> | undefined, lastSaveError = '';
 // Hubble delivers state on its own slow cycle, so an older copy can arrive after a newer reply.
-let newestState = 0;
+let newestState = 0, tooLarge = false;
 function adopt(next: Reply) {
-  if (!next.units || !next.rows || !next.choiceSets || !next.columns || !next.cells || !next.shapes) return;
+  if (!next.units || !next.rows || !next.choiceSets || !next.columns || !next.strings || !next.cells || !next.shapes) return;
   if (typeof next.sequence === 'number') { if (next.sequence < newestState) return; newestState = next.sequence; }
-  observed = fromWire({ units: next.units, rows: next.rows, choiceSets: next.choiceSets, columns: next.columns, cells: next.cells, shapes: next.shapes });
+  observed = fromWire({ units: next.units, rows: next.rows, choiceSets: next.choiceSets, columns: next.columns, strings: next.strings, cells: next.cells, shapes: next.shapes });
+  // The worker leaves the rows out rather than go past Hubble's limit. Say so once each time it happens.
+  if (next.tooLarge && !tooLarge) report('Too many settings are shown for this many FS-HDRs, so their values can’t be shown. Hide some columns.');
+  tooLarge = next.tooLarge === true;
 }
 function report(message: string) { clearTimeout(errorTimer); errorBox.getAnimations().forEach(animation => animation.cancel()); errorBox.textContent = message; errorBox.hidden = !message; if (message) { errorBox.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 250, delay: 4250, fill: 'forwards' }); errorTimer = setTimeout(() => { errorBox.hidden = true; }, 4500); } }
 try {
@@ -313,16 +316,19 @@ try {
         const batch = waiting.slice(0, 32).filter(entry => valueOf(doc(), rowId, entry.id) === entry.value && !store.invalid.has(rowId + '/' + entry.id));
         if (!batch.length) continue;
         const reply = await inLane(() => client.call('send', { rowId, fieldIds: batch.map(entry => entry.id) })) as unknown as Reply & { outcomes?: { fieldId: string; status: string; message?: string }[]; confirmed?: Record<string, string> };
-        adopt(reply);
-        for (const outcome of reply.outcomes ?? []) if (outcome.status === 'failed') messages.push(rowTitle(doc(), observed, rowId) + ', ' + (fieldById.get(outcome.fieldId)?.label ?? 'Setting') + ': ' + outcome.message);
-        // Only a value the unit confirmed stops being staged. If the worker sent an older saved value, this one is sent next time round.
-        dropConfirmed(rowId, batch.filter(entry => reply.confirmed?.[entry.id] === entry.value));
-        for (const entry of batch) if (reply.confirmed?.[entry.id] !== undefined && reply.confirmed[entry.id] !== entry.value && valueOf(doc(), rowId, entry.id) === entry.value) unsent.set(rowId, [...(unsent.get(rowId) ?? []).filter(item => item.id !== entry.id), entry]);
-        refreshGrid(); update();
+        // Replies to Send all arrive one after another, so the sheet draws once a frame rather than for each of them.
+        openGrid().batch(() => {
+          adopt(reply);
+          for (const outcome of reply.outcomes ?? []) if (outcome.status === 'failed') messages.push(rowTitle(doc(), observed, rowId) + ', ' + (fieldById.get(outcome.fieldId)?.label ?? 'Setting') + ': ' + outcome.message);
+          // Only a value the unit confirmed stops being staged. If the worker sent an older saved value, this one is sent next time round.
+          dropConfirmed(rowId, batch.filter(entry => reply.confirmed?.[entry.id] === entry.value));
+          for (const entry of batch) if (reply.confirmed?.[entry.id] !== undefined && reply.confirmed[entry.id] !== entry.value && valueOf(doc(), rowId, entry.id) === entry.value) unsent.set(rowId, [...(unsent.get(rowId) ?? []).filter(item => item.id !== entry.id), entry]);
+        });
+        update();
       }
     } catch (error) { if (unitOf(rowId)) messages.push(failureOf(rowId, error)); }
     finally { unsent.delete(rowId); }
-    refreshGrid(); update();
+    openGrid().refreshSoon(); update();
   }
   function queueSend(rowId: string, entries: { id: string; value: string }[], messages: string[]): Promise<void> {
     unsent.set(rowId, [...(unsent.get(rowId) ?? []).filter(entry => !entries.some(next => next.id === entry.id)), ...entries]);

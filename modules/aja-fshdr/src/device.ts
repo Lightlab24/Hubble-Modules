@@ -25,15 +25,33 @@ export const PREREQUISITE = 'Switch on this setting’s prerequisite first.';
  */
 export const advisory = (condition: { paramid: string; value: unknown }) => /^eParamID_Vid[0-4#]CustomSizePos$/.test(condition.paramid) && String(condition.value) === '0';
 
+/**
+ * At most four units download their 7 MB settings list at a time. Forty units starting together would otherwise hold 280 MB of
+ * them at once; four in turn add about a second for the last unit.
+ */
+const CATALOG_DOWNLOADS = 4;
+let downloading = 0;
+const waitingToDownload: (() => void)[] = [];
+async function oneOfFew<T>(run: () => Promise<T>): Promise<T> {
+  while (downloading >= CATALOG_DOWNLOADS) await new Promise<void>(resolve => waitingToDownload.push(resolve));
+  downloading++;
+  try { return await run(); } finally { downloading--; waitingToDownload.shift()?.(); }
+}
+
 export function httpTransport(address: string): Transport {
   return async (path, query, signal) => {
     const url = new URL(path, address);
     // A space goes as %20: the unit's own pages send it that way, and a `+` may be stored as typed.
     url.search = Object.entries(query).map(([key, value]) => encodeURIComponent(key) + '=' + encodeURIComponent(value)).join('&');
-    const response = await fetch(url, { signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]), cache: 'no-store', redirect: 'error' });
-    if (!response.ok) throw new Error('HTTP ' + response.status);
+    const get = () => fetch(url, { signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]), cache: 'no-store', redirect: 'error' });
     // The settings list comes back as bytes so that `readCatalog` can share one copy between units.
-    if (path === '/desc.json' || path === '/map.json') return new Uint8Array(await response.arrayBuffer());
+    if (path === '/desc.json' || path === '/map.json') return oneOfFew(async () => {
+      const response = await get();
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      return new Uint8Array(await response.arrayBuffer());
+    });
+    const response = await get();
+    if (!response.ok) throw new Error('HTTP ' + response.status);
     return await response.json() as unknown;
   };
 }
@@ -162,6 +180,10 @@ export class Device {
   private restarting = false;
 
   constructor(readonly address: string, private readonly onChange: () => void, private readonly transport: Transport = httpTransport(address)) {}
+  /** Goes up whenever anything the unit reports changes, so a caller can tell its rows are out of date. */
+  private changes = 0;
+  get version(): number { return this.changes; }
+  private changed() { this.changes++; this.onChange(); }
 
   get connection(): Connection { return this.status; }
   get error(): string | null { return this.failure; }
@@ -249,7 +271,7 @@ export class Device {
         const readback = await this.request('/config', { action: 'get', paramid: prepared.target, configid: '0', alt: 'json' }, signal);
         if (this.revision !== revision || !object(readback) || readback.name !== prepared.target || scalar(readback.value) !== prepared.wire) return { ok: false, message: 'The unit did not confirm the new value.' };
         this.state[prepared.target] = prepared.wire;
-        this.onChange();
+        this.changed();
         return { ok: true, message: 'Confirmed' };
       } catch { return { ok: false, message: 'The unit did not answer, so the result is unknown.' }; }
     });
@@ -265,30 +287,30 @@ export class Device {
       this.cycle = new AbortController();
       const cycle = AbortSignal.any([signal, this.cycle.signal]);
       try {
-        const [desc, map] = await Promise.all([this.request('/desc.json', {}, cycle), this.request('/map.json', {}, cycle)]);
-        const catalog = readCatalog(desc, map);
+        // Read in one step, so the downloaded bytes are let go before waiting for the unit's values.
+        const catalog = readCatalog(...await Promise.all([this.request('/desc.json', {}, cycle), this.request('/map.json', {}, cycle)]));
         const snapshot = await this.request('/config', { action: 'connect' }, cycle);
         if (!object(snapshot) || !Array.isArray(snapshot.configevents) || !object(snapshot.configevents[0]) || scalar(snapshot.connectionid) === null) throw new Error('Invalid FS-HDR snapshot');
         cycle.throwIfAborted();
         this.catalog = catalog;
         this.state = Object.assign(Object.create(null), snapshot.configevents[0]);
         this.status = 'live'; this.failure = null; this.revision++;
-        this.onChange();
+        this.changed();
         retry = 500;
         while (!cycle.aborted) {
           const events = await this.request('/config', { action: 'wait_for_config_events', connectionid: String(snapshot.connectionid) }, cycle);
           cycle.throwIfAborted();
-          if (applyEvents(this.state, events)) this.onChange();
+          if (applyEvents(this.state, events)) this.changed();
           await delay(50, undefined, { signal: cycle });
         }
       } catch (error) {
         if (signal.aborted) return;
-        if (this.restarting) { this.restarting = false; this.status = 'connecting'; this.revision++; this.onChange(); continue; }
+        if (this.restarting) { this.restarting = false; this.status = 'connecting'; this.revision++; this.changed(); continue; }
         this.status = 'offline';
         this.failure = error instanceof Error ? error.message : 'Device connection failed';
         if (object(error) && object(error.cause)) { const cause = scalar(error.cause.code) || scalar(error.cause.message); if (cause) this.failure += ' (' + cause + ')'; }
         this.revision++;
-        this.onChange();
+        this.changed();
         try { await delay(retry, undefined, { signal: cycle }); } catch { if (signal.aborted) return; this.restarting = false; }
         retry = Math.min(30_000, retry * 2);
       }

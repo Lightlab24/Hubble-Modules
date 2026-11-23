@@ -1,16 +1,17 @@
 import { channelRowId, fieldById, isSimulated, masterRowId, masterSelection, nameField, parseRowId, plannedChannels, rowValues, unitName, type Field, type FsDocument, type SheetKind, type Unit } from './model.js';
 import type { Observed, RowObservation, UnitObservation, WireObserved } from './backend.js';
 import type { Choice } from './device.js';
+import { unpackNumbers } from './wire.js';
 
 /** The worker's state with each row's values, locks, choices and limits keyed by setting again. Rows with the same shape share its maps. */
-export function fromWire(wire: Pick<WireObserved, 'units' | 'rows' | 'choiceSets' | 'columns' | 'cells' | 'shapes'>): Observed {
+export function fromWire(wire: Pick<WireObserved, 'units' | 'rows' | 'choiceSets' | 'columns' | 'strings' | 'cells' | 'shapes'>): Observed {
   const rows: Observed['rows'] = {}, expanded = new Map<string, Pick<RowObservation, 'locked' | 'choices' | 'limits'>>();
-  for (const [rowId, { columns: at, values: list, shape, errors = {}, sending = [], queued = [], ...rest }] of Object.entries(wire.rows)) {
+  for (const [rowId, { columns: at, values: packed = '', shape, errors = {}, sending = [], queued = [], ...rest }] of Object.entries(wire.rows)) {
     const ids = wire.columns[at] ?? [], key = at + ':' + shape;
     let parts = expanded.get(key);
     if (!parts) {
       const made: Pick<RowObservation, 'locked' | 'choices' | 'limits'> = { locked: {}, choices: {}, limits: {} };
-      (wire.shapes[shape] ?? []).forEach((index, i) => {
+      unpackNumbers(wire.shapes[shape] ?? '', ids.length).forEach((index, i) => {
         const id = ids[i], cell = wire.cells[index];
         if (id === undefined || !cell) return;
         if (cell.locked !== undefined) made.locked[id] = cell.locked;
@@ -20,7 +21,7 @@ export function fromWire(wire: Pick<WireObserved, 'units' | 'rows' | 'choiceSets
       expanded.set(key, parts = made);
     }
     const values: Record<string, string> = {};
-    ids.forEach((id, i) => { const value = list[i]; if (typeof value === 'string') values[id] = value; });
+    unpackNumbers(packed, ids.length).forEach((number, i) => { const value = number ? wire.strings[number - 1] : undefined; if (value !== undefined && ids[i] !== undefined) values[ids[i]!] = value; });
     rows[rowId] = { ...rest, values, ...parts, errors, sending, queued };
   }
   return { units: wire.units, rows, choiceSets: wire.choiceSets };

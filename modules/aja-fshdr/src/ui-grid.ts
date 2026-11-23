@@ -650,7 +650,14 @@ export async function createGrid(options: GridOptions) {
     const nowShowing = activeSheetId(store.document) + '/' + table.dataset.orientation;
     if (nowShowing !== shownLayout) { shownLayout = nowShowing; followSelection(); }
   }
-  const unsubscribe = store.subscribe(render);
+  /**
+   * While a batch of send replies is applied, the grid draws once on the next frame instead of once per change. Redrawing
+   * forty units' rows takes tens of milliseconds, and Send all to 160 channels drew 320 times and held the page for ten
+   * seconds. The frame comes before the next paint, so nothing shows later; edits outside a batch still draw at once.
+   */
+  let batching = 0, drawQueued = false;
+  const drawSoon = () => { if (drawQueued) return; drawQueued = true; requestAnimationFrame(() => { drawQueued = false; render(); }); };
+  const unsubscribe = store.subscribe(() => { if (batching) drawSoon(); else render(); });
   render();
-  return { kind, refresh: render, select: (address: SpreadsheetAddress) => controls.select(position(address)), get active() { return active; }, get editing() { return editor?.address; }, getValue: (address: SpreadsheetAddress) => cellValue(address), dispose() { disposed = true; unsubscribe(); for (const key of [...sliders.keys()]) dropSlider(key); for (const control of controlsToDispose.reverse()) control.dispose(); } };
+  return { kind, refresh: render, refreshSoon: drawSoon, batch<T>(run: () => T): T { batching++; try { return run(); } finally { batching--; drawSoon(); } }, select: (address: SpreadsheetAddress) => controls.select(position(address)), get active() { return active; }, get editing() { return editor?.address; }, getValue: (address: SpreadsheetAddress) => cellValue(address), dispose() { disposed = true; unsubscribe(); for (const key of [...sliders.keys()]) dropSlider(key); for (const control of controlsToDispose.reverse()) control.dispose(); } };
 }

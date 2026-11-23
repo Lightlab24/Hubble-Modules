@@ -4,7 +4,8 @@ import { Device, PREREQUISITE, object, parameterId, type Choice, type Limits, ty
 import { ACTION, MATCHES, TARGET_CHOICES, createActions, readCommand, type Command } from './actions.js';
 import { catalog, plannedReading } from './catalog.js';
 import { simulatedTransport } from './simulated.js';
-import { applyMutation, channelRowId, clone, defaultDocument, fieldById, isSimulated, maxUnits, modeLabel, newUnit, parseRowId, plannedChannels, plannedMode, same, unitName, validHost, validateDocument, valueOf, watchedFieldIds, type FsDocument, type Mutation, type Unit } from './model.js';
+import { packNumbers } from './wire.js';
+import { applyMutation, channelRowId, clone, defaultDocument, fieldById, fields, isSimulated, maxUnits, modeLabel, newUnit, parseRowId, plannedChannels, plannedMode, same, unitName, validHost, validateDocument, valueOf, watchedFieldIds, type FsDocument, type Mutation, type Unit } from './model.js';
 
 export const PLAN = 'fshdr-plan', LEGACY_SETUP = 'setup', SIMULATED = 'fshdr-sim';
 /**
@@ -26,19 +27,23 @@ export type RowShape = Pick<RowObservation, 'locked' | 'choices' | 'limits'>;
 /** One cell's lock, choices and limits. `choices` points into `choiceSets`. */
 export interface CellShape { locked?: string; choices?: number; limits?: Limits }
 /**
- * A row as the page receives it. `columns` points into the shared column lists; `values` and the cells of `shapes[shape]` are in
- * that list's order, with `null` for a setting the row has no value for. Empty errors, sends and queues are left out.
+ * A row as the page receives it. `columns` points into the shared column lists. `values` packs, in that list's order, one number
+ * per setting: 0 for no value, otherwise its place in `strings` plus one. `shapes[shape]` packs each setting's place in `cells`.
+ * A row with no values, and empty errors, sends and queues, leave those out.
  */
-export type WireRow = Omit<RowObservation, keyof RowShape | 'values' | 'errors' | 'sending' | 'queued'> & { columns: number; values: (string | null)[]; shape: number } & Partial<Pick<RowObservation, 'errors' | 'sending' | 'queued'>>;
+export type WireRow = Omit<RowObservation, keyof RowShape | 'values' | 'errors' | 'sending' | 'queued'> & { columns: number; values?: string; shape: number } & Partial<Pick<RowObservation, 'errors' | 'sending' | 'queued'>>;
 /**
- * What the page receives. Hubble refuses state over 256K characters, and the worker stops when it is refused. Setting names are
- * sent once, in `columns`, instead of in every row, and each distinct cell lock, choice list and limit once, in `cells`, so a row
- * is a list of short values and a list of cell numbers. Rows that differ only in a few prerequisites no longer need a whole copy.
+ * What the page receives. Hubble refuses state over 256K characters, and the worker stops when it is refused. So each setting
+ * name, each distinct value and each distinct cell lock, choice list and limit is sent once, and a row is two short texts of
+ * numbers (see `packNumbers`). Forty units with every column shown fit in about half the limit.
  */
-export interface WireObserved { units: Record<string, UnitObservation>; rows: Record<string, WireRow>; choiceSets: Choice[][]; columns: string[][]; cells: CellShape[]; shapes: number[][]; sequence?: number }
+export interface WireObserved { units: Record<string, UnitObservation>; rows: Record<string, WireRow>; choiceSets: Choice[][]; columns: string[][]; strings: string[]; cells: CellShape[]; shapes: string[]; sequence?: number; tooLarge?: true }
+/** Settings in sheet order, so every row with the same settings shares one column list. */
+const fieldOrder = new Map(fields.map((field, index) => [field.id, index]));
+const bySheetOrder = (a: string, b: string) => (fieldOrder.get(a) ?? Infinity) - (fieldOrder.get(b) ?? Infinity) || (a < b ? -1 : a > b ? 1 : 0);
 export function toWire(observed: Observed): WireObserved {
-  const columns: string[][] = [], cells: CellShape[] = [{}], shapes: number[][] = [], rows: Record<string, WireRow> = {};
-  const columnIndex = new Map<string, number>(), cellIndex = new Map<string, number>([['\u0001\u0001', 0]]), shapeIndex = new Map<string, number>();
+  const columns: string[][] = [], strings: string[] = [], cells: CellShape[] = [{}], shapes: string[] = [], rows: Record<string, WireRow> = {};
+  const columnIndex = new Map<string, number>(), stringIndex = new Map<string, number>(), cellIndex = new Map<string, number>([['\u0001\u0001', 0]]), shapeIndex = new Map<string, number>();
   const intern = <T>(list: T[], index: Map<string, number>, signature: string, item: () => T): number => {
     let at = index.get(signature);
     if (at === undefined) { at = list.push(item()) - 1; index.set(signature, at); }
@@ -47,19 +52,32 @@ export function toWire(observed: Observed): WireObserved {
   // Built for every cell of every row at each publish, so it is plain text rather than JSON.
   const limitsKey = (l: Limits) => [l.precision, l.min, l.max, l.step, l.units, l.minLength, l.maxLength].join('\u0002');
   for (const [rowId, { values, locked, choices, limits, errors, sending, queued, ...rest }] of Object.entries(observed.rows)) {
-    const ids = [...new Set([...Object.keys(values), ...Object.keys(locked), ...Object.keys(choices), ...Object.keys(limits)])];
-    const shape = ids.map(id => {
+    const ids = [...new Set([...Object.keys(values), ...Object.keys(locked), ...Object.keys(choices), ...Object.keys(limits)])].sort(bySheetOrder);
+    const shape = packNumbers(ids.map(id => {
       const lock = Object.hasOwn(locked, id) ? locked[id] : undefined, choice = Object.hasOwn(choices, id) ? choices[id] : undefined, limit = Object.hasOwn(limits, id) ? limits[id] : undefined;
       const signature = (lock === undefined ? '' : '=' + lock) + '\u0001' + (choice ?? '') + '\u0001' + (limit ? limitsKey(limit) : '');
       return intern(cells, cellIndex, signature, () => ({ ...(lock !== undefined ? { locked: lock } : {}), ...(choice !== undefined ? { choices: choice } : {}), ...(limit ? { limits: limit } : {}) }));
-    });
-    const row: WireRow = { ...rest, columns: intern(columns, columnIndex, ids.join('\n'), () => ids), values: ids.map(id => values[id] ?? null), shape: intern(shapes, shapeIndex, shape.join(','), () => shape) };
+    }));
+    const packed = packNumbers(ids.map(id => Object.hasOwn(values, id) ? intern(strings, stringIndex, values[id]!, () => values[id]!) + 1 : 0));
+    const row: WireRow = { ...rest, columns: intern(columns, columnIndex, ids.join('\n'), () => ids), shape: intern(shapes, shapeIndex, shape, () => shape) };
+    if (packed) row.values = packed;
     if (Object.keys(errors).length) row.errors = errors;
     if (sending.length) row.sending = sending;
     if (queued.length) row.queued = queued;
     rows[rowId] = row;
   }
-  return { units: observed.units, rows, choiceSets: observed.choiceSets, columns, cells, shapes };
+  return { units: observed.units, rows, choiceSets: observed.choiceSets, columns, strings, cells, shapes };
+}
+/** Hubble's limit on a module's state and on a page reply, in characters of JSON. */
+export const STATE_LIMIT = 262_144;
+/**
+ * `extra` and the rows as the page receives them, or, if that would go past Hubble's limit, without the rows and marked
+ * `tooLarge`: a refused publish stops the worker, so the page is told instead.
+ */
+export function withinLimit(observed: Observed, extra: Record<string, unknown>, limit = STATE_LIMIT): Record<string, unknown> {
+  const full = { ...extra, ...toWire(observed) };
+  if (JSON.stringify(full).length <= limit) return full;
+  return { ...extra, ...toWire({ ...observed, rows: {} }), tooLarge: true };
 }
 interface Running { device: Device; address: string; controller: AbortController; task?: Promise<void> }
 interface Transient { errors: Record<string, string>; sending: string[]; queued: string[] }
@@ -103,16 +121,24 @@ export function createBackend(context: ModuleContext): ModuleInstance {
     const fieldId = paramId.replace(/^eParamID_/, '');
     return fieldById.get(fieldId)?.scope === 'unit' ? unit.values[fieldId] || undefined : undefined;
   };
+  /**
+   * Each unit's rows are built again only when something they show has changed: the unit's values or connection, its line in
+   * the plan, which settings are shown, or a send in progress. Sending to forty units otherwise rebuilt every row of every unit
+   * several times for each setting sent. Choice lists keep their number for the life of the worker, so kept rows stay right.
+   */
+  const choiceSets: Choice[][] = [], choiceSetIndex = new Map<string, number>(), choiceSignatures = new WeakMap<Choice[], string>();
+  const choiceIndex = (choices: Choice[]) => {
+    let signature = choiceSignatures.get(choices);
+    if (signature === undefined) choiceSignatures.set(choices, signature = JSON.stringify(choices));
+    let index = choiceSetIndex.get(signature);
+    if (index === undefined) { index = choiceSets.push(choices) - 1; choiceSetIndex.set(signature, index); }
+    return index;
+  };
+  const unitCache = new Map<string, { key: string; unit: UnitObservation; rows: [string, RowObservation][] }>();
   function observe(): Observed {
-    const watched = watchedFieldIds(plan), choiceSets: Choice[][] = [], setIndex = new Map<string, number>(), signatures = new WeakMap<Choice[], string>();
-    const units: Observed['units'] = {}, rows: Observed['rows'] = {}, seenAddresses = new Set<string>();
-    const choiceIndex = (choices: Choice[]) => {
-      let signature = signatures.get(choices);
-      if (signature === undefined) signatures.set(choices, signature = JSON.stringify(choices));
-      let index = setIndex.get(signature);
-      if (index === undefined) { index = choiceSets.push(choices) - 1; setIndex.set(signature, index); }
-      return index;
-    };
+    const watched = watchedFieldIds(plan), watchedKey = watched.unit.join(',') + '|' + watched.channel.join(',');
+    const units: Observed['units'] = {}, rows: Observed['rows'] = {}, seenAddresses = new Set<string>(), heldByUnit = new Map<string, string>();
+    for (const [rowId, held] of transient) { const { unitId } = parseRowId(rowId); heldByUnit.set(unitId, (heldByUnit.get(unitId) ?? '') + rowId + JSON.stringify(held)); }
     // A unit that isn't live: no values yet, but every setting it will have, with the choices and ranges it will offer.
     const plannedRow = (unit: Unit, rowId: string, fieldIds: string[], channel: number | null): RowObservation => {
       const row: RowObservation = { values: {}, locked: {}, choices: {}, limits: {}, errors: { ...transient.get(rowId)?.errors }, sending: [], queued: [], planned: true };
@@ -149,14 +175,22 @@ export function createBackend(context: ModuleContext): ModuleInstance {
       if (address) seenAddresses.add(address);
       const live = device?.connection === 'live';
       const state = simulatedUnit ? (!canConnect ? 'disabled' : device?.connection ?? 'connecting') : !address ? 'unset' : duplicate ? 'duplicate' : !canConnect ? 'disabled' : device?.connection ?? 'connecting';
-      units[unit.id] = {
-        state, host, error: device?.error ?? null, mode: live ? device!.modeLabel : modeLabel(plannedMode(unit)), channels: live ? device!.channels : plannedChannels(unit),
-        remote: live ? device!.remoteAllowed : false, name: live ? device!.name : '', ...(live ? { modeValue: device!.mode } : { planned: true }),
-        ...(simulatedUnit ? { simulated: true } : {}), ...(simulatedUnit && live ? { changes: simulatedChanges(unit, device!) } : {}),
-      };
-      rows[unit.id] = live ? rowFor(unit.id, device, watched.unit, null) : plannedRow(unit, unit.id, watched.unit, null);
-      for (const channel of units[unit.id]!.channels) { const rowId = channelRowId(unit.id, channel); rows[rowId] = live ? rowFor(rowId, device, watched.channel, channel) : plannedRow(unit, rowId, watched.channel, channel); }
+      const key = [device?.version ?? -1, state, JSON.stringify(unit), watchedKey, heldByUnit.get(unit.id) ?? '', simulatedUnit ? JSON.stringify(simulated.units[unit.id] ?? null) : ''].join('\u0001');
+      let kept = unitCache.get(unit.id);
+      if (kept?.key !== key) {
+        const seen: UnitObservation = {
+          state, host, error: device?.error ?? null, mode: live ? device!.modeLabel : modeLabel(plannedMode(unit)), channels: live ? device!.channels : plannedChannels(unit),
+          remote: live ? device!.remoteAllowed : false, name: live ? device!.name : '', ...(live ? { modeValue: device!.mode } : { planned: true }),
+          ...(simulatedUnit ? { simulated: true } : {}), ...(simulatedUnit && live ? { changes: simulatedChanges(unit, device!) } : {}),
+        };
+        const built: [string, RowObservation][] = [[unit.id, live ? rowFor(unit.id, device, watched.unit, null) : plannedRow(unit, unit.id, watched.unit, null)]];
+        for (const channel of seen.channels) { const rowId = channelRowId(unit.id, channel); built.push([rowId, live ? rowFor(rowId, device, watched.channel, channel) : plannedRow(unit, rowId, watched.channel, channel)]); }
+        unitCache.set(unit.id, kept = { key, unit: seen, rows: built });
+      }
+      units[unit.id] = kept.unit;
+      for (const [rowId, row] of kept.rows) rows[rowId] = row;
     }
+    for (const unitId of unitCache.keys()) if (!units[unitId]) unitCache.delete(unitId);
     return { units, rows, choiceSets };
   }
   function publishFeedback() {
@@ -174,26 +208,34 @@ export function createBackend(context: ModuleContext): ModuleInstance {
       context.publishFeedback({ ...request, state: !available ? 'unavailable' : seen.every(value => value === command?.transform) ? 'active' : 'inactive', observedAt: available ? observedAt : null });
     }
   }
+  /** The rows as they are now. Clock-based numbering keeps rising across a worker restart; the page ignores state that arrives late. */
+  function observeNow() { observed = observe(); sequence = Math.max(sequence + 1, Date.now()); }
   function publish() {
     if (lifetime.signal.aborted) return;
-    observed = observe();
-    // Clock-based so it keeps rising across a worker restart. The page uses it to ignore state that arrives late.
-    sequence = Math.max(sequence + 1, Date.now());
+    observeNow();
     const all = Object.values(observed.units), states = all.filter(unit => !unit.simulated).map(unit => unit.state), live = states.filter(state => state === 'live').length;
     const simulatedLive = all.some(unit => unit.simulated && unit.state === 'live');
     context.publishState({
       phase: live > 0 || simulatedLive ? 'ready' : states.includes('connecting') ? 'connecting' : 'unavailable',
       message: live > 0 ? null : simulatedLive ? 'Simulated FS-HDRs only' : plan.units.length ? 'Waiting for FS-HDRs' : 'Add FS-HDRs in Setup',
       observedAt: new Date().toISOString(),
-      values: { revision: latestRevision, sequence, ...(ModuleDocumentValueSchema.parse(toWire(observed)) as Record<string, ModuleJsonValue>) },
+      values: { revision: latestRevision, sequence, ...(ModuleDocumentValueSchema.parse(fitted({ revision: latestRevision, sequence })) as Record<string, ModuleJsonValue>) },
     });
     publishFeedback();
     for (const wake of [...waiters]) wake();
   }
+  /** The page's state within Hubble's limit, saying so in the log once each time it no longer fits. */
+  let tooLarge = false;
+  function fitted(extra: Record<string, unknown>): Record<string, unknown> {
+    const value = withinLimit(observed, extra);
+    if (value.tooLarge && !tooLarge) context.log({ level: 'error', stage: 'fshdr-state', message: 'Too many settings are shown for ' + plan.units.length + ' FS-HDRs for Hubble to pass them to the page. Hide some columns.' });
+    tooLarge = value.tooLarge === true;
+    return value;
+  }
   // A unit can report many values at once, so the page hears about them at most ten times a second.
   let publishTimer: ReturnType<typeof setTimeout> | undefined;
   const publishSoon = () => { publishTimer ??= setTimeout(() => { publishTimer = undefined; publish(); }, 100); };
-  const reply = (extra: Record<string, unknown> = {}) => ({ ...extra, ...toWire(observed), sequence }) as unknown as ModuleJsonValue;
+  const reply = (extra: Record<string, unknown> = {}) => fitted({ ...extra, sequence }) as unknown as ModuleJsonValue;
 
   /** Keeps one connection per addressed unit and one simulated unit per Simulated row, and drops the ones whose row, address or mode has gone. */
   function planChanged(next: FsDocument) {
@@ -245,7 +287,7 @@ export function createBackend(context: ModuleContext): ModuleInstance {
   async function savePlan(operation: Mutation, signal: AbortSignal): Promise<FsDocument> {
     for (let attempt = 0; attempt < 3; attempt++) {
       const saved = await documents.read(PLAN, signal), next = applyMutation(withCarried(validateDocument(saved.value)), operation);
-      try { const result = await documents.write(saved, ModuleDocumentValueSchema.parse(next), signal); latestRevision = result.revision; planChanged(next); publish(); return next; }
+      try { const result = await documents.write(saved, ModuleDocumentValueSchema.parse(next), signal); latestRevision = result.revision; planChanged(next); observeNow(); publishSoon(); return next; }
       catch (error) { if (!(error instanceof ModuleDocumentConflictError) || attempt === 2) throw error; }
     }
     throw Error('The FS-HDR plan changed before saving.');
@@ -367,7 +409,7 @@ export function createBackend(context: ModuleContext): ModuleInstance {
       if (raw.commandId === 'cancel-send') {
         // Whatever is mid-write finishes. Everything behind it comes out of the queue.
         const drop = new Set(Array.isArray(input.fieldIds) ? input.fieldIds as string[] : held.queued);
-        held.queued = held.queued.filter(id => !drop.has(id)); publish();
+        held.queued = held.queued.filter(id => !drop.has(id)); publishSoon();
         return { status: 'cancelled' };
       }
       if (raw.commandId !== 'send') throw Error('Unknown FS-HDR operation.');
@@ -384,7 +426,7 @@ export function createBackend(context: ModuleContext): ModuleInstance {
       // depends on goes first, so Custom Size/Pos is on before Custom Size arrives.
       const asked = [...new Set(input.fieldIds as string[])], backing = (fieldId: string) => { const id = parameterId(fieldId, channel, running.device.mode); return id ? running.device.lookupId(id) : null; };
       const needed = new Set(asked.flatMap(fieldId => { const id = parameterId(fieldId, channel, running.device.mode); return id ? running.device.prerequisites(id) : []; }));
-      held.queued = [...asked.filter(fieldId => needed.has(backing(fieldId) ?? '')), ...asked.filter(fieldId => !needed.has(backing(fieldId) ?? ''))]; publish();
+      held.queued = [...asked.filter(fieldId => needed.has(backing(fieldId) ?? '')), ...asked.filter(fieldId => !needed.has(backing(fieldId) ?? ''))]; publishSoon();
       // A setting whose prerequisite is off waits for the rest of the batch, which may switch it on, and is tried once more.
       const later: string[] = [], retried = new Set<string>();
       try {
@@ -398,19 +440,21 @@ export function createBackend(context: ModuleContext): ModuleInstance {
             if (!value || hostOf(latest.units.find(item => item.id === unitId) ?? unit) !== hostOf(unit)) continue;
             if (!id) { held.errors[fieldId] = 'Not available in this operating mode.'; outcomes.push({ fieldId, status: 'failed', message: held.errors[fieldId] }); continue; }
             if (running.device.read(id).value === value) { confirmed[fieldId] = value; outcomes.push({ fieldId, status: 'verified' }); continue; }
-            held.sending = [fieldId]; publish();
+            held.sending = [fieldId]; publishSoon();
             const result = await running.device.write(id, value, AbortSignal.any([signal, lifetime.signal, running.controller.signal]));
             held.sending = [];
             if (!result.ok && result.message === PREREQUISITE && !retried.has(fieldId)) { retried.add(fieldId); later.push(fieldId); continue; }
             context.log({ level: result.ok ? 'info' : 'error', stage: 'fshdr-send', message: (unitName(unit) + (channel === null ? '' : ' channel ' + channel) + ' ' + fieldId + ' = ' + value + ': ' + result.message).slice(0, 600) });
             if (result.ok) { confirmed[fieldId] = value; outcomes.push({ fieldId, status: 'verified' }); } else { held.errors[fieldId] = result.message; outcomes.push({ fieldId, status: 'failed', message: result.message }); }
-            publish();
+            publishSoon();
           }
           if (!later.length) break;
           held.queued = later.splice(0);
         }
+        // Published at most ten times a second while a send goes on. The reply itself carries the rows as they are now.
+        held.sending = []; held.queued = []; observeNow();
         return reply({ status: 'sent', outcomes, confirmed });
-      } finally { held.sending = []; held.queued = []; if (isSimulated(unit)) await saveSimulatedQuietly(signal); publish(); }
+      } finally { held.sending = []; held.queued = []; if (isSimulated(unit)) await saveSimulatedQuietly(signal); publishSoon(); }
     },
     async execute(id, fields, execution) {
       await saveCarried(execution.signal);

@@ -18,7 +18,7 @@ export const groupsOf = (scope: Scope) => groups.filter(g => g.scope === scope);
 export const planFields = ['unit-name', 'unit-host', 'unit-allow', 'unit-simulated', 'unit-mode'] as const;
 export const modes = [{ value: '1', label: 'HD/SD 4 Ch' }, { value: '2', label: '4K/UHD 1 Ch' }] as const;
 export const modeLabel = (mode: string): string => modes.find(item => item.value === mode)?.label ?? '';
-export const maxUnits = 16;
+export const maxUnits = 40;
 export const masterRowId = 'master';
 
 export interface Unit { id: string; values: Record<string, string>; channels?: Record<string, Record<string, string>> }
