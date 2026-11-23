@@ -166,7 +166,8 @@ export async function buildUiAdapter() {
   const hooks = (await Promise.all(['src/ui-firmware.js','src/ui-camera-control.js','src/ui-device-workflows.js','src/ui-camera-grid-layout.js','src/ui-camera-sheets.js','src/ui-camera-sorting.js','src/ui-backend-hooks.js','src/ui-remi-workflows.js','src/ui-lens-axes.js','src/ui-camera-choices.js','src/ui-sheet-history.js','src/ui-camera-workbook.js','src/ui-camera-assignment.js','src/ui-camera-enabled.js','src/ui-rig.js','src/ui-device-sheet.js','src/ui-setup-mode.js','src/ui-dropdowns.js','src/ui-camera-count.js','src/ui-camera-clear.js','src/ui-text-size.js','src/ui-saved-lists.js','src/ui-defaults.js','src/ui-setup-guide.js'].map(file=>readFile(path.join(root,file),'utf8')))).join('\n');
   replace("  syncFilter();renderLans();renderCameras();setTab('cameras',false);restore(window.openai?.widgetState);", hooks + "\n  initializeDeviceWorkflow();initializeFirmwareTab();syncFilter();renderLans();renderCameras();setTab('devices',false);restore(window.openai?.widgetState);\n  if(moduleBridge)void initializeBackend();else root.hidden=false;");
   const imports = [
-    "import { createSpreadsheetContextMenu, mountSpreadsheetControls, mountSpreadsheetColumnGroup, mountSpreadsheetResize, mountSpreadsheetColumnEditor, mountSpreadsheetViewport } from '@hubble/module-sdk/spreadsheet-controls';",
+    "import { createSpreadsheetContextMenu, mountSpreadsheetControls, mountSpreadsheetColumnGroup, mountSpreadsheetResize, mountSpreadsheetColumnEditor, mountSpreadsheetViewport, spreadsheetColumnSectionsSupported } from '@hubble/module-sdk/spreadsheet-controls';",
+    "import { columnSectionItems, sectionItemId, withSectionVisibility, withShownWhenCollapsed } from './column-sections-model.js';",
     "import { cameraChoiceKey } from './choice-context.js';",
     "import { cyanviewCameraModels } from './camera-models.js';",
     "import { PresentationLedger } from './presentation-ledger.js';",

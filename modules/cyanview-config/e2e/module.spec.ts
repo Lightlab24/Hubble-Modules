@@ -257,7 +257,8 @@ test('Patch Sheet saves camera column widths, row heights and collapsed fields',
   await expect.poll(() => row.evaluate(element => (element as HTMLElement).offsetHeight)).toBe(height + 10);
   const iris = group.getByRole('button', { name: 'Expand Iris', exact: true });
   await iris.click({ button: 'right' });
-  await f.getByRole('menuitem', { name: /Collapsed fields/ }).press('ArrowRight');
+  // Hubble's Columns dropdown redo renamed the submenu.
+  await f.getByRole('menuitem', { name: /Collapsed fields|Shown when collapsed/ }).press('ArrowRight');
   const torque = f.getByRole('menuitemcheckbox', { name: 'Torque', exact: true });
   await torque.click();
   await expect(torque).toHaveAttribute('aria-checked', 'true');
@@ -289,7 +290,10 @@ test('each camera opts into lens axes and only sends the selected settings', asy
   const send = group.locator('[data-action="send-controller"]');
   await group.getByRole('button', { name: 'Choose visible columns' }).click();
   await f.getByRole('searchbox', { name: 'Search columns' }).fill('Use');
-  for (const axis of ['Iris', 'Zoom', 'Focus']) await f.getByRole('menuitemcheckbox', { name: 'Use ' + axis, exact: true }).click();
+  // With column sections, Use Iris is already ticked Show and waits in its collapsed section, so it is
+  // kept When collapsed. The plain menu shows it with its own tick.
+  const sections = await f.locator('[data-column-keep]').count() > 0;
+  for (const axis of ['Iris', 'Zoom', 'Focus']) await f.getByRole('menuitemcheckbox', { name: 'Use ' + axis + (sections ? ' shown when collapsed' : ''), exact: true }).click();
   await f.getByRole('searchbox', { name: 'Search columns' }).press('Escape');
   for (const row of [first, second]) {
     await addCamera(f, group, 'Alpha-USB');

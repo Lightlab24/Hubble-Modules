@@ -15,6 +15,10 @@
   const sheetOwner = id => id === allCamerasSheet || id === cameraSetupSheet || !!device(id);
   const sheetOwners = () => [...devices, { id: allCamerasSheet }, { id: cameraSetupSheet }];
   const cameraAxes = ['iris', 'zoom', 'focus'];
+  // On a Hubble with column sections, the Columns dropdown gives each setting its own Show tick and
+  // Iris, Zoom and Focus their When collapsed ticks. Older Hubbles keep the plain menu.
+  let hostColumnSections = false;
+  const columnSectionsReady = spreadsheetColumnSectionsSupported().then(supported => { hostColumnSections = supported; }, () => {});
   function cameraLayout(id) {
     if (!cameraLayouts.has(id)) cameraLayouts.set(id, {
       version: 2, columns: {}, rows: {}, groups: {}, hiddenGroups: [], textSize: 13,
@@ -41,7 +45,9 @@
   }
   function cameraFieldVisible(id, field, ignoreGroup = false) {
     const section = cameraSheetSections().find(section => section.fields.some(column => column.id === field));
-    const retained = section?.axis && !axisGroups(id)[section.axis] && cameraLayout(id).groups[section.axis]?.collapsed.includes(field);
+    // The plain menu draws a collapsed section's kept settings whatever their tick. With column
+    // sections, Show is the setting's own tick, so an unticked one never shows.
+    const retained = !hostColumnSections && section?.axis && !axisGroups(id)[section.axis] && cameraLayout(id).groups[section.axis]?.collapsed.includes(field);
     return (!hiddenCameraColumns(id).has(field) || retained) && (ignoreGroup || !cameraLayout(id).hiddenGroups.includes(section?.id));
   }
   function cameraAxisGroup(id, axis) {
@@ -109,13 +115,34 @@
     }
     return '<colgroup>' + columns.map(column => '<col' + (column.placeholder || column.tool ? '' : ' data-hubble-column="' + column.id + '" data-label="' + esc(column.label) + '"') + ' style="width:' + column.width + 'px">').join('') + '</colgroup><thead>' + cameraColumnBands(columns, deviceId) + '<tr>' + top.join('') + '</tr>' + (fields.length ? '<tr>' + fields.join('') + '</tr>' : '') + '</thead>';
   }
+  // The sheet's sections as the page draws them, Iris, Zoom and Focus in their saved order.
+  function cameraColumnSectionList(id) {
+    return sheetSections(id).map(section => section.axis ? { ...section, fields: cameraAxisGroup(id, section.axis).columns } : section);
+  }
+  function cameraColumnSectionState(id) {
+    return {
+      hidden: [...hiddenCameraColumns(id)], hiddenGroups: cameraLayout(id).hiddenGroups, expanded: axisGroups(id),
+      kept: Object.fromEntries(cameraAxes.map(axis => [axis, cameraAxisGroup(id, axis).collapsedColumnIds])),
+    };
+  }
   function cameraColumnItems(id) {
+    if (hostColumnSections) return columnSectionItems(cameraColumnSectionList(id), cameraColumnSectionState(id));
     return sheetSections(id).map(section => ({
       id: 'section:' + section.id, label: section.label, visible: !cameraLayout(id).hiddenGroups.includes(section.id),
       fields: section.fields.map(field => ({ id: field.id, label: field.label, visible: cameraFieldVisible(id, field.id, true) && (!section.axis || axisGroups(id)[section.axis] || cameraAxisGroup(id, section.axis).collapsedColumnIds.includes(field.id)) })),
     }));
   }
   function changeCameraVisibility(id, changes) {
+    if (hostColumnSections) {
+      changeCameraPresentation(id, () => {
+        const next = withSectionVisibility(cameraColumnSectionList(id), cameraColumnSectionState(id), changes);
+        const hidden = hiddenCameraColumns(id);
+        hidden.clear();
+        for (const field of next.hidden) hidden.add(field);
+        cameraLayout(id).hiddenGroups = [...next.hiddenGroups];
+      });
+      return;
+    }
     changeCameraPresentation(id, () => {
       const layout = cameraLayout(id), hidden = hiddenCameraColumns(id);
       for (const { id: field, visible } of changes) {
@@ -136,6 +163,28 @@
       }
     });
   }
+  // Column sections: the Expanded / Collapsed word on Iris, Zoom or Focus does what the band's + and − do.
+  function changeCameraExpanded(id, item, expanded) {
+    const axis = cameraColumnSectionList(id).find(section => sectionItemId(section.id) === item)?.axis;
+    if (axis) changeCameraPresentation(id, () => { axisGroups(id)[axis] = expanded; });
+  }
+  // Column sections: When collapsed ticks change only what a collapsed section keeps, never Show.
+  function changeCameraShownWhenCollapsed(id, changes) {
+    changeCameraPresentation(id, () => {
+      const kept = withShownWhenCollapsed(cameraColumnSectionList(id), cameraColumnSectionState(id), changes);
+      for (const axis of cameraAxes) {
+        const group = cameraAxisGroup(id, axis);
+        if (kept[axis].length !== group.collapsedColumnIds.length || kept[axis].some(field => !group.collapsedColumnIds.includes(field)))
+          cameraLayout(id).groups[axis] = { order: group.columns.map(column => column.id), collapsed: kept[axis] };
+      }
+    });
+  }
+  function cameraColumnSectionHandlers(id) {
+    return hostColumnSections ? {
+      onExpandedChange: (item, expanded) => changeCameraExpanded(id, item, expanded),
+      onShownWhenCollapsedChanges: changes => changeCameraShownWhenCollapsed(id, changes),
+    } : {};
+  }
   function mountCameraLayoutControls(table, viewport, sheet) {
     const id = table.dataset.cameraDevice, groups = new Map();
     let resize, disposed = false;
@@ -154,7 +203,8 @@
             changeCameraPresentation(id, () => {
               axisGroups(id)[axis] = next.expanded;
               cameraLayout(id).groups[axis] = { order: next.columns.map(column => column.id), collapsed: [...next.collapsedColumnIds] };
-              for (const field of next.collapsedColumnIds) hiddenCameraColumns(id).delete(field);
+              // The plain menu shows a setting when it's picked here. With column sections, only Show does.
+              if (!hostColumnSections) for (const field of next.collapsedColumnIds) hiddenCameraColumns(id).delete(field);
             });
             focused?.focus({ preventScroll: true });
           }, onError: error => toast(error.message),
