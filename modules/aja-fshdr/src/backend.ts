@@ -23,21 +23,43 @@ const simulatedKey = (unit: Unit) => 'simulated:' + unit.id + ':' + plannedMode(
 export interface Observed { units: Record<string, UnitObservation>; rows: Record<string, RowObservation>; choiceSets: Choice[][]; sequence?: number }
 /** Which settings a row has, how each is held back, and the choices and limits each offers. */
 export type RowShape = Pick<RowObservation, 'locked' | 'choices' | 'limits'>;
+/** One cell's lock, choices and limits. `choices` points into `choiceSets`. */
+export interface CellShape { locked?: string; choices?: number; limits?: Limits }
 /**
- * What the page receives. Rows of the same kind share one shape, sent once in `shapes`, because every row of ten units that
- * aren't connected repeats the same locks, choices and limits, and the copies went past Hubble's 256K state limit.
+ * A row as the page receives it. `columns` points into the shared column lists; `values` and the cells of `shapes[shape]` are in
+ * that list's order, with `null` for a setting the row has no value for. Empty errors, sends and queues are left out.
  */
-export type WireRow = Omit<RowObservation, keyof RowShape> & { shape: number };
-export interface WireObserved { units: Record<string, UnitObservation>; rows: Record<string, WireRow>; choiceSets: Choice[][]; shapes: RowShape[]; sequence?: number }
+export type WireRow = Omit<RowObservation, keyof RowShape | 'values' | 'errors' | 'sending' | 'queued'> & { columns: number; values: (string | null)[]; shape: number } & Partial<Pick<RowObservation, 'errors' | 'sending' | 'queued'>>;
+/**
+ * What the page receives. Hubble refuses state over 256K characters, and the worker stops when it is refused. Setting names are
+ * sent once, in `columns`, instead of in every row, and each distinct cell lock, choice list and limit once, in `cells`, so a row
+ * is a list of short values and a list of cell numbers. Rows that differ only in a few prerequisites no longer need a whole copy.
+ */
+export interface WireObserved { units: Record<string, UnitObservation>; rows: Record<string, WireRow>; choiceSets: Choice[][]; columns: string[][]; cells: CellShape[]; shapes: number[][]; sequence?: number }
 export function toWire(observed: Observed): WireObserved {
-  const shapes: RowShape[] = [], index = new Map<string, number>(), rows: Record<string, WireRow> = {};
-  for (const [rowId, { locked, choices, limits, ...rest }] of Object.entries(observed.rows)) {
-    const shape = { locked, choices, limits }, signature = JSON.stringify(shape);
+  const columns: string[][] = [], cells: CellShape[] = [{}], shapes: number[][] = [], rows: Record<string, WireRow> = {};
+  const columnIndex = new Map<string, number>(), cellIndex = new Map<string, number>([['\u0001\u0001', 0]]), shapeIndex = new Map<string, number>();
+  const intern = <T>(list: T[], index: Map<string, number>, signature: string, item: () => T): number => {
     let at = index.get(signature);
-    if (at === undefined) { at = shapes.push(shape) - 1; index.set(signature, at); }
-    rows[rowId] = { ...rest, shape: at };
+    if (at === undefined) { at = list.push(item()) - 1; index.set(signature, at); }
+    return at;
+  };
+  // Built for every cell of every row at each publish, so it is plain text rather than JSON.
+  const limitsKey = (l: Limits) => [l.precision, l.min, l.max, l.step, l.units, l.minLength, l.maxLength].join('\u0002');
+  for (const [rowId, { values, locked, choices, limits, errors, sending, queued, ...rest }] of Object.entries(observed.rows)) {
+    const ids = [...new Set([...Object.keys(values), ...Object.keys(locked), ...Object.keys(choices), ...Object.keys(limits)])];
+    const shape = ids.map(id => {
+      const lock = Object.hasOwn(locked, id) ? locked[id] : undefined, choice = Object.hasOwn(choices, id) ? choices[id] : undefined, limit = Object.hasOwn(limits, id) ? limits[id] : undefined;
+      const signature = (lock === undefined ? '' : '=' + lock) + '\u0001' + (choice ?? '') + '\u0001' + (limit ? limitsKey(limit) : '');
+      return intern(cells, cellIndex, signature, () => ({ ...(lock !== undefined ? { locked: lock } : {}), ...(choice !== undefined ? { choices: choice } : {}), ...(limit ? { limits: limit } : {}) }));
+    });
+    const row: WireRow = { ...rest, columns: intern(columns, columnIndex, ids.join('\n'), () => ids), values: ids.map(id => values[id] ?? null), shape: intern(shapes, shapeIndex, shape.join(','), () => shape) };
+    if (Object.keys(errors).length) row.errors = errors;
+    if (sending.length) row.sending = sending;
+    if (queued.length) row.queued = queued;
+    rows[rowId] = row;
   }
-  return { units: observed.units, rows, choiceSets: observed.choiceSets, shapes };
+  return { units: observed.units, rows, choiceSets: observed.choiceSets, columns, cells, shapes };
 }
 interface Running { device: Device; address: string; controller: AbortController; task?: Promise<void> }
 interface Transient { errors: Record<string, string>; sending: string[]; queued: string[] }

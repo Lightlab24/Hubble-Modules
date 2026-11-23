@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { ModuleContext, ModuleInstance } from '@hubble/module-sdk';
 import manifest from '../src/manifest.js';
-import { createBackend, type Observed, type WireObserved } from '../src/backend.js';
-import { parameterId, readCatalog } from '../src/device.js';
+import { createBackend, toWire, type Observed, type WireObserved } from '../src/backend.js';
+import { PREREQUISITE, parameterId, readCatalog } from '../src/device.js';
 import { addSheet, applyMutation, channelRowId, defaultDocument, fieldById, fields, groups, inverse, moveSheet, newUnit, removeSheet, renameSheet, setUnitCount, sheetList, validateDocument, valueOf, visibleFields, watchedFieldIds, withColumnVisibility, withSectionVisibility, withShownWhenCollapsed, type FsDocument, type Mutation } from '../src/model.js';
 import { fromWire, masterRows, normalize, pendingFields, rowsFor, shownLabel, shownName } from '../src/rows.js';
 import { DraftStore } from '../src/draft-store.js';
@@ -390,6 +390,41 @@ test('sixteen units that are not connected, with every column shown, stay well i
     const row = h.observed().rows['u16#4']!;
     assert.deepEqual(row.limits['Vid#CustomSize'], { precision: 1, min: 10, max: 200, step: 0.1, units: '%' }, 'every row gets its limits back from the shared shape');
     assert.ok(h.observed().choiceSets[row.choices['Vid#ColorHDRTransform']!]!.some(choice => choice.label === 'BBC HLG LUT'));
+  } finally { await h.stop(); }
+});
+
+test('the page gets back exactly what the worker observed, with setting names sent once instead of in every row', () => {
+  const size = { precision: 1, min: 10, max: 200, step: 0.1, units: '%' };
+  const observed: Observed = { units: {}, choiceSets: [[{ value: '4', label: 'Off' }, { value: '8', label: 'Colorfront Engine-TV' }]], rows: {
+    u1: { values: { SystemName: 'Truck A', ChannelName1: '' }, locked: { ChannelName2: 'Not available in this operating mode.' }, choices: {}, limits: { SystemName: { minLength: 1, maxLength: 20 } }, errors: {}, sending: [], queued: [] },
+    'u1#1': { values: { 'Vid#ColorHDRTransform': '4', 'Vid#CustomSize': '100.0' }, locked: { 'Vid#CustomSize': PREREQUISITE }, choices: { 'Vid#ColorHDRTransform': 0 }, limits: { 'Vid#CustomSize': size }, errors: { 'Vid#ColorHDRTransform': 'The unit did not answer, so the result is unknown.' }, sending: ['Vid#CustomSize'], queued: [], signal: '1080p 23.98' },
+    'u1#2': { values: { 'Vid#ColorHDRTransform': '8', 'Vid#CustomSize': '120.0' }, locked: {}, choices: { 'Vid#ColorHDRTransform': 0 }, limits: { 'Vid#CustomSize': size }, errors: {}, sending: [], queued: ['Vid#ColorHDRTransform'], signal: '' },
+    u2: { values: {}, locked: { SystemName: 'The unit reports this value. It can’t be set.' }, choices: {}, limits: {}, errors: {}, sending: [], queued: [], planned: true },
+  } };
+  const wire = toWire(observed);
+  assert.deepEqual(fromWire(JSON.parse(JSON.stringify(wire)) as WireObserved), observed);
+  assert.ok(['u1', 'u2'].every(rowId => !JSON.stringify(wire.rows[rowId]).includes('Name')), 'a row with nothing pending is values and cell numbers, no setting names');
+});
+
+test('sixteen live units, every column shown and each on its own transforms, stay well inside Hubble’s 256K state limit', async () => {
+  // Past the limit the worker stops. Each channel here is on a different transform, so rows differ in their locks and choices.
+  const transforms = ['0', '5', '8', '1', '7', '2', '3', '4'];
+  const plan = defaultDocument();
+  plan.units = Array.from({ length: 16 }, (_, index) => { const unit = newUnit('s' + (index + 1), 'Sim ' + (index + 1), ''); unit.values['unit-simulated'] = 'TRUE'; return unit; });
+  const showAll = (view: FsDocument['view']) => ({ ...view, hidden: [], hiddenGroups: [] });
+  plan.sheets = plan.sheets.map(sheet => sheet.view ? { ...sheet, view: showAll(sheet.view) } : sheet);
+  plan.view = showAll(plan.view);
+  const changes = Object.fromEntries(plan.units.map((unit, index) => [unit.id, Object.fromEntries([1, 2, 3, 4].map(n => ['eParamID_Vid' + n + 'ColorHDRTransform', transforms[(index + n) % 8]!]))]));
+  const h = host(plan, { simulated: { version: 1, units: changes } });
+  try {
+    await h.backend.start!();
+    await until(() => Object.values(h.observed().units).filter(unit => unit.state === 'live').length === 16, 'all sixteen units live');
+    const sent = JSON.stringify(h.states.at(-1)!.values);
+    assert.ok(sent.length < 160 * 1024, 'published state is ' + sent.length + ' characters');
+    const seen = h.observed();
+    assert.deepEqual([1, 2, 3, 4].map(n => seen.rows['s3#' + n]!.values['Vid#ColorHDRTransform']), ['1', '7', '2', '3']);
+    assert.ok(seen.choiceSets[seen.rows['s16#4']!.choices['Vid#ColorHDRTransform']!]!.some(choice => choice.label === 'BBC HLG LUT'));
+    assert.ok(Object.keys(seen.rows['s16#4']!.locked).length > 0, 'locks come back too');
   } finally { await h.stop(); }
 });
 

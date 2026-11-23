@@ -21,9 +21,9 @@ let errorTimer: ReturnType<typeof setTimeout> | undefined, lastSaveError = '';
 // Hubble delivers state on its own slow cycle, so an older copy can arrive after a newer reply.
 let newestState = 0;
 function adopt(next: Reply) {
-  if (!next.units || !next.rows || !next.choiceSets || !next.shapes) return;
+  if (!next.units || !next.rows || !next.choiceSets || !next.columns || !next.cells || !next.shapes) return;
   if (typeof next.sequence === 'number') { if (next.sequence < newestState) return; newestState = next.sequence; }
-  observed = fromWire({ units: next.units, rows: next.rows, choiceSets: next.choiceSets, shapes: next.shapes });
+  observed = fromWire({ units: next.units, rows: next.rows, choiceSets: next.choiceSets, columns: next.columns, cells: next.cells, shapes: next.shapes });
 }
 function report(message: string) { clearTimeout(errorTimer); errorBox.getAnimations().forEach(animation => animation.cancel()); errorBox.textContent = message; errorBox.hidden = !message; if (message) { errorBox.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 250, delay: 4250, fill: 'forwards' }); errorTimer = setTimeout(() => { errorBox.hidden = true; }, 4500); } }
 try {

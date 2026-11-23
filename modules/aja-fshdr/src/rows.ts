@@ -2,10 +2,27 @@ import { channelRowId, fieldById, isSimulated, masterRowId, masterSelection, nam
 import type { Observed, RowObservation, UnitObservation, WireObserved } from './backend.js';
 import type { Choice } from './device.js';
 
-/** The worker's state with each row's locks, choices and limits looked up again from the shared `shapes`. */
-export function fromWire(wire: Pick<WireObserved, 'units' | 'rows' | 'choiceSets' | 'shapes'>): Observed {
-  const rows: Observed['rows'] = {};
-  for (const [rowId, { shape, ...rest }] of Object.entries(wire.rows)) rows[rowId] = { ...rest, ...(wire.shapes[shape] ?? { locked: {}, choices: {}, limits: {} }) };
+/** The worker's state with each row's values, locks, choices and limits keyed by setting again. Rows with the same shape share its maps. */
+export function fromWire(wire: Pick<WireObserved, 'units' | 'rows' | 'choiceSets' | 'columns' | 'cells' | 'shapes'>): Observed {
+  const rows: Observed['rows'] = {}, expanded = new Map<string, Pick<RowObservation, 'locked' | 'choices' | 'limits'>>();
+  for (const [rowId, { columns: at, values: list, shape, errors = {}, sending = [], queued = [], ...rest }] of Object.entries(wire.rows)) {
+    const ids = wire.columns[at] ?? [], key = at + ':' + shape;
+    let parts = expanded.get(key);
+    if (!parts) {
+      const made: Pick<RowObservation, 'locked' | 'choices' | 'limits'> = { locked: {}, choices: {}, limits: {} };
+      (wire.shapes[shape] ?? []).forEach((index, i) => {
+        const id = ids[i], cell = wire.cells[index];
+        if (id === undefined || !cell) return;
+        if (cell.locked !== undefined) made.locked[id] = cell.locked;
+        if (cell.choices !== undefined) made.choices[id] = cell.choices;
+        if (cell.limits !== undefined) made.limits[id] = cell.limits;
+      });
+      expanded.set(key, parts = made);
+    }
+    const values: Record<string, string> = {};
+    ids.forEach((id, i) => { const value = list[i]; if (typeof value === 'string') values[id] = value; });
+    rows[rowId] = { ...rest, values, ...parts, errors, sending, queued };
+  }
   return { units: wire.units, rows, choiceSets: wire.choiceSets };
 }
 
