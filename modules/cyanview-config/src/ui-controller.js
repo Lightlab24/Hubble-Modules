@@ -3316,26 +3316,47 @@ import { addressPatternProblem, deviceKinds, deviceNumber, fillAddress, fillName
     }
     return [...routeLines(camera), ...settingLines(camera)];
   }
-  // Taking copies off only touches the controllers that hold them, so the camera's own controller can be off.
-  function onlyTakesCopiesOff(camera) {
-    if (!routeHasChanges(camera) || isMove(camera) || camera.pending) return false;
-    const actual = actualRoute(camera).links;
-    return Object.entries(wantedRoute(camera).links).every(([rcp, parent]) => actual[rcp] === parent);
+  // The controllers a re-route opens, the way remi-route does it: a copy that comes off needs only the
+  // controller holding it, and a new copy needs its controller and the one it comes from. A copy that stays,
+  // and the controllers it comes through, are never asked. So once a Master RCP holds a camera, copies from
+  // the master go ahead while the RIO the camera is on is off (Nov 23, 2026).
+  function routeReach(camera) {
+    const actual = actualRoute(camera).links, wanted = wantedRoute(camera).links, kept = new Set([camera.device]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const [rcp, parent] of Object.entries(actual)) if (!kept.has(rcp) && wanted[rcp] === parent && kept.has(parent)) { kept.add(rcp); grew = true; }
+    }
+    const added = Object.entries(wanted).filter(([rcp]) => !kept.has(rcp));
+    return { added, reach: [...new Set([...Object.keys(actual).filter(rcp => !kept.has(rcp)), ...added.flat()])] };
   }
   // A delete or a move can go ahead with the camera's own controller off: everything else is done, and the
   // camera waits to be deleted there. Every other controller it involves has to be on.
-  const ownMayBeOff = camera => !camera.leftBehind && !!camera.elementKey && (!!camera.removeStaged || isMove(camera) || onlyTakesCopiesOff(camera));
+  const ownMayBeOff = camera => !camera.leftBehind && !!camera.elementKey && (!!camera.removeStaged || isMove(camera));
+  const controllerList = ids => ids.map(controllerName).join(' and ');
   function pendingState(camera) {
     if (camera.deleting || camera.jobs) return { text: 'Sending…', kind: 'active', blocked: true };
     if (queuedSends.has(camera)) return { text: 'Queued', kind: 'active', blocked: true };
     const wanted = wantedRoute(camera), actual = actualRoute(camera);
-    const involved = [...new Set([camera.device, wanted.source, ...Object.keys(actual.links), ...Object.keys(wanted.links)])].filter(id => device(id)?.online === false);
-    const ownOff = ownMayBeOff(camera) && involved.includes(camera.device), offline = ownOff ? involved.filter(id => id !== camera.device) : involved;
+    // A setting change rebuilds every copy, so it needs the camera and every controller holding one.
+    const route = routeHasChanges(camera) && !ownMayBeOff(camera) && !camera.pending ? routeReach(camera) : null;
+    const needed = route ? route.reach : [camera.device, wanted.source, ...Object.keys(actual.links), ...Object.keys(wanted.links)];
+    const involved = [...new Set(needed)].filter(id => device(id)?.online === false);
+    const ownDown = !camera.leftBehind && !!camera.elementKey && device(camera.device)?.online === false;
+    const ownOff = ownDown && (ownMayBeOff(camera) || !!route && !involved.includes(camera.device)), offline = ownOff ? involved.filter(id => id !== camera.device) : involved;
     const error = routeErrors.get(camera.id) ?? (['Pending', 'Verified', 'In sync', 'Queued', 'Sending', 'Verifying', 'Error'].includes(camera.result) ? '' : camera.result);
     if (error) return { text: error, kind: 'failed', blocked: !!offline.length };
     if (camera.leftBehind && offline.length) return { text: 'Waits until ' + controllerName(camera.device) + ' is back online', kind: 'offline', blocked: true };
-    if (offline.length) return { text: 'Won’t send while ' + offline.map(controllerName).join(' and ') + (offline.length === 1 ? ' is' : ' are') + ' offline', kind: 'offline', blocked: true };
-    if (ownOff) return { text: controllerName(camera.device) + ' is offline. ' + (camera.removeStaged ? 'Its REMI copies come off now and deleting it there waits until it is back.' : isMove(camera) ? 'The camera moves now and deleting it there waits until it is back.' : 'Its REMI copies can still come off.'), kind: 'offline', blocked: false };
+    if (offline.length) {
+      // Only a copy taken straight from the camera's own controller needs it on.
+      const direct = route && offline.includes(camera.device) ? route.added.filter(([, parent]) => parent === camera.device).map(([rcp]) => rcp) : [];
+      return { text: 'Won’t send while ' + controllerList(offline) + (offline.length === 1 ? ' is' : ' are') + ' offline' +
+        (direct.length ? '. ' + controllerList(direct) + (direct.length === 1 ? ' takes its copy' : ' take their copies') + ' straight from ' + controllerName(camera.device) : ''), kind: 'offline', blocked: true };
+    }
+    if (ownOff) {
+      const from = [...new Set(route?.added.map(([, parent]) => parent) ?? [])], to = route?.added.map(([rcp]) => rcp) ?? [];
+      return { text: controllerName(camera.device) + ' is offline. ' + (camera.removeStaged ? 'Its REMI copies come off now and deleting it there waits until it is back.' : isMove(camera) ? 'The camera moves now and deleting it there waits until it is back.' :
+        to.length ? controllerList(to) + (to.length === 1 ? ' gets its copy' : ' get their copies') + ' from ' + controllerList(from) + ', so ' + (to.length === 1 ? 'it' : 'they') + ' can still be sent.' : 'Its REMI copies can still come off.'), kind: 'offline', blocked: false };
+    }
     return { text: camera.result === 'Error' ? 'Could not be confirmed' : '', kind: camera.result === 'Error' ? 'failed' : '', blocked: false };
   }
   const pendingRows = () => sortCameraRows([...assignmentRows(), ...cameras.filter(camera => camera.leftBehind || camera.foreign && !importedCamera(camera))], allCamerasSheet).flatMap(camera => { const lines = pendingLines(camera); return lines.length ? [{ camera, lines }] : []; });

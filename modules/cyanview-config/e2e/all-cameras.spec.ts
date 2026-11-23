@@ -1030,7 +1030,34 @@ test('a circle can come off while the RIO it starts from is off', async ({ page,
   await sendAll(f);
   await settle(f);
   expect(names((await fleet(request))[1]!)).toEqual([]);
-  // Putting a copy back needs the RIO.
+  // Putting a copy back needs the RIO, since it comes straight from it.
   await circle(row(f, 'Wide'), MASTER).click();
-  await expect(line(f, on(MASTER)).locator('.hc-pending-status')).toContainText('Won’t send while Stage RIO is offline');
+  await expect(line(f, on(MASTER)).locator('.hc-pending-status')).toHaveText('Won’t send while Stage RIO is offline. Master RCP takes its copy straight from Stage RIO');
+  await expect(panel(f).locator('[data-action="send-all-pending"]')).toBeDisabled();
+});
+
+// Nov 23, 2026: cameras 12 and 13 were on RIOs that were off, with their copies on the Gateway as Master RCP.
+// A circle for another RCP waited for the RIO, though that copy comes from the Gateway, which still had them.
+test('a copy from the Master RCP goes ahead while the RIO the camera is on is off', async ({ page, request }) => {
+  const f = await open(page, request);
+  await setMaster(f, 'Wide', 'Master RCP');
+  await sendAll(f);
+  await settle(f);
+  expect(names((await fleet(request))[1]!)).toEqual(['Wide']);
+  await request.post('/__simulate', { data: { power: { device: 0, on: false } } });
+  await circle(row(f, 'Wide'), LEAF).click();
+  await showPending(f);
+  await expect(line(f, on(LEAF)).locator('.hc-pending-status')).toHaveText('Stage RIO is offline. Downstream RCP gets its copy from Master RCP, so it can still be sent.', { timeout: 20000 });
+  await expect(line(f, on(LEAF)).locator('.hc-pending-status')).toHaveAttribute('data-kind', 'offline');
+  await expect(panel(f).locator('[data-action="send-all-pending"]')).toBeEnabled();
+  await sendAll(f);
+  await settle(f);
+  const devices = await fleet(request);
+  // Made on Downstream RCP from Master RCP's copy. The RIO is never asked, and keeps its camera.
+  expect(names(devices[2]!)).toEqual(['Wide']);
+  expect(Object.values(devices[2]!.config.Camera).map(camera => camera.Interface?.device)).toEqual(['(D)cy-rcp-1-20']);
+  expect(realNames(devices[0]!)).toEqual(['Wide']);
+  await expect(cell(row(f, 'Wide'), 'remiMaster')).toHaveText('Master RCP');
+  await expect(circle(row(f, 'Wide'), LEAF)).toBeChecked();
+  await expect(cell(row(f, 'Wide'), 'sync')).not.toContainText('Error');
 });
