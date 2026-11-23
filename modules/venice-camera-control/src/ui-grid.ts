@@ -1,10 +1,10 @@
 import {
-  mountSpreadsheetControls,mountSpreadsheetColumnGroup,mountSpreadsheetColumnEditor,
+  mountSpreadsheetControls,mountSpreadsheetColumnGroup,mountSpreadsheetColumnEditor,spreadsheetColumnSectionsSupported,
   createSpreadsheetContextMenu,mountSpreadsheetReorder,mountSpreadsheetResize,mountSpreadsheetViewport,
   type SpreadsheetAddress,type SpreadsheetCell,type SpreadsheetControls,type SpreadsheetColumn,type SpreadsheetColumnGroup,
   type SpreadsheetEdit,type SpreadsheetReorderItem,type SpreadsheetColumnGroupControls
 } from '@hubble/module-sdk/spreadsheet-controls';
-import { groups,fields,fieldById,valueOf,sameValue,clone,visibleFields,withColumnVisibility,withNoColumns,activeSheetId,isFlipped,viewChange,isLoginField,loginVisible,type View,type Camera,type CellEdit,type Field } from './model.js';
+import { groups,fields,fieldById,valueOf,sameValue,clone,visibleFields,withColumnVisibility,withNoColumns,withSectionVisibility,withShownWhenCollapsed,activeSheetId,isFlipped,viewChange,isLoginField,loginVisible,type View,type Camera,type CellEdit,type Field } from './model.js';
 import { DraftStore } from './draft-store.js';
 import type { Observations } from './backend.js';
 
@@ -91,7 +91,7 @@ export async function createCameraGrid(options:GridOptions){
   function setVisibility(changes:readonly {id:string;visible:boolean}[]){
     const clearing=changes.find(change=>change.id===clearAllId);
     if(clearing){if(clearing.visible){columnEditor.refresh();return;}layout(withNoColumns(view()));}
-    else layout(withColumnVisibility(view(),changes));
+    else layout(sections?withSectionVisibility(view(),changes):withColumnVisibility(view(),changes));
     followSelection();
   }
   function setVisible(id:string,visible:boolean){setVisibility([{id,visible}]);}
@@ -157,12 +157,20 @@ export async function createCameraGrid(options:GridOptions){
       onError:error=>options.onError(error.message)
     });groupControls.set(group.id,header);controlsToDispose.push(header);
   }
+  // A Hubble with column sections gives each setting its own Show and When collapsed ticks and
+  // lists the ones a collapsed section tucks away. Older Hubbles get the plain menu.
+  const sections=await spreadsheetColumnSectionsSupported().catch(()=>false);
+  const sectionItems=()=>[{id:clearAllId,label:'Clear all columns',visible:hasOptionalColumns()},{id:'login',label:'Login',visible:!view().hiddenLogin?.includes('login'),fields:loginMeta.map(m=>({id:m.id,label:m.label,visible:!view().hiddenLogin?.includes(m.id)}))},...view().order.map(id=>{const g=groups.find(g=>g.id===id)!;const off=!!view().hiddenGroups?.includes(id),kept=view().collapsed[id]??g.collapsed;return {id,label:g.label,expanded:!!view().expanded[id],fields:orderedFields().filter(f=>f.group===id).map(f=>({id:f.id,label:f.label,visible:!off&&!view().hidden.includes(f.id),shownWhenCollapsed:kept.includes(f.id)}))};})];
   const columnEditor=await mountSpreadsheetColumnEditor({
     root:options.columnEditor,
-    getItems:()=>[{id:clearAllId,label:'Clear all columns',visible:hasOptionalColumns()},{id:'login',label:'Login',visible:!view().hiddenLogin?.includes('login'),fields:loginMeta.map(m=>({id:m.id,label:m.label,visible:!view().hiddenLogin?.includes(m.id)}))},...view().order.map(id=>{const g=groups.find(g=>g.id===id)!;const visible=new Set(visibleFields({...view(),hiddenGroups:[]}).map(f=>f.id));return {id,label:g.label,visible:!view().hiddenGroups?.includes(id),fields:orderedFields().filter(f=>f.group===id).map(f=>({id:f.id,label:f.label,visible:visible.has(f.id)}))};})],
+    getItems:()=>sections?sectionItems():[{id:clearAllId,label:'Clear all columns',visible:hasOptionalColumns()},{id:'login',label:'Login',visible:!view().hiddenLogin?.includes('login'),fields:loginMeta.map(m=>({id:m.id,label:m.label,visible:!view().hiddenLogin?.includes(m.id)}))},...view().order.map(id=>{const g=groups.find(g=>g.id===id)!;const visible=new Set(visibleFields({...view(),hiddenGroups:[]}).map(f=>f.id));return {id,label:g.label,visible:!view().hiddenGroups?.includes(id),fields:orderedFields().filter(f=>f.group===id).map(f=>({id:f.id,label:f.label,visible:visible.has(f.id)}))};})],
     onVisibilityChange:setVisible,
     onVisibilityChanges:setVisibility,
-    onMove(id,beforeId){if(id===clearAllId||id==='login'||isLoginField(id))return;move([id],beforeId===clearAllId||beforeId==='login'?view().order[0]!:beforeId,fieldById.get(id)?.group??'groups');}
+    onMove(id,beforeId){if(id===clearAllId||id==='login'||isLoginField(id))return;move([id],beforeId===clearAllId||beforeId==='login'?view().order[0]!:beforeId,fieldById.get(id)?.group??'groups');},
+    ...(sections?{
+      onExpandedChange(groupId:string,expanded:boolean){const next=clone(view());next.expanded[groupId]=expanded;layout(next);followSelection();},
+      onShownWhenCollapsedChanges(changes:readonly {id:string;shownWhenCollapsed:boolean}[]){layout(withShownWhenCollapsed(view(),changes));followSelection();},
+    }:{}),
   });controlsToDispose.push(columnEditor);
   const menu=await createSpreadsheetContextMenu({root:table,onError:error=>options.onError(error.message)});controlsToDispose.push(menu);
   table.addEventListener('contextmenu',event=>{

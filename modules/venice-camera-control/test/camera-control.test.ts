@@ -8,7 +8,7 @@ import { WebSocketServer } from 'ws';
 import { encode,decode } from '@msgpack/msgpack';
 import { createModuleHarness } from '@hubble/module-sdk/testing';
 import module from '../src/index.js';
-import { groups,fields,defaultDocument,applyMutation,clone,visibleFields,withColumnVisibility,validateDocument,addSheet,renameSheet,removeSheet,moveSheet,setOrientation,sheetList,activeSheetId,isFlipped,viewChange,setCameraCount,cameraHasData,loginVisible,sheetRowCount,withNoColumns,alertChoices,inverse,liveOn,autoSendOn,readFieldIds,sameValue,validateValue,type AlertChoices,type Mutation,type View } from '../src/model.js';
+import { groups,fields,defaultDocument,applyMutation,clone,visibleFields,withColumnVisibility,withSectionVisibility,withShownWhenCollapsed,validateDocument,addSheet,renameSheet,removeSheet,moveSheet,setOrientation,sheetList,activeSheetId,isFlipped,viewChange,setCameraCount,cameraHasData,loginVisible,sheetRowCount,withNoColumns,alertChoices,inverse,liveOn,autoSendOn,readFieldIds,sameValue,validateValue,type AlertChoices,type Mutation,type View } from '../src/model.js';
 import { DraftStore } from '../src/draft-store.js';
 import { CameraClient } from '../src/camera-client.js';
 import { encodeField,decodeField,writeField,recordingState,fieldProperties } from '../src/protocol.js';
@@ -1243,4 +1243,26 @@ test('a card that is recording means REC even while the media box says NoMedia, 
     assert.deepEqual(lines.map(line=>line.split(' (')[0]),['Camera 1 standby','Camera 1 recording','Camera 1 standby'],'one line per change, none for a repeat');
     assert.match(lines[1]!,/media box NoMedia, cards \{.*"media\.4":"Recording"/);
   } finally {await backend.dispose();await camera.close();}
+});
+test('column sections: Show is each setting’s own tick, When collapsed picks what a collapsed section keeps, and Login keeps its own on/off',()=>{
+  const view=defaultDocument().view,group=groups.find(g=>g.fields.length>2)!,[first,second]=group.fields;
+  const onScreen=(next:View)=>visibleFields(next).map(f=>f.id);
+  const expanded=(next:View):View=>({...next,expanded:{...next.expanded,[group.id]:true},hiddenGroups:(next.hiddenGroups??[]).filter(id=>id!==group.id)});
+  // Hidden by Show stays hidden when its section expands.
+  const hidden=withSectionVisibility(expanded(view),[{id:second!.id,visible:false}]);
+  assert.ok(!onScreen(hidden).includes(second!.id));
+  assert.ok(!onScreen({...hidden,expanded:{...hidden.expanded,[group.id]:true}}).includes(second!.id));
+  // When collapsed only changes what a collapsed section keeps.
+  const collapsed:View={...expanded(view),expanded:{...view.expanded,[group.id]:false}};
+  const kept=withShownWhenCollapsed(collapsed,[{id:first!.id,shownWhenCollapsed:true}]);
+  assert.ok(onScreen(kept).includes(first!.id));
+  assert.deepEqual(kept.hidden,collapsed.hidden);
+  // Every setting off switches the section off; ticking one brings it back with only that one.
+  const off=withSectionVisibility(expanded(view),group.fields.map(f=>({id:f.id,visible:false})));
+  assert.ok(off.hiddenGroups!.includes(group.id));
+  const one=withSectionVisibility(off,[{id:first!.id,visible:true}]);
+  assert.deepEqual(onScreen(expanded(one)).filter(id=>group.fields.some(f=>f.id===id)),[first!.id]);
+  // Login settings keep their own rules.
+  const login=withSectionVisibility(view,[{id:'login',visible:false}]);
+  assert.ok(login.hiddenLogin!.includes('login'));
 });
