@@ -1,7 +1,7 @@
 import { CyanviewClient } from './transport.js';
 import { PlanRepository } from './repository.js';
 import { addressParts, baseFromSerial, lensParameters, normalizedLabel, object, validIp, type Plan, type RecordValue } from './model.js';
-import { baseRow, normalizeSnapshot, optionEntries } from './normalize.js';
+import { baseRow, normalizeSnapshot, optionEntries, wanRow } from './normalize.js';
 import { isRemiModel, remiCamera, remiEntries } from './remi-model.js';
 import type { RemiOperations } from './remi.js';
 
@@ -118,12 +118,14 @@ export class ConfigurationOperations {
       const number = input.kind === 'camera' && !input.deleting ? Number(item.number) : null;
       if (number !== null && numbers.has(number)) throw new Error('That camera number is already being sent on this controller');
       if (number !== null) { numbers.add(number); this.cameraNumbers.set(deviceId, numbers); }
+      // An address change goes over a socket of its own, on the controller's base address when that answers.
+      const network = input.kind === 'lan' && item.type !== 'WAN' && item.operation !== 'Keep';
       let client: CyanviewClient | undefined;
       try {
-        client = session ? await session.client(device, signal) : await this.connect(device, signal);
+        client = network ? await this.connectForNetwork(device, signal) : session ? await session.client(device, signal) : await this.connect(device, signal);
         return input.kind === 'camera' ? await this.camera(client, device, target, input, signal, session) : await this.lan(client, device, target, input, signal);
       } finally {
-        if (!session) client?.close();
+        if (!session || network) client?.close();
         if (number !== null) { numbers.delete(number); if (!numbers.size) this.cameraNumbers.delete(deviceId); }
       }
     });
@@ -162,8 +164,9 @@ export class ConfigurationOperations {
           const rows = work[next++]!;
           const send = async (index: number) => {
             const input = object(items[index]), item = object(input.item), began = performance.now();
-            try { results[index] = { ...await this.run(input, signal, session), kind: input.kind, id: item.id }; }
-            catch (error) { results[index] = { kind: input.kind, id: item.id, error: error instanceof Error ? error.message : 'Settings could not be confirmed' }; }
+            // Each result names its controller, so the log can say where a send failed.
+            try { results[index] = { ...await this.run(input, signal, session), kind: input.kind, id: item.id, device: item.device }; }
+            catch (error) { results[index] = { kind: input.kind, id: item.id, device: item.device, error: error instanceof Error ? error.message : 'Settings could not be confirmed' }; }
             results[index]!.ms = Math.round(performance.now() - began);
           };
           // A network change, a new camera and a changed camera number each take their turn, since the
@@ -410,10 +413,13 @@ export class ConfigurationOperations {
         const entries = Object.entries(object(client.config.IP)).map(([key, raw]) => [key, object(raw)] as const);
         const own = baseRow(entries.map(([key, row]) => ({ key, ...row })), serial);
         if (!own || own.IP !== base) throw new Error(name + ' doesn’t list ' + base + ' as its base address, so nothing on it was changed');
-        const isWan = (row: RecordValue) => String(row.Type ?? '').toUpperCase().includes('WAN');
+        const isWan = wanRow;
         // What the controller lets go of: its own addresses are ReadOnly, and the WAN and its base are NoDelete.
+        // A blank address element, which reads as a WAN and isn't one, goes with the LAN addresses.
         const deleting = lans ? entries.filter(([key, row]) => key !== own.key && !isWan(row) && !enabled(row.ReadOnly) && !enabled(row.NoDelete)).map(([key]) => key) : [];
-        const wanEntry = wan ? entries.find(([, row]) => isWan(row) && !enabled(row.ReadOnly)) : undefined;
+        // The WAN the controller itself keeps is NoDelete. Anything else that reads as one comes second.
+        const wans = entries.filter(([, row]) => isWan(row) && !enabled(row.ReadOnly));
+        const wanEntry = wan ? wans.find(([, row]) => enabled(row.NoDelete)) ?? wans[0] : undefined;
         const wanBlank = (row: RecordValue) => !enabled(row.DHCP) && ['IP', 'Gateway', 'DNS1', 'DNS2'].every(field => !String(row[field] ?? '').trim());
         const wanChange = !!wanEntry && !wanBlank(wanEntry[1]);
         const total = deleting.length + (wanChange ? 1 : 0);
@@ -428,7 +434,7 @@ export class ConfigurationOperations {
             if (!client.connected) throw error;
           }
           try { await client.waitFor(gone, signal); }
-          catch { signal.throwIfAborted(); throw new Error('LAN address ' + String(object(object(client.config.IP)[key]).IP ?? key) + ' on ' + name + ' could not be deleted'); }
+          catch { signal.throwIfAborted(); throw new Error('LAN address ' + String(object(object(client.config.IP)[key]).IP || key) + ' on ' + name + ' could not be deleted'); }
           progress(deviceId, ++done, total);
         }
         if (wanEntry && wanChange) {
@@ -510,49 +516,170 @@ export class ConfigurationOperations {
   }
   private async lan(client: CyanviewClient, device: RecordValue, item: RecordValue, input: RecordValue, signal: AbortSignal): Promise<RecordValue> {
     const rows = object(client.config.IP), fields: string[] = Array.isArray(input.fields) ? input.fields : [];
-    const oldKey = String(item.elementKey ?? Object.keys(rows).find(key => rows[key].IP === String(item.current).split('/')[0] && rows[key].Interface === item.iface) ?? '');
-    const old = object(rows[oldKey]);
-    if (item.type === 'WAN') return this.wan(client, item, oldKey, old, fields, signal);
-    if (!['Add', 'Replace', 'Keep'].includes(item.operation)) throw new Error('Choose Add or Replace');
+    if (item.type === 'WAN') {
+      const key = String(item.elementKey ?? Object.keys(rows).find(key => rows[key].IP === String(item.current).split('/')[0] && rows[key].Interface === item.iface) ?? '');
+      return this.wan(client, item, key, object(rows[key]), fields, signal);
+    }
+    if (!['Add', 'Replace', 'Keep', 'Delete'].includes(item.operation)) throw new Error('Choose Add, Replace or Delete');
     if (item.operation === 'Keep') {
       if (item.planned !== item.current) throw new Error('Choose Add or Replace for the changed address');
-      return { verified: true, elementKey: oldKey };
+      return { verified: true, elementKey: String(item.elementKey ?? '') };
     }
-    const desired = addressParts(String(item.planned)), replacing = item.operation === 'Replace';
-    if (!/^LAN\d+$/.test(String(item.iface))) throw new Error('Choose a valid LAN interface');
-    if (replacing && (!oldKey || !old.IP || String(old.IP) !== String(item.current).split('/')[0]) && !item.newElementKey) throw new Error('The original address changed; refresh before replacing it');
-    if (replacing && old.IP && protectedLan(old, device)) throw new Error('The management or protected address cannot be replaced');
-    const separate = replacing || item.operation === 'Add' && !!item.current && !!oldKey;
-    let key = String(separate ? item.newElementKey ?? '' : item.elementKey ?? '');
-    if (key && !rows[key]) throw new Error('The saved network element is unavailable; refresh before retrying');
+    return item.operation === 'Delete' ? this.removeAddress(client, device, item, signal) : this.setAddress(client, device, item, signal);
+  }
+  /**
+   * The socket an address change goes over: the controller's own base address when it answers there as itself,
+   * because that address is never the one being changed or removed, and an address Hubble last reached it by may
+   * already be gone. Otherwise the address it is usually reached by.
+   */
+  private async connectForNetwork(device: RecordValue, signal: AbortSignal): Promise<CyanviewClient> {
+    const base = baseFromSerial(String(device.serial ?? '')) || String(device.base ?? '');
+    if (validIp(base) && base !== String(device.address || device.base)) {
+      const opened = await this.reach(device, [base], signal);
+      if (opened) return opened;
+    }
+    return this.connect(device, signal);
+  }
+  /** Another Cyanview controller that already answers at an address, by its serial. Only a look: nothing is written. */
+  private async holderOf(address: string, device: RecordValue, signal: AbortSignal): Promise<string> {
+    let probe: CyanviewClient | undefined;
+    try {
+      probe = this.client(address);
+      await probe.connect(AbortSignal.any([signal, AbortSignal.timeout(1500)]));
+      return probe.serial && probe.serial !== device.serial ? probe.serial : '';
+    } catch { signal.throwIfAborted(); return ''; }
+    finally { probe?.close(); }
+  }
+  /** The controller again, at the first of these addresses where it answers as itself. */
+  private async reach(device: RecordValue, addresses: string[], signal: AbortSignal): Promise<CyanviewClient | undefined> {
+    for (const address of new Set(addresses.filter(validIp))) {
+      try {
+        const opened = await ownSocket(this.held, this.client, device, AbortSignal.any([signal, AbortSignal.timeout(3000)]), address);
+        if (opened.serial === device.serial) return opened;
+        opened.close();
+      } catch { signal.throwIfAborted(); }
+    }
+    return undefined;
+  }
+  /**
+   * A LAN address set on the controller. Changing an address rewrites the one the controller already has, in place,
+   * so it never ends up with the old address and the new one (Nov 23, 2026: the change used to add the new address,
+   * look for the controller at it, and only then delete the old one; when that look found another controller, or
+   * nothing, both addresses stayed). A new address is the only thing that makes a new element, and one that can't be
+   * finished is taken off again. What the controller reports back on the same socket confirms it.
+   */
+  private async setAddress(client: CyanviewClient, device: RecordValue, item: RecordValue, signal: AbortSignal): Promise<RecordValue> {
+    const rows = object(client.config.IP), name = String(device.name || device.serial), desired = addressParts(String(item.planned)), replacing = item.operation === 'Replace';
+    const base = baseFromSerial(String(device.serial ?? '')) || String(device.base ?? '');
+    const ownKey = String(item.elementKey ?? (replacing ? Object.keys(rows).find(key => rows[key].IP === String(item.current).split('/')[0] && rows[key].Interface === item.iface) ?? '' : ''));
+    // Add on a row that already has an address keeps that address and makes another beside it.
+    const beside = !replacing && !!item.current && !!ownKey;
+    let key = beside ? String(item.newElementKey ?? '') : ownKey;
+    if (replacing && (!key || !rows[key])) throw new Error('This address is no longer on ' + name + '. Refresh, then set it again.');
+    // An address this row started and that has since gone from the controller is simply made again.
+    if (key && !rows[key]) key = '';
+    const old = key ? object(rows[key]) : {};
+    if (key && protectedLan(old, device)) throw new Error('The management or protected address cannot be replaced');
+    // A blank element that reads as a WAN would become a second WAN if an address were written to it.
+    if (key && String(old.Type ?? '').toUpperCase().includes('WAN')) throw new Error('This blank entry on ' + name + ' can only be removed');
+    // A blank address element has no interface yet, and takes the one the controller's own address is on.
+    const entries: RecordValue[] = Object.entries(rows).map(([other, row]) => ({ key: other, ...object(row) }));
+    const iface = String(old.Interface || item.iface || baseRow(entries, String(device.serial ?? ''))?.Interface || 'LAN1');
+    if (!/^LAN\d+$/.test(iface)) throw new Error('Choose a valid LAN interface');
+    if (entries.some(row => row.key !== key && row.IP === desired.ip)) throw new Error(desired.ip + ' is already on ' + name + ' as another address');
+    if (String(old.IP ?? '') !== desired.ip) {
+      const holder = await this.holderOf(desired.ip, device, signal);
+      if (holder) throw new Error(desired.ip + ' is already ' + holder + '’s address, so nothing was changed. Change or remove it there first.');
+    }
+    let created = false;
     if (!key) {
       if (item.createState) throw new Error('A previous address creation has an unknown outcome. Refresh before retrying.');
       await this.receipt('lan', item, { createState: 'pending' }, signal);
-      const result = await client.action({ new: ['CyElement.LanIp'] }, signal);
-      if (typeof result[1] !== 'string') throw new Error('Controller did not return a network identity');
-      key = result[1]; await this.receipt('lan', item, { [separate ? 'newElementKey' : 'elementKey']: key, createState: null }, signal);
-    }
-    for (const changes of [{ interface: String(item.iface) }, { mask: desired.mask }, { ip: desired.ip }, { where: 'etc' }]) await client.update(key, changes, signal);
-    const verify = async () => {
-      const fresh = await this.connect(device, signal, desired.ip);
-      const row = object(fresh.config.IP?.[key]);
-      if (row.IP !== desired.ip || String(row.mask) !== desired.mask || row.Interface !== item.iface) { fresh.close(); throw new Error('New address could not be verified; the old address was retained'); }
-      return fresh;
-    };
-    const fresh = await verify(); fresh.close();
-    if (replacing && oldKey !== key && old.IP) {
-      try { await client.action({ delete: [oldKey] }, signal); }
+      let result: unknown;
+      try { result = await client.action({ new: ['CyElement.LanIp'] }, signal); }
       catch (error) {
-        signal.throwIfAborted();
-        const check = await verify(); try { if (check.config.IP?.[oldKey]) throw error; } finally { check.close(); }
+        // A controller that said no made nothing, so there is nothing unknown about it.
+        if (error instanceof Error && /rejected/.test(error.message)) await this.receipt('lan', item, { createState: null }, signal).catch(() => undefined);
+        throw error;
       }
+      if (!Array.isArray(result) || typeof result[1] !== 'string') throw new Error('Controller did not return a network identity');
+      key = result[1]; created = true;
+      await this.receipt('lan', item, { [beside ? 'newElementKey' : 'elementKey']: key, createState: null }, signal);
     }
-    const final = await verify();
-    try { if (replacing && oldKey !== key && final.config.IP?.[oldKey]) throw new Error('Old address removal could not be verified'); } finally { final.close(); }
+    // Only what differs is written, in the order Cyanview's own page saved an address, ending with the save itself.
+    const write = async (target: CyanviewClient) => {
+      const now = object(object(target.config.IP)[key]);
+      if (created || !String(now.Interface ?? '').trim()) await target.update(key, { interface: iface }, signal);
+      if (created || String(now.mask ?? '') !== desired.mask) await target.update(key, { mask: desired.mask }, signal);
+      if (created || String(now.IP ?? '') !== desired.ip) await target.update(key, { ip: desired.ip }, signal);
+      await target.update(key, { where: 'etc' }, signal);
+    };
+    const written = (config: RecordValue) => { const row = object(object(config.IP)[key]); return row.IP === desired.ip && String(row.mask) === desired.mask && row.Interface === iface; };
+    let work = client, reopened: CyanviewClient | undefined;
+    try {
+      if (!written(work.config)) {
+        try { await write(work); }
+        catch (error) {
+          signal.throwIfAborted();
+          if (work.connected) throw error;
+          // The socket went with the address it was on. The controller is found again and the rest is written there.
+          reopened = await this.reach(device, [base, desired.ip, String(device.address ?? '')], signal);
+          if (!reopened) throw new Error(name + ' stopped answering while its address was changed. Look for it at ' + desired.ip + ', then Refresh.');
+          work = reopened;
+          if (!object(work.config.IP)[key]) throw new Error('The address could not be confirmed on ' + name);
+          // Whatever is still missing, and the save, which the lost socket may never have carried.
+          await write(work);
+        }
+      }
+      try { await work.waitFor(written, signal); }
+      catch { signal.throwIfAborted(); throw new Error('The new address could not be confirmed on ' + name); }
+    } catch (error) {
+      // An address made for this send and never finished is taken off again, so nothing half-made is left.
+      if (created && work.connected && !signal.aborted) {
+        const removed = await work.action({ delete: [key] }, signal).then(() => true, () => false);
+        if (removed) await this.receipt('lan', item, { [beside ? 'newElementKey' : 'elementKey']: null, createState: null }, signal).catch(() => undefined);
+      }
+      reopened?.close();
+      throw error;
+    }
+    const alias = normalizeSnapshot(work.config, work.address).device.alias || desired.ip;
+    // A controller that was reached by the address just replaced is reached from now on where it answered.
+    const moved = replacing && !!old.IP && old.IP !== desired.ip && String(device.address ?? '') === String(old.IP);
+    const devicePatch = { alias, ...(moved ? { address: work.address } : {}) };
+    reopened?.close();
     const saved = await this.repository.update(plan => {
       const row = plan.lans.find(row => row.id === item.id); if (row) Object.assign(row, { elementKey: key, newElementKey: null, createState: null });
-      const controller = plan.devices.find(row => row.id === device.id); if (controller) Object.assign(controller, { alias: desired.ip, ...(replacing ? { address: desired.ip } : {}) });
+      const controller = plan.devices.find(row => row.id === device.id); if (controller) Object.assign(controller, devicePatch);
     }, signal);
-    return { elementKey: key, revision: saved.revision, verified: true, devicePatch: { alias: desired.ip, ...(replacing ? { address: desired.ip } : {}) } };
+    return { elementKey: key, revision: saved.revision, verified: true, devicePatch };
+  }
+  /**
+   * A LAN address taken off the controller. Its base address and its WAN stay, and so does the address Hubble is
+   * reaching it by when its base address doesn't answer, since removing that one would lose the controller.
+   */
+  private async removeAddress(client: CyanviewClient, device: RecordValue, item: RecordValue, signal: AbortSignal): Promise<RecordValue> {
+    const name = String(device.name || device.serial), key = String(item.elementKey ?? ''), old = object(object(client.config.IP)[key]);
+    const present = !!key && !!object(client.config.IP)[key];
+    if (present) {
+      if (protectedLan(old, device) || wanRow(old)) throw new Error('This address is ' + name + '’s own and can’t be removed');
+      if (old.IP && client.address === String(old.IP)) throw new Error('Hubble reaches ' + name + ' through ' + old.IP + ' and its base address doesn’t answer, so it was left in place');
+      try { await client.action({ delete: [key] }, signal); }
+      catch (error) {
+        // A reply can be lost after the controller has done it, so what it reports decides.
+        signal.throwIfAborted();
+        if (!client.connected) throw error;
+      }
+      try { await client.waitFor(config => !object(config.IP)[key], signal); }
+      catch { signal.throwIfAborted(); throw new Error((old.IP || 'The blank address') + ' could not be removed from ' + name); }
+    }
+    // An address that was only ever planned, or that has already gone from the controller, just leaves the list.
+    const alias = normalizeSnapshot(client.config, client.address).device.alias;
+    const moved = !!old.IP && String(device.address ?? '') === String(old.IP);
+    const devicePatch = { alias, ...(moved ? { address: client.address } : {}) };
+    const saved = await this.repository.update(plan => {
+      plan.lans = plan.lans.filter(row => row.id !== item.id && !(present && row.device === device.id && row.elementKey === key));
+      const controller = plan.devices.find(row => row.id === device.id); if (controller) Object.assign(controller, devicePatch);
+    }, signal);
+    return { deleted: true, elementKey: key, revision: saved.revision, verified: true, devicePatch };
   }
 }

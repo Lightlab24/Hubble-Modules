@@ -238,6 +238,21 @@ body:has(#cyanview-design .hc-veil:not([hidden])) .hubble-column-resize-handles 
 #cyanview-design .hc-device-group:hover { background: none; color: var(--hc-strong); }
 #cyanview-design .hc-device-group-box { display: inline-grid; place-items: center; width: 16px; height: 16px; border: 1px solid light-dark(#9a9a9a, #6b6b6b); border-radius: 3px; font-size: 13px; line-height: 1; font-weight: 400; }
 #cyanview-design .hc-device-waiting { margin-left: 6px; color: light-dark(#8f6a12, #dfbc72); font-size: 11px; white-space: nowrap; }
+/* Folded away, the LAN column counts the device's other addresses and opens them. Its width is set, so the
+   address beside it stays where it is whatever the count, and a full address still fits. */
+#cyanview-design .hc-grid[data-device-sheet] button.hc-device-more { display: inline-block; box-sizing: border-box; width: 46px; min-height: 0; margin-left: 4px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--hc-secondary); font: inherit; font-size: 11px; text-align: left; white-space: nowrap; cursor: pointer; }
+#cyanview-design .hc-grid[data-device-sheet] button.hc-device-more[data-pending="true"] { color: light-dark(#8f6a12, #dfbc72); }
+#cyanview-design .hc-grid[data-device-sheet] button.hc-device-more:is(:hover, :focus-visible) { color: var(--hc-focus); text-decoration: underline; }
+#cyanview-design .hc-grid[data-device-sheet] td:has(> .hc-device-more) .hc-cell-input { width: calc(100% - 54px); }
+#cyanview-design .hc-grid[data-device-sheet] td:has(> .hc-device-more) > .hc-ip-open { right: 58px; }
+/* An address on its way off the device: still readable, struck through. */
+#cyanview-design .hc-grid[data-device-sheet] .hc-cell-input[data-removing]::placeholder { color: var(--hc-secondary); text-decoration: line-through; opacity: 1; }
+/* A blank address entry on a device: nothing to type into, only to remove. */
+#cyanview-design .hc-grid[data-device-sheet] .hc-device-blank { display: inline-block; padding: 0 7px; color: var(--hc-amber); font-size: var(--hc-sheet-text-size, 13px); line-height: 1.35; white-space: nowrap; }
+#cyanview-design .hc-grid[data-device-sheet] .hc-device-blank.hc-device-removing { color: var(--hc-secondary); text-decoration: line-through; }
+#cyanview-design .hc-grid[data-device-sheet] .hc-device-remove-address { display: inline-grid; place-items: center; min-height: 0; width: 24px; height: 22px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--hc-secondary); cursor: pointer; vertical-align: middle; }
+#cyanview-design .hc-grid[data-device-sheet] .hc-device-remove-address:is(:hover, :focus-visible) { background: light-dark(#f3dede, #3a2222); color: var(--hc-red); }
+#cyanview-design .hc-grid[data-device-sheet] .hc-device-remove-address .hc-icon { width: 14px; height: 14px; }
 #cyanview-design .hc-grid[data-device-sheet] tr.hc-device-add td, #cyanview-design .hc-grid[data-device-sheet] tr.hc-device-found td { font-style: italic; }
 #cyanview-design .hc-grid[data-device-sheet] tr.hc-device-add input { font-style: normal; }
 #cyanview-design .hc-grid[data-device-sheet] tr.hc-device-found .hc-button { font-style: normal; font-size: 11px; padding: 3px 8px; }

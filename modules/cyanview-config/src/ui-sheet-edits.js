@@ -39,6 +39,9 @@
         if(wan&&value)for(const setting of ['gateway','dns1','dns2'])if(item[setting]){item[setting]='';item.dirty.add(setting);fields.push(setting);}
       }else if(item.operation==='Keep'&&field!=='operation'){
         item.operation=wan?'Edit':item.current?'Replace':'Add';
+      }else if(!wan&&field==='planned'&&item.operation==='Delete'){
+        // An address that was going to be removed is typed over instead.
+        item.operation=item.current?'Replace':'Add';
       }
       // A WAN's mode and its address go to the controller together.
       if(wan&&field==='planned'&&item.dirty.has('dhcp'))fields.push('dhcp');

@@ -743,13 +743,16 @@
   // Network changes made on the Devices sheet wait here too, one group per device.
   function lanColumnLabel(row) {
     if (row.type === 'WAN') return 'WAN';
-    const index = lans.filter(item => item.device === row.device && item.type !== 'WAN' && !item.readOnly).indexOf(row);
+    // The same order the Devices sheet's columns are in.
+    const owner = device(row.device), index = owner ? deviceNetwork(owner).lan.indexOf(row) : -1;
     return index <= 0 ? 'LAN IP' : 'LAN IP ' + (index + 1);
   }
   const lanDraftGroups = () => orderedDevices().map(d => ({ id: d.id, rows: lans.filter(row => row.device === d.id && row.pending) })).filter(group => group.rows.length);
   const lanGroupBlocked = group => group.rows.some(row => row.jobs > 0) || device(group.id)?.online === false;
   function lanChangeText(row) {
     const extras = [['gateway', 'gateway'], ['dns1', 'DNS 1'], ['dns2', 'DNS 2']].filter(([field]) => row.dirty.has(field)).map(([field, label]) => label + ' ' + (row[field] || 'blank'));
+    // An address being taken off the device says so, not that it goes blank.
+    if (row.operation === 'Delete') return (row.current || 'Blank entry') + ' → Removed';
     return (row.current || 'Blank') + ' → ' + (row.type === 'WAN' && row.dhcp ? 'DHCP' : row.planned || 'Blank') + (extras.length ? ' · ' + extras.join(' · ') : '');
   }
   function lanGroupMarkup(group) {

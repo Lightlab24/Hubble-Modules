@@ -40,6 +40,8 @@
         if(report.devicePatch)Object.assign(device(item.device),report.devicePatch);
         item.newElementKey=null;item.createState=null;item.needsInitialization=false;
         if(deleting)cameras=cameras.filter(camera=>camera.id!==item.id);
+        // An address taken off its controller leaves the sheet.
+        else if(kind==='lan'&&report.deleted)lans=lans.filter(row=>row!==item);
         else{
           if(kind==='lan'&&sentFields.some(field=>['planned','dhcp'].includes(field))){item.current=captured.planned;const cell=root.querySelector('[data-current="'+item.id+'"]');if(cell)cell.textContent=item.current;if(item.type==='LAN')device(item.device).alias=captured.planned.split('/')[0];}
           for(const field of sentFields)if(item[field]===captured[field])item.dirty.delete(field);
@@ -51,6 +53,11 @@
       item.jobs=Math.max(0,item.jobs-1);if(item.deleting)item.result='Sending';paintItem(item);
     }
     if(deleting||axisCleared)renderCameras();
+    // After an address change that wasn't confirmed, the controller is read again, so the sheet shows what it has.
+    if(kind==='lan'&&errors.length&&moduleBridge&&!moduleBridge.preview){
+      for(const {item} of jobs)if(item.result==='Error'&&device(item.device))autoReads.add(item.device);
+      scheduleAutoRead(50);
+    }
     if(errors.length)toast(errors.length+' '+(errors.length===1?'change':'changes')+' could not be confirmed: '+errors[0]);
     remember();
     if(remiChanged){

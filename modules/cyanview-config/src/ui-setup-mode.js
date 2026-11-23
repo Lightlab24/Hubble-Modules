@@ -23,7 +23,7 @@
     root.querySelector('#hc-devices')?.insertAdjacentHTML('afterbegin', '<div class="hc-setup-band" data-role="setup-band" role="region" aria-label="Setup mode" hidden>' +
       '<strong>Setup mode</strong><span data-role="setup-band-text">Every RCP you add is cleared as soon as Hubble reaches it:</span>' +
       choice('lans', 'Delete its LAN addresses') + choice('wan', 'WAN to Static, no address') + choice('cameras', 'Delete every camera') +
-      '<span class="hc-setup-note">RIOs, and each RCP’s 10.192 address, are never touched.</span><span class="hc-right"></span>' +
+      '<span class="hc-setup-note">RIOs, and each RCP’s 10.192 address, are never touched. Nothing joins the list by itself while this is on.</span><span class="hc-right"></span>' +
       '<button class="hc-button" data-action="review-setup-clear">Clear the RCPs already here…</button></div>');
     syncSetupMode();
   }
@@ -43,20 +43,28 @@
     if (!moduleBridge || moduleBridge.preview) { toast('Setup mode clears RCPs only when Hubble is connected to them'); return; }
     if (!choices.lans && !choices.wan && !choices.cameras) return;
     const step = phase => { setupClears.set(id, { phase }); renderLans(); };
+    // Each tick is its own job. Cameras that couldn't be deleted used to stop the addresses from being
+    // cleared at all (Nov 23, 2026), so what goes wrong with one part is kept and the next still runs.
+    const problems = [];
     try {
       if (choices.cameras && cameras.some(camera => camera.device === id)) {
         step('cameras');
-        await clearDeviceCameras(id);
+        try { await clearDeviceCameras(id); } catch (error) { problems.push(error?.message || 'its cameras could not be deleted'); }
         const left = cameras.filter(camera => camera.device === id).length;
-        if (left) throw new Error(left + (left === 1 ? ' camera is' : ' cameras are') + ' still on it');
+        if (left && !problems.length) problems.push(left + (left === 1 ? ' camera is' : ' cameras are') + ' still on it');
       }
       if (choices.lans || choices.wan) {
         // Unsent address changes are about addresses that are going, so they go too.
         for (const row of lans.filter(row => row.device === id && row.pending && !row.jobs && (row.type === 'WAN' ? choices.wan : choices.lans))) cancelLanDrafts(id, row.id);
         step('network');
-        const result = await moduleBridge.clearNetwork(id, choices.lans, choices.wan);
-        if (result.snapshot && device(id)) mergeOwn(result.snapshot);
+        try {
+          const result = await moduleBridge.clearNetwork(id, choices.lans, choices.wan);
+          if (result.snapshot && device(id)) mergeOwn(result.snapshot);
+          // Said with whatever went wrong before it, so "Not cleared" doesn't read as nothing done.
+          if (problems.length) problems.push('its addresses were cleared');
+        } catch (error) { problems.push(error?.message || 'its addresses could not be cleared'); }
       }
+      if (problems.length) throw new Error(problems.join('; '));
       setupClears.set(id, { phase: 'cleared' });
       toast((device(id)?.name || d.name) + ' cleared for setup');
     } catch (error) {
@@ -73,8 +81,12 @@
     }
   }
 
-  // RCPs added while Setup mode is on are cleared once they are in the list. A controller the rig search finds
-  // on its own isn't one you added, so it is left for the review.
+  // RCPs added while Setup mode is on are cleared once they are in the list. Nothing else is added meanwhile:
+  // the search for the rest of a rig used to bring the other RCPs in by itself right after the first was added,
+  // and those were never cleared, though to whoever was adding them they had been added in Setup mode (Nov 23, 2026).
+  // It looks again after the next Refresh all or add once Setup mode is off.
+  const findRigBeforeSetup = findRig;
+  findRig = async function() { if (!setupMode) return findRigBeforeSetup(); };
   const addBeforeSetup = addLiveResults;
   addLiveResults = async function() {
     const before = new Set(devices.map(d => d.id));
@@ -89,7 +101,8 @@
   function setupReviewLines(d) {
     const net = deviceNetwork(d), lines = [];
     if (setupChoices.lans) {
-      const addresses = net.lan.filter(row => row.elementKey && row.current).map(row => row.current);
+      const blanks = net.lan.filter(row => row.elementKey && row.blank).length;
+      const addresses = [...net.lan.filter(row => row.elementKey && row.current).map(row => row.current), ...(blanks ? [blanks + (blanks === 1 ? ' blank entry' : ' blank entries')] : [])];
       lines.push('LAN: ' + (addresses.length ? 'deletes ' + esc(addresses.length === 1 ? addresses[0] : addresses.slice(0, -1).join(', ') + ' and ' + addresses.at(-1)) : 'none to delete'));
     }
     if (setupChoices.wan) {

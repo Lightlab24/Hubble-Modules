@@ -192,6 +192,8 @@ const server = createServer(async (request, response) => {
           fleet.power(target, !!input.power.on);
           if (!input.power.on) for (const socket of mqttSockets.get(id) ?? []) socket.destroy();
         }
+        // One simulated controller refuses to delete its cameras, or goes back to deleting them.
+        if (input.refuseCameraDeletes) controllers[Number(input.refuseCameraDeletes.device) || 0]!.refuseCameraDeletes = input.refuseCameraDeletes.on !== false;
         if (input.cameraName) controller.config.Camera.wide.Name = input.cameraName;
         if (input.addCamera) { const target = controllers[Number(input.addCamera.device) || 0]!; target.config.Camera[String(input.addCamera.key)] = input.addCamera.row; target.broadcast(); }
         // A change made outside Hubble, such as in Cyanview's own page. The controller pushes it to every open socket.

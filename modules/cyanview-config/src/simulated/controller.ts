@@ -25,6 +25,8 @@ export type SimulatedControllerState = { config: RecordValue; endpoints: [string
 export class SimulatedController {
   remiFleet?: SimulatedRemiFleet;
   sockets = new Set<PeerSocket>();
+  /** The address each open socket reached this controller by. A socket ends when its address leaves the controller. */
+  private reachedBy = new Map<PeerSocket, string | null>();
   actions: RecordValue[] = [];
   origins: string[] = [];
   options: string[] = [];
@@ -34,6 +36,8 @@ export class SimulatedController {
   failProperty = '';
   dropCreateReply = false;
   dropDeleteReply = false;
+  /** The controller says no to deleting a camera, as one that is busy with it does. */
+  refuseCameraDeletes = false;
   wrongIdentity = false;
   replyDelayProperty = '';
   replyDelayMs = 0;
@@ -61,13 +65,18 @@ export class SimulatedController {
   protected endpoints = new Map<string, string>();
   protected lenses = new Map<string, string>();
   protected links = new Map<string, string>();
+  /** An address that was changed or removed takes the sockets that were open on it, as it does on a real controller. */
+  private addressGone(address: unknown) {
+    if (!address || this.answers(String(address))) return;
+    for (const [socket, reached] of this.reachedBy) if (reached === address) socket.terminate();
+  }
   /** Whether one of this controller's addresses is this one. */
   answers(address: string | null) { return Object.values(object(this.config.IP)).some(row => object(row).IP === address); }
   /** A new settings socket from the module, at one of this controller's addresses. */
   accept(ws: PeerSocket, path: string, address: string | null, origin: string) {
-    this.sockets.add(ws); this.opened++;
+    this.sockets.add(ws); this.opened++; this.reachedBy.set(ws, address);
     if (this.history) { this.paths.push(path); this.origins.push(origin); }
-    ws.once('close', () => this.sockets.delete(ws));
+    ws.once('close', () => { this.sockets.delete(ws); this.reachedBy.delete(ws); });
     if (path === '/ws' && (this.remiFleet || this.endpointElements)) {
       ws.send(JSON.stringify({ elements: [...(this.remiFleet?.elements(this) ?? []), ...(this.endpointElements?.() ?? [])], version: 1 })); return;
     }
@@ -157,6 +166,7 @@ export class SimulatedController {
   }
   protected apply(request: RecordValue): any {
     if (Array.isArray(request)) return request.map(item => this.apply(item));
+    if (this.refuseCameraDeletes && request.delete && this.config.Camera[request.delete[0]]) return ['error', 'busy'];
     const remi = this.remiFleet?.apply(this, request);
     if (remi) return remi;
     if (request.new) {
@@ -168,7 +178,7 @@ export class SimulatedController {
       else return ['error', 'unsupported'];
       return ['ok', key];
     }
-    if (request.delete) { const key = request.delete[0]; delete this.config.Camera[key]; delete this.config.IP[key]; this.links.delete(key); return ['ok', key]; }
+    if (request.delete) { const key = request.delete[0], address = this.config.IP[key]?.IP; delete this.config.Camera[key]; delete this.config.IP[key]; this.links.delete(key); this.addressGone(address); return ['ok', key]; }
     if (request.connect) {
       const [port, lens] = request.connect, camera = this.lenses.get(lens);
       if (!camera) return ['error', 'bad parameters'];
@@ -185,7 +195,7 @@ export class SimulatedController {
       }
       else if (this.endpoints.has(key)) { const target = this.config.Camera[this.endpoints.get(key)!]; for (const [field, value] of Object.entries(changes)) { if (field === 'content') target.Interface = { device: 'SN', port: value }; else target[({ ip: 'IP', port: 'Port', login: 'Login', password: 'Password' } as RecordValue)[field] ?? field] = value; } }
       else if (this.lenses.has(key)) { const target = this.config.Camera[this.lenses.get(key)!]; if (changes.model !== undefined) target.LensModel = changes.model === '' ? '' : this.lensChoices.find(([, id]) => id === changes.model)?.[0] ?? ''; if (changes.params !== undefined) target.LensParams = changes.params; }
-      else if (this.config.IP[key]) { for (const [field, value] of Object.entries(changes)) this.config.IP[key][({ ip: 'IP', interface: 'Interface', dhcp: 'DHCP', dns: 'DNS1', dns2: 'DNS2', gateway: 'Gateway' } as RecordValue)[field] ?? field] = field === 'dhcp' ? value === 'yes' : value; }
+      else if (this.config.IP[key]) { const address = this.config.IP[key].IP; for (const [field, value] of Object.entries(changes)) this.config.IP[key][({ ip: 'IP', interface: 'Interface', dhcp: 'DHCP', dns: 'DNS1', dns2: 'DNS2', gateway: 'Gateway' } as RecordValue)[field] ?? field] = field === 'dhcp' ? value === 'yes' : value; if (this.config.IP[key].IP !== address) this.addressGone(address); }
       else return ['error', 'unknown element'];
       return ['ok', key];
     }

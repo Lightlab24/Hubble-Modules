@@ -492,7 +492,12 @@ test('the log says why a send was not confirmed, how long the copies took, and w
     assert.equal(plain.results[0].copiesMs, undefined, 'Nothing is timed when no copy is rebuilt');
 
     await s.session.call('send', { items: [{ kind: 'camera', item: { ...camera, name: '' }, fields: ['name'] }] });
-    assert.match(lines().at(-1)!, /^1 camera on 1 controller in \d+ ms.*, 1 not confirmed: Enter a camera number and name$/);
+    assert.match(lines().at(-1)!, /^1 camera on 1 controller in \d+ ms.*, 1 not confirmed on CY-[A-Z0-9-]+: Enter a camera number and name$/);
+
+    // An address change is logged as one, with the controller it failed on.
+    const base = { id: 'base-address', device: camera.device, type: 'LAN', iface: 'LAN1', elementKey: 'protected', current: '10.192.1.10/16', operation: 'Replace', planned: '10.20.101.77/16' };
+    await s.session.call('send', { items: [{ kind: 'lan', item: base, fields: ['planned'] }] });
+    assert.match(lines().at(-1)!, /^1 address on 1 controller in \d+ ms, 1 not confirmed on CY-[A-Z0-9-]+: The management or protected address cannot be replaced$/);
 
     // A send that is refused outright has no result, and used to leave nothing in the log.
     await assert.rejects(s.session.call('send', { items: [] }), /Choose between 1 and 1536/);

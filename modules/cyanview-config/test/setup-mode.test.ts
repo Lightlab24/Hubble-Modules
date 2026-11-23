@@ -49,7 +49,7 @@ test('a LAN address inside 10.192 can be replaced like any other, while the base
     const old = plan.lans.find(row => row.elementKey === 'old')!;
     const result = await operations.run({ kind: 'lan', item: { ...old, operation: 'Replace', planned: '10.20.101.201/16' }, fields: ['planned'] }, f.signal);
     assert.equal(result.verified, true);
-    assert.equal(fake.config.IP.old, undefined);
+    assert.equal(fake.config.IP.old.IP, '10.20.101.201', 'the address the controller had is the one that changed');
     const base = plan.lans.find(row => row.elementKey === 'protected')!;
     await assert.rejects(() => operations.run({ kind: 'lan', item: { ...base, operation: 'Replace', planned: '10.20.101.202/16' }, fields: ['planned'] }, f.signal), /protected/);
     assert.equal(fake.config.IP.protected.IP, '10.192.1.10');

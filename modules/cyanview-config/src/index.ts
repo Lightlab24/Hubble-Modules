@@ -66,9 +66,13 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
       ...(longest('confirmMs') > 0 ? ['the controller confirmed after ' + longest('confirmMs') + ' ms'] : []),
       ...(longest('copiesMs') > 0 ? ['its copies on other controllers took ' + longest('copiesMs') + ' ms'] : [])];
     const copies = rows.find(row => row.remiError);
-    context.log({ level: 'info', stage, message: rows.length + (rows.length === 1 ? ' camera' : ' cameras') + ' on ' + count + (count === 1 ? ' controller' : ' controllers') +
+    // An address change is named as one, and a failure says which controller, so the log can be read back
+    // (Nov 23, 2026: LAN IP changes that failed were logged as "1 camera on 1 controller").
+    const addresses = rows.filter(row => row.kind === 'lan').length, cameras = rows.length - addresses;
+    const what = [...(cameras || !addresses ? [cameras + (cameras === 1 ? ' camera' : ' cameras')] : []), ...(addresses ? [addresses + (addresses === 1 ? ' address' : ' addresses')] : [])].join(' and ');
+    context.log({ level: 'info', stage, message: what + ' on ' + count + (count === 1 ? ' controller' : ' controllers') +
       ' in ' + Math.round(elapsed) + ' ms' + (parts.length ? ' (' + parts.join(', ') + ')' : '') +
-      (failed.length ? ', ' + failed.length + ' not confirmed: ' + reason(failed[0]!.error) : '') + (copies ? ', copies not rebuilt: ' + reason(copies.remiError) : '') });
+      (failed.length ? ', ' + failed.length + ' not confirmed' + (failed[0]!.device ? ' on ' + String(failed[0]!.device) : '') + ': ' + reason(failed[0]!.error) : '') + (copies ? ', copies not rebuilt: ' + reason(copies.remiError) : '') });
   };
   // The page and the controller sockets follow the saved plan.
   // A plan that was just read comes with its saved revision, which lets the next press act on it without reading again.

@@ -112,7 +112,8 @@ test('an address typed into LAN IP 2 waits in Pending sends, can be cancelled, a
 
   // Collapsed, the group still says something is waiting.
   await group(f, 'lan').click();
-  await expect(row(f, MASTER).locator('[data-device-column="lan1"]')).toContainText('+1 pending');
+  await expect(row(f, MASTER).locator('[data-device-column="lan1"] .hc-device-more')).toHaveText('+1 more');
+  await expect(row(f, MASTER).locator('[data-device-column="lan1"] .hc-device-more')).toHaveAttribute('data-pending', 'true');
   await group(f, 'lan').click();
 
   await line.getByRole('button').click();

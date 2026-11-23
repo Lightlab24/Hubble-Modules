@@ -10,15 +10,37 @@
   let typedDeviceCell = '';
   // Text committed while its device was mid-send waits here, and goes in when the send finishes.
   const heldDeviceEdits = new Map();
+  // Every LAN address a device has gets a column (Nov 23, 2026: a third address, and one a failed change left
+  // behind, were on the device and nowhere on the sheet). There is always one empty column more than the device
+  // with the most, to type another address into.
+  const lanColumnLimit = 8;
+  const lanField = index => 'lan' + (index + 1);
+  const lanIndex = field => /^lan[1-9]\d*$/.test(field) ? Number(field.slice(3)) - 1 : -1;
+  const lanLabel = index => index ? 'LAN IP ' + (index + 1) : 'LAN IP';
+  function lanColumnCount() {
+    const most = devices.reduce((count, d) => Math.max(count, deviceNetwork(d).lan.length), 0);
+    return Math.min(lanColumnLimit, Math.max(2, most + 1));
+  }
   const deviceGroups = {
-    lan: { label: 'LAN IP settings', open: [['lan1', 'LAN IP', 158], ['lan2', 'LAN IP 2', 158]], closed: [['lan1', 'LAN IP', 190]] },
+    lan: { label: 'LAN IP settings', get open() { return Array.from({ length: lanColumnCount() }, (_, index) => [lanField(index), lanLabel(index), 158]); }, closed: [['lan1', 'LAN IP', 200]] },
     wan: { label: 'WAN settings', open: [['wanMode', 'Mode', 96], ['wanIp', 'WAN IP', 158], ['gateway', 'Gateway', 130], ['dns1', 'DNS 1', 122], ['dns2', 'DNS 2', 122]], closed: [['wan', 'WAN', 150]] },
   };
-  const deviceSortable = new Set(['row', 'name', 'type', 'serial', 'status', 'base', 'lan1', 'lan2', 'wan', 'wanIp', 'connected', 'cameras']);
+  const deviceSortable = { has: field => ['row', 'name', 'type', 'serial', 'status', 'base', 'wan', 'wanIp', 'connected', 'cameras'].includes(field) || lanIndex(field) >= 0 };
 
   function deviceNetwork(d) {
-    const rows = lans.filter(row => row.device === d.id);
-    return { lan: rows.filter(row => row.type !== 'WAN' && !row.readOnly), wan: rows.find(row => row.type === 'WAN' && !row.readOnly) };
+    const rows = lans.filter(row => row.device === d.id), wans = rows.filter(row => row.type === 'WAN' && !row.readOnly);
+    // Every address the device has that isn't its own base address or its WAN, in the order it lists them. A blank
+    // entry is among them. The WAN is the one the device itself keeps, which it marks as not deletable.
+    // A blank entry comes after the addresses, so the first column is always an address when the device has one.
+    const listed = rows.filter(row => row.type !== 'WAN' && !row.readOnly);
+    return { lan: [...listed.filter(row => !row.blank), ...listed.filter(row => row.blank)], wan: wans.find(row => row.noDelete) ?? wans[0] };
+  }
+  // An address taken off the device: it waits in Pending sends like any other address change.
+  const lanRemoving = row => row?.operation === 'Delete';
+  function stageLanRemoval(row) {
+    if (!row || row.jobs || lanRemoving(row)) return;
+    Object.assign(row, { planned: '', operation: 'Delete', pending: true, result: 'Pending', revision: (row.revision || 0) + 1 });
+    row.dirty.add('planned');
   }
   const plainAddress = value => String(value ?? '').split('/')[0];
   // A controller's own web page, opened in Safari from its address. A module page can't open a window
@@ -36,7 +58,8 @@
     const address = openableAddress(row?.current);
     return address ? '<button type="button" class="hc-ip-open" tabindex="-1" data-action="open-device-page" data-address="' + esc(address) + '" aria-label="' + esc('Open ' + name + ' at ' + address + ' in Safari') + '" title="' + esc('Open ' + address + ' in Safari') + '">' + icon('external-link') + '</button>' : '';
   }
-  root.addEventListener('mousedown', event => { if (event.target.closest?.('.hc-ip-open')) event.preventDefault(); });
+  // Nor do the count of a device's other addresses and a blank entry's remove button, so the cell they sit in is redrawn.
+  root.addEventListener('mousedown', event => { if (event.target.closest?.('.hc-ip-open, .hc-device-more, .hc-device-remove-address')) event.preventDefault(); });
   const pagesOpening = new Set();
   async function openDevicePage(address) {
     // A second click while Safari is still coming up would open the page twice.
@@ -67,7 +90,7 @@
     const net = deviceNetwork(d);
     return String({
       row: String(deviceNumber(d.number) ?? '').padStart(3, '0'), name: d.name, type: d.kind, serial: d.serial, status: d.online ? '1 Online' : d.online === false ? '2 Offline' : '3', base: d.base,
-      lan1: plainAddress(net.lan[0]?.planned), lan2: plainAddress(net.lan[1]?.planned), wan: net.wan ? (net.wan.dhcp ? 'DHCP' : plainAddress(net.wan.planned)) : '',
+      ...(lanIndex(field) >= 0 ? { [field]: plainAddress(net.lan[lanIndex(field)]?.planned) } : {}), wan: net.wan ? (net.wan.dhcp ? 'DHCP' : plainAddress(net.wan.planned)) : '',
       wanIp: net.wan && !net.wan.dhcp ? plainAddress(net.wan.planned) : '', connected: deviceConnectedOn(d), cameras: String(deviceCameraCount(d)),
     }[field] ?? '');
   }
@@ -111,10 +134,28 @@
   function deviceCell(d, column) {
     const net = deviceNetwork(d), id = esc(d.id), busy = deviceBusy(d.id);
     const held = field => heldDeviceEdits.get(d.id + ':' + field);
-    const input = (field, value, label, disabled = false) => '<input class="hc-cell-input hc-mono" data-device-cell="' + id + ':' + field + '" value="' + esc(held(field) ?? value ?? '') + '" aria-label="' + esc(label + ' for ' + d.name) + '"' + (disabled ? ' disabled' : '') + ' spellcheck="false" autocomplete="off">';
+    const input = (field, value, label, disabled = false, extra = '') => '<input class="hc-cell-input hc-mono" data-device-cell="' + id + ':' + field + '" value="' + esc(held(field) ?? value ?? '') + '" aria-label="' + esc(label + ' for ' + d.name) + '"' + (disabled ? ' disabled' : '') + extra + ' spellcheck="false" autocomplete="off">';
     const cell = (content, changed = false, extra = '') => '<td data-device-column="' + column.id + '"' + (changed || held(column.id) !== undefined ? ' class="hc-changed"' : '') + extra + '>' + content + '</td>';
     const waiting = rows => { const count = rows.filter(row => row?.pending).length; return count ? '<span class="hc-device-waiting">+' + count + ' pending</span>' : ''; };
     const quiet = text => '<span class="hc-muted">' + esc(text) + '</span>';
+    // Folded away, the one LAN column says how many more addresses the device has, and opens the rest.
+    const more = rows => {
+      if (!rows.length) return '';
+      // The note keeps one width whatever it counts, so the address beside it never moves.
+      const pending = rows.filter(row => row.pending).length, list = rows.map(row => lanRemoving(row) ? (row.current || 'Blank entry') + ' (to be removed)' : (row.planned || row.current || 'Blank entry') + (row.pending ? ' (pending)' : '')).join(', ');
+      return '<button type="button" class="hc-device-waiting hc-device-more" tabindex="-1" data-action="show-device-addresses" data-pending="' + (pending > 0) + '" aria-label="' + esc('Show all LAN addresses of ' + d.name + ': ' + list) + '" title="' + esc(list) + '">+' + rows.length + ' more</button>';
+    };
+    // One LAN address. A blank entry can't hold an address, so it shows as what it is, with a way to remove it.
+    const lanCell = index => {
+      const row = net.lan[index], field = lanField(index), label = lanLabel(index), rest = deviceSheet.lanOpen ? '' : more(net.lan.slice(1));
+      if (row?.blank) {
+        const removing = lanRemoving(row);
+        return cell('<span class="hc-device-blank' + (removing ? ' hc-device-removing' : '') + '"' + (removing ? ' title="This blank entry is removed from ' + esc(d.name) + ' when you press Send"' : '') + '>Blank entry</span>' + (removing ? '' : '<button type="button" class="hc-device-remove-address" data-action="remove-device-address" data-row="' + esc(row.id) + '" aria-label="' + esc('Remove the blank entry from ' + d.name) + '" title="A blank address entry on ' + esc(d.name) + ' with nothing set. Remove it."' + (busy ? ' disabled' : '') + '>' + icon('trash-2') + '</button>') + rest, !!row.pending);
+      }
+      // An address on its way off the device stays readable in its cell, struck through, until it is sent.
+      const removing = lanRemoving(row), extra = removing ? ' data-removing="true" placeholder="' + esc(plainAddress(row.current)) + '" title="' + esc(plainAddress(row.current) + ' is removed from ' + d.name + ' when you press Send. Type it again to keep it.') + '"' : '';
+      return cell(input(field, row?.planned, label, busy, extra) + (removing ? '' : pageOpener(row, d.name)) + rest, !!row?.pending);
+    };
     switch (column.id) {
       // The device's own number among its kind, which its default name and LAN IP are made from. Typing one renumbers it.
       case 'row': return cell('<input class="hc-cell-input hc-mono hc-device-position" data-device-cell="' + id + ':row" value="' + esc(held('row') ?? deviceNumber(d.number) ?? '') + '" inputmode="numeric" maxlength="3" aria-label="' + esc('Number of ' + d.name) + '" title="Type a number to renumber this ' + esc(kindSingular[kindOf(d)] ?? 'device') + '" spellcheck="false" autocomplete="off">');
@@ -123,8 +164,6 @@
       case 'serial': return cell('<span class="hc-mono hc-muted">' + esc(d.serial) + '</span>');
       case 'status': return cell(status(d.online), false, ' data-device-status="' + id + '"');
       case 'base': return cell(pageLink(d.base, d.name));
-      case 'lan1': return cell(input('lan1', net.lan[0]?.planned, 'LAN IP', busy) + pageOpener(net.lan[0], d.name) + (deviceSheet.lanOpen ? '' : waiting(net.lan.slice(1))), !!net.lan[0]?.pending);
-      case 'lan2': return cell(input('lan2', net.lan[1]?.planned, 'LAN IP 2', busy) + pageOpener(net.lan[1], d.name) + waiting(net.lan.slice(2)), !!net.lan[1]?.pending);
       // Folded away, the WAN shows what it will be once sent.
       case 'wan': return cell(net.wan ? (net.wan.dhcp ? esc('DHCP') : !net.wan.planned ? quiet('Static') : plainAddress(net.wan.planned).startsWith('10.192.') ? '<span class="hc-mono hc-setup-inside" title="This WAN is inside 10.192, the factory network the base addresses use">' + esc(net.wan.planned) + '</span>' : esc(net.wan.planned)) + waiting([net.wan]) : quiet('—'), !!net.wan?.pending);
       case 'wanMode': return cell(net.wan ? '<select class="hc-cell-input" data-device-cell="' + id + ':wanMode" aria-label="' + esc('WAN mode for ' + d.name) + '"' + (busy ? ' disabled' : '') + '>' + options(['DHCP', 'Static'], held('wanMode') ?? (net.wan.dhcp ? 'DHCP' : 'Static')) + '</select>' : quiet('—'), !!net.wan?.dirty.has('dhcp'));
@@ -133,7 +172,9 @@
       case 'connected': return cell(quiet(deviceConnectedOn(d)), false, ' data-device-connected="' + id + '"');
       case 'cameras': return cell(deviceCamerasMarkup(d), false, ' data-device-cameras="' + id + '"');
       case 'sync': return cell(deviceSyncMarkup(d), false, ' data-device-sync="' + id + '"');
-      default: return cell('<button type="button" class="hc-row-remove-button" data-action="remove-device" data-id="' + id + '" aria-label="Remove ' + esc(d.name) + ' from this list" title="Remove ' + esc(d.name) + ' from this list. Nothing is deleted on the device."' + (busy ? ' disabled' : '') + '>' + icon('trash-2') + '</button>');
+      default:
+        if (lanIndex(column.id) >= 0) return lanCell(lanIndex(column.id));
+        return cell('<button type="button" class="hc-row-remove-button" data-action="remove-device" data-id="' + id + '" aria-label="Remove ' + esc(d.name) + ' from this list" title="Remove ' + esc(d.name) + ' from this list. Nothing is deleted on the device."' + (busy ? ' disabled' : '') + '>' + icon('trash-2') + '</button>');
     }
   }
   // Clearing a controller's cameras starts from its own row, after a confirmation.
@@ -238,7 +279,7 @@
     addAll.disabled = deviceAddBusy;
     addAll.querySelector('[data-add-all-label]').textContent = 'Add all ' + found;
     $('device-summary').textContent = devices.length + (devices.length === 1 ? ' device' : ' devices') + ' · ' + devices.filter(d => d.online).length + ' online';
-    $('lan-foot').textContent = 'RCPs, RIOs and Gateways are numbered separately. Type a number in # to renumber a device: a name and LAN IP from Defaults change with it. Address changes wait in Pending sends until you press Send.';
+    $('lan-foot').textContent = 'Type a number in # to renumber a device: its name and LAN IP from Defaults change with it. Type over a LAN IP to change it on the device, or empty it to remove it. Address changes wait in Pending sends until you press Send.';
     releaseHeldDeviceEdits();
   }
   function releaseHeldDeviceEdits() {
@@ -284,18 +325,21 @@
     }
     // An address typed while this device is mid-send is kept, and goes in when the send finishes.
     if (deviceBusy(id)) { heldDeviceEdits.set(id + ':' + field, String(raw)); renderLans(); return; }
-    const net = deviceNetwork(d), mask = maskOf(net.lan[0]?.current, '16');
-    if (field === 'lan1' || field === 'lan2') {
-      // The second column only means something once there is a first address.
-      const row = field === 'lan1' || !net.lan.length ? net.lan[0] : net.lan[1];
+    const net = deviceNetwork(d), mask = maskOf(net.lan.find(row => row.current)?.current, '16');
+    if (lanIndex(field) >= 0) {
+      // A column past the device's last address adds one more.
+      const row = net.lan[Math.min(lanIndex(field), net.lan.length)];
+      if (row?.blank) { renderLans(); return; }
       if (!value) {
-        if (row?.pending) cancelLanDrafts(id, row.id);
-        else if (row) refuse('An address can be changed here, but not removed.');
+        // Emptying an address the device has takes it off the device, once sent. One that was only typed here just goes.
+        if (row && !row.elementKey) cancelLanDrafts(id, row.id);
+        else if (row && !lanRemoving(row)) { stageLanRemoval(row); renderLans(); remember(); }
         else renderLans();
         return;
       }
       const planned = value.includes('/') ? value : value + '/' + maskOf(row?.current, mask);
       if (!cidr(planned)) { refuse('Enter an address such as 10.20.101.212/16'); return; }
+      if (lans.some(other => other !== row && other.device === id && !lanRemoving(other) && plainAddress(other.planned) === plainAddress(planned))) { refuse(plainAddress(planned) + ' is already on ' + d.name); return; }
       if (lans.some(other => other !== row && plainAddress(other.planned) === plainAddress(planned) && other.device !== id)) toast(plainAddress(planned) + ' is already set on ' + (device(lans.find(other => other !== row && plainAddress(other.planned) === plainAddress(planned)).device)?.name ?? 'another device'));
       if (!row) {
         if (lans.length >= 1024) { refuse('Network row capacity reached'); return; }
@@ -485,6 +529,9 @@
     else if (data.action === 'add-found-device') { deviceAddBusy = true; renderDeviceSheet(); void addFoundDevice(data.id).catch(error => toast(error.message)).finally(() => { deviceAddBusy = false; renderLans(); }); }
     else if (data.action === 'clear-device-cameras' && device(data.id)) reviewDeviceClear(data.id);
     else if (data.action === 'open-device-page') void openDevicePage(data.address);
+    else if (data.action === 'show-device-addresses') { if (!deviceSheet.lanOpen) { deviceSheet.lanOpen = true; renderDeviceSheet(); remember(); } }
+    // Reached by Tab too. It lets go of the keyboard first, so its cell is redrawn to say the entry is going.
+    else if (data.action === 'remove-device-address') { const address = lans.find(item => item.id === data.row); if (address && !deviceBusy(address.device)) { button.blur(); stageLanRemoval(address); renderLans(); remember(); } }
     else if (data.clearDeviceConfirm) { $('modal-layer').hidden = true; void clearDeviceCameras(data.clearDeviceConfirm); }
   });
   root.addEventListener('focusin', event => {

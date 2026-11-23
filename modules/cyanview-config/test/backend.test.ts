@@ -486,7 +486,7 @@ test('an uncertain create is never automatically repeated', async () => {
   } finally { await f.instance.dispose(); await fake.close(); }
 });
 
-test('LAN Add preserves the existing address; Replace verifies new identity before deletion', async () => {
+test('LAN Add preserves the existing address; Replace changes the address the controller has, in place', async () => {
   const fake = new FakeController(); await fake.start(); const f = fixture();
   try {
     const plan = planFor(fake), old = plan.lans.find(row => row.elementKey === 'old')!;
@@ -496,14 +496,14 @@ test('LAN Add preserves the existing address; Replace verifies new identity befo
     assert.equal(fake.actions.filter(action => action.delete).length, 0);
     const current = (await f.repository.read(f.signal)).plan;
     const staged = { ...old, id: 'replace-row', operation: 'Replace', planned: '10.20.101.202/16' }; current.lans.push(staged); await f.repository.write((await f.repository.read(f.signal)).revision, current, f.signal);
-    fake.wrongIdentity = true;
-    await assert.rejects(() => operations.run({ kind: 'lan', item: staged, fields: ['planned'] }, f.signal), /identity changed/);
-    assert.equal(fake.config.IP.old.IP, '10.20.101.200'); assert.equal(fake.actions.filter(action => action.delete).length, 0);
-    fake.wrongIdentity = false; fake.dropDeleteReply = true;
+    fake.actions.length = 0;
     const replaced = await operations.run({ kind: 'lan', item: staged, fields: ['planned'] }, f.signal);
-    assert.equal(replaced.verified, true); assert.equal(fake.config.IP.old, undefined); assert.equal(fake.config.IP.protected.IP, '10.192.1.10');
-    assert.equal(fake.actions.filter(action => action.delete).length, 1);
-    assert.equal((await f.repository.read(f.signal)).plan.lans.find(row => row.id === staged.id)!.elementKey, replaced.elementKey);
+    assert.equal(replaced.verified, true); assert.equal(replaced.elementKey, 'old');
+    assert.equal(fake.config.IP.old.IP, '10.20.101.202'); assert.equal(fake.config.IP.protected.IP, '10.192.1.10');
+    // Nothing is made and nothing is deleted: the address is written over, then saved.
+    assert.deepEqual(fake.actions, [{ update: { key: 'old', changes: { ip: '10.20.101.202' } } }, { update: { key: 'old', changes: { where: 'etc' } } }]);
+    assert.equal(Object.keys(fake.config.IP).length, 3);
+    assert.equal((await f.repository.read(f.signal)).plan.lans.find(row => row.id === staged.id)!.elementKey, 'old');
   } finally { await f.instance.dispose(); await fake.close(); }
 });
 

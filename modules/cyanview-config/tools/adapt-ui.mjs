@@ -36,7 +36,8 @@ export async function buildUiAdapter() {
   replace("if(!item)return;\n    if(!isLan&&isLensSetting", "if(!item||item.deleting)return;\n    if(!isLan&&isLensSetting");
   replace("    if(!device(item.device)?.online)return 'Offline · unsent';\n", "");
   // A WAN on Static can be sent with no address, as the RIO's own page allows (Nov 17, 2026).
-  replace("if(kind==='lan'){if(item.dhcp&&item.type==='WAN')return '';", "if(kind==='lan'){if(item.type==='WAN'&&(item.dhcp||!String(item.planned||'').trim()))return '';");
+  // So can the removal of a LAN address, which has no new address to check (Nov 23, 2026).
+  replace("if(kind==='lan'){if(item.dhcp&&item.type==='WAN')return '';", "if(kind==='lan'){if(item.operation==='Delete'||item.type==='WAN'&&(item.dhcp||!String(item.planned||'').trim()))return '';");
   replace("b.disabled=!pending||!d.online||", "b.disabled=!pending||");
   replace("<span>'+esc(d.online?'Connected at '+d.base:'Offline · edits stay pending')+'</span>", "<span data-connection-note>'+esc(connectionNote(d))+'</span>");
   replace("'Manual · edit, then Send changes.'", "'Manual · edit, then Send settings.'");

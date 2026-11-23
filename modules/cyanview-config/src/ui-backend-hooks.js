@@ -17,7 +17,7 @@
     // A live update used to put a changed address back on Keep, which Send then refused. Typing an
     // address picks Replace or Add (Edit on a WAN), so a row saved that way gets the same again.
     if(row.operation==='Keep'&&row.planned!==undefined&&dirty.has('planned')&&row.planned!==row.current){
-      restored.operation=row.type==='WAN'?'Edit':row.current?'Replace':'Add';
+      restored.operation=row.type==='WAN'?'Edit':!row.current?'Add':row.planned?'Replace':'Delete';
     }
     return restored;
   }
@@ -134,8 +134,10 @@
       const collection=name==='cameras'?cameras:lans;
       for(const remote of remoteRows){
         let local=collection.find(item=>item.device===current.id&&item.elementKey===remote.elementKey);
-        // An element a row's own send is making is that row's, and the send links it when it finishes.
-        if(!local&&collection.some(item=>item.device===current.id&&item.newElementKey===remote.elementKey))continue;
+        // An element a row's own send is making right now is that row's, and the send links it when it finishes.
+        // Once no send is running, everything the controller lists is shown: an address a failed change left
+        // behind used to stay hidden here, on the device and not on the sheet (Nov 23, 2026).
+        if(!local&&collection.some(item=>item.device===current.id&&item.newElementKey===remote.elementKey&&item.jobs>0))continue;
         if(local){
           const changingLens=name==='cameras'&&local.dirty.has('lens')&&local.lens!==remote.lens;
           for(const [field,value]of Object.entries(remote)){
