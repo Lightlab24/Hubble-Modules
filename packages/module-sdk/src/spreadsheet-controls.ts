@@ -14,6 +14,10 @@ export const MODULE_SPREADSHEET_COLUMN_VISIBILITY_FEATURE =
   "module-spreadsheet-column-visibility-v1";
 export const MODULE_SPREADSHEET_COLUMN_PAINT_FEATURE =
   "module-spreadsheet-column-paint-v1";
+export const MODULE_SPREADSHEET_COLUMN_SEARCH_FEATURE =
+  "module-spreadsheet-column-search-v1";
+export const MODULE_SPREADSHEET_COLUMN_SECTIONS_FEATURE =
+  "module-spreadsheet-column-sections-v1";
 export const MODULE_SPREADSHEET_TEXT_SIZE_FEATURE =
   "module-spreadsheet-text-size-v1";
 export const MODULE_SPREADSHEET_WORKBOOK_TOOLS_FEATURE =
@@ -245,6 +249,12 @@ async function loadRuntime() {
       options: SpreadsheetColumnEditorOptions,
     ) => SpreadsheetResizeControls;
     mountToolbar?: (options: SpreadsheetToolbarOptions) => SpreadsheetToolbar;
+    mountColumnSearch?: (
+      options: SpreadsheetColumnSearchOptions,
+    ) => SpreadsheetColumnSearchControls;
+    spreadsheetColumnsOnScreen?: (
+      items: readonly SpreadsheetColumnEditorItem[],
+    ) => string[];
     mountSheets?: (
       options: SpreadsheetSheetsOptions,
     ) => SpreadsheetResizeControls;
@@ -438,17 +448,50 @@ export interface SpreadsheetToolbar extends SpreadsheetResizeControls {
 export interface SpreadsheetColumnEditorField {
   readonly id: string;
   readonly label: string;
+  /** With column sections, the Show tick alone: collapsing never changes it. */
   readonly visible: boolean;
+  /** Column sections: the When collapsed tick, on screen while its section is collapsed. */
+  readonly shownWhenCollapsed?: boolean;
 }
 export type SpreadsheetColumnEditorItem =
   | SpreadsheetColumnEditorField
   | {
       readonly id: string;
       readonly label: string;
-      /** Optional independent group toggle. Requires column-visibility-v1. */
+      /** Optional independent group toggle. Requires column-visibility-v1. Not with column sections. */
       readonly visible?: boolean;
+      /** Column sections: the section is expanded on the page. Requires column-sections-v1. */
+      readonly expanded?: boolean;
       readonly fields: readonly SpreadsheetColumnEditorField[];
     };
+
+/**
+ * The one rule for column sections: a column is on screen when its Show is ticked and its
+ * section is expanded or it is ticked When collapsed. Hubble's editor uses the same rule.
+ */
+export function spreadsheetColumnsOnScreen(
+  items: readonly SpreadsheetColumnEditorItem[],
+): string[] {
+  return items.flatMap((item) =>
+    "fields" in item
+      ? item.fields
+          .filter(
+            (field) =>
+              field.visible &&
+              (item.expanded !== false || field.shownWhenCollapsed === true),
+          )
+          .map((field) => field.id)
+      : item.visible
+        ? [item.id]
+        : [],
+  );
+}
+
+/** Whether this Hubble's Columns editor has column sections. Older hosts show the plain editor. */
+export async function spreadsheetColumnSectionsSupported(): Promise<boolean> {
+  const runtime = await loadRuntime();
+  return typeof runtime.spreadsheetColumnsOnScreen === "function";
+}
 export interface SpreadsheetColumnEditorOptions {
   readonly root: HTMLElement;
   /** Include hidden fields and use unique, stable IDs for fields and groups. */
@@ -460,6 +503,47 @@ export interface SpreadsheetColumnEditorOptions {
   ): void;
   /** Move a field or group before a sibling. Null means the end of its list. */
   onMove?(id: string, beforeId: string | null): void;
+  /** Column sections: the Expanded / Collapsed word on a section's row. Requires column-sections-v1. */
+  onExpandedChange?(groupId: string, expanded: boolean): void;
+  /** Column sections: When collapsed ticks; a section's tick-all arrives as one batch. */
+  onShownWhenCollapsedChanges?(
+    changes: readonly {
+      readonly id: string;
+      readonly shownWhenCollapsed: boolean;
+    }[],
+  ): void;
+}
+/** A search field for the page's own toolbar. Requires column-search-v1. */
+export interface SpreadsheetColumnSearchOptions {
+  /** An empty slot in the page's toolbar. The field keeps one width. */
+  readonly root: HTMLElement;
+  /** The same items as the Columns menu: every column the page has, by stable ID. */
+  getItems(): readonly SpreadsheetColumnEditorItem[];
+  /**
+   * Called as the operator types, again after refresh() when the items change what
+   * the search matches, and with null once it is cleared. Show only the matching
+   * columns and keep the ones that name each row. It is a view: never save it.
+   */
+  onSearch(search: SpreadsheetColumnSearch | null): void;
+  /** Enter, Down Arrow, or Escape in an empty field hand the keyboard back to the sheet. */
+  onFocusGrid?(): void;
+}
+export interface SpreadsheetColumnSearch {
+  /** What the operator typed, trimmed. */
+  readonly query: string;
+  /** Columns whose own name, or whose section's name, has every typed word. In item order. */
+  readonly fieldIds: readonly string[];
+  /** Sections whose name matches or that hold a matching column. */
+  readonly groupIds: readonly string[];
+}
+export interface SpreadsheetColumnSearchControls {
+  /** Call after the items change, such as on another tab. */
+  refresh(): void;
+  /** Show every column again. */
+  clear(): void;
+  /** Put the cursor in the field, as Command-F does. */
+  focus(): void;
+  dispose(): void;
 }
 export interface SpreadsheetSheetsOptions {
   readonly root: HTMLElement;
@@ -527,6 +611,17 @@ export async function mountSpreadsheetColumnEditor(
       `Host does not supply ${MODULE_SPREADSHEET_COLUMN_EDITOR_FEATURE}`,
     );
   return mountColumnEditor(options);
+}
+/** The shared column search field in a module-chosen toolbar slot. */
+export async function mountSpreadsheetColumnSearch(
+  options: SpreadsheetColumnSearchOptions,
+): Promise<SpreadsheetColumnSearchControls> {
+  const { mountColumnSearch } = await loadRuntime();
+  if (!mountColumnSearch)
+    throw new Error(
+      `Host does not supply ${MODULE_SPREADSHEET_COLUMN_SEARCH_FEATURE}`,
+    );
+  return mountColumnSearch(options);
 }
 export async function mountSpreadsheetSheets(
   options: SpreadsheetSheetsOptions,

@@ -118,6 +118,8 @@ dialog::backdrop{background:#0009}dialog header{display:flex;align-items:center;
 /* FS-HDR: one grid per kind of tab, and only the open one shows. */
 .sheet-scroll[hidden]{display:none}
 .toolbar [hidden]{display:none!important}
+/* Hubble's column search sits in the header, where it has room without wrapping the toolbar onto a second line. */
+.header-search{margin-left:auto;display:flex;align-items:center}.header-search+.header-status{margin-left:0}.header-search [hidden]{display:none!important}
 .selection-summary{margin:0 2px 0 4px;color:#a1a1aa;font-size:13px;white-space:nowrap}
 /* The Master row sits under the headers and stays there while the channels scroll. */
 :is(#grid-master) tbody tr.master-row>*{position:sticky;z-index:9;border-bottom:2px solid #3a3a42}

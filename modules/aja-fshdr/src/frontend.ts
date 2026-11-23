@@ -67,7 +67,7 @@ try {
     if (kind === shownKind) return;
     shownKind = kind;
     for (const item of kinds) el('viewport-' + item).hidden = item !== kind;
-    for (const node of document.querySelectorAll<HTMLElement>('.toolbar [data-for]')) node.hidden = !node.dataset.for!.split(' ').includes(kind);
+    for (const node of document.querySelectorAll<HTMLElement>('.toolbar [data-for], .header-search [data-for]')) node.hidden = !node.dataset.for!.split(' ').includes(kind);
   }
   function update() {
     showKind();
@@ -206,7 +206,7 @@ try {
   // The open tab's sheet has to be on screen before its grid draws, because the grid measures its own headers.
   showKind(); store.subscribe(showKind);
   for (const kind of kinds) grids.set(kind, await createGrid({
-    kind, table: el<HTMLTableElement>('grid-' + kind), viewport: el('viewport-' + kind), columnEditor: el('columns-' + kind), store,
+    kind, table: el<HTMLTableElement>('grid-' + kind), viewport: el('viewport-' + kind), columnEditor: el('columns-' + kind), columnSearch: el('search-' + kind), store,
     observed: () => observed, onSelect: address => { if (activeKind(doc()) === kind) { active = address; update(); } },
     onZoom: ratio => { el('zoom-status').textContent = Math.round(ratio * 100) + '%'; },
     onRefresh: unitId => void refreshUnits([unitId]),

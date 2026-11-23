@@ -5,7 +5,7 @@ import type { ModuleContext, ModuleInstance } from '@hubble/module-sdk';
 import manifest from '../src/manifest.js';
 import { createBackend, type Observed, type WireObserved } from '../src/backend.js';
 import { parameterId } from '../src/device.js';
-import { addSheet, applyMutation, channelRowId, defaultDocument, fieldById, fields, groups, inverse, moveSheet, newUnit, removeSheet, renameSheet, setUnitCount, sheetList, validateDocument, valueOf, visibleFields, watchedFieldIds, withColumnVisibility, type FsDocument, type Mutation } from '../src/model.js';
+import { addSheet, applyMutation, channelRowId, defaultDocument, fieldById, fields, groups, inverse, moveSheet, newUnit, removeSheet, renameSheet, setUnitCount, sheetList, validateDocument, valueOf, visibleFields, watchedFieldIds, withColumnVisibility, withSectionVisibility, withShownWhenCollapsed, type FsDocument, type Mutation } from '../src/model.js';
 import { fromWire, masterRows, normalize, pendingFields, rowsFor, shownLabel, shownName } from '../src/rows.js';
 import { DraftStore } from '../src/draft-store.js';
 import { fakeUnit, type FakeUnit } from './fake-unit.js';
@@ -95,6 +95,30 @@ test('ticking a setting in a section that is off brings the section back with on
   assert.ok(!next.hiddenGroups!.includes('framing'));
   assert.deepEqual(visibleFields(next, 'channel').filter(f => f.group === 'framing').map(f => f.id), ['Vid#CustomSize']);
 });
+test('column sections: Show is each setting’s own tick, and When collapsed picks what a collapsed section keeps', () => {
+  const view = sheetList(defaultDocument()).find(sheet => sheet.id === 'hdr')!.view!;
+  const onScreen = (next: typeof view) => visibleFields(next, 'channel').map(f => f.id);
+  // HDR collapsed keeps its three; hiding one of them takes it off, and expanding never brings it back.
+  const hidden = withSectionVisibility(view, [{ id: 'Vid#DynamicRangeAndGamut', visible: false }]);
+  assert.ok(!onScreen(hidden).includes('Vid#DynamicRangeAndGamut'));
+  assert.ok(!onScreen({ ...hidden, expanded: { ...hidden.expanded, hdr: true } }).includes('Vid#DynamicRangeAndGamut'));
+  assert.ok(onScreen({ ...hidden, expanded: { ...hidden.expanded, hdr: true } }).includes('Vid#SdrPreview'));
+  // When collapsed adds a setting to what the collapsed section keeps, without touching Show.
+  const kept = withShownWhenCollapsed(view, [{ id: 'Vid#SdrPreview', shownWhenCollapsed: true }]);
+  assert.ok(onScreen(kept).includes('Vid#SdrPreview'));
+  assert.deepEqual(kept.hidden, view.hidden);
+  // Every setting off switches the section off; ticking one brings it back with just that one.
+  const hdr = groups.find(g => g.id === 'hdr')!;
+  const off = withSectionVisibility(view, hdr.fields.map(f => ({ id: f.id, visible: false })));
+  assert.ok(off.hiddenGroups?.includes('hdr'));
+  assert.ok(!off.hidden.some(id => fieldById.get(id)?.group === 'hdr'));
+  const one = withSectionVisibility(off, [{ id: 'Vid#ColorHDRTransform', visible: true }]);
+  assert.ok(!one.hiddenGroups?.includes('hdr'));
+  assert.deepEqual(onScreen(one).filter(id => fieldById.get(id)?.group === 'hdr'), ['Vid#ColorHDRTransform']);
+  const all = withSectionVisibility(off, hdr.fields.map(f => ({ id: f.id, visible: true })));
+  assert.equal(onScreen({ ...all, expanded: { ...all.expanded, hdr: true } }).filter(id => fieldById.get(id)?.group === 'hdr').length, hdr.fields.length);
+});
+
 test('typed values are checked against the unit’s limits before they are staged', () => {
   const size = fieldById.get('Vid#CustomSize')!, seen = { values: {}, locked: {}, choices: {}, errors: {}, sending: [], queued: [], limits: { 'Vid#CustomSize': { precision: 1, min: 10, max: 200, step: 0.1, units: '%' }, ChannelName1: { minLength: 1, maxLength: 9 } } };
   assert.deepEqual(normalize(seen, size, '120'), { value: '120.0' });

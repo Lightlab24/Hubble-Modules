@@ -116,7 +116,7 @@ list. Earlier hosts can supply cell controls without this optional header API.
 Create an empty slot in your group header and give the control the group's full
 field list, display order, expanded state, and fields to keep visible while
 collapsed. Plain columns need no group control. The host supplies **+** and **−**,
-the **Expand/Collapse** context command, and the Matrix **Collapsed fields**
+the **Expand/Collapse** context command, and the **Shown when collapsed**
 submenu with checkboxes and field reordering.
 
 ```ts
@@ -305,6 +305,25 @@ Escape cancels without a callback. The list scrolls near its edges. Field drags
 affect fields, section drags affect sections, and reorder grips remain separate.
 Apply the batch against the current layout synchronously before saving, preserve
 unrelated preferences and refresh the editor after receipts or rollback.
+
+### Column sections
+
+Require `module-spreadsheet-column-sections-v1` to give the Columns editor the
+same sections as the Button Matrix. A group item adds `expanded`, and each of
+its fields adds `shownWhenCollapsed`. Each field's `visible` is then its
+**Show** tick alone: collapsing never changes it. The editor lists every
+column, including those a collapsed section tucks away, with a word for where
+it is now (Showing, Collapsed or Hidden). Big sections fold in the list, and
+each section's row has an Expanded / Collapsed word and a tick-all for Show and
+for **When collapsed**. Provide `onExpandedChange(groupId, expanded)` and
+`onShownWhenCollapsedChanges(changes)`; a tick-all arrives as one batch.
+A section's Show tick-all uses `onVisibilityChanges` when provided.
+
+Draw exactly what `spreadsheetColumnsOnScreen(items)` returns:
+`visible && (expanded || shownWhenCollapsed)`. Don't add a section-wide
+`visible` to a column-sections group; a section with no Show ticks is hidden.
+Older hosts ignore the new fields and show the plain editor, so keep the
+module's own collapsed-field header until it requires this feature.
 
 Require `module-spreadsheet-text-size-v1` to mount only the Matrix text-size
 section with `mountSpreadsheetToolbar({ root, textSize: { get, onChange } })`.

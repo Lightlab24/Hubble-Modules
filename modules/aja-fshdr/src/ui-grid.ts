@@ -1,11 +1,11 @@
 import {
-  mountSpreadsheetControls, mountSpreadsheetColumnGroup, mountSpreadsheetColumnEditor,
+  mountSpreadsheetControls, mountSpreadsheetColumnGroup, mountSpreadsheetColumnEditor, mountSpreadsheetColumnSearch, spreadsheetColumnSectionsSupported,
   createSpreadsheetContextMenu, mountSpreadsheetReorder, mountSpreadsheetResize, mountSpreadsheetViewport,
   type SpreadsheetAddress, type SpreadsheetCell, type SpreadsheetControls, type SpreadsheetColumn, type SpreadsheetColumnGroup,
-  type SpreadsheetEdit, type SpreadsheetReorderItem, type SpreadsheetColumnGroupControls,
+  type SpreadsheetEdit, type SpreadsheetReorderItem, type SpreadsheetColumnGroupControls, type SpreadsheetColumnEditorItem,
 } from '@hubble/module-sdk/spreadsheet-controls';
 import { mountSlider, type SliderControls, type SliderState } from '@hubble/module-sdk/slider-controls';
-import { activeKind, activeSheetId, clone, fieldById, groupById, groupsOf, isFlipped, isSimulated, masterRowId, masterSelection, modeLabel, modes, nameField, plannedMode, scopeOf, valueOf, viewChange, visibleFields, withColumnVisibility, withNoColumns, type CellEdit, type Field, type SheetKind, type View } from './model.js';
+import { activeKind, activeSheetId, clone, fieldById, groupById, groupsOf, isFlipped, isSimulated, masterRowId, masterSelection, modeLabel, modes, nameField, plannedMode, scopeOf, valueOf, viewChange, visibleFields, withColumnVisibility, withNoColumns, withSectionVisibility, withShownWhenCollapsed, type CellEdit, type Field, type SheetKind, type View } from './model.js';
 import { choicesOf, displayValue, isLive, labelFieldOf, masterRows, normalize, rowObservation, rowsFor, shownLabel, shownName, unitObservation, waitingLabel, type Row } from './rows.js';
 import { DraftStore } from './draft-store.js';
 import type { Observed } from './backend.js';
@@ -13,6 +13,8 @@ import type { Limits } from './device.js';
 
 export interface GridOptions {
   kind: SheetKind; table: HTMLTableElement; viewport: HTMLElement; columnEditor: HTMLElement; store: DraftStore;
+  /** The toolbar slot for Hubble's column search. A Hubble without it leaves the slot empty. */
+  columnSearch?: HTMLElement;
   observed: () => Observed; onSelect: (address: SpreadsheetAddress | undefined) => void;
   onZoom?: (ratio: number) => void;
   onRefresh: (unitId: string) => void; onRemove: (unitId: string) => void; onError: (message: string) => void;
@@ -73,7 +75,12 @@ export async function createGrid(options: GridOptions) {
   const settingLabel = (id: string) => fieldById.get(id)?.label ?? meta.find(m => m.id === id)?.label;
   const orderedGroups = () => [...view().order, ...groups.map(g => g.id).filter(id => !view().order.includes(id))];
   const fieldsOfGroup = (id: string) => { const group = groupById.get(id)!; return [...(view().fields[id] ?? []), ...group.fields.map(f => f.id).filter(f => !view().fields[id]?.includes(f))].map(fieldId => fieldById.get(fieldId)!); };
-  const shownFields = () => visibleFields(view(), scope);
+  // The column search in the toolbar: only the settings it matches are drawn, until it is cleared. It is never saved.
+  // It looks inside collapsed sections too. Sections and settings that are switched off aren't read from the units, so they stay off.
+  let searchIds: ReadonlySet<string> | null = null;
+  const shownFields = () => searchIds ? visibleFields({ ...view(), expanded: Object.fromEntries(groups.map(g => [g.id, true])) }, scope).filter(f => searchIds!.has(f.id)) : visibleFields(view(), scope);
+  /** Sections on screen: not hidden, and while searching, holding a match. */
+  const shownGroups = () => { const list = shownFields(); return orderedGroups().filter(id => !view().hiddenGroups?.includes(id) && (!searchIds || list.some(f => f.group === id))); };
   const observed = () => options.observed();
   const seen = (row: Row) => rowObservation(observed(), row.unit, row.id);
   const live = (row: Row) => !!row.unit && row.kind !== 'placeholder' && isLive(observed(), row.unit);
@@ -280,7 +287,7 @@ export async function createGrid(options: GridOptions) {
   function setVisibility(changes: readonly { id: string; visible: boolean }[]) {
     const clearing = changes.find(change => change.id === clearAllId);
     if (clearing) { if (clearing.visible) { columnEditor.refresh(); return; } layout(withNoColumns(view(), scope)); }
-    else layout(withColumnVisibility(view(), changes));
+    else layout(sections ? withSectionVisibility(view(), changes) : withColumnVisibility(view(), changes));
     followSelection();
   }
   function setVisible(id: string, visible: boolean) { setVisibility([{ id, visible }]); }
@@ -387,13 +394,45 @@ export async function createGrid(options: GridOptions) {
       onError: error => options.onError(error.message),
     }); groupControls.set(group.id, header); controlsToDispose.push(header);
   }
+  // A Hubble with column sections gives each setting its own Show and When collapsed ticks,
+  // and lists the ones a collapsed section tucks away. Older Hubbles get the plain menu.
+  const sections = await spreadsheetColumnSectionsSupported().catch(() => false);
+  const sectionItems = (): SpreadsheetColumnEditorItem[] => [
+    { id: clearAllId, label: 'Clear all columns', visible: hasOptionalColumns() },
+    ...orderedGroups().map(id => {
+      const group = groupById.get(id)!, off = !!view().hiddenGroups?.includes(id), kept = view().collapsed[id] ?? group.collapsed;
+      return { id, label: group.label, expanded: !!view().expanded[id], fields: fieldsOfGroup(id).map(f => ({ id: f.id, label: f.label, visible: !off && !view().hidden.includes(f.id), shownWhenCollapsed: kept.includes(f.id) })) };
+    }),
+  ];
+  // Every setting this tab can show, for the Columns menu and the column search alike.
+  const columnItems = (): SpreadsheetColumnEditorItem[] => sections ? sectionItems() : legacyColumnItems();
+  const legacyColumnItems = (): SpreadsheetColumnEditorItem[] => { const visible = new Set(visibleFields({ ...view(), hiddenGroups: [] }, scope).map(f => f.id)); return [{ id: clearAllId, label: 'Clear all columns', visible: hasOptionalColumns() }, ...orderedGroups().map(id => ({ id, label: groupById.get(id)!.label, visible: !view().hiddenGroups?.includes(id), fields: fieldsOfGroup(id).map(f => ({ id: f.id, label: f.label, visible: !view().hiddenGroups?.includes(id) && visible.has(f.id) })) }))]; };
   const columnEditor = await mountSpreadsheetColumnEditor({
     root: options.columnEditor,
-    getItems: () => { const visible = new Set(visibleFields({ ...view(), hiddenGroups: [] }, scope).map(f => f.id)); return [{ id: clearAllId, label: 'Clear all columns', visible: hasOptionalColumns() }, ...orderedGroups().map(id => ({ id, label: groupById.get(id)!.label, visible: !view().hiddenGroups?.includes(id), fields: fieldsOfGroup(id).map(f => ({ id: f.id, label: f.label, visible: !view().hiddenGroups?.includes(id) && visible.has(f.id) })) }))]; },
+    getItems: columnItems,
     onVisibilityChange: setVisible,
     onVisibilityChanges: setVisibility,
     onMove(id, beforeId) { if (id === clearAllId) return; move([id], beforeId === clearAllId ? orderedGroups()[0]! : beforeId, fieldById.get(id)?.group ?? 'groups'); },
+    ...(sections ? {
+      onExpandedChange(groupId: string, expanded: boolean) { const next = clone(view()); next.expanded[groupId] = expanded; layout(next); followSelection(); },
+      onShownWhenCollapsedChanges(changes: readonly { id: string; shownWhenCollapsed: boolean }[]) { layout(withShownWhenCollapsed(view(), changes)); followSelection(); },
+    } : {}),
   }); controlsToDispose.push(columnEditor);
+  // A Hubble without the column search leaves its slot empty and the page works as before.
+  if (options.columnSearch) {
+    try {
+      const search = await mountSpreadsheetColumnSearch({
+        root: options.columnSearch, getItems: columnItems,
+        onSearch(found) { searchIds = found && new Set(found.fieldIds); render(); followSelection(); },
+        onFocusGrid() {
+          const rowId = active?.rowId ?? rows[0]?.id;
+          if (!rowId) { table.focus(); return; }
+          const keep = active && (meta.some(m => m.id === active!.columnId) || shownFields().some(f => f.id === active!.columnId));
+          controls.select(position(keep ? active! : { rowId, columnId: shownFields()[0]?.id ?? meta[0]!.id }));
+        },
+      }); controlsToDispose.push(search);
+    } catch { options.columnSearch.hidden = true; }
+  }
   const menu = await createSpreadsheetContextMenu({ root: table, onError: error => options.onError(error.message) }); controlsToDispose.push(menu);
   table.addEventListener('contextmenu', event => {
     const target = (event.target as Element).closest<HTMLTableCellElement>('td,th'); if (!target) return;
@@ -446,7 +485,7 @@ export async function createGrid(options: GridOptions) {
       const settingCells = (f: Field) => rows.map(row => cellFor(row.id, f.id));
       const handleOf = (f: Field) => isFlippedNow ? labelHead(f.id) : fieldHeader(f);
       const visible = shownFields();
-      for (const id of orderedGroups().filter(id => !view().hiddenGroups?.includes(id))) {
+      for (const id of shownGroups()) {
         const group = groupById.get(id)!, list = visible.filter(f => f.group === id);
         result.push({ id, label: group.label, axis, scope: 'groups', handle: groupHeaders.get(id)!, elements: [groupHeaders.get(id)!, ...list.flatMap(f => [handleOf(f), ...settingCells(f)])] });
         for (const f of list) result.push({ id: f.id, label: f.label, axis, scope: id, handle: handleOf(f), elements: [handleOf(f), ...settingCells(f)] });
@@ -493,7 +532,7 @@ export async function createGrid(options: GridOptions) {
     const numberHead = document.createElement('th'); numberHead.scope = 'col'; numberHead.className = 'column-number'; numberHead.dataset.rowId = row.id; numberHeads.set(row.id, numberHead);
   }
   function layoutRows() {
-    const visible = shownFields(), groupOrder = orderedGroups().filter(id => !view().hiddenGroups?.includes(id));
+    const visible = shownFields(), groupOrder = shownGroups();
     const inGroup = (id: string) => visible.filter(f => f.group === id), isEmpty = (id: string) => !inGroup(id).length;
     place(tracks, [gutter, ...meta.map(m => trackFor(m.id)), ...groupOrder.flatMap(id => isEmpty(id) ? [placeholders.get(id)!.track] : inGroup(id).map(f => trackFor(f.id)))]);
     place(head, [groupRow, fieldRow]);
@@ -541,7 +580,7 @@ export async function createGrid(options: GridOptions) {
     for (const [index, row] of rows.entries()) { const number = numberHeads.get(row.id)!; number.textContent = String(index + 1); number.setAttribute('aria-label', rowName(row)); }
     for (const m of meta) { const row = identityRows.get(m.id)!; place(row, [labelHead(m.id), ...acrossRows(m.id)]); row.style.height = heightOf(m.id); }
     const list = shownFields(), bodyRows: HTMLElement[] = [];
-    for (const id of orderedGroups().filter(id => !v.hiddenGroups?.includes(id))) {
+    for (const id of shownGroups()) {
       const section = sectionRows.get(id)!, th = groupHeaders.get(id)!;
       th.scope = 'rowgroup'; th.hidden = false; th.colSpan = 1; section.filler.colSpan = Math.max(1, rows.length);
       place(section.row, rows.length ? [th, section.filler] : [th]); bodyRows.push(section.row); groupControls.get(id)?.refresh();

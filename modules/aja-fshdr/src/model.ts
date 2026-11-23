@@ -304,6 +304,46 @@ export function withColumnVisibility(view: View, changes: readonly { id: string;
   }
   return next;
 }
+/**
+ * Column sections: each change is a column's own Show tick, whatever its section's collapse.
+ * A section with every column off is switched off, so its values aren't read from the units;
+ * ticking one of its columns brings it back with just the ticked ones.
+ */
+export function withSectionVisibility(view: View, changes: readonly { id: string; visible: boolean }[]): View {
+  const next = clone(view);
+  let off = [...(next.hiddenGroups ?? [])];
+  const touched = new Set<string>();
+  for (const { id, visible } of changes) {
+    const field = fieldById.get(id); if (!field) throw Error('Unknown column.');
+    const group = groupById.get(field.group)!; touched.add(group.id);
+    if (off.includes(group.id)) {
+      if (!visible) continue;
+      off = off.filter(item => item !== group.id);
+      next.hidden = [...new Set([...next.hidden, ...group.fields.map(f => f.id).filter(f => f !== id)])];
+      continue;
+    }
+    next.hidden = next.hidden.filter(item => item !== id);
+    if (!visible) next.hidden.push(id);
+  }
+  for (const id of touched) {
+    const group = groupById.get(id)!;
+    if (off.includes(id) || !group.fields.every(f => next.hidden.includes(f.id))) continue;
+    off.push(id);
+    next.hidden = next.hidden.filter(item => fieldById.get(item)?.group !== id);
+  }
+  next.hiddenGroups = off;
+  return next;
+}
+/** Column sections: When collapsed ticks, which columns a collapsed section keeps on screen. */
+export function withShownWhenCollapsed(view: View, changes: readonly { id: string; shownWhenCollapsed: boolean }[]): View {
+  const next = clone(view);
+  for (const { id, shownWhenCollapsed } of changes) {
+    const field = fieldById.get(id); if (!field) throw Error('Unknown column.');
+    const kept = next.collapsed[field.group] ?? [...groupById.get(field.group)!.collapsed];
+    next.collapsed[field.group] = shownWhenCollapsed ? [...new Set([...kept, id])] : kept.filter(item => item !== id);
+  }
+  return next;
+}
 /** Takes every optional column off a tab. Anything ticked afterwards shows on its own. */
 export function withNoColumns(view: View, scope: Scope): View {
   const next = clone(view);
