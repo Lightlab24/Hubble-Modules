@@ -4,7 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import type { ModuleContext, ModuleInstance } from '@hubble/module-sdk';
 import manifest from '../src/manifest.js';
 import { createBackend, type Observed, type WireObserved } from '../src/backend.js';
-import { parameterId } from '../src/device.js';
+import { parameterId, readCatalog } from '../src/device.js';
 import { addSheet, applyMutation, channelRowId, defaultDocument, fieldById, fields, groups, inverse, moveSheet, newUnit, removeSheet, renameSheet, setUnitCount, sheetList, validateDocument, valueOf, visibleFields, watchedFieldIds, withColumnVisibility, withSectionVisibility, withShownWhenCollapsed, type FsDocument, type Mutation } from '../src/model.js';
 import { fromWire, masterRows, normalize, pendingFields, rowsFor, shownLabel, shownName } from '../src/rows.js';
 import { DraftStore } from '../src/draft-store.js';
@@ -142,6 +142,23 @@ test('the draft store shows an edit at once, keeps a second edit while the first
   saves[1]!.resolve(); await store.whenSaved();
   assert.equal(valueOf(saved, 'a#1', 'Vid#ColorHDRTransform'), '8'); assert.equal(store.pending.length, 0);
 });
+test('units on the same firmware share one settings list, though each puts its own serial number in it', () => {
+  // A real list is about 7 MB; nine units each keeping their own copy ran the worker past Hubble's 128 MB.
+  const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
+  const unit = (serial: string, transforms = [{ value: 0, text: 'Colorfront Engine-Live' }, { value: 4, text: 'Off' }]) => bytes([
+    { param_id: 'eParamID_FormattedSerialNumber', param_name: 'Serial Number', param_type: 'string', class_names: ['readonly'], default_value: serial, persistence_type: 'none' },
+    { param_id: 'eParamID_Vid1ColorHDRTransform', param_name: 'Transform', param_type: 'enum', enum_values: transforms, default_value: 0 },
+  ]);
+  const map = bytes({ forward_maps: { eParamID_Vid1OutputFormat: { map_scheme: 0 } }, reverse_maps: {} });
+  const first = readCatalog(unit('3FF002382  '), map), second = readCatalog(unit('3FF002385  '), map), again = readCatalog(unit('3FF002382  '), map);
+  assert.equal(second, first, 'a second unit uses the first one\'s copy');
+  assert.equal(again, first, 'a reconnect uses the same copy');
+  assert.deepEqual(first.descriptors.get('eParamID_FormattedSerialNumber'), { param_id: 'eParamID_FormattedSerialNumber', param_name: 'Serial Number', param_type: 'string', class_names: ['readonly'] });
+  assert.deepEqual(first.maps, { eParamID_Vid1OutputFormat: { map_scheme: 0 } });
+  assert.notEqual(readCatalog(unit('3FF002382  ', [{ value: 4, text: 'Off' }]), map), first, 'other firmware gets its own copy');
+  assert.throws(() => readCatalog(bytes({}), map), /Invalid FS-HDR catalog/);
+});
+
 test('the worker reads each unit, follows changes made at it, and reports its channels by mode', async () => {
   const four = await fakeUnit({ name: 'Truck A' }), single = await fakeUnit({ name: 'Truck B', mode: '2' }), plan = planFor(four, single);
   plan.units.push(newUnit('u3', 'Spare', '')); plan.units.push(newUnit('u4', 'Copy', four.host));

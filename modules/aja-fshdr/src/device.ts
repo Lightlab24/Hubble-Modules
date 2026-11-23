@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 
 export type Values = Record<string, unknown>;
@@ -31,6 +32,8 @@ export function httpTransport(address: string): Transport {
     url.search = Object.entries(query).map(([key, value]) => encodeURIComponent(key) + '=' + encodeURIComponent(value)).join('&');
     const response = await fetch(url, { signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]), cache: 'no-store', redirect: 'error' });
     if (!response.ok) throw new Error('HTTP ' + response.status);
+    // The settings list comes back as bytes so that `readCatalog` can share one copy between units.
+    if (path === '/desc.json' || path === '/map.json') return new Uint8Array(await response.arrayBuffer());
     return await response.json() as unknown;
   };
 }
@@ -38,6 +41,59 @@ export function httpTransport(address: string): Transport {
 const MODE = 'eParamID_FS4Mode', REMOTE = 'eParamID_RemoteControl', SYSTEM_NAME = 'eParamID_SystemName';
 export const object = (value: unknown): value is Values => value !== null && typeof value === 'object' && !Array.isArray(value);
 const scalar = (value: unknown): string | null => typeof value === 'string' || typeof value === 'number' ? String(value) : null;
+
+/** A unit's settings list, and the settings stored in a different place for each frame-rate family or transform. Never changed once read. */
+export interface UnitCatalog { readonly descriptors: ReadonlyMap<string, Descriptor>; readonly maps: Values }
+/**
+ * The fields of a setting that the module reads. A unit also puts its own serial number, MAC address and loaded LUT names in
+ * `default_value`, so keeping only these lets every unit on the same firmware use one copy.
+ */
+const DESCRIPTOR_FIELDS = ['param_id', 'param_name', 'param_type', 'enum_values', 'class_names', 'min_value', 'max_value', 'adjust_by', 'scale_by', 'display_precision', 'units', 'min_length', 'max_length', 'relations'] as const;
+/**
+ * A real unit's list is about 7 MB of JSON and takes 15 to 25 MB once read. Hubble gives a module 128 MB, so nine units each
+ * holding their own copy ran the worker out of memory. Catalogs are kept while a unit holds one, by the bytes the unit sent
+ * (so a reconnect skips reading them again) and by their trimmed content (so units that differ only in `default_value` share).
+ */
+const byBytes = new Map<string, WeakRef<UnitCatalog>>(), byContent = new Map<string, WeakRef<UnitCatalog>>();
+function held(cache: Map<string, WeakRef<UnitCatalog>>, key: string): UnitCatalog | undefined {
+  const catalog = cache.get(key)?.deref();
+  if (!catalog) cache.delete(key);
+  return catalog;
+}
+function hold(cache: Map<string, WeakRef<UnitCatalog>>, key: string, catalog: UnitCatalog) {
+  for (const [other, ref] of cache) if (!ref.deref()) cache.delete(other);
+  cache.set(key, new WeakRef(catalog));
+}
+function buildCatalog(desc: unknown, map: unknown): UnitCatalog {
+  if (!Array.isArray(desc) || !object(map) || !object(map.forward_maps)) throw new Error('Invalid FS-HDR catalog');
+  const descriptors = new Map<string, Descriptor>();
+  for (const item of desc) {
+    if (!object(item) || typeof item.param_id !== 'string') continue;
+    const kept: Values = {};
+    for (const field of DESCRIPTOR_FIELDS) if (item[field] !== undefined) kept[field] = item[field];
+    descriptors.set(item.param_id, kept as Descriptor);
+  }
+  return { descriptors, maps: map.forward_maps };
+}
+/**
+ * The catalog for a unit's `/desc.json` and `/map.json`. Bytes from a real unit are read here, all in one step, so only one
+ * unit's full list is in memory at a time however many connect together. A simulated unit's lists are already shared objects.
+ */
+export function readCatalog(desc: unknown, map: unknown): UnitCatalog {
+  if (!(desc instanceof Uint8Array) || !(map instanceof Uint8Array)) return buildCatalog(desc, map);
+  const bytesKey = createHash('sha256').update(String(desc.length) + ':').update(desc).update(map).digest('hex');
+  const known = held(byBytes, bytesKey);
+  if (known) return known;
+  const decoder = new TextDecoder();
+  const read = buildCatalog(JSON.parse(decoder.decode(desc)), JSON.parse(decoder.decode(map)));
+  const content = createHash('sha256');
+  for (const descriptor of read.descriptors.values()) content.update(JSON.stringify(descriptor));
+  const contentKey = content.update(JSON.stringify(read.maps)).digest('hex');
+  let catalog = held(byContent, contentKey);
+  if (!catalog) hold(byContent, contentKey, catalog = read);
+  hold(byBytes, bytesKey, catalog);
+  return catalog;
+}
 
 export function applyEvents(state: Values, events: unknown): boolean {
   if (!Array.isArray(events)) throw new Error('Invalid event batch');
@@ -96,8 +152,8 @@ export function parameterId(fieldId: string, channel: number | null, mode: strin
 
 export class Device {
   private state: Values = Object.create(null);
-  private descriptors = new Map<string, Descriptor>();
-  private maps: Values = {};
+  /** Shared with other units on the same firmware. Holding it here is what keeps it in `readCatalog`'s caches. */
+  private catalog: UnitCatalog = { descriptors: new Map(), maps: {} };
   private status: Connection = 'connecting';
   private revision = 0;
   private work: Promise<unknown> = Promise.resolve();
@@ -119,17 +175,17 @@ export class Device {
   private request(path: string, query: Record<string, string>, signal: AbortSignal) { return this.transport(path, query, signal); }
   /** Some settings are stored in a different place for each frame-rate family or transform. This finds the one in use now. */
   private resolve(id: string): string | null {
-    const target = mappedTarget(this.maps[id], selector => scalar(this.state[selector]));
+    const target = mappedTarget(this.catalog.maps[id], selector => scalar(this.state[selector]));
     return target === '' ? id : target;
   }
   label(id: string): string {
-    const backing = this.resolve(id), descriptor = backing ? this.descriptors.get(backing) : undefined;
+    const backing = this.resolve(id), descriptor = backing ? this.catalog.descriptors.get(backing) : undefined;
     if (!backing) return '';
     return descriptor ? displayValue(descriptor, this.state[backing]) : scalar(this.state[backing]) ?? '';
   }
   private lookup(id: string) {
-    const original = this.descriptors.get(id), target = original ? this.resolve(id) : null;
-    const descriptor = (target && this.descriptors.get(target)) || original;
+    const original = this.catalog.descriptors.get(id), target = original ? this.resolve(id) : null;
+    const descriptor = (target && this.catalog.descriptors.get(target)) || original;
     return { original, target, descriptor };
   }
   private matches = (condition: { paramid: string; value: unknown }) => {
@@ -210,12 +266,11 @@ export class Device {
       const cycle = AbortSignal.any([signal, this.cycle.signal]);
       try {
         const [desc, map] = await Promise.all([this.request('/desc.json', {}, cycle), this.request('/map.json', {}, cycle)]);
-        if (!Array.isArray(desc) || !object(map) || !object(map.forward_maps)) throw new Error('Invalid FS-HDR catalog');
+        const catalog = readCatalog(desc, map);
         const snapshot = await this.request('/config', { action: 'connect' }, cycle);
         if (!object(snapshot) || !Array.isArray(snapshot.configevents) || !object(snapshot.configevents[0]) || scalar(snapshot.connectionid) === null) throw new Error('Invalid FS-HDR snapshot');
         cycle.throwIfAborted();
-        this.descriptors = new Map(desc.filter((item): item is Descriptor => object(item) && typeof item.param_id === 'string').map(item => [item.param_id, item]));
-        this.maps = map.forward_maps;
+        this.catalog = catalog;
         this.state = Object.assign(Object.create(null), snapshot.configevents[0]);
         this.status = 'live'; this.failure = null; this.revision++;
         this.onChange();
