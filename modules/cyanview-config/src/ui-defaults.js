@@ -263,15 +263,15 @@
   // ----- The Defaults tab -----
   const code = value => '<code class="hc-defaults-code">' + esc(value) + '</code>';
   const chip = (token, target = '') => '<button type="button" class="hc-defaults-chip" data-action="insert-wildcard" data-insert="' + esc(token) + '"' + (target ? ' data-target="' + esc(target) + '"' : '') + ' aria-label="Insert ' + esc(token) + '">+ ' + esc(token) + '</button>';
-  function defaultsInput(key, value, label, { placeholder = '', mono = true, pattern = false, problem = '', width = '' } = {}) {
+  function defaultsInput(key, value, label, { placeholder = '', mono = true, pattern = false, problem = '', width = '', disabled = false } = {}) {
     return '<input class="hc-cell-input' + (mono ? ' hc-mono' : '') + (problem ? ' hc-defaults-invalid' : '') + '" data-defaults-field="' + esc(key) + '"' + (pattern ? ' data-pattern' : '') + ' value="' + esc(value) + '" placeholder="' + esc(placeholder) + '" aria-label="' + esc(label) + '"' +
-      (problem ? ' aria-invalid="true" title="' + esc(problem) + '"' : '') + (width ? ' style="width:' + width + '"' : '') + ' maxlength="160" spellcheck="false" autocomplete="off">';
+      (problem ? ' aria-invalid="true" title="' + esc(problem) + '"' : '') + (width ? ' style="width:' + width + '"' : '') + (disabled ? ' disabled' : '') + ' maxlength="160" spellcheck="false" autocomplete="off">';
   }
   function typeModelOptions(current) {
     const taken = new Set(cameraTypes.map(item => item.model).filter(model => model && model !== current));
     const groups = new Map();
     for (const option of everyModelChoice()) {
-      if (usbCamera(option.value) || taken.has(option.value)) continue;
+      if (taken.has(option.value)) continue;
       const group = option.group ?? '';
       if (!groups.has(group)) groups.set(group, []);
       groups.get(group).push(option);
@@ -295,7 +295,7 @@
     const ip = addressPatternProblem(defaults.camera.ip);
     if (ip) camerasFound.push({ key: 'camera:ip', text: 'Camera IP: ' + ip });
     if (defaults.camera.name && !/%number%/i.test(defaults.camera.name)) camerasFound.push({ key: 'camera:name', text: 'Camera name has no %number%, so cameras get the same name', warning: true });
-    cameraTypes.forEach((row, index) => { const problem = noCameraIp(row.ip) ? '' : addressPatternProblem(row.ip); if (problem) camerasFound.push({ key: 'type:' + index + ':ip', text: (row.model || 'Row ' + (index + 1)) + ' camera IP: ' + problem }); });
+    cameraTypes.forEach((row, index) => { const problem = noCameraIp(row.ip) || usbCamera(row.model) ? '' : addressPatternProblem(row.ip); if (problem) camerasFound.push({ key: 'type:' + index + ':ip', text: (row.model || 'Row ' + (index + 1)) + ' camera IP: ' + problem }); });
     return { devices: devicesFound, cameras: camerasFound };
   }
   const problemFor = (list, key) => list.find(item => item.key === key && !item.warning)?.text ?? '';
@@ -311,12 +311,14 @@
     }).join('');
     const typeRows = cameraTypes.map((row, index) => {
       const key = field => 'type:' + index + ':' + field, named = row.model || 'row ' + (index + 1);
+      // A camera on USB has no address or login, so its row only gives it a type for its name.
+      const usb = usbCamera(row.model);
       return '<tr data-defaults-type="' + index + '">' +
         '<td><select class="hc-cell-input" data-defaults-field="' + key('model') + '" aria-label="Camera model ' + (index + 1) + '">' + typeModelOptions(row.model) + '</select></td>' +
         '<td>' + defaultsInput(key('type'), row.type, '%type% for ' + named, { placeholder: row.model || '' }) + '</td>' +
-        '<td>' + defaultsInput(key('ip'), row.ip, 'Camera IP for ' + named, { placeholder: defaults.camera.ip || 'No default', pattern: true, problem: problemFor(problems.cameras, key('ip')) }) + '</td>' +
-        '<td>' + defaultsInput(key('login'), row.login, 'Username for ' + named, { placeholder: defaults.camera.login, mono: false }) + '</td>' +
-        '<td>' + defaultsInput(key('password'), row.password, 'Password for ' + named, { mono: false }) + '</td>' +
+        '<td>' + defaultsInput(key('ip'), row.ip, 'Camera IP for ' + named, usb ? { disabled: true } : { placeholder: defaults.camera.ip || 'No default', pattern: true, problem: problemFor(problems.cameras, key('ip')) }) + '</td>' +
+        '<td>' + defaultsInput(key('login'), row.login, 'Username for ' + named, usb ? { disabled: true, mono: false } : { placeholder: defaults.camera.login, mono: false }) + '</td>' +
+        '<td>' + defaultsInput(key('password'), row.password, 'Password for ' + named, { mono: false, disabled: usb }) + '</td>' +
         '<td class="hc-defaults-remove"><button type="button" class="hc-row-remove-button" data-action="remove-camera-type" data-index="' + index + '" aria-label="Remove the row for ' + esc(named) + '" title="Remove this row. Cameras already set up keep their names, addresses and logins.">' + icon('trash-2') + '</button></td></tr>';
     }).join('');
     const field = (key, value, label, under, options = {}) => '<label class="hc-defaults-field"><span>' + esc(label) + '</span>' + defaultsInput(key, value, label, options) + '<span class="hc-defaults-under">' + under + '</span></label>';
@@ -385,7 +387,7 @@
       if (!(first in defaults.camera) || defaults.camera[first] === value) return;
       defaults.camera[first] = value;
       // The model rows show the camera IP and username as their placeholders.
-      if (first === 'ip' || first === 'login') for (const input of defaultsPanel.querySelectorAll('[data-defaults-field$=":' + first + '"]')) if (input.dataset.defaultsField.startsWith('type:')) input.placeholder = first === 'ip' ? value || 'No default' : value;
+      if (first === 'ip' || first === 'login') for (const input of defaultsPanel.querySelectorAll('[data-defaults-field$=":' + first + '"]')) if (input.dataset.defaultsField.startsWith('type:') && !input.disabled) input.placeholder = first === 'ip' ? value || 'No default' : value;
     } else if (scope === 'type') {
       const row = cameraTypes[Number(first)];
       if (!row || !(second in row)) return;
@@ -393,6 +395,8 @@
       if (next !== value) element.value = next;
       if (row[second] === next) return;
       row[second] = next;
+      // What was typed for another model doesn't stay behind boxes that are now off.
+      if (second === 'model' && usbCamera(next)) row.ip = row.login = row.password = '';
       if (second === 'model') renderDefaults();
     } else return;
     paintDefaultsProblems();

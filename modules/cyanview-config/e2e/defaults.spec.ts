@@ -277,3 +277,33 @@ test('a camera with no address can be added and sent, and None in a model’s Ca
   await expect(cameraCell(added, 'sync')).toHaveText('Invalid IP');
   expect((await sent())?.IP ?? '').toBe('');
 });
+
+// Asked for Nov 24, 2026: "add other camera defaults like the FX3 over USB, i should just be able to name it".
+test('a USB camera model has a Defaults row that names its cameras, with no address or login to fill', async ({ page, request }) => {
+  const f = await open(page, request);
+  await showDefaults(f);
+  await tab(f).getByRole('button', { name: 'Add a camera model' }).click();
+  await tab(f).getByRole('button', { name: 'Camera model 1', exact: true }).click();
+  await f.getByRole('listbox', { name: 'Camera model 1' }).getByRole('option', { name: 'Alpha-USB', exact: true }).click();
+  await type(box(f, '%type% for Alpha-USB'), 'FX3');
+  for (const name of ['Camera IP', 'Username', 'Password']) {
+    await expect(box(f, name + ' for Alpha-USB')).toBeDisabled();
+    await expect(box(f, name + ' for Alpha-USB')).toHaveAttribute('placeholder', '');
+  }
+  await expect.poll(async () => (await rpc(request)('read-plan')).plan.cameraLogins).toEqual([{ model: 'Alpha-USB', login: '', password: '', type: 'FX3' }]);
+
+  await f.locator('[data-tab="setup"]').click();
+  await expect(setup(f).locator('table[role="grid"]')).toBeVisible();
+  const list = setup(f).locator('tbody tr[data-id]'), before = await list.count();
+  await setup(f).locator('[data-count-step="1"]').click();
+  await expect(list).toHaveCount(before + 1);
+  const added = setup(f).locator('tbody tr[data-id="' + await list.last().getAttribute('data-id') + '"]');
+  const number = await cameraCell(added, 'number').locator('input').inputValue();
+  // Its model becomes the USB one, and the name follows with the row's type.
+  await cameraCell(added, 'model').click();
+  await gridOf(added).press('Enter');
+  const dialog = f.getByRole('dialog', { name: 'Select Camera model' });
+  await dialog.getByRole('option', { name: 'Alpha-USB', exact: true }).click();
+  await expect(cameraCell(added, 'name').locator('input')).toHaveValue('FX3 ' + number);
+  await expect(cameraCell(added, 'sync')).not.toHaveText('Incomplete');
+});
