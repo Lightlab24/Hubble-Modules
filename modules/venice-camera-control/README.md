@@ -51,7 +51,10 @@ in, and Undo restores it.
 Each tab along the bottom is a saved view: which settings it shows, their sizes and order,
 and whether cameras are rows or columns. Camera values are the same on every tab. Columns
 can hide whole sections, paint a range of fields on or off in one drag, and clear every
-optional column; right-clicking a column or setting row hides it. The toolbar's text size
+optional column; right-clicking a column or setting row hides it. **Search columns** in the
+header (⌘F) shows only the settings whose names, or whose section's name, have the words
+typed, on Cameras and on Presets, until it is cleared. It reaches into collapsed sections,
+leaves hidden settings hidden, and is never saved. The toolbar's text size
 control changes table text from 9 to 24.
 
 ## Refresh, offline cameras and Live

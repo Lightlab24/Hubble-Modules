@@ -70,7 +70,7 @@ try {
     cameraTab.setAttribute('aria-selected',String(!open));presetsTab.setAttribute('aria-selected',String(open));
     cameraTab.tabIndex=open?-1:0;presetsTab.tabIndex=open?0:-1;
     el('camera-toolbar').hidden=open;el('camera-area').hidden=open;el('sheet-tabs').hidden=open;el('pending-status').hidden=open;
-    el('preset-toolbar').hidden=!open;el('preset-area').hidden=!open;el('preset-status').hidden=!open;
+    el('search-cameras').hidden=open;el('search-presets').hidden=!open;el('preset-toolbar').hidden=!open;el('preset-area').hidden=!open;el('preset-status').hidden=!open;
     if(open){if(presets)presets.show();else void loadPresets();}
     else {presets?.hide();grid.refresh();update();}
   }
@@ -217,7 +217,7 @@ try {
     dialog.showModal();input('camera-host').focus();
   }
   grid=await createCameraGrid({
-    table:el<HTMLTableElement>('camera-grid'),viewport:el('viewport'),columnEditor:el('column-editor'),store,
+    table:el<HTMLTableElement>('camera-grid'),viewport:el('viewport'),columnEditor:el('column-editor'),columnSearch:el('search-cameras'),store,
     observations:()=>observations,onSelect:address=>{active=address;update();},
     onZoom:ratio=>{el('zoom-status').textContent=Math.round(ratio*100)+'%';},
     onRefresh:refreshCamera,

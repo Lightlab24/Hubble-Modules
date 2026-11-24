@@ -8,7 +8,7 @@ import { WebSocketServer } from 'ws';
 import { encode,decode } from '@msgpack/msgpack';
 import { createModuleHarness } from '@hubble/module-sdk/testing';
 import module from '../src/index.js';
-import { groups,fields,defaultDocument,applyMutation,clone,visibleFields,withColumnVisibility,withSectionVisibility,withShownWhenCollapsed,validateDocument,addSheet,renameSheet,removeSheet,moveSheet,setOrientation,sheetList,activeSheetId,isFlipped,viewChange,setCameraCount,cameraHasData,loginVisible,sheetRowCount,withNoColumns,alertChoices,inverse,liveOn,autoSendOn,readFieldIds,sameValue,validateValue,type AlertChoices,type Mutation,type View } from '../src/model.js';
+import { groups,fields,defaultDocument,applyMutation,clone,visibleFields,searchedFields,withColumnVisibility,withSectionVisibility,withShownWhenCollapsed,validateDocument,addSheet,renameSheet,removeSheet,moveSheet,setOrientation,sheetList,activeSheetId,isFlipped,viewChange,setCameraCount,cameraHasData,loginVisible,sheetRowCount,withNoColumns,alertChoices,inverse,liveOn,autoSendOn,readFieldIds,sameValue,validateValue,type AlertChoices,type Mutation,type View } from '../src/model.js';
 import { DraftStore } from '../src/draft-store.js';
 import { CameraClient } from '../src/camera-client.js';
 import { encodeField,decodeField,writeField,recordingState,fieldProperties } from '../src/protocol.js';
@@ -1265,4 +1265,22 @@ test('column sections: Show is each setting’s own tick, When collapsed picks w
   // Login settings keep their own rules.
   const login=withSectionVisibility(view,[{id:'login',visible:false}]);
   assert.ok(login.hiddenLogin!.includes('login'));
+});
+
+test('a column search shows the matching settings a tab has, a collapsed section’s included, and never a hidden one',()=>{
+  const view=defaultDocument().view,group=groups.find(g=>g.fields.length>(view.collapsed[g.id]??g.collapsed).length+1)!;
+  const kept=view.collapsed[group.id]??group.collapsed,tucked=group.fields.filter(f=>!kept.includes(f.id)).map(f=>f.id);
+  const closed:View={...clone(view),expanded:{...view.expanded,[group.id]:false}};
+  assert.ok(!visibleFields(closed).some(f=>f.id===tucked[0]));
+  // The search reaches into the collapsed section and shows only what it matched.
+  assert.deepEqual(searchedFields(closed,new Set([tucked[0]!])).map(f=>f.id),[tucked[0]]);
+  // A setting whose Show tick is off stays off, and so does a section that is switched off.
+  assert.deepEqual(searchedFields({...closed,hidden:[tucked[0]!]},new Set(tucked.slice(0,2))).map(f=>f.id),[tucked[1]]);
+  assert.deepEqual(searchedFields({...closed,hiddenGroups:[group.id]},new Set(tucked)),[]);
+  // Matches keep the tab's own order.
+  const all=visibleFields({...closed,expanded:Object.fromEntries(groups.map(g=>[g.id,true]))}).map(f=>f.id);
+  const picked=new Set([all.at(-1)!,all[0]!]);
+  assert.deepEqual(searchedFields(closed,picked).map(f=>f.id),[all[0],all.at(-1)]);
+  // The search changes nothing that is saved.
+  assert.deepEqual(closed.expanded[group.id],false);
 });

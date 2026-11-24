@@ -63,7 +63,7 @@ export async function mountPresetsView({client,report,onChange}:PresetsViewOptio
   }
   function setSend(next:SendChoice){const expected=clone(doc().send??{});const merged={...expected,...next};if(JSON.stringify(merged)!==JSON.stringify(expected))store.submit({kind:'send',send:merged,expected},false);}
   const grid=await createPresetGrid({
-    table:el<HTMLTableElement>('preset-grid'),viewport:el('preset-viewport'),columnEditor:el('preset-column-editor'),store,chosen,choices,
+    table:el<HTMLTableElement>('preset-grid'),viewport:el('preset-viewport'),columnEditor:el('preset-column-editor'),columnSearch:el('search-presets'),store,chosen,choices,
     onSelect:()=>{},onZoom:ratio=>{if(shown)el('zoom-status').textContent=Math.round(ratio*100)+'%';},onError:report,
     onChoosePreset:presetId=>setSend({presetId}),
     onDuplicate(presetId){const source=presetById(doc(),presetId);if(!source)return;const id=crypto.randomUUID();

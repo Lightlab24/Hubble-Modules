@@ -1,15 +1,15 @@
 import {
-  mountSpreadsheetControls,mountSpreadsheetColumnGroup,mountSpreadsheetColumnEditor,spreadsheetColumnSectionsSupported,
+  mountSpreadsheetControls,mountSpreadsheetColumnGroup,mountSpreadsheetColumnEditor,mountSpreadsheetColumnSearch,spreadsheetColumnSectionsSupported,
   createSpreadsheetContextMenu,mountSpreadsheetReorder,mountSpreadsheetResize,mountSpreadsheetViewport,
   type SpreadsheetAddress,type SpreadsheetCell,type SpreadsheetControls,type SpreadsheetColumn,type SpreadsheetColumnGroup,
   type SpreadsheetEdit,type SpreadsheetReorderItem,type SpreadsheetColumnGroupControls
 } from '@hubble/module-sdk/spreadsheet-controls';
-import { groups,fields,fieldById,valueOf,sameValue,clone,visibleFields,withColumnVisibility,withNoColumns,withSectionVisibility,withShownWhenCollapsed,activeSheetId,isFlipped,viewChange,isLoginField,loginVisible,type View,type Camera,type CellEdit,type Field } from './model.js';
+import { groups,fields,fieldById,valueOf,sameValue,clone,visibleFields,searchedFields,withColumnVisibility,withNoColumns,withSectionVisibility,withShownWhenCollapsed,activeSheetId,isFlipped,viewChange,isLoginField,loginVisible,type View,type Camera,type CellEdit,type Field } from './model.js';
 import { DraftStore } from './draft-store.js';
 import type { Observations } from './backend.js';
 
 export interface GridOptions {
-  table:HTMLTableElement; viewport:HTMLElement; columnEditor:HTMLElement; store:DraftStore;
+  table:HTMLTableElement; viewport:HTMLElement; columnEditor:HTMLElement; columnSearch?:HTMLElement; store:DraftStore;
   observations:()=>Observations; onSelect:(address:SpreadsheetAddress|undefined)=>void;
   onZoom?:(ratio:number)=>void;
   onRefresh:(rowId:string)=>void; onRemove:(rowId:string)=>void; onError:(message:string)=>void;
@@ -47,7 +47,12 @@ export async function createCameraGrid(options:GridOptions){
   const allColumnIds=[...meta.map(c=>c.id),...fields.map(f=>f.id)];
   const view=()=>store.document.view;
   const flipped=()=>isFlipped(store.document);
-  const shownLogin=()=>loginMeta.filter(m=>loginVisible(view(),m.id));
+  // A column search is a view over the tab: it is never saved, and the names and addresses stay.
+  let searchIds:ReadonlySet<string>|null=null;
+  const shownFields=()=>searchIds?searchedFields(view(),searchIds):visibleFields(view());
+  const loginShown=(id:string)=>loginVisible(view(),id)&&(!searchIds||searchIds.has(id));
+  const groupShown=(id:string)=>!view().hiddenGroups?.includes(id)&&(!searchIds||shownFields().some(f=>f.group===id));
+  const shownLogin=()=>loginMeta.filter(m=>loginShown(m.id));
   const position=<T extends SpreadsheetAddress>(address:T):T=>flipped()?{...address,rowId:address.columnId,columnId:address.rowId}:address;
   const orderedGroups=()=>[...view().order,...groups.map(g=>g.id).filter(id=>!view().order.includes(id))];
   const orderedFields=()=>orderedGroups().flatMap(id=>{
@@ -87,7 +92,7 @@ export async function createCameraGrid(options:GridOptions){
     const group=groups.find(g=>g.id===id)!;
     return {id,label:group.label,columns:orderedFields().filter(f=>f.group===id).map(f=>({id:f.id,label:f.label,fill:'copy'})),expanded:!!view().expanded[id],collapsedColumnIds:view().collapsed[id]??group.collapsed};
   }
-  const hasOptionalColumns=()=>shownLogin().length>0||groups.some(g=>!view().hiddenGroups?.includes(g.id));
+  const hasOptionalColumns=()=>loginMeta.some(m=>loginVisible(view(),m.id))||groups.some(g=>!view().hiddenGroups?.includes(g.id));
   function setVisibility(changes:readonly {id:string;visible:boolean}[]){
     const clearing=changes.find(change=>change.id===clearAllId);
     if(clearing){if(clearing.visible){columnEditor.refresh();return;}layout(withNoColumns(view()));}
@@ -141,8 +146,8 @@ export async function createCameraGrid(options:GridOptions){
   }
   controls=await mountSpreadsheetControls({
     root:table,viewport,extendedEditing:true,workbookEditing:true,
-    getRows:()=>flipped()?[...frozenMeta,...shownLogin()].map(m=>m.id).concat(visibleFields(view()).map(f=>f.id)):store.document.cameras.map(r=>r.id),
-    getColumns:()=>flipped()?cameraColumns():[...frozenMeta,...shownLogin(),...visibleFields(view()).map(f=>({id:f.id,label:f.label,fill:'copy' as const}))],
+    getRows:()=>flipped()?[...frozenMeta,...shownLogin()].map(m=>m.id).concat(shownFields().map(f=>f.id)):store.document.cameras.map(r=>r.id),
+    getColumns:()=>flipped()?cameraColumns():[...frozenMeta,...shownLogin(),...shownFields().map(f=>({id:f.id,label:f.label,fill:'copy' as const}))],
     getCell:address=>cellValue(position(address)),onEdit:batch=>submit(batch.edits.map(position)),
     onSelection(address){active=address&&position(address);options.onSelect(active);if(flipped())controls.refresh();},
     onHistory(direction){if(active&&store.invalid.has(addressKey(active))){store.discard(active.rowId,active.columnId);return;}store.history(direction==='redo');},
@@ -161,9 +166,11 @@ export async function createCameraGrid(options:GridOptions){
   // lists the ones a collapsed section tucks away. Older Hubbles get the plain menu.
   const sections=await spreadsheetColumnSectionsSupported().catch(()=>false);
   const sectionItems=()=>[{id:clearAllId,label:'Clear all columns',visible:hasOptionalColumns()},{id:'login',label:'Login',visible:!view().hiddenLogin?.includes('login'),fields:loginMeta.map(m=>({id:m.id,label:m.label,visible:!view().hiddenLogin?.includes(m.id)}))},...view().order.map(id=>{const g=groups.find(g=>g.id===id)!;const off=!!view().hiddenGroups?.includes(id),kept=view().collapsed[id]??g.collapsed;return {id,label:g.label,expanded:!!view().expanded[id],fields:orderedFields().filter(f=>f.group===id).map(f=>({id:f.id,label:f.label,visible:!off&&!view().hidden.includes(f.id),shownWhenCollapsed:kept.includes(f.id)}))};})];
+  // Every setting this tab can show, for the Columns menu and the column search alike.
+  const columnItems=()=>sections?sectionItems():[{id:clearAllId,label:'Clear all columns',visible:hasOptionalColumns()},{id:'login',label:'Login',visible:!view().hiddenLogin?.includes('login'),fields:loginMeta.map(m=>({id:m.id,label:m.label,visible:!view().hiddenLogin?.includes(m.id)}))},...view().order.map(id=>{const g=groups.find(g=>g.id===id)!;const visible=new Set(visibleFields({...view(),hiddenGroups:[]}).map(f=>f.id));return {id,label:g.label,visible:!view().hiddenGroups?.includes(id),fields:orderedFields().filter(f=>f.group===id).map(f=>({id:f.id,label:f.label,visible:visible.has(f.id)}))};})];
   const columnEditor=await mountSpreadsheetColumnEditor({
     root:options.columnEditor,
-    getItems:()=>sections?sectionItems():[{id:clearAllId,label:'Clear all columns',visible:hasOptionalColumns()},{id:'login',label:'Login',visible:!view().hiddenLogin?.includes('login'),fields:loginMeta.map(m=>({id:m.id,label:m.label,visible:!view().hiddenLogin?.includes(m.id)}))},...view().order.map(id=>{const g=groups.find(g=>g.id===id)!;const visible=new Set(visibleFields({...view(),hiddenGroups:[]}).map(f=>f.id));return {id,label:g.label,visible:!view().hiddenGroups?.includes(id),fields:orderedFields().filter(f=>f.group===id).map(f=>({id:f.id,label:f.label,visible:visible.has(f.id)}))};})],
+    getItems:columnItems,
     onVisibilityChange:setVisible,
     onVisibilityChanges:setVisibility,
     onMove(id,beforeId){if(id===clearAllId||id==='login'||isLoginField(id))return;move([id],beforeId===clearAllId||beforeId==='login'?view().order[0]!:beforeId,fieldById.get(id)?.group??'groups');},
@@ -172,6 +179,22 @@ export async function createCameraGrid(options:GridOptions){
       onShownWhenCollapsedChanges(changes:readonly {id:string;shownWhenCollapsed:boolean}[]){layout(withShownWhenCollapsed(view(),changes));followSelection();},
     }:{}),
   });controlsToDispose.push(columnEditor);
+  // A Hubble without the column search leaves its slot empty and the page works as before.
+  let columnSearch:Awaited<ReturnType<typeof mountSpreadsheetColumnSearch>>|undefined;
+  if(options.columnSearch){
+    try{
+      columnSearch=await mountSpreadsheetColumnSearch({
+        root:options.columnSearch,getItems:columnItems,
+        onSearch(found){searchIds=found&&new Set(found.fieldIds);render();followSelection();},
+        onFocusGrid(){
+          const rowId=active?.rowId??store.document.cameras[0]?.id;
+          if(!rowId){table.focus();return;}
+          const keep=active&&([...frozenMeta,...shownLogin()].some(m=>m.id===active!.columnId)||shownFields().some(f=>f.id===active!.columnId));
+          controls.select(position(keep?active!:{rowId,columnId:shownLogin()[0]?.id??shownFields()[0]?.id??'camera-name'}));
+        },
+      });controlsToDispose.push(columnSearch);
+    }catch{options.columnSearch.hidden=true;}
+  }
   const menu=await createSpreadsheetContextMenu({root:table,onError:error=>options.onError(error.message)});controlsToDispose.push(menu);
   table.addEventListener('contextmenu',event=>{
     const target=(event.target as Element).closest<HTMLTableCellElement>('td,th');if(!target)return;
@@ -203,10 +226,10 @@ export async function createCameraGrid(options:GridOptions){
     getItems:()=>(flipped()?[
       {id:settingLabelsId,label:'setting names',axis:'column' as const,header:numberCorner,size:view().settingLabelWidth??defaultLabelWidth,min:120,max:800},
       ...store.document.cameras.map(row=>({id:row.id,label:valueOf(row,'camera-name'),axis:'column' as const,header:numberHeads.get(row.id)!,size:view().cameraWidths?.[row.id]??defaultCameraWidth,min:96,max:800})),
-      ...[...frozenMeta,...shownLogin()].map(m=>m.id).concat(visibleFields(view()).map(f=>f.id)).filter(id=>id!=='recording-status').map(id=>({id,label:settingLabel(id)!,axis:'row' as const,header:labelHeads.get(id)!,size:view().settingHeights?.[id]??defaultSettingHeight,min:28,max:200}))
+      ...[...frozenMeta,...shownLogin()].map(m=>m.id).concat(shownFields().map(f=>f.id)).filter(id=>id!=='recording-status').map(id=>({id,label:settingLabel(id)!,axis:'row' as const,header:labelHeads.get(id)!,size:view().settingHeights?.[id]??defaultSettingHeight,min:28,max:200}))
     ]:[
       ...[...frozenMeta,...shownLogin()].filter(m=>m.id!=='connection-status'&&m.id!=='recording-status').map(m=>({id:m.id,label:m.label,axis:'column' as const,header:metaHeads[meta.indexOf(m)]!,size:view().widths[m.id]??m.width,min:96,max:800})),
-      ...visibleFields(view()).map(f=>({id:f.id,label:f.label,axis:'column' as const,header:fieldHeaders.get(f.id)!,size:view().widths[f.id]??f.width,min:96,max:800})),
+      ...shownFields().map(f=>({id:f.id,label:f.label,axis:'column' as const,header:fieldHeaders.get(f.id)!,size:view().widths[f.id]??f.width,min:96,max:800})),
       ...store.document.cameras.map(row=>({id:row.id,label:valueOf(row,'camera-name'),axis:'row' as const,header:rows.get(row.id)!.cells[0] as HTMLElement,size:view().rowHeights[row.id]??36,min:28,max:200}))
     ]).filter(handleIsExposed),
     onResize(item,size){
@@ -222,7 +245,7 @@ export async function createCameraGrid(options:GridOptions){
       const axis=isFlippedNow?'row' as const:'column' as const;
       const settingCells=(f:Field)=>cameras.map(row=>cells.get(row.id+'/'+f.id)!);
       const handleOf=(f:Field)=>isFlippedNow?labelHeads.get(f.id)!:fieldHeaders.get(f.id)!;
-      for(const id of orderedGroups().filter(id=>!view().hiddenGroups?.includes(id))){const group=groups.find(g=>g.id===id)!;const list=visibleFields(view()).filter(f=>f.group===id);
+      for(const id of orderedGroups().filter(groupShown)){const group=groups.find(g=>g.id===id)!;const list=shownFields().filter(f=>f.group===id);
         result.push({id,label:group.label,axis,scope:'groups',handle:groupHeaders.get(id)!,elements:[groupHeaders.get(id)!,...list.flatMap(f=>[handleOf(f),...settingCells(f)])]});
         for(const f of list)result.push({id:f.id,label:f.label,axis,scope:id,handle:handleOf(f),elements:[handleOf(f),...settingCells(f)]});
       }
@@ -260,28 +283,28 @@ export async function createCameraGrid(options:GridOptions){
   table.addEventListener('dblclick',event=>{const cell=document.elementFromPoint(event.clientX,event.clientY)?.closest<HTMLTableCellElement>('td');if(cell&&table.contains(cell)&&!editor)startEdit(cell);});
   function ensureCamera(row:Camera){
     if(rows.has(row.id))return;
-    const visible=new Set(visibleFields(view()).map(f=>f.id));
+    const visible=new Set(shownFields().map(f=>f.id));
     const tr=document.createElement('tr');tr.dataset.cameraId=row.id;rows.set(row.id,tr);const number=document.createElement('th');number.scope='row';number.className='row-number';number.dataset.rowId=row.id;tr.append(number);
     for(const id of allColumnIds){const cell=tr.insertCell();cell.dataset.cameraId=row.id;cell.dataset.settingId=id;cell.setAttribute('role','gridcell');if(frozenMeta.some(m=>m.id===id))cell.className='identity-column';cells.set(row.id+'/'+id,cell);}
-    for(const group of groups){const cell=tr.insertCell();cell.className='empty-group-cell';cell.setAttribute('aria-hidden','true');cell.hidden=!!view().hiddenGroups?.includes(group.id)||group.fields.some(f=>visible.has(f.id));placeholders.get(group.id)!.cells.set(row.id,cell);}
+    for(const group of groups){const cell=tr.insertCell();cell.className='empty-group-cell';cell.setAttribute('aria-hidden','true');cell.hidden=!groupShown(group.id)||group.fields.some(f=>visible.has(f.id));placeholders.get(group.id)!.cells.set(row.id,cell);}
     cameraTracks.set(row.id,document.createElement('col'));
     const head=document.createElement('th');head.scope='col';head.className='column-number';head.dataset.rowId=row.id;numberHeads.set(row.id,head);
   }
   function layoutRows(){
-    const visible=new Set(visibleFields(view()).map(f=>f.id)),order=orderedFields(),groupOrder=orderedGroups();
+    const visible=new Set(shownFields().map(f=>f.id)),order=orderedFields(),groupOrder=orderedGroups();
     place(tracks,[gutter,...meta.map(m=>trackMap.get(m.id)!),...groupOrder.flatMap(id=>[...order.filter(f=>f.group===id).map(f=>trackMap.get(f.id)!),placeholders.get(id)!.track])]);
     place(head,[groupRow,fieldRow]);
     place(groupRow,[corner,...metaHeads,...groupOrder.map(id=>groupHeaders.get(id)!)]);
     place(fieldRow,groupOrder.flatMap(id=>[...order.filter(f=>f.group===id).map(f=>fieldHeaders.get(f.id)!),placeholders.get(id)!.header]));
     let width=34,offset=34;corner.style.left='0px';
     for(const [i,m]of meta.entries()){
-      const w=view().widths[m.id]??m.width,show=m.frozen||loginVisible(view(),m.id);
+      const w=view().widths[m.id]??m.width,show=m.frozen||loginShown(m.id);
       trackMap.get(m.id)!.style.width=w+'px';trackMap.get(m.id)!.style.display=show?'':'none';metaHeads[i]!.hidden=!show;metaHeads[i]!.style.left=m.frozen?offset+'px':'';metaHeads[i]!.style.minWidth=w+'px';
       if(m.frozen)offset+=w;if(show)width+=w;
     }
     for(const field of order){const show=visible.has(field.id);trackMap.get(field.id)!.style.display=show?'':'none';trackMap.get(field.id)!.style.width=(view().widths[field.id]??field.width)+'px';fieldHeaders.get(field.id)!.hidden=!show;if(show)width+=view().widths[field.id]??field.width;}
     for(const group of groups){
-      const th=groupHeaders.get(group.id)!,placeholder=placeholders.get(group.id)!,hidden=!!view().hiddenGroups?.includes(group.id);
+      const th=groupHeaders.get(group.id)!,placeholder=placeholders.get(group.id)!,hidden=!groupShown(group.id);
       const count=group.fields.filter(f=>visible.has(f.id)).length,empty=!hidden&&count===0;
       th.scope='colgroup';th.hidden=hidden;th.colSpan=Math.max(1,count);placeholder.header.hidden=!empty;placeholder.track.style.display=empty?'':'none';
       const w=Math.max(180,group.label.length*8+50);placeholder.track.style.width=w+'px';if(empty)width+=w;
@@ -312,12 +335,12 @@ export async function createCameraGrid(options:GridOptions){
     place(numberRow,[numberCorner,...cameras.map(row=>numberHeads.get(row.id)!)]);
     for(const [index,row]of cameras.entries()){const number=numberHeads.get(row.id)!;number.textContent=String(index+1);number.setAttribute('aria-label',valueOf(row,'camera-name'));}
     for(const m of frozenMeta){const row=identityRows.get(m.id)!;place(row,[labelHeads.get(m.id)!,...cameraCells(m.id)]);row.style.height=heightOf(m.id);}
-    const list=visibleFields(v),bodyRows:HTMLElement[]=[];
+    const list=shownFields(),bodyRows:HTMLElement[]=[];
     if(shownLogin().length){
       loginFiller.colSpan=Math.max(1,cameras.length);place(loginSection,cameras.length?[loginHeader,loginFiller]:[loginHeader]);bodyRows.push(loginSection);
       for(const m of shownLogin()){const row=settingRow(m.id);place(row,[labelHeads.get(m.id)!,...cameraCells(m.id)]);row.style.height=heightOf(m.id);bodyRows.push(row);for(const cell of cameraCells(m.id)){cell.style.left='';cell.style.top='';}}
     }
-    for(const id of orderedGroups().filter(id=>!v.hiddenGroups?.includes(id))){
+    for(const id of orderedGroups().filter(groupShown)){
       const section=sectionRows.get(id)!,th=groupHeaders.get(id)!;
       th.scope='rowgroup';th.hidden=false;th.colSpan=1;section.filler.colSpan=Math.max(1,cameras.length);
       place(section.row,cameras.length?[th,section.filler]:[th]);bodyRows.push(section.row);groupControls.get(id)?.refresh();
@@ -335,7 +358,7 @@ export async function createCameraGrid(options:GridOptions){
   }
   function followSelection(){
     if(!active||!currentRow(active.rowId))return;
-    const shownOnTab=[...frozenMeta,...shownLogin()].some(m=>m.id===active!.columnId)||visibleFields(view()).some(f=>f.id===active!.columnId);
+    const shownOnTab=[...frozenMeta,...shownLogin()].some(m=>m.id===active!.columnId)||shownFields().some(f=>f.id===active!.columnId);
     controls.select(position(shownOnTab?active:{rowId:active.rowId,columnId:'camera-name'}),undefined,{focus:false});
   }
   function render(){
@@ -347,12 +370,12 @@ export async function createCameraGrid(options:GridOptions){
     for(const [id,element]of rows)if(!ids.has(id)){element.remove();rows.delete(id);for(const columnId of allColumnIds){cells.get(id+'/'+columnId)?.remove();cells.delete(id+'/'+columnId);}for(const placeholder of placeholders.values())placeholder.cells.delete(id);cameraTracks.get(id)?.remove();cameraTracks.delete(id);numberHeads.get(id)?.remove();numberHeads.delete(id);}
     for(const row of store.document.cameras)ensureCamera(row);
     if(flip)layoutColumns();else layoutRows();
-    const visible=new Set(visibleFields(view()).map(f=>f.id)),orderedIds=[...meta.map(m=>m.id),...orderedFields().map(f=>f.id)];
+    const visible=new Set(shownFields().map(f=>f.id)),orderedIds=[...meta.map(m=>m.id),...orderedFields().map(f=>f.id)];
     for(const row of store.document.cameras){
       for(const id of orderedIds){
         const cell=cells.get(row.id+'/'+id)!,address={rowId:row.id,columnId:id};
         cell.dataset.hubbleRow=flip?id:row.id;cell.dataset.hubbleColumn=flip?row.id:id;
-        cell.hidden=fieldById.has(id)?!visible.has(id):isLoginField(id)&&!loginVisible(view(),id);if(cell===editor?.cell)continue;
+        cell.hidden=fieldById.has(id)?!visible.has(id):isLoginField(id)&&!loginShown(id);if(cell===editor?.cell)continue;
         const field=cellValue(address),invalid=store.invalid.get(addressKey(address)),definition=fieldById.get(id),obs=observation(row);
         cell.setAttribute('aria-readonly',String(!field||!!field.readOnly));
         cell.toggleAttribute('aria-invalid',!!invalid);if(invalid)cell.setAttribute('aria-invalid','true');
@@ -368,7 +391,7 @@ export async function createCameraGrid(options:GridOptions){
         if(id==='recording-status')cell.dataset.recording=isOnline(row)?obs?.recording??'':'';
       }
     }
-    controls.refresh();resize?.refresh();reorder?.refresh();columnEditor.refresh();
+    controls.refresh();resize?.refresh();reorder?.refresh();columnEditor.refresh();columnSearch?.refresh();
     const nowShowing=activeSheetId(store.document)+'/'+table.dataset.orientation;
     if(nowShowing!==shownLayout){shownLayout=nowShowing;followSelection();}
   }

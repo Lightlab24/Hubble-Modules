@@ -241,6 +241,10 @@ export function applyMutation(before:CameraDocument,operation:Mutation):CameraDo
   } else throw Error('Unknown edit operation.');
   return validateDocument(next);
 }
+/** What a column search leaves on a tab: the matching settings the tab shows, a collapsed section's tucked-away ones included. Hidden settings stay hidden. */
+export function searchedFields(view:View,ids:ReadonlySet<string>):Field[] {
+  return visibleFields({...view,expanded:Object.fromEntries(groups.map(g=>[g.id,true]))}).filter(f=>ids.has(f.id));
+}
 export function visibleFields(view:View):Field[] {
   return [...view.order,...groups.map(g=>g.id).filter(id=>!view.order.includes(id))].filter(id=>!view.hiddenGroups?.includes(id)).flatMap(id=>{
     const group=groups.find(g=>g.id===id)!;

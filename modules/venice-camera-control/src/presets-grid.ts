@@ -1,5 +1,5 @@
 import {
-  mountSpreadsheetControls,mountSpreadsheetColumnGroup,mountSpreadsheetColumnEditor,createSpreadsheetContextMenu,mountSpreadsheetResize,mountSpreadsheetViewport,
+  mountSpreadsheetControls,mountSpreadsheetColumnGroup,mountSpreadsheetColumnEditor,mountSpreadsheetColumnSearch,createSpreadsheetContextMenu,mountSpreadsheetResize,mountSpreadsheetViewport,
   type SpreadsheetAddress,type SpreadsheetCell,type SpreadsheetColumnGroup,type SpreadsheetColumnGroupControls,type SpreadsheetEdit,type SpreadsheetMenuItem
 } from '@hubble/module-sdk/spreadsheet-controls';
 import { groups,fieldById,clone,visibleFields,withColumnVisibility,withNoColumns,type View,type Field } from './model.js';
@@ -10,7 +10,7 @@ import type { CameraSummary,Observation,PresetSend } from './backend.js';
 export const cameraColumnId='camera-now';
 export interface Chosen { presetId?:string; camera?:CameraSummary; observation?:Observation; job?:PresetSend; plan?:PlannedSend }
 export interface PresetGridOptions {
-  table:HTMLTableElement; viewport:HTMLElement; columnEditor:HTMLElement;
+  table:HTMLTableElement; viewport:HTMLElement; columnEditor:HTMLElement; columnSearch?:HTMLElement;
   store:Drafts<PresetDocument,PresetMutation>;
   chosen:()=>Chosen;
   /** The values a setting can take: the module's own list, or what the cameras report. */
@@ -47,8 +47,11 @@ export async function createPresetGrid(options:PresetGridOptions){
   const orderedFields=(groupId:string)=>{const group=groups.find(g=>g.id===groupId)!;return [...(view().fields[groupId]??[]),...group.fields.map(f=>f.id).filter(id=>!view().fields[groupId]?.includes(id))].map(id=>fieldById.get(id)!).filter(f=>isPresetField(f.id));};
   const orderedGroups=()=>allGroups().filter(id=>!view().hiddenGroups?.includes(id));
   const folded=()=>withPresetFolding(view());
+  let searchIds:ReadonlySet<string>|null=null;
   /** Folded sections show their chosen settings, plus anything a role changes, so a role's differences never hide. */
   function shownFields(groupId:string):Field[]{
+    // A search shows every match that isn't hidden, folded away or not, and nothing else.
+    if(searchIds)return orderedFields(groupId).filter(f=>searchIds!.has(f.id)&&!view().hidden.includes(f.id));
     const visible=new Set(visibleFields(folded()).map(f=>f.id)),roles=roleFieldIds(doc());
     return orderedFields(groupId).filter(f=>visible.has(f.id)||(roles.has(f.id)&&!view().hidden.includes(f.id)));
   }
@@ -139,15 +142,30 @@ export async function createPresetGrid(options:PresetGridOptions){
     },onError:error=>options.onError(error.message)});disposers.push(entry.controls);
   }
   const hideAllId='hide-all-settings';
-  const columnEditor=await mountSpreadsheetColumnEditor({
-    root:options.columnEditor,
-    getItems:()=>[{id:hideAllId,label:'Hide all settings',visible:groups.some(g=>!view().hiddenGroups?.includes(g.id))},...allGroups().map(id=>{
+  const columnItems=()=>[{id:hideAllId,label:'Hide all settings',visible:groups.some(g=>!view().hiddenGroups?.includes(g.id))},...allGroups().map(id=>{
       const group=groups.find(g=>g.id===id)!,visible=new Set(visibleFields({...folded(),hiddenGroups:[]}).map(f=>f.id));
       return {id,label:group.label,visible:!view().hiddenGroups?.includes(id),fields:orderedFields(id).map(f=>({id:f.id,label:f.label,visible:visible.has(f.id)}))};
-    })],
+    })];
+  const columnEditor=await mountSpreadsheetColumnEditor({
+    root:options.columnEditor,
+    getItems:columnItems,
     onVisibilityChange:(id,visible)=>setVisibility([{id,visible}]),
     onVisibilityChanges:setVisibility
   });disposers.push(columnEditor);
+  // A Hubble without the column search leaves its slot empty and the page works as before.
+  let columnSearch:Awaited<ReturnType<typeof mountSpreadsheetColumnSearch>>|undefined;
+  if(options.columnSearch){
+    try{
+      columnSearch=await mountSpreadsheetColumnSearch({
+        root:options.columnSearch,getItems:columnItems,
+        onSearch(found){searchIds=found&&new Set(found.fieldIds);render();},
+        onFocusGrid(){
+          const rowsNow=[nameRowId,holdsRowId,...shownRows()],columnId=active&&columnIds().includes(active.columnId)?active.columnId:columnIds()[0]!;
+          controls.select({rowId:active&&rowsNow.includes(active.rowId)?active.rowId:shownRows()[0]??nameRowId,columnId});
+        },
+      });disposers.push(columnSearch);
+    }catch{options.columnSearch.hidden=true;}
+  }
   function setVisibility(changes:readonly {id:string;visible:boolean}[]){
     const all=changes.find(change=>change.id===hideAllId);
     if(all){if(all.visible){columnEditor.refresh();return;}layout(withNoColumns(view()));return;}
@@ -272,6 +290,7 @@ export async function createPresetGrid(options:PresetGridOptions){
     place(head,[numberRow,...headRows]);
     const bodyRows:HTMLElement[]=[];
     for(const id of orderedGroups()){
+      if(searchIds&&!shownFields(id).length)continue;
       const section=sections.get(id)!;section.filler.colSpan=columns.length;bodyRows.push(section.row);section.controls?.refresh();
       for(const field of shownFields(id)){const row=rowFor(field.id);place(row,[labelFor(field.id,field.label),...columns.map(c=>cellFor(field.id,c))]);row.style.height=(view().settingHeights?.[field.id]??defaultRowHeight)+'px';bodyRows.push(row);}
     }
@@ -280,7 +299,7 @@ export async function createPresetGrid(options:PresetGridOptions){
     let top=0;
     for(const row of [numberRow,...headRows]){for(const cell of row.cells){cell.style.top=top+'px';cell.style.left=cell.classList.contains('setting-label')?'0px':'';}top+=row.offsetHeight;}
     for(const row of bodyRows)for(const cell of (row as HTMLTableRowElement).cells){cell.style.top='';}
-    controls.refresh();resize.refresh();columnEditor.refresh();
+    controls.refresh();resize.refresh();columnEditor.refresh();columnSearch?.refresh();
   }
   const unsubscribe=store.subscribe(render);
   render();
