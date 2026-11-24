@@ -235,6 +235,8 @@ test('a camera with no address can be added and sent, and None in a model’s Ca
   await f.getByRole('listbox', { name: 'Camera model 1' }).getByRole('option', { name: 'Venice-IP', exact: true }).click();
   await type(box(f, 'Camera IP for Venice-IP'), 'none');
   await expect(box(f, 'Camera IP for Venice-IP')).toHaveValue('None');
+  await type(box(f, 'Username for Venice-IP'), 'NONE');
+  await expect(box(f, 'Username for Venice-IP')).toHaveValue('None');
   await expect(tab(f).locator('[data-role="defaults-camera-problems"]')).toHaveText('');
   await expect.poll(async () => (await rpc(request)('read-plan')).plan.cameraLogins?.[0]?.ip).toBe('None');
 
@@ -247,6 +249,7 @@ test('a camera with no address can be added and sent, and None in a model’s Ca
   const name = await cameraCell(added, 'name').locator('input').inputValue();
   // No address, and it waits to be sent rather than for more typing.
   await expect(cameraCell(added, 'ip').locator('input')).toHaveValue('');
+  await expect(cameraCell(added, 'login').locator('input')).toHaveValue('');
   await expect(cameraCell(added, 'sync')).not.toHaveText('Incomplete');
   await cameraCell(added, 'source').click();
   await gridOf(added).press('Enter');
@@ -261,6 +264,7 @@ test('a camera with no address can be added and sent, and None in a model’s Ca
   const sent = async () => Object.values((await fleet(request))[0]!.config.Camera).find(camera => camera.Name === sentName);
   await expect.poll(async () => (await sent())?.Model).toBeTruthy();
   expect((await sent())?.IP ?? '').toBe('');
+  expect((await sent())?.Login ?? '').toBe('');
   await expect(cameraCell(added, 'sync')).not.toHaveText(/Incomplete|Error|Invalid/);
   expect(name).toBeTruthy();
 

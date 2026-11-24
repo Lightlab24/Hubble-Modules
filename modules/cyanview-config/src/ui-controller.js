@@ -5913,7 +5913,8 @@ import { addressPatternProblem, deviceKinds, deviceNumber, fillAddress, fillName
     if (!camera || usbCamera(camera.model)) return false;
     const row = cameraTypeRow(camera.model);
     if (!row) return false;
-    const values = { login: row.login || defaults.camera.login, password: row.password };
+    // None in a model's Username means its cameras have none, where an empty box takes the Username above.
+    const values = { login: noCameraIp(row.login) ? '' : row.login || defaults.camera.login, password: row.password };
     for (const field of ['login', 'password']) {
       camera[field] = values[field];
       camera.dirty?.add(field);
@@ -6038,7 +6039,7 @@ import { addressPatternProblem, deviceKinds, deviceNumber, fillAddress, fillName
       '<section class="hc-defaults-section" aria-labelledby="hc-defaults-devices"><div class="hc-defaults-heading"><h4 id="hc-defaults-devices">Devices</h4><span>RCPs, RIOs and Gateways are numbered separately, so RCP 1 and RIO 1 can both exist.</span></div>' +
       '<div class="hc-sheet"><div class="hc-scroll"><table class="hc-grid hc-defaults-table" data-defaults-table="devices"><colgroup><col style="width:120px"><col><col><col style="width:90px"></colgroup><thead><tr><th scope="col">Type</th><th scope="col">Name</th><th scope="col">LAN IP</th><th scope="col">Mask</th></tr></thead><tbody>' + deviceRows + '</tbody></table></div></div>' +
       '<div class="hc-defaults-chips"><span>Insert into the box you’re in:</span>' + chip('%number%') + '</div>' + problemLine(problems.devices, 'defaults-device-problems') + '</section>' +
-      '<section class="hc-defaults-section" aria-labelledby="hc-defaults-cameras"><div class="hc-defaults-heading"><h4 id="hc-defaults-cameras">Cameras</h4><span>A model without a row below uses its own model name for %type%. Type None in a model’s Camera IP when its cameras have no address.</span></div>' +
+      '<section class="hc-defaults-section" aria-labelledby="hc-defaults-cameras"><div class="hc-defaults-heading"><h4 id="hc-defaults-cameras">Cameras</h4><span>A model without a row below uses its own model name for %type%. Type None in a model’s Camera IP or Username when its cameras have none.</span></div>' +
       '<div class="hc-defaults-fields">' +
       field('camera:name', defaults.camera.name, 'Camera name', chip('%number%', 'camera:name') + chip('%type%', 'camera:name'), { placeholder: 'Camera %number%', pattern: true }) +
       field('camera:ip', defaults.camera.ip, 'Camera IP', chip('%number%', 'camera:ip'), { placeholder: 'No default', pattern: true, problem: problemFor(problems.cameras, 'camera:ip') }) +
@@ -6099,7 +6100,7 @@ import { addressPatternProblem, deviceKinds, deviceNumber, fillAddress, fillName
     } else if (scope === 'type') {
       const row = cameraTypes[Number(first)];
       if (!row || !(second in row)) return;
-      const next = second === 'ip' && noCameraIp(value) ? 'None' : value;
+      const next = (second === 'ip' || second === 'login') && noCameraIp(value) ? 'None' : value;
       if (next !== value) element.value = next;
       if (row[second] === next) return;
       row[second] = next;
