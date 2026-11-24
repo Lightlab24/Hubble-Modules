@@ -224,3 +224,52 @@ test('a camera gets its type and number in its name, its address and its login; 
   expect((await sent())?.Login).toBe('operator');
   expect((await sent())?.Password).toBe('venice1');
 });
+
+// Asked for Nov 24, 2026: virtual cameras, such as Cyan - Generic ones made to connect to LiveLab, have no
+// address, and a camera had to have one before it could be sent.
+test('a camera with no address can be added and sent, and None in a model’s Camera IP gives its cameras none', async ({ page, request }) => {
+  const f = await open(page, request);
+  await showDefaults(f);
+  await tab(f).getByRole('button', { name: 'Add a camera model' }).click();
+  await tab(f).getByRole('button', { name: 'Camera model 1', exact: true }).click();
+  await f.getByRole('listbox', { name: 'Camera model 1' }).getByRole('option', { name: 'Venice-IP', exact: true }).click();
+  await type(box(f, 'Camera IP for Venice-IP'), 'none');
+  await expect(box(f, 'Camera IP for Venice-IP')).toHaveValue('None');
+  await expect(tab(f).locator('[data-role="defaults-camera-problems"]')).toHaveText('');
+  await expect.poll(async () => (await rpc(request)('read-plan')).plan.cameraLogins?.[0]?.ip).toBe('None');
+
+  await f.locator('[data-tab="setup"]').click();
+  await expect(setup(f).locator('table[role="grid"]')).toBeVisible();
+  const list = setup(f).locator('tbody tr[data-id]'), before = await list.count();
+  await setup(f).locator('[data-count-step="1"]').click();
+  await expect(list).toHaveCount(before + 1);
+  const added = setup(f).locator('tbody tr[data-id="' + await list.last().getAttribute('data-id') + '"]');
+  const name = await cameraCell(added, 'name').locator('input').inputValue();
+  // No address, and it waits to be sent rather than for more typing.
+  await expect(cameraCell(added, 'ip').locator('input')).toHaveValue('');
+  await expect(cameraCell(added, 'sync')).not.toHaveText('Incomplete');
+  await cameraCell(added, 'source').click();
+  await gridOf(added).press('Enter');
+  await f.getByRole('dialog').getByRole('option', { name: 'Stage RIO', exact: true }).click();
+  const sentName = await cameraCell(added, 'name').locator('input').inputValue();
+  await expect(cameraCell(added, 'ip').locator('input')).toHaveValue('');
+
+  const panel = f.locator('[data-role="pending-sends"]');
+  if (await panel.isHidden()) await f.locator('.hc-panel:not([hidden]) .hc-toolbar [data-action="toggle-pending-sends"]').click();
+  await panel.locator('[data-action="send-all-pending"]').click();
+  await expect(panel).toContainText('Nothing is waiting to send');
+  const sent = async () => Object.values((await fleet(request))[0]!.config.Camera).find(camera => camera.Name === sentName);
+  await expect.poll(async () => (await sent())?.Model).toBeTruthy();
+  expect((await sent())?.IP ?? '').toBe('');
+  await expect(cameraCell(added, 'sync')).not.toHaveText(/Incomplete|Error|Invalid/);
+  expect(name).toBeTruthy();
+
+  // An address that isn't one is still refused, and says why.
+  await cameraCell(added, 'ip').click();
+  await gridOf(added).press('Enter');
+  await f.locator('input:focus').fill('10.20.300');
+  await f.locator('input:focus').press('Enter');
+  await panel.locator('[data-action="send-all-pending"]').click();
+  await expect(cameraCell(added, 'sync')).toHaveText('Invalid IP');
+  expect((await sent())?.IP ?? '').toBe('');
+});

@@ -240,7 +240,9 @@ export class ConfigurationOperations {
     }
     if (!/^\d+$/.test(String(item.number)) || Number(item.number) < 1 || !String(item.name ?? '').trim() || String(item.name).length > 160) throw new Error('Enter a camera number and name');
     const usb = item.model === 'Alpha-USB' || normalizedLabel(item.model) === 'sonyalphausb';
-    if (!usb && !validIp(String(item.ip ?? ''))) throw new Error('Enter a valid camera IP address');
+    // A camera can have no address: a virtual one, or one whose address isn't known yet (Nov 24, 2026).
+    const address = String(item.ip ?? '').trim();
+    if (!usb && address && !validIp(address)) throw new Error('Enter a valid camera IP address, or leave it empty');
     const port = String(item.port ?? '').trim();
     if (!usb && fields.includes('port') && port && (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535)) throw new Error('Enter a camera port between 1 and 65535');
     if (item.lens === 'cmotion cGate' && fields.some(field => field === 'lens' || field === 'lensPort' || advanced(field))) throw new Error('cGate configuration is not available yet');
@@ -276,6 +278,8 @@ export class ConfigurationOperations {
     if (!usb) for (const [field, label] of [['ip', 'IP'], ['port', 'Port'], ['login', 'Login'], ['password', 'Password']] as const) if (created || fields.includes('model') || fields.includes(field)) {
       const value = String(item[field] ?? '').trim();
       if (field === 'port' && (!value || !fields.includes('port'))) continue;
+      // No address on a camera that has none yet is nothing to write.
+      if (field === 'ip' && !value && !String(before?.IP ?? '')) continue;
       const mapping = await client.mapping(key, label, signal);
       await client.update(mapping.key, { [mapping.property]: value }, signal); expected[label] = value;
     }

@@ -318,7 +318,7 @@ import { addressPatternProblem, deviceKinds, deviceNumber, fillAddress, fillName
   function valid(item,kind,fields=[]){
     if(kind==='lan'){if(item.operation==='Delete'||item.type==='WAN'&&(item.dhcp||!String(item.planned||'').trim()))return '';const parts=String(item.planned).split('/');return parts.length===2&&ipv4(parts[0])&&/^\d{1,2}$/.test(parts[1])&&Number(parts[1])<=32?'':'Invalid IP';}
     if(!item.number||!item.name||item.model==='Choose model…')return 'Incomplete';
-    if(item.model!=='Alpha-USB'&&!ipv4(item.ip))return 'Incomplete';
+    if(item.model!=='Alpha-USB'&&String(item.ip??'').trim()&&!ipv4(String(item.ip).trim()))return 'Invalid IP';
     initializeLensFields(item);const p=lensCapabilities(item);
     const filled=fields.filter(field=>!lensAxisBeingCleared(item,field));
     if(filled.some(field=>field==='irisMin'||field==='irisMax')&&!irisRangeValid(item))return 'Incomplete';
@@ -410,7 +410,7 @@ import { addressPatternProblem, deviceKinds, deviceNumber, fillAddress, fillName
   function addCamera(id,model){
     if(cameras.length>=512){toast('Camera capacity reached');return;}
     const nums=(id?cameras.filter(c=>c.device===id):cameras).map(c=>Number(c.number));
-    const c={id:'new-camera-'+Date.now(),device:id,number:String(Math.max(0,...nums)+1),name:'New camera',model,ip:'',lens:'None',lensPort:'None',online:null,pending:true,result:model==='Alpha-USB'?'Pending':'Incomplete',port:model==='Alpha-USB'?'':'80',login:model==='Alpha-USB'?'':'admin',password:'',isNew:true,dirty:new Set(['number','name','model','ip','lens','lensPort']),revision:0,jobs:0};
+    const c={id:'new-camera-'+Date.now(),device:id,number:String(Math.max(0,...nums)+1),name:'New camera',model,ip:'',lens:'None',lensPort:'None',online:null,pending:true,result:model==='Choose model…'?'Incomplete':'Pending',port:model==='Alpha-USB'?'':'80',login:model==='Alpha-USB'?'':'admin',password:'',isNew:true,dirty:new Set(['number','name','model','ip','lens','lensPort']),revision:0,jobs:0};
     cameras.push(c);openControllers.add(id);renderCameras();if(ui.sendMode==='Auto send'&&!valid(c,'camera'))sendItems([c],'camera');toast(id?'Camera row added to '+device(id).name:'Camera added · choose its Source');remember();
   }
   function addLan(){const id=$('device-filter').value==='all'?(orderedDevices()[0]?.id||''):$('device-filter').value;lans.push({id:'new-lan-'+Date.now(),device:id,type:'LAN',iface:'LAN1',current:'',planned:'',operation:'Add',pending:true,result:'Incomplete',dhcp:false,gateway:'',dns1:'',dns2:'',dirty:new Set(['planned']),revision:0,jobs:0});renderLans();remember();}
@@ -5192,11 +5192,9 @@ import { addressPatternProblem, deviceKinds, deviceNumber, fillAddress, fillName
       used.add(taken);
       next = Math.max(next, taken + 1);
       const number = String(taken);
-      const row = { id: 'new-camera-' + crypto.randomUUID(), device: deviceId, number, name: 'Camera ' + number, model, ip: '', lens: 'None', lensPort: 'None', online: null, pending: true, result: usb ? 'Pending' : 'Incomplete', port: usb ? '' : '80', login: usb ? '' : 'admin', password: '', isNew: true, dirty: new Set(['number', 'name', 'model', 'ip']), revision: 0, jobs: 0 };
+      const row = { id: 'new-camera-' + crypto.randomUUID(), device: deviceId, number, name: 'Camera ' + number, model, ip: '', lens: 'None', lensPort: 'None', online: null, pending: true, result: model === 'Choose model…' ? 'Incomplete' : 'Pending', port: usb ? '' : '80', login: usb ? '' : 'admin', password: '', isNew: true, dirty: new Set(['number', 'name', 'model', 'ip']), revision: 0, jobs: 0 };
       // Its name, address and login from Defaults.
       applyCameraDefaults(row);
-      // A model and an address from Defaults make the row complete, so it waits to be sent rather than for more typing.
-      if (!usb && row.model !== 'Choose model…' && row.name && ipv4(row.ip)) row.result = 'Pending';
       return row;
     });
     cameras.push(...added);
@@ -5899,8 +5897,11 @@ import { addressPatternProblem, deviceKinds, deviceNumber, fillAddress, fillName
     const pattern = defaults.camera.name;
     return pattern ? fillName(pattern, { number, type: cameraTypeLabel(model) }) : 'Camera ' + number;
   }
+  // None in a model's Camera IP means its cameras have no address, such as a virtual camera (Nov 24, 2026).
+  const noCameraIp = value => /^none$/i.test(String(value ?? '').trim());
+  const modelHasNoIp = model => noCameraIp(cameraTypeRow(model)?.ip);
   function cameraDefaultIp(model, number) {
-    if (usbCamera(model)) return '';
+    if (usbCamera(model) || modelHasNoIp(model)) return '';
     const pattern = cameraTypeRow(model)?.ip || defaults.camera.ip, value = Number(number);
     return pattern && Number.isInteger(value) ? fillAddress(pattern, value).address : '';
   }
@@ -5948,6 +5949,8 @@ import { addressPatternProblem, deviceKinds, deviceNumber, fillAddress, fillName
     const put = (key, next) => { if (!next || next === item[key]) return; item[key] = next; item.dirty?.add(key); if (!fields.includes(key)) fields.push(key); };
     if (nameFollows) put('name', cameraDefaultName(item.model, item.number));
     if (ipFollows) put('ip', cameraDefaultIp(item.model, item.number));
+    // A model with no address takes away the one that came from Defaults.
+    if (ipFollows && field === 'model' && modelHasNoIp(item.model) && item.ip) { item.ip = ''; item.dirty?.add('ip'); if (!fields.includes('ip')) fields.push('ip'); }
     return fields;
   };
   // A camera made on Camera Configuration has no controller until its Source is chosen. Choosing a RIO
@@ -6002,7 +6005,7 @@ import { addressPatternProblem, deviceKinds, deviceNumber, fillAddress, fillName
     const ip = addressPatternProblem(defaults.camera.ip);
     if (ip) camerasFound.push({ key: 'camera:ip', text: 'Camera IP: ' + ip });
     if (defaults.camera.name && !/%number%/i.test(defaults.camera.name)) camerasFound.push({ key: 'camera:name', text: 'Camera name has no %number%, so cameras get the same name', warning: true });
-    cameraTypes.forEach((row, index) => { const problem = addressPatternProblem(row.ip); if (problem) camerasFound.push({ key: 'type:' + index + ':ip', text: (row.model || 'Row ' + (index + 1)) + ' camera IP: ' + problem }); });
+    cameraTypes.forEach((row, index) => { const problem = noCameraIp(row.ip) ? '' : addressPatternProblem(row.ip); if (problem) camerasFound.push({ key: 'type:' + index + ':ip', text: (row.model || 'Row ' + (index + 1)) + ' camera IP: ' + problem }); });
     return { devices: devicesFound, cameras: camerasFound };
   }
   const problemFor = (list, key) => list.find(item => item.key === key && !item.warning)?.text ?? '';
@@ -6035,7 +6038,7 @@ import { addressPatternProblem, deviceKinds, deviceNumber, fillAddress, fillName
       '<section class="hc-defaults-section" aria-labelledby="hc-defaults-devices"><div class="hc-defaults-heading"><h4 id="hc-defaults-devices">Devices</h4><span>RCPs, RIOs and Gateways are numbered separately, so RCP 1 and RIO 1 can both exist.</span></div>' +
       '<div class="hc-sheet"><div class="hc-scroll"><table class="hc-grid hc-defaults-table" data-defaults-table="devices"><colgroup><col style="width:120px"><col><col><col style="width:90px"></colgroup><thead><tr><th scope="col">Type</th><th scope="col">Name</th><th scope="col">LAN IP</th><th scope="col">Mask</th></tr></thead><tbody>' + deviceRows + '</tbody></table></div></div>' +
       '<div class="hc-defaults-chips"><span>Insert into the box you’re in:</span>' + chip('%number%') + '</div>' + problemLine(problems.devices, 'defaults-device-problems') + '</section>' +
-      '<section class="hc-defaults-section" aria-labelledby="hc-defaults-cameras"><div class="hc-defaults-heading"><h4 id="hc-defaults-cameras">Cameras</h4><span>A model without a row below uses its own model name for %type%.</span></div>' +
+      '<section class="hc-defaults-section" aria-labelledby="hc-defaults-cameras"><div class="hc-defaults-heading"><h4 id="hc-defaults-cameras">Cameras</h4><span>A model without a row below uses its own model name for %type%. Type None in a model’s Camera IP when its cameras have no address.</span></div>' +
       '<div class="hc-defaults-fields">' +
       field('camera:name', defaults.camera.name, 'Camera name', chip('%number%', 'camera:name') + chip('%type%', 'camera:name'), { placeholder: 'Camera %number%', pattern: true }) +
       field('camera:ip', defaults.camera.ip, 'Camera IP', chip('%number%', 'camera:ip'), { placeholder: 'No default', pattern: true, problem: problemFor(problems.cameras, 'camera:ip') }) +
@@ -6095,8 +6098,11 @@ import { addressPatternProblem, deviceKinds, deviceNumber, fillAddress, fillName
       if (first === 'ip' || first === 'login') for (const input of defaultsPanel.querySelectorAll('[data-defaults-field$=":' + first + '"]')) if (input.dataset.defaultsField.startsWith('type:')) input.placeholder = first === 'ip' ? value || 'No default' : value;
     } else if (scope === 'type') {
       const row = cameraTypes[Number(first)];
-      if (!row || !(second in row) || row[second] === value) return;
-      row[second] = value;
+      if (!row || !(second in row)) return;
+      const next = second === 'ip' && noCameraIp(value) ? 'None' : value;
+      if (next !== value) element.value = next;
+      if (row[second] === next) return;
+      row[second] = next;
       if (second === 'model') renderDefaults();
     } else return;
     paintDefaultsProblems();

@@ -35,6 +35,9 @@ export async function buildUiAdapter() {
   replace("+' for '+(device(row.device)?.name||'new row'))+'\"'+(disabled?' disabled':'')", "+' for '+(device(row.device)?.name||'new row'))+'\"'+(disabled||row.deleting?' disabled':'')");
   replace("if(!item)return;\n    if(!isLan&&isLensSetting", "if(!item||item.deleting)return;\n    if(!isLan&&isLensSetting");
   replace("    if(!device(item.device)?.online)return 'Offline · unsent';\n", "");
+  // A camera can be added and sent with no address (Nov 24, 2026). Only an address that isn't one is refused.
+  replace("    if(item.model!=='Alpha-USB'&&!ipv4(item.ip))return 'Incomplete';", "    if(item.model!=='Alpha-USB'&&String(item.ip??'').trim()&&!ipv4(String(item.ip).trim()))return 'Invalid IP';");
+  replace("result:model==='Alpha-USB'?'Pending':'Incomplete',port", "result:model==='Choose model…'?'Incomplete':'Pending',port");
   // A WAN on Static can be sent with no address, as the RIO's own page allows (Nov 17, 2026).
   // So can the removal of a LAN address, which has no new address to check (Nov 23, 2026).
   replace("if(kind==='lan'){if(item.dhcp&&item.type==='WAN')return '';", "if(kind==='lan'){if(item.operation==='Delete'||item.type==='WAN'&&(item.dhcp||!String(item.planned||'').trim()))return '';");

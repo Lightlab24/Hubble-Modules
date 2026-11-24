@@ -61,11 +61,9 @@
       used.add(taken);
       next = Math.max(next, taken + 1);
       const number = String(taken);
-      const row = { id: 'new-camera-' + crypto.randomUUID(), device: deviceId, number, name: 'Camera ' + number, model, ip: '', lens: 'None', lensPort: 'None', online: null, pending: true, result: usb ? 'Pending' : 'Incomplete', port: usb ? '' : '80', login: usb ? '' : 'admin', password: '', isNew: true, dirty: new Set(['number', 'name', 'model', 'ip']), revision: 0, jobs: 0 };
+      const row = { id: 'new-camera-' + crypto.randomUUID(), device: deviceId, number, name: 'Camera ' + number, model, ip: '', lens: 'None', lensPort: 'None', online: null, pending: true, result: model === 'Choose model…' ? 'Incomplete' : 'Pending', port: usb ? '' : '80', login: usb ? '' : 'admin', password: '', isNew: true, dirty: new Set(['number', 'name', 'model', 'ip']), revision: 0, jobs: 0 };
       // Its name, address and login from Defaults.
       applyCameraDefaults(row);
-      // A model and an address from Defaults make the row complete, so it waits to be sent rather than for more typing.
-      if (!usb && row.model !== 'Choose model…' && row.name && ipv4(row.ip)) row.result = 'Pending';
       return row;
     });
     cameras.push(...added);

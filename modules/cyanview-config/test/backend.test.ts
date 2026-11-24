@@ -119,6 +119,27 @@ test('camera creation resolves generated endpoint IDs and verifies credentials w
   } finally { await f.instance.dispose(); await fake.close(); }
 });
 
+test('a camera with no address is created and verified, and an address that is not one is refused', async () => {
+  const fake = new FakeController(); await fake.start(); const f = fixture();
+  try {
+    const plan = planFor(fake), camera: RecordValue = { id: 'virtual-camera', device: plan.devices[0]!.id, number: '1', name: 'Virtual 1', model: 'Venice-IP', ip: '', port: '', login: '', password: '', lens: 'None', lensPort: 'None', isNew: true };
+    plan.cameras.push(camera); await f.repository.write(null, plan, f.signal);
+    const operations = new ConfigurationOperations(f.repository, fake.client);
+    const result = await operations.run({ kind: 'camera', item: camera, fields: ['number', 'name', 'model', 'ip'] }, f.signal);
+    assert.equal(result.verified, true); assert.ok(result.elementKey);
+    assert.equal(String(fake.config.Camera[result.elementKey].IP ?? ''), '');
+    assert.equal(fake.config.Camera[result.elementKey].Name, 'Virtual 1');
+    // An address it had is taken off when the cell is emptied.
+    await operations.run({ kind: 'camera', item: { ...camera, elementKey: result.elementKey, ip: '10.20.100.101' }, fields: ['ip'] }, f.signal);
+    assert.equal(fake.config.Camera[result.elementKey].IP, '10.20.100.101');
+    const cleared = await operations.run({ kind: 'camera', item: { ...camera, elementKey: result.elementKey, ip: '' }, fields: ['ip'] }, f.signal);
+    assert.equal(cleared.verified, true); assert.equal(fake.config.Camera[result.elementKey].IP, '');
+    const actions = fake.actions.length;
+    await assert.rejects(operations.run({ kind: 'camera', item: { ...camera, elementKey: result.elementKey, ip: '10.20.300' }, fields: ['ip'] }, f.signal), /valid camera IP/);
+    assert.equal(fake.actions.length, actions);
+  } finally { await f.instance.dispose(); await fake.close(); }
+});
+
 test('a new camera with lens None sends nothing about the lens, whatever lens list the controller has', async () => {
   const fake = new FakeController(); await fake.start(); const f = fixture();
   // Some controllers list no blank lens and give a new camera a lens of their own.
