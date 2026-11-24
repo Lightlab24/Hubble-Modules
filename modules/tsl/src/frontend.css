@@ -26,11 +26,13 @@ h1{margin:0;font-size:16px;font-weight:600;color:var(--hubble-text-strong,#f4f4f
 .field{display:inline-flex;align-items:center;gap:7px;color:var(--hubble-text-secondary,#b2b2b2);font-size:var(--hubble-text-size-small,12px);white-space:nowrap}
 .field input{width:190px;min-height:var(--hubble-control-height,26px);padding:0 8px;border:1px solid var(--hubble-line-strong,#414141);border-radius:var(--hubble-radius-control,7px);background:var(--hubble-bar,#111);color:var(--hubble-text,#dedede);font:var(--hubble-control-text-size,11px) var(--hubble-font,system-ui)}
 
-button.primary{appearance:none;min-height:var(--hubble-control-height-field,34px);padding:0 14px;border:1px solid var(--hubble-text,#dedede);border-radius:var(--hubble-radius-control,7px);background:var(--hubble-text,#dedede);color:var(--hubble-sheet,#111);font:550 var(--hubble-text-size,13px) var(--hubble-font,system-ui);display:inline-flex;align-items:center;gap:6px;white-space:nowrap;cursor:pointer}
+button.primary{appearance:none;min-height:var(--hubble-control-height-field,34px);padding:0 13px;border:1px solid transparent;border-radius:var(--hubble-radius-control,7px);background:var(--hubble-text,#dedede);color:var(--hubble-sheet,#111);font:400 var(--hubble-control-text-size,11px) var(--hubble-font,system-ui);display:inline-flex;align-items:center;gap:6px;white-space:nowrap;cursor:pointer}
 button.primary:hover:not(:disabled){background:var(--hubble-text-strong,#fff)}
-button.primary:disabled{opacity:.43;cursor:default}
-button.quiet{appearance:none;min-height:var(--hubble-control-height,26px);padding:0 10px;border:1px solid var(--hubble-line-strong,#414141);border-radius:var(--hubble-radius-control,7px);background:var(--hubble-raised,#222);color:var(--hubble-text,#dedede);font:var(--hubble-control-text-size,11px) var(--hubble-font,system-ui);white-space:nowrap;cursor:pointer}
-button.quiet.tall{min-height:var(--hubble-control-height-field,34px);padding:0 14px;font-size:var(--hubble-text-size,13px)}
+/* Off, it is an outline like the other buttons, so it never reads as something to press. */
+button.primary:disabled{border-color:var(--hubble-line-strong,#414141);background:var(--hubble-bar,#151515);color:var(--hubble-text-disabled,#777);cursor:default}
+button.quiet{appearance:none;min-height:var(--hubble-control-height,26px);padding:0 10px;border:1px solid var(--hubble-line-strong,#414141);border-radius:var(--hubble-radius-control,7px);background:var(--hubble-bar,#151515);color:var(--hubble-text,#dedede);font:var(--hubble-text-size-small,12px) var(--hubble-font,system-ui);white-space:nowrap;cursor:pointer}
+button.quiet.tall{min-height:var(--hubble-control-height-row,30px)}
+.with-button button.quiet.tall{min-height:var(--hubble-control-height-field,34px)}
 button.quiet:hover:not(:disabled){background:var(--hubble-hover,#2e2e2e)}
 button.quiet:disabled{opacity:.43;cursor:default}
 
@@ -72,44 +74,50 @@ table.sheet.pick tbody tr:focus-visible td{box-shadow:inset 0 1px 0 var(--hubble
 table.sheet.pick tr[data-mine=true] td:first-child{box-shadow:inset 3px 0 0 var(--hubble-text,#dedede)}
 table.sheet.pick[aria-disabled=true] tbody tr{cursor:default}
 table.sheet.plain{width:100%;border-top:1px solid var(--hubble-sheet-line,#3b3b3b);border-left:1px solid var(--hubble-sheet-line,#3b3b3b)}
-table.sheet.plain thead th{position:static}
+table.sheet.plain td{height:28px}
+table.sheet.plain tbody tr{scroll-margin-top:29px}
+table.sheet.plain thead th{height:29px}
+/* Always four rows high: fewer leave room, more scroll here, so nothing under the list ever moves. */
+.device-scroll{height:143px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--hubble-line-strong,#555) var(--hubble-sheet,#111)}
 
-.setup{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:14px;align-items:start;max-width:1240px;padding:16px}
+.setup{display:grid;grid-template-columns:minmax(0,4fr) minmax(0,8fr);gap:12px 40px;align-items:start;max-width:1240px;padding:14px 24px 10px}
 .column{display:grid;gap:14px;min-width:0}
-/* Whether both ends agree. Always there and one line high, so it never moves the panels. */
-.link{grid-column:1/-1;display:flex;align-items:center;gap:8px;height:38px;margin:0;padding:0 14px;border:1px solid var(--hubble-line,#2a2a2a);border-radius:var(--hubble-radius-surface,8px);background:var(--hubble-bar,#151515);color:var(--hubble-text-secondary,#b2b2b2);white-space:nowrap;overflow:hidden}
-.link strong{font-weight:600;color:var(--hubble-text-strong,#f4f4f4)}
+/* Whether both ends agree. Always there and one line high, so it never moves the sections. */
+.link{grid-column:1/-1;display:flex;align-items:center;gap:10px;height:30px;margin:0;color:var(--hubble-text-secondary,#b2b2b2);white-space:nowrap;overflow:hidden}
+.link .status-dot{position:relative;left:11px;z-index:1}
+.link strong{flex:none;display:inline-flex;align-items:center;height:26px;margin-left:-16px;padding:0 11px 0 24px;border-radius:13px;background:var(--hubble-raised,#222);font-size:var(--hubble-text-size-small,12px);font-weight:600;color:var(--hubble-text-strong,#f4f4f4)}
 .link span:last-child{overflow:hidden;text-overflow:ellipsis}
 .link[data-tone=warn] strong{color:var(--tsl-warn)}
 .action-hint{min-width:0;color:var(--hubble-text-secondary,#b2b2b2);font-size:var(--hubble-text-size-small,12px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.panel{min-width:0;padding:14px 16px 16px;border:1px solid var(--hubble-line,#2a2a2a);border-radius:var(--hubble-radius-surface,8px);background:var(--hubble-bar,#151515)}
-.panel-head{display:flex;align-items:baseline;gap:10px;margin-bottom:12px;white-space:nowrap;overflow:hidden}
-.panel h2{margin:0;font-size:14px;font-weight:600;color:var(--hubble-text-strong,#f4f4f4)}
-.panel-sub{color:var(--hubble-text-secondary,#b2b2b2);font-size:var(--hubble-text-size-small,12px);overflow:hidden;text-overflow:ellipsis}
+/* Hubble's settings form: flat sections, a heading and a thin rule. */
+.panel{min-width:0}
+.panel-head{display:flex;align-items:center;gap:10px;min-height:26px;margin-bottom:10px;white-space:nowrap;overflow:hidden}
+.panel h2{flex:none;margin:0;font-size:16px;font-weight:400;color:var(--hubble-text,#dedede)}
+.panel-head::after{content:"";flex:1;min-width:12px;height:1px;background:var(--hubble-line,#2a2a2a);order:1}
+.panel-sub{flex:0 1 auto;min-width:0;color:var(--hubble-text-secondary,#b2b2b2);font-size:var(--hubble-text-size-small,12px);overflow:hidden;text-overflow:ellipsis}
 .panel-sub strong{font-weight:600;color:var(--hubble-text-strong,#f4f4f4)}
 /* Always there, so the heading is the same height with or without it. */
-.panel-head .head-action{margin-left:auto;align-self:center;flex:none}
+.panel-head .head-action{order:2;flex:none}
 /* A setting changed here and not sent to the switcher yet. The label turns amber; nothing moves. */
 .box[data-changed=true]{color:var(--tsl-warn)}
 .box[data-changed=true] input,.box[data-changed=true] select{border-color:var(--tsl-warn)}
 .control[data-changed=true] .hubble-control-label{color:var(--tsl-warn)}
 .fields{display:grid;gap:12px 14px;align-items:start}
-.fields.two{grid-template-columns:repeat(2,minmax(0,1fr))}
-.fields.three{grid-template-columns:repeat(3,minmax(0,1fr))}
-.fields.switches{gap:10px 28px;margin-top:16px;padding-top:14px;border-top:1px solid var(--hubble-line,#2a2a2a);align-items:center}
-.fields .wide{grid-column:1/-1}
+.fields.four{grid-template-columns:repeat(4,minmax(0,1fr))}
+.fields.switches{gap:10px 28px;margin-top:12px;align-items:center}
+.fields .half{grid-column:span 2}
 .box{display:flex;flex-direction:column;gap:6px;min-width:0;color:var(--hubble-text-secondary,#b2b2b2);font-size:var(--hubble-text-size-small,12px)}
-.box input,.box select{width:100%;min-height:var(--hubble-control-height-field,34px);padding:0 10px;border:1px solid var(--hubble-line-strong,#414141);border-radius:var(--hubble-radius-control,7px);background:var(--hubble-sheet,#111);color:var(--hubble-text-strong,#f4f4f4);font:var(--hubble-text-size,13px) var(--hubble-font,system-ui);font-variant-numeric:tabular-nums}
+.box input,.box select{width:100%;min-height:var(--hubble-control-height-field,34px);padding:0 9px;border:1px solid var(--hubble-line-strong,#414141);border-radius:var(--hubble-radius-control,7px);background:var(--hubble-bar,#151515);color:var(--hubble-text,#dedede);font:var(--hubble-text-size-small,12px) var(--hubble-font,system-ui);font-variant-numeric:tabular-nums}
 .box select{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .box select:disabled,.box input:disabled{opacity:.45}
 .box input::placeholder,.field input::placeholder{color:var(--hubble-text-disabled,#7a7a7a)}
 .with-button{display:flex;gap:8px}.with-button input{flex:1;min-width:0}
 .control{min-width:0}
-.found,.device-state{display:flex;align-items:center;gap:7px;min-height:18px;margin:-4px 0 0;color:var(--hubble-text-secondary,#b2b2b2);font-size:var(--hubble-text-size-small,12px);white-space:nowrap;overflow:hidden}
+.found,.device-state{display:flex;align-items:center;gap:7px;min-height:18px;margin:8px 0 0;color:var(--hubble-text-secondary,#b2b2b2);font-size:var(--hubble-text-size-small,12px);white-space:nowrap;overflow:hidden}
 .found span:last-child,.device-state span:last-child{overflow:hidden;text-overflow:ellipsis}
-.panel-note{min-height:18px;margin:14px 0 0;color:var(--hubble-text-secondary,#b2b2b2);font-size:var(--hubble-text-size-small,12px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.panel-note{min-height:18px;margin:8px 0 0;color:var(--hubble-text-secondary,#b2b2b2);font-size:var(--hubble-text-size-small,12px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .panel-note[data-tone=bad]{color:#f2aaa5}
-.panel-actions{display:flex;align-items:center;gap:10px;margin-top:16px;padding-top:14px;border-top:1px solid var(--hubble-line,#2a2a2a)}
+.panel-actions{display:flex;align-items:center;gap:10px;margin-top:12px}
 .device-state{margin:0 0 0 6px;min-width:0}
 
 /* A button keeps its label and width while it works; a line runs along its bottom edge. */

@@ -281,6 +281,10 @@ try {
     deviceGrid.replaceChildren(head([["Slot", "num", 46], ["Name", ""], ["Format", "", 78], ["Sends to", "", 170], ["Enabled", "", 72]]), deviceBody);
     deviceGrid.setAttribute("aria-disabled", String(away));
     if (focused !== undefined) deviceBody.querySelector<HTMLElement>(`tr[data-slot="${focused}"]`)?.focus();
+    // The list is four rows high: bring a newly picked device into it, once, and leave the user's own scrolling alone.
+    const pickedRow = deviceBody.querySelector<HTMLElement>('tr[data-mine="true"]');
+    if (pickedRow && deviceGrid.dataset.shown !== pickedRow.dataset.slot) pickedRow.scrollIntoView({ block: "nearest" });
+    deviceGrid.dataset.shown = pickedRow?.dataset.slot ?? "";
     el("devices-empty").hidden = rows.length > 0;
     el("devices-empty").textContent = reading ? "No TSL devices yet" : "Read the switcher to list its devices";
     el("devices-sub").textContent = rows.length ? "Click a device to edit it" : "\u00a0";
@@ -296,7 +300,7 @@ try {
     } else if (reading) {
       name.textContent = switcher.name;
       sub.replaceChildren(name, " · new device, not on the switcher yet");
-    } else sub.textContent = "What the switcher sends";
+    } else sub.textContent = "Read the switcher to see what it has";
 
     el<HTMLSelectElement>("offset").disabled = fiveOnlyOff();
     const target = sendTo();
