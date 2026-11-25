@@ -85,7 +85,6 @@ export function everyControllerMutations(current: Selection, plan: Plan, command
     const numbered = new Set(devices.flatMap(device => numberedCameras(rows, device.id, cameraNumber)));
     const matches = rows.filter(row => numbered.has(row));
     if (!matches.length) throw new Error('No controller has this camera number');
-    if (new Set(matches.map(row => row.device)).size !== matches.length) throw new Error('Choose a camera number that is unique on each controller');
     const enabled = !matches.every(ticked);
     // Under Single switch a press picks that camera, as it does with a controller named.
     return matches.map(row => ({ kind: 'camera', controllerId: row.device, cameraId: row.id, enabled: current.singleSwitch[row.device] === true || enabled }));

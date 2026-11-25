@@ -443,7 +443,7 @@ test('a controller left blank offers each camera number once, and an unsent came
   } finally { await s.close(); }
 });
 
-test('a number a controller lists twice means its own camera, not the copy REMI put there', async () => {
+test('a number a controller lists twice still works: its own camera over a REMI copy, and its own cameras together', async () => {
   const s = await fleet();
   try {
     const own = s.plan.cameras.find(row => row.device === s.ids[0] && Number(row.number) === 1)!;
@@ -466,11 +466,26 @@ test('a number a controller lists twice means its own camera, not the copy REMI 
     assert.equal(rolled.status, 'success', JSON.stringify(rolled));
     assert.deepEqual(s.networks[0]!.commands.map(command => command.topic), ['unit/a/camhead/action/set/keyboard']);
 
-    // Two cameras of its own under one number can't be told apart, and the key says so.
-    s.plan.cameras.push({ ...own, id: `${s.ids[0]}:camera:twin`, elementKey: 'twin', name: 'Twin' }); await s.save();
-    const refused = await s.run('toggle-camera-enabled', 0, 1);
-    assert.equal(refused.status, 'failure');
-    assert.match(String((refused as { message?: string }).message), /has 2 cameras numbered 1\. Renumber or remove one/);
+    // A second saved row for the same camera (one the controller no longer has) ticks with it, and the camera gets one command.
+    s.plan.cameras.push({ ...own, id: `${s.ids[0]}:camera:stale`, elementKey: 'stale', name: 'Stale' }); await s.save();
+    const together = await s.run('toggle-camera-enabled', 0, 1);
+    assert.equal(together.status, 'success', JSON.stringify(together));
+    const paired = (await s.state() as { enabled: Record<string, boolean> }).enabled;
+    assert.deepEqual([paired[String(own.id)], paired[`${s.ids[0]}:camera:stale`]], [true, true], 'Rows that share the number are ticked together');
+    assert.equal((await s.run('stop-enabled-cameras')).status, 'success');
+    s.networks[0]!.commands.length = 0;
+    assert.equal((await s.run('record-camera', 0, 1)).status, 'success');
+    assert.deepEqual(s.networks[0]!.commands.map(command => command.topic), ['unit/a/camhead/action/set/keyboard'], 'One camera, one command');
+
+    // Two cameras the controller really has under one number roll together.
+    s.plan.cameras.splice(s.plan.cameras.findIndex(row => row.id === `${s.ids[0]}:camera:stale`), 1);
+    s.plan.cameras.find(row => row.device === s.ids[0] && Number(row.number) === 2)!.number = '1'; await s.save();
+    s.networks[0]!.send('unit/b/camhead/status/persist/number', '1'); await delay(30);
+    assert.equal((await s.run('stop-enabled-cameras')).status, 'success');
+    s.networks[0]!.commands.length = 0;
+    const both = await s.run('record-camera', 0, 1);
+    assert.equal(both.status, 'success', JSON.stringify(both));
+    assert.deepEqual(s.networks[0]!.commands.map(command => command.topic).sort(), ['unit/a/camhead/action/set/keyboard', 'unit/b/camhead/action/set/keyboard']);
     const missing = await s.run('toggle-camera-enabled', 0, 99);
     assert.match(String((missing as { message?: string }).message), /has no camera 99/);
   } finally { await s.close(); }
