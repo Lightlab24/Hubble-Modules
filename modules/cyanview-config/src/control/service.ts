@@ -4,7 +4,7 @@ import { MODULE_PROMPT_CHANNEL, type ModuleContext, type ModuleExecutionContext,
 import { controlDevice, controllerLabel, emptyPlan, object, selectsCamera, type Plan, type RecordValue } from '../model.js';
 import type { PlanRepository } from '../repository.js';
 import { commands, commandGroup, cameraCommands, localCommands, feedbackCommands, ndCommands, baseGainCommands, type Command, type CyanViewRcpConnectionDefinition } from './config.js';
-import { ControlSelection, everyControllerMutations, type SelectionMutation } from './selection.js';
+import { ControlSelection, everyControllerMutations, numberedCameras, type SelectionMutation } from './selection.js';
 import { RcpSession, type CyanViewCameraTarget, type CyanViewCameraParameterStep } from './rcp-session.js';
 import { RecordingCoordinator } from './recording-coordinator.js';
 import { recordingCheckpoint } from './recording-checkpoint.js';
@@ -349,8 +349,10 @@ export class CameraControl {
       const controllers = plan.devices.filter(controlDevice).map(device => device.id);
       // A tick is only a saved value, so a camera that hasn't been sent to its controller can have one too.
       const rows = plan.cameras.filter(camera => (everywhere ? controllers.includes(camera.device) : camera.device === id) && (local ? number(Number(camera.number)) : this.appliedRow(camera)));
-      // A row covering every controller has one choice per camera number.
-      choices = rows.filter((camera, index) => !everywhere || rows.findIndex(row => Number(row.number) === Number(camera.number)) === index).map(camera => ({
+      // A row covering every controller has one choice per camera number. A copy that shares its number with the
+      // controller's own camera isn't offered, because the number means the controller's own.
+      choices = rows.filter(camera => numberedCameras(rows, camera.device, camera.number).includes(camera))
+        .filter((camera, index, kept) => !everywhere || kept.findIndex(row => Number(row.number) === Number(camera.number)) === index).map(camera => ({
         id: camera.id, label: `${camera.number} · ${camera.name || 'Camera'}`,
         values: { 'module.cameraNumber': Number(camera.number) },
       })).sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }));
@@ -379,8 +381,10 @@ export class CameraControl {
           const device = this.controller(controllerId);
           if (command === 'single-switch') return [{ kind: 'single', controllerId: device.id, enabled: 'toggle' }];
           if (command !== 'toggle-camera-enabled') return [{ kind: 'all', controllerId: device.id }];
-          const rows = this.plan.cameras.filter(row => row.device === device.id && Number(row.number) === cameraNumber);
-          if (rows.length !== 1) throw new Error('Choose a unique camera number on this controller');
+          const rows = numberedCameras(this.plan.cameras, device.id, cameraNumber);
+          if (rows.length !== 1) throw new Error(rows.length
+            ? `${device.name || 'This controller'} has ${rows.length} cameras numbered ${cameraNumber}. Renumber or remove one`
+            : `${device.name || 'This controller'} has no camera ${cameraNumber}`);
           return [{ kind: 'camera', controllerId: device.id, cameraId: rows[0]!.id, enabled: 'toggle' }];
         }, execution.signal);
         return actionResult({ outcome: 'success', targets: [] }, execution);
@@ -397,7 +401,7 @@ export class CameraControl {
         // A press that names a camera number goes by what the controller reports over MQTT and nothing
         // else. The saved list is only kept current by reading the controller's web side, so it never
         // decides whether such a press goes. A row there only lends its identity, to settle a tie.
-        const listed = rows.filter(row => Number(row.number) === cameraNumber);
+        const listed = numberedCameras(rows, device.id, cameraNumber);
         const targets: RecordValue[] = specific
           ? [{ id: listed.length === 1 ? listed[0]!.id : `${device.id}:camera:#${cameraNumber}`, device: device.id, number: String(cameraNumber), elementKey: listed.length === 1 ? String(listed[0]!.elementKey ?? '') : '', unlisted: true }]
           : rows.filter(row => enabled[row.id]);
@@ -703,7 +707,8 @@ export class CameraControl {
       const everywhere = !values['module.controllerId'] && localCommands.includes(command);
       const devices = everywhere ? this.plan.devices.filter(controlDevice) : device ? [device] : [];
       const rows = this.plan.cameras.filter(row => devices.some(item => item.id === row.device));
-      const matches = rows.filter(row => Number(row.number) === values['module.cameraNumber']);
+      const numbered = new Set(devices.flatMap(item => numberedCameras(rows, item.id, values['module.cameraNumber'])));
+      const matches = rows.filter(row => numbered.has(row));
       const resolved = everywhere ? matches.length > 0 : matches.length === 1;
       const selected = this.selection.value();
       const session = device && this.sessions.get(device.id);

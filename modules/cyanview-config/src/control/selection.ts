@@ -63,6 +63,18 @@ export function applySelection(current: Selection, plan: Plan, mutations: readon
   return next;
 }
 
+/** A copy of another controller's camera that REMI put on this one, told apart the way the page tells it. */
+const remiCopy = (row: RecordValue) => !!row.remi || [row.modelLabel, row.model].some(label => /^cyan\s*-\s*imported$/i.test(String(label ?? '').trim()));
+/**
+ * The cameras one controller lists under a number. It can list a number twice: its own camera, and a copy
+ * of another controller's camera with the same number. A key that names the controller means its own camera.
+ */
+export function numberedCameras(rows: readonly RecordValue[], controllerId: unknown, cameraNumber: unknown): RecordValue[] {
+  const matches = rows.filter(row => row.device === controllerId && Number(row.number) === Number(cameraNumber));
+  const own = matches.filter(row => !remiCopy(row));
+  return matches.length > 1 && own.length ? own : matches;
+}
+
 /** With no controller named, a selection action covers them all. Each press goes one way everywhere, so controllers can't drift apart. */
 export function everyControllerMutations(current: Selection, plan: Plan, command: string, cameraNumber: unknown): SelectionMutation[] {
   const devices = plan.devices.filter(controlDevice);
@@ -70,7 +82,8 @@ export function everyControllerMutations(current: Selection, plan: Plan, command
   const rows = plan.cameras.filter(row => devices.some(device => device.id === row.device));
   const ticked = (row: RecordValue) => current.enabled[row.id] === true;
   if (command === 'toggle-camera-enabled') {
-    const matches = rows.filter(row => Number(row.number) === cameraNumber);
+    const numbered = new Set(devices.flatMap(device => numberedCameras(rows, device.id, cameraNumber)));
+    const matches = rows.filter(row => numbered.has(row));
     if (!matches.length) throw new Error('No controller has this camera number');
     if (new Set(matches.map(row => row.device)).size !== matches.length) throw new Error('Choose a camera number that is unique on each controller');
     const enabled = !matches.every(ticked);

@@ -443,6 +443,39 @@ test('a controller left blank offers each camera number once, and an unsent came
   } finally { await s.close(); }
 });
 
+test('a number a controller lists twice means its own camera, not the copy REMI put there', async () => {
+  const s = await fleet();
+  try {
+    const own = s.plan.cameras.find(row => row.device === s.ids[0] && Number(row.number) === 1)!;
+    // The Gateway's camera 1, copied onto this controller, beside this controller's own camera 1.
+    const copy = { ...own, id: `${s.ids[0]}:camera:copy`, elementKey: 'copy', name: 'Gateway copy', model: 'Cyan - Imported',
+      remi: { peer: 'cy-gateway-1-30', sourceKey: 'x', origin: { serial: 'CY-GATEWAY-1-30', model: 'Venice-IP' } } };
+    s.plan.cameras.push(copy); await s.save();
+    const query = async (draft: Record<string, string>) => (await s.f.instance.discoverChoices!({ version: 2, provider: 'control-cameras', draft, search: '', cursor: null, limit: 128, requestRevision: 1 }, { signal: s.f.signal })).choices.map(choice => choice.label);
+    assert.deepEqual(await query({ actionType: 'toggle-camera-enabled', 'module.controllerId': s.ids[0]! }), ['1 · Wide', '2 · Tight'], 'The copy is not offered under the same number');
+
+    const ticked = await s.run('toggle-camera-enabled', 0, 1);
+    assert.equal(ticked.status, 'success', JSON.stringify(ticked));
+    const { enabled } = await s.state() as { enabled: Record<string, boolean> };
+    assert.equal(enabled[String(own.id)], true, 'Its own camera is ticked');
+    assert.notEqual(enabled[copy.id], true, 'The copy is left alone');
+    assert.equal((await blankController(s, 'toggle-camera-enabled', 1)).status, 'success', 'A blank controller ticks it too');
+
+    // Rolling the ticked cameras on this controller reaches its own camera 1.
+    const rolled = await s.run('roll-enabled-cameras');
+    assert.equal(rolled.status, 'success', JSON.stringify(rolled));
+    assert.deepEqual(s.networks[0]!.commands.map(command => command.topic), ['unit/a/camhead/action/set/keyboard']);
+
+    // Two cameras of its own under one number can't be told apart, and the key says so.
+    s.plan.cameras.push({ ...own, id: `${s.ids[0]}:camera:twin`, elementKey: 'twin', name: 'Twin' }); await s.save();
+    const refused = await s.run('toggle-camera-enabled', 0, 1);
+    assert.equal(refused.status, 'failure');
+    assert.match(String((refused as { message?: string }).message), /has 2 cameras numbered 1\. Renumber or remove one/);
+    const missing = await s.run('toggle-camera-enabled', 0, 99);
+    assert.match(String((missing as { message?: string }).message), /has no camera 99/);
+  } finally { await s.close(); }
+});
+
 test('button feedback with no controller named follows every controller', async () => {
   const s = await fleet();
   try {
