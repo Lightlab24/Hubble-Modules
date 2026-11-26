@@ -36,6 +36,8 @@ export default defineModuleManifest({
       "host-alert-choices-v1",
       // The alert count on the Ping tab in the sidebar.
       "module-page-badges-v1",
+      // The page can be open in several HubDash windows at once.
+      "module-page-windows-v1",
     ],
   },
   configVersion: 1,
@@ -60,6 +62,9 @@ export default defineModuleManifest({
           label: "Ping devices",
           entry: "ui/index.html",
           height: 560,
+          // Live in every window at once: each copy follows the others, and none is refused for
+          // being behind or undoes another's work (merge.ts, test/windows.test.ts).
+          windows: true,
           commands: [
             { id: "snapshot", label: "Read the device list" },
             { id: "save", label: "Save the device list" },

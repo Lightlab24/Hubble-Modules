@@ -1,9 +1,9 @@
 # Ping
 
-Module ID `network-ping`, version 0.1.8. Pings network devices, keeps a timeline of each one, and
+Module ID `network-ping`, version 0.2.0. Pings network devices, keeps a timeline of each one, and
 alerts when a device stops answering or answers slowly. It is a workspace module: add it once, and
-its **Ping** page lists every device. It needs a Hubble with `module-page-badges-v1` and
-`module-controls-inline-v1` (2.3.1).
+its **Ping** page lists every device. It needs a Hubble with module windows
+(`module-page-windows-v1`); 0.1.8 is the last version for Hubble before that.
 
 ## The Ping page
 
@@ -64,6 +64,24 @@ their Online, Slow and Offline colours. Until a time is typed, and after **Follo
 bars are green under the Answer over alert and amber over it. The scale and the colour times are
 each one setting for every device, saved with the page like Show last, and Undo covers them.
 
+## In several windows
+
+The Ping page can be open in several HubDash windows at once, and on other computers connected to
+the same Hubble. Every copy shows what the others save straight away, without a reload: devices,
+cells, settings, sheets and layout.
+
+- A change goes onto the list as it is saved now, so a window that hasn't caught up yet is never
+  refused for that, and never undoes another window's work. A new device or sheet whose name is
+  taken by then gets the next free number.
+- The same cell changed in two windows keeps the later value, and the window that typed it says so.
+- Undo and Redo put back only that window's own changes. One that would undo another window's
+  change since is left alone, with a message.
+- While a cell is being typed in, other windows' saves change only the other cells' text. New rows,
+  hidden columns, widths and text size wait until the typing is finished, so that cell never moves
+  or clears.
+- The open sheet, Show last, Scale, bar colours, columns and text size are saved with the page, so
+  every window shows the same ones. The device whose timeline is shown is each window's own.
+
 ## Alerts
 
 A device goes **Offline** once it hasn't answered for its lost time and **Slow** as soon as an
@@ -119,7 +137,13 @@ the row under the timeline moves.
 `tools/flash-check.mjs` watches the timeline frame by frame across each Show last switch, against a
 running preview, and reports any earlier picture that comes back.
 
+`test/windows.test.ts` runs two and three copies of the page's own code against one worker.
+`tools/qa-windows.mjs` drives two copies of the built page, each in a browser page of its own as in
+two HubDash windows, against a preview started with `PING_PREVIEW_FAKE=1`: following, the cell
+being typed in while the other copy saves, the same cell typed in both, and shared sheets.
+`PREVIEW_COPIES=2` shows copies side by side in one page instead, to look at.
+
 ## Not checked yet
 
-Running inside HubDash or a real Hubble agent; a real notification, Status Log line or key; and
-workspace export and import of `ping-plan`.
+Running inside HubDash or a real Hubble agent, including in several real HubDash windows; a real
+notification, Status Log line or key; and workspace export and import of `ping-plan`.
