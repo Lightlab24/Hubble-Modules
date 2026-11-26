@@ -1,7 +1,7 @@
 import { createModuleDocumentClient, ModuleDocumentConflictError, ModuleDocumentValueSchema, type HubbleModule, type ModuleJsonValue } from '@hubble/module-sdk';
 import { CameraClient, CameraOfflineError } from './camera-client.js';
 import { pingCamera } from './camera-ping.js';
-import { alertChoices, applyMutation, fieldById, fields, liveOn, readFieldIds, sameValue, validateDocument, type CameraDocument, type Mutation, type Camera, type Field } from './model.js';
+import { alertChoices, applyMutation, fieldById, fields, liveOn, readFieldIds, same, sameValue, validateDocument, type CameraDocument, type Mutation, type Camera, type Field } from './model.js';
 import { readFields, decodeField, writeField, fieldProperties, baseIsoChoices, ndChoices, recordingProperties, recordingState, recordingSignals, clipNameProperty } from './protocol.js';
 import { applyPresetMutation, defaultPresetDocument, modeFieldIds, planSend, presetById, presetFields, resolvedValues, validatePresetDocument, type PresetDocument, type PresetMutation } from './presets-model.js';
 export interface Observation { state:'offline'|'online'|'error'; host:string; values:Record<string,string>; choices:Record<string,{value:string;label:string}[]>; updatedAt?:string; errors:Record<string,string>; sending:string[]; queued:string[]; live?:boolean; recording?:string }
@@ -360,6 +360,8 @@ export function createBackend(context:Parameters<HubbleModule['createInstance']>
           const operation=command.value?.operation as PresetMutation;
           for(let attempt=0;attempt<3;attempt++){
             const saved=await documents.read('camera-presets',signal),next=applyPresetMutation(validatePresetDocument(saved.value??defaultPresetDocument()),operation);
+            // A change to what is saved already, as when two windows make the same one, has nothing to save.
+            if(same(next,saved.value)){if(presetsRevision!==saved.revision){presetsRevision=saved.revision;presetDoc=next;publish();}return presetsReply() as unknown as ModuleJsonValue;}
             try {const result=await documents.write(saved,ModuleDocumentValueSchema.parse(next),signal);presetsRevision=result.revision;presetDoc=next;publish();return presetsReply() as unknown as ModuleJsonValue;}
             catch(error){if(!(error instanceof ModuleDocumentConflictError)||attempt===2)throw error;}
           }
@@ -381,6 +383,8 @@ export function createBackend(context:Parameters<HubbleModule['createInstance']>
         const operation=command.value?.operation as Mutation;
         for(let attempt=0;attempt<3;attempt++) {
           const saved=await documents.read('camera-plan',signal),next=applyMutation(validateDocument(saved.value),operation);
+          // A change to what is saved already, such as a value two windows both saw the camera confirm, has nothing to save.
+          if(same(next,saved.value)){if(latestRevision!==saved.revision){latestRevision=saved.revision;planChanged(next);publish();}return {document:next,revision:saved.revision,observations,sequence} as unknown as ModuleJsonValue;}
           try {const result=await documents.write(saved,ModuleDocumentValueSchema.parse(next),signal);latestRevision=result.revision;planChanged(next);publish();return {document:next,revision:result.revision,observations,sequence} as unknown as ModuleJsonValue;}
           catch(error){if(!(error instanceof ModuleDocumentConflictError)||attempt===2)throw error;}
         }

@@ -197,7 +197,9 @@ export function applyMutation(before:CameraDocument,operation:Mutation):CameraDo
       const key=edit.rowId+'/'+edit.columnId;
       if(addresses.has(key))throw Error('A batch contains the same cell twice.');
       addresses.add(key);
-      if(valueOf(row,edit.columnId)!==edit.expected)throw Error('This cell changed in another editor. Your draft is retained.');
+      // Another window may have saved this very value already, which is no conflict.
+      const current=valueOf(row,edit.columnId);
+      if(current!==edit.expected&&current!==edit.value)throw Error('This cell changed in another editor. Your draft is retained.');
       const issue=validateValue(edit.columnId,edit.value);if(issue)throw Error(issue);
       row.values[edit.columnId]=edit.value;
     }

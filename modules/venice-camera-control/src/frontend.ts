@@ -1,7 +1,7 @@
 import { connectModuleFrontend, ModuleFrontendValueSchema } from '@hubble/module-sdk/frontend';
 import { mountSpreadsheetSheets,mountSpreadsheetToolbar,type SpreadsheetAddress } from '@hubble/module-sdk/spreadsheet-controls';
 import { alertChoices, alertsOn, autoSendOn, liveOn, readFieldIds, sameValue, type AlertChoices, groups, fields, fieldById, valueOf, clone, validHost, activeSheetId, isFlipped, sheetList, sheetRowCount, addSheet, renameSheet, removeSheet, moveSheet, setOrientation, viewChange, setCameraCount, cameraHasData, loginVisible, type Camera, type CameraDocument, type CellEdit, type Field, type Mutation, type Orientation } from './model.js';
-import { DraftStore, type SaveReceipt } from './draft-store.js';
+import { DraftStore, followSaved, type SaveReceipt } from './draft-store.js';
 import { createCameraGrid } from './ui-grid.js';
 import { mountPresetsView } from './presets-view.js';
 import type { Observations } from './backend.js';
@@ -226,17 +226,16 @@ try {
     onError:report
   });
   store.subscribe(update);
-  let disposed=false,snapshotRequest=0;
+  let disposed=false;
+  // Every open copy of this page, in any window, follows what the others save.
+  const follow=followSaved(store,async()=>await client.call('snapshot') as unknown as Snapshot);
   const stop=client.subscribe(state=>{
     if(disposed||!state||typeof state!=='object'||Array.isArray(state))return;
     const values=(state as any).values;
     if(!values||typeof values!=='object')return;
     adopt(values);
     grid.refresh();update();
-    if(values.revision!==store.revision&&!store.pending.length){
-      const request=++snapshotRequest,epoch=store.epoch,targetRevision=values.revision;
-      void client.call('snapshot').then(reply=>{const next=reply as unknown as Snapshot;if(!disposed&&request===snapshotRequest&&epoch===store.epoch&&next.revision===targetRevision)store.observe(next,epoch);}).catch(()=>{});
-    }
+    follow.saw(values.revision);
   });
   const canRead=(row:Camera)=>!!valueOf(row,'camera-host')&&!!valueOf(row,'camera-username')&&!!valueOf(row,'camera-password');
   const readIds=()=>readFieldIds(store.document.view);
@@ -442,5 +441,5 @@ try {
   else {const first=store.document.cameras[0];if(first)grid.select({rowId:first.id,columnId:'camera-name'});}
   // Loaded behind the Cameras tab, so the Presets tab shows its count and opens at once.
   setTimeout(()=>void loadPresets(),0);
-  window.addEventListener('pagehide',()=>{disposed=true;clearTimeout(watchTimer);stop();grid.dispose();textControls.dispose();sheetTabs.dispose();presets?.dispose();client.dispose();},{once:true});
+  window.addEventListener('pagehide',()=>{disposed=true;follow.dispose();clearTimeout(watchTimer);stop();grid.dispose();textControls.dispose();sheetTabs.dispose();presets?.dispose();client.dispose();},{once:true});
 }catch(error){el('loading').hidden=true;report(error instanceof Error?error.message:'Camera Control could not start.');saveStatus.textContent='Workspace unavailable';}

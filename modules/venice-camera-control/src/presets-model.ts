@@ -194,7 +194,9 @@ export function applyPresetMutation(before:PresetDocument,operation:PresetMutati
         if(preset.name!==edit.expected)throw Error('This name changed in another editor.');
         preset.name=validateName(edit.value);continue;
       }
-      if((preset.values[edit.rowId]??'')!==edit.expected)throw Error('This cell changed in another editor. Your draft is retained.');
+      // Another window may have saved this very value already, which is no conflict.
+      const current=preset.values[edit.rowId]??'';
+      if(current!==edit.expected&&current!==edit.value)throw Error('This cell changed in another editor. Your draft is retained.');
       if(!edit.value){if(!isPresetField(edit.rowId))throw Error('Unknown camera setting.');delete preset.values[edit.rowId];continue;}
       validatePresetValue(edit.rowId,edit.value);
       // A typed or pasted value has to be one the setting allows. Values already saved are kept and shown as wrong.

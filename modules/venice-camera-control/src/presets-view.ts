@@ -2,7 +2,7 @@ import { ModuleFrontendValueSchema, type connectModuleFrontend } from '@hubble/m
 import { mountSpreadsheetToolbar,createSpreadsheetContextMenu,type SpreadsheetMenuItem } from '@hubble/module-sdk/spreadsheet-controls';
 import { clone,groups,type Field } from './model.js';
 import { applyPresetMutation,basePreset,capturedOffers,capturedValues,inversePreset,isBase,knownValues,newRole,nameRowId,offeredChange,planSend,presetById,presetFields,resolvedValues,uniqueName,type PlannedSend,type PresetDocument,type PresetMutation,type SendChoice } from './presets-model.js';
-import { Drafts,type Receipt } from './draft-store.js';
+import { Drafts,followSaved,type Receipt } from './draft-store.js';
 import { createPresetGrid,type Chosen } from './presets-grid.js';
 import type { CameraSummary,Observations,PresetSends } from './backend.js';
 import './presets.css';
@@ -174,15 +174,14 @@ export async function mountPresetsView({client,report,onChange}:PresetsViewOptio
   for(const [id,expanded]of [['preset-expand-all',true],['preset-collapse-all',false]] as const)el(id).addEventListener('click',()=>{const view=clone(doc().view);view.expanded=Object.fromEntries(groups.map(g=>[g.id,expanded]));store.submit({kind:'view',view,expected:clone(doc().view)});});
 
   // Hubble hands state over on its own slow cycle, so while the tab is open it also waits on the worker for each change.
-  let snapshotRequest=0,following=0;
+  let following=0;
+  // Every open copy of the page, in any window, follows what the others save.
+  const followPresets=followSaved(store,async()=>{const next=await client.call('presets-snapshot') as unknown as Snapshot;adopt(next);return next;});
   const stopState=client.subscribe(state=>{
     if(disposed||!state||typeof state!=='object'||Array.isArray(state))return;
     const values=(state as {values?:Live}).values;if(!values||typeof values!=='object')return;
     adopt(values);refresh();
-    if(values.presetsRevision&&values.presetsRevision!==store.revision&&!store.pending.length){
-      const request=++snapshotRequest,epoch=store.epoch,target=values.presetsRevision;
-      void client.call('presets-snapshot').then(reply=>{const next=reply as unknown as Snapshot;if(!disposed&&request===snapshotRequest&&next.revision===target){adopt(next);store.observe(next,epoch);}}).catch(()=>{});
-    }
+    if(values.presetsRevision)followPresets.saw(values.presetsRevision);
   });
   async function follow(run:number){
     while(!disposed&&shown&&run===following){
@@ -202,6 +201,6 @@ export async function mountPresetsView({client,report,onChange}:PresetsViewOptio
       if(!grid.active)grid.select({rowId:nameRowId,columnId:chosenPreset().id});
     },
     hide(){shown=false;following++;},
-    dispose(){disposed=true;following++;stopState();grid.dispose();textControls.dispose();menu.dispose();}
+    dispose(){disposed=true;following++;followPresets.dispose();stopState();grid.dispose();textControls.dispose();menu.dispose();}
   };
 }
