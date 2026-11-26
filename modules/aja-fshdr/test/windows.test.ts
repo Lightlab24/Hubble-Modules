@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { ModuleContext, ModuleInstance } from '@hubble/module-sdk';
+import manifest from '../src/manifest.js';
 import { createBackend, type WireObserved } from '../src/backend.js';
-import { channelRowId, defaultDocument, newUnit, valueOf, type FsDocument, type Mutation } from '../src/model.js';
+import { activeSheetId, channelRowId, clone, defaultDocument, newUnit, sheetList, valueOf, viewChange, type FsDocument, type Mutation } from '../src/model.js';
 import { fromWire, reportedEdits } from '../src/rows.js';
 import { DraftStore, followSaved, takeReported, type SaveReceipt } from '../src/draft-store.js';
 import type { Observed } from '../src/backend.js';
@@ -109,6 +110,12 @@ async function running(t: { after(fn: () => unknown): void }) {
   return { unit, h, first };
 }
 
+test('the FS-HDR page is declared for several windows', () => {
+  const section = manifest.pages![0]!.sections[0]!;
+  assert.equal('windows' in section && section.windows, true);
+  assert.ok('requiredFeatures' in manifest.host && manifest.host.requiredFeatures?.includes('module-page-windows-v1'));
+});
+
 test('an edit saved in one window shows in the other without reopening it, and each window’s next edit lands', async t => {
   const { unit, h, first } = await running(t);
   const second = await openCopy(h);
@@ -197,6 +204,19 @@ test('a window whose edit is refused reads the plan again, so its next edit to t
   assert.equal(second.errors.length, 1);
   second.release();
   await until(() => first.value('u1', 'ChannelName2') === 'CAM B', 'the first window follows');
+});
+
+test('the open tab and column layout are shared, as chosen: a tab opened in one window opens in the other, and nothing is refused', async t => {
+  const { h, first } = await running(t);
+  const second = await openCopy(h);
+  t.after(() => second.close());
+  await delay(50);
+  const master = sheetList(first.store.document).find(sheet => sheet.kind === 'master')!.id;
+  first.store.submit({ kind: 'select-sheet', sheetId: master }, false);
+  await until(() => activeSheetId(second.store.document) === master, 'the second window opens the same tab');
+  second.store.submit(viewChange(second.store.document, { ...clone(second.store.document.view), textSize: 15 }));
+  await until(() => first.store.document.view.textSize === 15, 'the first window takes the second window’s layout');
+  assert.deepEqual([...first.errors, ...second.errors], []);
 });
 
 test('eight windows each wait for the next change, and a change at the unit answers all of them', async t => {
