@@ -1,8 +1,9 @@
 # Flanders
 
-Module ID `flanders-monitor`, version 0.2.1. Presses keys on Flanders Scientific (FSI) monitors from
+Module ID `flanders-monitor`, version 0.3.0. Presses keys on Flanders Scientific (FSI) monitors from
 Hubble buttons, the same keys FSI's "Flanders Controls" Stream Deck scripts press. It is a workspace
-module: add it once, and its **Flanders** page lists every monitor. It needs Hubble 2.2.0 or later.
+module: add it once, and its **Flanders** page lists every monitor. It needs a Hubble with module
+windows (`module-page-windows-v1`); 0.2.1 is the last version for Hubble before that.
 
 ## The Flanders page
 
@@ -23,6 +24,22 @@ and FS-HDR.
 other apps** looks at this Mac's connections for each monitor and shows who is connected, without
 contacting any monitor. Monitors are saved in the workspace's `monitor-plan` module document, so they
 travel with workspace export and import.
+
+## In several windows
+
+The Flanders page can be open in several HubDash windows at once, and on other computers connected
+to the same Hubble. Every copy shows what the others save straight away, without a reload.
+
+- A change goes onto the list as it is saved now, so a window that hasn't caught up yet is never
+  refused for that, and never undoes another window's work. A new monitor whose name is taken by
+  then gets the next free number.
+- The same cell changed in two windows keeps the later value, and the window that typed it says so.
+- Undo and Redo put back only that window's own changes. One that would undo another window's
+  change since is left alone, with a message.
+- While a cell is being typed in, or a choice list is open on one, other windows' saves change only
+  the other cells' text. New rows, widths and text size wait until it is finished, so that cell
+  never moves or clears.
+- Column widths and the text size are saved with the page, so every window shows the same ones.
 
 ## Buttons
 
@@ -63,3 +80,9 @@ node_modules/.bin/tsx modules/flanders-monitor/tools/fake-monitor.ts 18181
 Point a monitor row at `127.0.0.1`. The tests use the same fake, a real `netstat`, a separate process
 holding the port to stand in for LiveGrade, and a document store that holds saves to check edits
 show at once, a second edit while the first save waits, and recovery when a save fails.
+
+`test/windows.test.ts` runs two and three copies of the page's own code against one worker.
+`tools/preview.ts` serves the built page with the real worker at http://127.0.0.1:43192, with two
+monitors on 127.0.0.1 and no key pressed. `tools/qa-windows.mjs` drives two copies of it, each in a
+browser page of its own as in two HubDash windows: following, the cell being typed in and Hubble's
+choice list while the other copy saves, and the same cell typed in both.
