@@ -208,6 +208,7 @@ export function withRouterInterface(
           "module-pages-v1",
           ...(icon ? ["module-page-icons-v1"] : []),
           "module-custom-pages-v1",
+          "module-page-windows-v1",
           "module-spreadsheet-controls-v1",
           "module-spreadsheet-extended-editing-v1",
           "module-settings-pages-v1",
@@ -262,6 +263,10 @@ export function withRouterInterface(
             label: routerLabels[type],
             entry: "ui/index.html",
             height: 920,
+            // Live in every HubDash window at once: each copy has its own session and sees every
+            // route, groups follow the published routing revision, and each saved preference is
+            // merged into a fresh read (test/router-page-windows.test.ts).
+            windows: true,
             commands: [
               "open",
               "close",
@@ -293,6 +298,8 @@ export function withRouterInterface(
             entry: "ui/settings.html",
             // Automatic Take and a few groups; a longer list scrolls inside.
             height: 300,
+            // The same settings as the Router page's, followed the same way.
+            windows: true,
             commands: ["groups", "edit-group"].map((id) => ({
               id,
               label: id,

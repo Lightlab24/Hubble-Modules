@@ -26,7 +26,7 @@ import { ConnectionDefinitionSchema as rossConnection } from "../../../modules/r
 import { RossUltrixOgpConnectionManager } from "../../../modules/ross-ultrix-ogp/src/ross-ultrix-ogp-connection-manager.js";
 import type { RouterConnectionManagerContract } from "../src/connection-contract.js";
 import type { RouterType } from "../src/matrix.js";
-import { routerSettings } from "../src/manifest.js";
+import { routerSettings, withRouterInterface } from "../src/manifest.js";
 import { routerModule, routerViewPreferences } from "../src/module.js";
 import { createRouterPageApi } from "../src/frontend/page-client.js";
 import {
@@ -384,6 +384,23 @@ async function openPage(router: Router) {
   cleanups.push(() => copy.close());
   return copy;
 }
+
+it("declares the Router page and its Button Matrix settings for several windows", () => {
+  const manifest = withRouterInterface("blackmagic-videohub", {
+    host: { minimumVersion: "2.0.18", requiredFeatures: [] },
+    capabilities: [],
+    actions: [],
+    feedback: [],
+  } as never);
+  const sections = (manifest.pages ?? []).flatMap((page) => page.sections);
+  expect(sections.map((section) => [section.id, "windows" in section && section.windows])).toEqual([
+    ["router", true],
+    ["routing-settings", true],
+  ]);
+  expect(
+    "requiredFeatures" in manifest.host ? manifest.host.requiredFeatures : [],
+  ).toContain("module-page-windows-v1");
+});
 
 it("a route taken in one window shows in the other at once, and either window can route next", async () => {
   const router = await startRouter();
