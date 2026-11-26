@@ -1,3 +1,5 @@
+import { leftAlone, mergeOrder, mergeRecord, mergeValue, quietly, same, type Merge } from "./merge.js";
+
 /**
  * The Flanders page's saved data: one row per monitor, kept in the workspace's
  * portable "monitor-plan" document, plus the page's column widths and text size.
@@ -46,23 +48,24 @@ export interface CellEdit {
   rowId: string;
   columnId: string;
   value: string;
-  /** The value the edit was made over, so a late save can't overwrite a newer one. */
+  /** The value the edit was made over: another window may have saved a different one since. */
   expected: string;
 }
-export type Mutation =
+/**
+ * A change, as the copy of the page that made it saw it: `expected` is what it read, the other
+ * half what it wants. The worker puts only the difference onto what is saved now (see merge.ts),
+ * so a copy that hasn't caught up with another window yet is never refused for that.
+ * `strict` marks an Undo or Redo, which is refused rather than undo another window's work.
+ */
+export type Mutation = (
   | { kind: "edit"; edits: CellEdit[] }
-  /** Adding, removing and reordering monitors replace the list as one step. */
-  | { kind: "rows"; rows: MonitorRow[]; expected: MonitorRow[] }
-  | { kind: "view"; view: View; expected: View };
+  /** Adding, removing and moving monitors, as one step. `moved`: the monitors a move moved. */
+  | { kind: "rows"; rows: MonitorRow[]; expected: MonitorRow[]; moved?: string[] }
+  | { kind: "view"; view: View; expected: View }
+) & { strict?: boolean };
 
 export const clone = <T>(value: T): T => structuredClone(value);
-const sorted = (value: unknown): unknown =>
-  Array.isArray(value)
-    ? value.map(sorted)
-    : value && typeof value === "object"
-      ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([key, item]) => [key, sorted(item)]))
-      : value;
-export const same = (a: unknown, b: unknown) => JSON.stringify(sorted(a)) === JSON.stringify(sorted(b));
+export { same };
 export const valueOf = (row: MonitorRow, columnId: string) => row.values[columnId] ?? "";
 export const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
@@ -137,23 +140,84 @@ export function validateDocument(value: unknown): MonitorDocument {
   return doc;
 }
 
-export function applyMutation(document: MonitorDocument, operation: Mutation): MonitorDocument {
+const monitorName = (row: MonitorRow) => valueOf(row, "name").trim() || "A monitor";
+const cellName = (row: MonitorRow, columnId: string) => `${monitorName(row)}'s ${columns.find((column) => column.id === columnId)?.label ?? columnId}`;
+
+/** The monitor list with this copy's additions, removals, moves and values put onto the one saved now. */
+function mergeRows(base: readonly MonitorRow[], mine: readonly MonitorRow[], theirs: readonly MonitorRow[], merge: Merge, moved?: readonly string[]): MonitorRow[] {
+  const was = new Map(base.map((row) => [row.id, row]));
+  const wanted = new Map(mine.map((row) => [row.id, row]));
+  const now = new Map(theirs.map((row) => [row.id, row]));
+  // An Undo takes out only a monitor as this copy left it, never one another window has changed since.
+  if (merge.strict)
+    for (const [id, row] of was) {
+      const current = now.get(id);
+      if (!wanted.has(id) && current && !same(current, row)) throw leftAlone(monitorName(current));
+    }
+  return mergeOrder([...was.keys()], [...wanted.keys()], [...now.keys()], moved).map((id) => {
+    const current = now.get(id);
+    const before = was.get(id);
+    const after = wanted.get(id);
+    if (!current) return clone(after!);
+    if (!before || !after) return current;
+    return { ...current, values: mergeRecord((columnId) => cellName(current, columnId), before.values, after.values, current.values, merge) };
+  });
+}
+
+/**
+ * A monitor the page named "Monitor N" by itself takes the next free number if another window's
+ * monitor has that name by now. A name someone gave it is never changed.
+ */
+function freeNames(next: MonitorDocument, added: ReadonlySet<string>) {
+  next.monitors.forEach((row, index) => {
+    const name = valueOf(row, "name").trim();
+    if (!added.has(row.id) || !/^Monitor \d+$/u.test(name)) return;
+    const taken = (candidate: string) => next.monitors.some((other) => other.id !== row.id && sameName(valueOf(other, "name"), candidate));
+    if (!taken(name)) return;
+    let number = next.monitors.length;
+    while (taken(`Monitor ${number}`)) number++;
+    next.monitors[index] = { ...row, values: { ...row.values, name: `Monitor ${number}` } };
+  });
+}
+
+/**
+ * Puts a change onto the document as it is saved now. A change made from an older copy changes
+ * only what that copy changed (see merge.ts). `clashes` collects what another window had also
+ * changed, which this change's value now replaces.
+ */
+export function applyMutation(document: MonitorDocument, operation: Mutation, clashes: string[] = []): MonitorDocument {
   const next = clone(document);
+  const merge: Merge = { strict: operation.strict === true, clashes };
   if (operation.kind === "edit") {
     for (const edit of operation.edits) {
       const row = next.monitors.find((item) => item.id === edit.rowId);
       if (!row) throw Error("That monitor was removed before the change saved.");
-      if (valueOf(row, edit.columnId) !== edit.expected) throw Error("That cell changed before the edit saved.");
+      const now = valueOf(row, edit.columnId);
+      if (now !== edit.expected && now !== edit.value) {
+        if (merge.strict) throw leftAlone(cellName(row, edit.columnId));
+        clashes.push(cellName(row, edit.columnId));
+      }
       const problem = validateValue(edit.columnId, edit.value);
       if (problem) throw Error(problem);
       row.values[edit.columnId] = edit.value;
     }
   } else if (operation.kind === "rows") {
-    if (!same(next.monitors, operation.expected)) throw Error("The monitor list changed before this change saved.");
-    next.monitors = clone(operation.rows);
+    const had = new Set(next.monitors.map((row) => row.id));
+    next.monitors = mergeRows(operation.expected, operation.rows, next.monitors, merge, operation.moved);
+    freeNames(next, new Set(next.monitors.filter((row) => !had.has(row.id)).map((row) => row.id)));
   } else {
-    if (!same(next.view, operation.expected)) throw Error("The layout changed before this change saved.");
-    next.view = clone(operation.view);
+    // The layout: the newest change to each part wins, so a layout change is never refused.
+    const layout = quietly();
+    const { expected: base, view: mine } = operation;
+    const out: View = {
+      ...next.view,
+      widths: mergeRecord(() => "", base.widths ?? {}, mine.widths ?? {}, next.view.widths ?? {}, layout),
+      rowHeights: mergeRecord(() => "", base.rowHeights ?? {}, mine.rowHeights ?? {}, next.view.rowHeights ?? {}, layout),
+    };
+    const textSize = mergeValue("", base.textSize, mine.textSize, next.view.textSize, layout);
+    if (textSize === undefined) delete out.textSize;
+    else out.textSize = textSize;
+    next.view = out;
   }
   return validateDocument(next);
 }
@@ -167,7 +231,8 @@ export function inverse(before: MonitorDocument, operation: Mutation): Mutation 
         return { rowId: edit.rowId, columnId: edit.columnId, value: valueOf(row, edit.columnId), expected: edit.value };
       }),
     };
-  if (operation.kind === "rows") return { kind: "rows", rows: clone(operation.expected), expected: clone(operation.rows) };
+  if (operation.kind === "rows")
+    return { kind: "rows", rows: clone(operation.expected), expected: clone(operation.rows), ...(operation.moved ? { moved: [...operation.moved] } : {}) };
   return { kind: "view", view: clone(operation.expected), expected: clone(operation.view) };
 }
 
@@ -196,7 +261,7 @@ export function moveRows(document: MonitorDocument, ids: readonly string[], befo
   rest.splice(index < 0 ? rest.length : index, 0, ...moving);
   return same(rest.map((row) => row.id), document.monitors.map((row) => row.id))
     ? null
-    : { kind: "rows", rows: clone(rest), expected: clone(document.monitors) };
+    : { kind: "rows", rows: clone(rest), expected: clone(document.monitors), moved: moving.map((row) => row.id) };
 }
 
 /** What a monitor shows in Status before anything has happened to it. */

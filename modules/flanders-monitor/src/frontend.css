@@ -54,3 +54,4 @@ button svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.6
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
 /* Errors float over the page like Hubble's own failure toast. A strip in the page's flow pushed the sheet down. */
 .notice{position:fixed;right:20px;bottom:20px;z-index:60;width:min(390px,calc(100vw - 40px));padding:13px 14px;border:1px solid #a94949;border-radius:9px;background:#452729;color:#fff1f1;box-shadow:0 5px 22px #0004;font-size:13px;line-height:1.45;overflow-wrap:anywhere}
+.notice[data-tone=note]{border-color:var(--hubble-line-strong,#555);background:var(--hubble-raised,#222);color:var(--hubble-text-strong,#f4f4f4)}
