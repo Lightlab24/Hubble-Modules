@@ -30,6 +30,8 @@ export default defineModuleManifest({
     // White Balance asks for a temperature and tint in a HubDash dialog that follows the checked cameras.
     'module-prompt-v1',
     'module-prompt-update-v1',
+    // The page can be live in several HubDash windows at once, each copy following what the others save (0.1.112).
+    'module-page-windows-v1',
   ] },
   capabilities: ['host.documents', 'host.helpers', 'service.page.studio', 'state-feedback'],
   // The id stays sampleData, which saved workspaces already hold.
@@ -51,6 +53,9 @@ export default defineModuleManifest({
   }],
   pages: [{ id: 'studio', label: 'Cyanview', icon: 'ui/logo.svg', layout: 'full-page', sections: [ModuleFrontendSectionSchema.parse({
     type: 'custom', id: 'frontend', label: 'Cyanview configuration', entry: 'ui/index.html',
+    // Built to be open in several windows at once: every copy follows the saved plan's revision, a save on an older
+    // plan puts only that copy's own changes onto it, and where each copy is stays its own (ui-plan-follow.js).
+    windows: true,
     commands: ['read-plan', 'read-part', 'save-plan', 'save-begin', 'save-part', 'save-commit', 'send', 'clear-network', 'send-begin', 'send-part', 'send-commit', 'scan', 'stop-scan', 'probe', 'find-rig', 'import-device', 'import-part', 'refresh', 'choice-catalogs', 'options', 'firmware-begin', 'firmware-part', 'firmware-commit', 'firmware-targets', 'firmware-install', 'firmware-status', 'remi-state', 'remi-send', 'remi-route', 'camera-control-state', 'camera-control-mutate', 'camera-enabled', 'camera-refresh', 'open-device-page', 'setup-guide', 'page-view'].map(id => ({ id, label: id })),
   })] }],
 });
