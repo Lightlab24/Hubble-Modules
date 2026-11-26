@@ -2,6 +2,9 @@
 //   node --import tsx tools/preview.ts
 // FSHDR_SIMULATOR_DIR=<folder holding server.mjs> starts simulators too, one per entry in FSHDR_SIMULATORS (default "four,four,single").
 // The browser checks in tools/qa-smoke.mjs want FSHDR_SIMULATORS=four,four,single,four and PREVIEW_UNITS=3: the fourth stands in for a unit that arrives later.
+// PREVIEW_COPIES=2 shows that many copies of the page side by side, as in several HubDash windows, all on the one worker.
+// PREVIEW_SIMULATED=<n> adds that many of the module's own simulated units, which need no simulator and no network.
+// tools/qa-windows.mjs wants PREVIEW_COPIES=2 PREVIEW_SIMULATED=2.
 // Nothing here reaches a real unit unless you type its address into Setup.
 import http from 'node:http';
 import path from 'node:path';
@@ -24,6 +27,8 @@ const stored = new Map<string, { revision: number; value: unknown }>();
 const seeded = defaultDocument();
 // PREVIEW_UNITS puts only the first few simulators in Setup, so a check can bring in another one later.
 if (process.env.PREVIEW_EMPTY !== '1') seeded.units = simulatorHosts.slice(0, Number(process.env.PREVIEW_UNITS ?? simulatorHosts.length)).map((host, index) => newUnit('unit-' + (index + 1), 'FS-HDR ' + (index + 1), host));
+for (let index = 0; index < Number(process.env.PREVIEW_SIMULATED ?? 0); index++) { const unit = newUnit('sim-' + (index + 1), 'Simulated ' + (index + 1), ''); unit.values['unit-simulated'] = 'TRUE'; seeded.units.push(unit); }
+const copies = Math.max(1, Math.min(4, Number(process.env.PREVIEW_COPIES ?? 1)));
 stored.set('fshdr-plan', { revision: 1, value: seeded }); stored.set('setup', { revision: 1, value: {} }); stored.set('fshdr-sim', { revision: 1, value: { version: 1, units: {} } });
 let hold = false, held: { resolve(rejected: boolean): void } | undefined, published: unknown, feedback: unknown[] = [];
 const record = (id: string) => ({ id, version: 1, revision: String(stored.get(id)!.revision), value: stored.get(id)!.value });
@@ -41,7 +46,8 @@ const backend = createBackend({ services, connectionEnabled: process.env.PREVIEW
 await backend.start?.();
 const lifetime = new AbortController();
 // Like Hubble, a page may have at most 32 commands waiting at once (core-runtime module-frontends.ts); the 33rd is refused.
-const wrapper = '<!doctype html><html><head><title>FS-HDR preview</title><style>html,body{margin:0;height:100%;background:#111;overflow:hidden}iframe{border:0;width:100%;height:100%}</style></head><body><iframe sandbox="allow-scripts" title="FS-HDR" src="' + prefix + 'index.html"></iframe><script>const frame=document.querySelector("iframe");addEventListener("message",event=>{if(event.source!==frame.contentWindow||event.data?.type!=="hubble.module.frontend.ready.v1")return;const channel=new MessageChannel();let pending=0;channel.port1.onmessage=async(event)=>{const r=event.data;if(r.commandId!==undefined&&pending>=32){channel.port1.postMessage({type:"error",id:r.id,message:"Too many pending page requests"});return;}if(r.commandId!==undefined)pending++;try{const response=await fetch("/fixture/call",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(r)});const value=await response.json();channel.port1.postMessage(value.error?{type:"error",id:r.id,message:value.error}:{type:"result",id:r.id,value:value.result});}catch(error){channel.port1.postMessage({type:"error",id:r.id,message:String(error)});}finally{if(r.commandId!==undefined)pending--;}};channel.port1.start();' +
+// Each copy is its own frame with its own channel, as each HubDash window has; every call reaches the one worker.
+const wrapper = '<!doctype html><html><head><title>FS-HDR preview</title><style>html,body{margin:0;height:100%;background:#111;overflow:hidden}body{display:flex;gap:4px}iframe{border:0;flex:1;min-width:0;height:100%}</style></head><body>' + Array.from({ length: copies }, (_, index) => '<iframe sandbox="allow-scripts" title="FS-HDR ' + (index + 1) + '" src="' + prefix + 'index.html"></iframe>').join('') + '<script>const frames=[...document.querySelectorAll("iframe")];addEventListener("message",event=>{const frame=frames.find(item=>item.contentWindow===event.source);if(!frame||event.data?.type!=="hubble.module.frontend.ready.v1")return;const channel=new MessageChannel();let pending=0;channel.port1.onmessage=async(event)=>{const r=event.data;if(r.commandId!==undefined&&pending>=32){channel.port1.postMessage({type:"error",id:r.id,message:"Too many pending page requests"});return;}if(r.commandId!==undefined)pending++;try{const response=await fetch("/fixture/call",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(r)});const value=await response.json();channel.port1.postMessage(value.error?{type:"error",id:r.id,message:value.error}:{type:"result",id:r.id,value:value.result});}catch(error){channel.port1.postMessage({type:"error",id:r.id,message:String(error)});}finally{if(r.commandId!==undefined)pending--;}};channel.port1.start();' +
   // Hubble hands a module page its state on a slow cycle. PREVIEW_STATE_MS sets how slow; the page's own waiting call is what makes changes prompt.
   'setInterval(async()=>{const r=await fetch("/fixture/live");channel.port1.postMessage({type:"state",value:await r.json()});},' + Number(process.env.PREVIEW_STATE_MS ?? 3000) + ');frame.contentWindow.postMessage({type:"hubble.module.frontend.connect.v1",id:event.data.id},"*",[channel.port2]);});</script></body></html>';
 async function body(request: http.IncomingMessage) { let text = ''; for await (const chunk of request) { text += chunk; if (text.length > 1048576) throw Error('Payload too large'); } return text ? JSON.parse(text) : {}; }
@@ -70,6 +76,8 @@ const server = http.createServer(async (request, response) => {
     if (url.pathname === '/api/module-controls/spreadsheet-v1.js') file = path.join(assets, 'module-spreadsheet-v1.js');
     if (url.pathname === '/api/module-controls/workbook-tools-v1.js') file = path.join(assets, 'module-workbook-tools-v1.js');
     if (url.pathname === '/api/module-controls/slider-v1.js') file = path.join(assets, 'module-slider-v1.js');
+    // Hubble's look, as Hubble serves it to every module page.
+    if (url.pathname === '/api/module-controls/theme-v1.css') file = path.join(assets, 'module-theme-v1.css');
     if (!file) { response.writeHead(404); response.end('Not found'); return; }
     const bytes = await readFile(file);
     response.writeHead(200, { 'Content-Type': file.endsWith('.css') ? 'text/css' : file.endsWith('.html') ? 'text/html' : 'text/javascript', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' }); response.end(bytes);
