@@ -31,6 +31,13 @@ export const ModuleFrontendSectionSchema = z
      * restart. Requires module-frontend-restart-v1.
      */
     restart: z.literal('keep-open').optional(),
+    /**
+     * `true`: the page is built to be open in several windows at once, each copy following what
+     * the others save, and it may open parts of itself in windows of their own with
+     * `openWindow`. Without it Hubble keeps the page live in one window at a time.
+     * Requires module-page-windows-v1.
+     */
+    windows: z.literal(true).optional(),
   })
   .refine(
     (value) => new Set(value.commands.map((command) => command.id)).size === value.commands.length,
@@ -50,6 +57,22 @@ export const ModuleFrontendTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/u
 export const ModuleFrontendReadySchema = z.strictObject({
   type: z.literal('hubble.module.frontend.ready.v1'),
   id: z.string().regex(/^[a-f0-9]{32}$/u),
+})
+/** The part of its page a module shows in a window. Only the module reads it. */
+export const ModuleFrontendViewSchema = z.string().min(1).max(128)
+/** What a module calls that part: one line, shown after Hubble and the module's name. */
+export const ModuleFrontendWindowTitleSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(80)
+  .refine((value) => !/[\u0000-\u001f\u007f]/u.test(value), 'A window title is one line')
+/** Sent with the port: where the page is shown. Pages built before windows do not read it. */
+export const ModuleFrontendWindowSchema = z.strictObject({
+  /** The view this window shows, or null for the module's whole page. */
+  view: ModuleFrontendViewSchema.nullable(),
+  /** Whether `openWindow` can open a window here. False in a plain browser. */
+  canOpen: z.boolean(),
 })
 export const ModuleFrontendValueSchema = z
   .json()
@@ -76,6 +99,19 @@ export const ModuleFrontendRequestSchema = z.discriminatedUnion('operation', [
         (values) => JSON.stringify(values).length <= 262_144,
         'Custom page payload exceeds 256K characters',
       ),
+  }),
+  /** Open this page in a window of its own, showing `view`. Requires `windows: true`. */
+  z.strictObject({
+    id: Id,
+    operation: z.literal('open-window'),
+    view: ModuleFrontendViewSchema,
+    title: ModuleFrontendWindowTitleSchema,
+  }),
+  /** Rename the window this copy of the page was opened in with `open-window`. */
+  z.strictObject({
+    id: Id,
+    operation: z.literal('window-title'),
+    title: ModuleFrontendWindowTitleSchema,
   }),
 ])
 export const ModuleFrontendReplySchema = z.discriminatedUnion('type', [
@@ -143,7 +179,7 @@ export function connectModuleFrontend(
       source: unknown
       ports: readonly ModuleFrontendPort[]
     }) => {
-      const data = event.data as { type?: unknown; id?: unknown } | null
+      const data = event.data as { type?: unknown; id?: unknown; window?: unknown } | null
       if (
         event.source !== target.parent ||
         data?.type !== 'hubble.module.frontend.connect.v1' ||
@@ -154,7 +190,9 @@ export function connectModuleFrontend(
       const port = event.ports[0]
       if (!port) return
       finish()
-      resolve(createModuleFrontendClient(port))
+      // A Hubble from before windows sends none: the page is whole and cannot open any.
+      const shown = ModuleFrontendWindowSchema.safeParse(data.window)
+      resolve(createModuleFrontendClient(port, shown.success ? shown.data : undefined))
     }
     const ready = () => {
       target.parent.postMessage({ type: 'hubble.module.frontend.ready.v1', id: handshakeId }, '*')
@@ -171,7 +209,13 @@ export function connectModuleFrontend(
   })
 }
 
-export function createModuleFrontendClient(port: ModuleFrontendPort) {
+export function createModuleFrontendClient(
+  port: ModuleFrontendPort,
+  shown: { readonly view: string | null; readonly canOpen: boolean } = {
+    view: null,
+    canOpen: false,
+  },
+) {
   let sequence = 0
   let closed = false
   const pending = new Map<
@@ -228,7 +272,9 @@ export function createModuleFrontendClient(port: ModuleFrontendPort) {
     input:
       | { operation: 'state' }
       | { operation: 'call'; commandId: string; value: ModuleFrontendValue }
-      | { operation: 'settings'; values: Record<string, ModuleFrontendValue> },
+      | { operation: 'settings'; values: Record<string, ModuleFrontendValue> }
+      | { operation: 'open-window'; view: string; title: string }
+      | { operation: 'window-title'; title: string },
   ) => {
     if (closed) return Promise.reject(new Error('Module page closed'))
     if (pending.size >= 32) return Promise.reject(new Error('Too many pending page requests'))
@@ -280,6 +326,34 @@ export function createModuleFrontendClient(port: ModuleFrontendPort) {
         restartListeners.delete(listener)
       }
     },
+    /**
+     * The part of the page this window shows: the `view` another copy of the page passed to
+     * `openWindow`. Null in the module's whole page. Draw only that part when it is set.
+     * Requires module-page-windows-v1.
+     */
+    view: shown.view,
+    /**
+     * Whether `openWindow` can open a window here. False in a plain browser, where there are
+     * none to open: leave the control that opens one out. Requires module-page-windows-v1.
+     */
+    canOpenWindows: shown.canOpen,
+    /**
+     * Opens this page again in a HubDash window of its own, showing the part you name. `view`
+     * is yours to choose and arrives as `view` in that window. `title` names the window, after
+     * Hubble and the module's name: "Hubble - Cyanview - Camera 3". A view that already has a
+     * window comes to the front. Call it in answer to the operator's click or key press; Hubble
+     * refuses a window the page asks for by itself. HubDash remembers the window and opens it
+     * again with the same `view` next time, so a view must stay meaningful across restarts. For
+     * a section with `windows: true`. Requires module-page-windows-v1.
+     */
+    openWindow: (view: string, title: string) =>
+      request({ operation: 'open-window', view, title }).then(() => undefined),
+    /**
+     * In a window opened with `openWindow`: changes its title, for example after the camera it
+     * shows was renamed. Requires module-page-windows-v1.
+     */
+    setWindowTitle: (title: string) =>
+      request({ operation: 'window-title', title }).then(() => undefined),
     subscribe(listener: (state: ModuleFrontendValue) => void) {
       if (closed) throw new Error('Module page closed')
       listeners.add(listener)

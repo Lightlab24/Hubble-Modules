@@ -177,6 +177,69 @@ page.onRestart(() => void readEverythingAgain());
   that reloads is refused until the window has caught up, as before.
 - A page without `restart: 'keep-open'` is reloaded for every restart, as before.
 
+## Open in several windows
+
+HubDash can show a module's page in a window of its own, beside the main window, and the
+operator can have the same page on screen in both. Hubble keeps a page that was not built
+for that live in one window at a time: the other window shows a notice and a **Use it here**
+button. Once the page is built so that several copies can be open at once, declare
+`windows: true` on the section and require `module-page-windows-v1`:
+
+```ts
+{
+  type: 'custom', id: 'app', label: 'Cameras', entry: 'ui/index.html',
+  commands: [{ id: 'snapshot', label: 'Read the page' }],
+  windows: true,
+}
+```
+
+Every copy is its own frame with its own bridge, and all of them talk to the one running
+module. Before declaring it, make sure of these:
+
+- A copy never saves what it read when it opened over what another copy saved since. Send
+  each edit as a change (this row, this field) that the backend applies to a fresh read, not
+  the whole document as the page last saw it.
+- Each copy follows the others. Publish a revision in the module's state when saved data
+  changes, and have the page read again when it sees a new one, leaving the box in use alone.
+- A refused edit puts back only that edit, and the copy then holds the current data, so the
+  next edit is not refused for the same reason.
+- What a copy is looking at (its tab, sort, scroll, selection) is that copy's own. Keep it out
+  of the shared data, or two windows drag each other around.
+- Limits the backend counts per instance, such as long polls or transfers in progress, allow
+  for as many copies as there are windows.
+
+### Open part of the page in its own window
+
+A page with `windows: true` can open a part of itself in another window and name it:
+
+```ts
+const page = await connectModuleFrontend(window);
+if (page.view === null) drawEverything();
+else drawOnly(page.view); // "camera-3"
+
+openButton.hidden = !page.canOpenWindows;
+openButton.onclick = () => void page.openWindow("camera-3", "Camera 3");
+```
+
+- `openWindow(view, title)` opens the same page file in a new HubDash window. `view` is
+  yours to choose, up to 128 characters, and arrives as `page.view` in that window. It is
+  `null` in the module's whole page. `title`, one line of up to 80 characters, names the
+  window after Hubble and the module's name as the sidebar shows it:
+  "Hubble - Cyanview - Camera 3".
+- Opening a view that already has a window brings that window to the front.
+- Call it in answer to the operator's click or key press in the page. Hubble refuses a window
+  the page asks for by itself, on a timer or as it loads, the way a browser refuses a pop-up.
+- `page.canOpenWindows` is false where there are no windows to open, such as a plain browser,
+  and `openWindow` rejects there. Leave the control out.
+- In a window opened this way, `page.setWindowTitle(title)` changes its name, for example
+  after the camera it shows was renamed. Hubble follows a rename of the module by itself.
+- HubDash remembers its windows on that Mac and opens them again with the same `view` the
+  next time it starts. A `view` must stay meaningful across restarts: use a stable ID, not a
+  row number, and draw a plain "no longer here" state when it names something that is gone.
+- The operator closes the window. A page cannot close or move a window, choose its size, or
+  open anything but its own page.
+- One HubDash keeps at most 16 module windows open, and `openWindow` rejects beyond that.
+
 ## Declare and build
 
 Add a `custom` section to a normal page. Require both `module-pages-v1` and
@@ -211,6 +274,7 @@ Imported CSS and supported assets are included in `files` automatically. Link a
 generated stylesheet from HTML. React or another framework may be bundled through
 the project's dependencies. Inline scripts, runtime CDN imports, Node imports,
 remote requests, nested frames, popups and direct device access are unavailable.
+A page reaches another window only through `openWindow`, described above.
 Keep device and OS operations in the backend and supported host services.
 
 ## Scoped bridge
