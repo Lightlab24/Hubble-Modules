@@ -1,11 +1,15 @@
   function plainRow(item){const {deleting,...saved}=item;return {...saved,dirty:[...(item.dirty||[])],jobs:0};}
   function snapshotPlan(uiState){return {formatVersion:1,devices:devices.map(({modelCatalog,models,lensOptions,snapshot,...item})=>({...item})),cameras:cameras.filter(row=>row.device!=='').map(plainRow),lans:lans.map(plainRow),uiState,cameraLogins:savedCameraLogins(),savedDevices:savedDeviceList(),defaults:savedDefaults()};}
-  // Where the page is goes to this copy's own place; the plan is written only when something in it changed, and only
-  // then does the page say Saving. What a save writes is taken when its turn comes, after the edit is on screen, so a
-  // save queued behind another writes what the page holds then (ui-plan-follow.js).
+  // Where the page is goes to this copy's own place, and the plan is written only when something in it changed. What a
+  // save writes is taken when its turn comes, after the edit is on screen, so a save queued behind another writes what
+  // the page holds then (ui-plan-follow.js). The page says Saving at once, as it always has, unless all that moved is
+  // where the page is (a tab, sort or expand), which writes nothing; a write that starts anyway says so then.
+  let rememberedPlace='';
   function persistPlan(uiState){
-    savePageView(splitUiState(uiState).view);
+    const place=splitUiState(uiState).view,placeText=JSON.stringify(place),moved=placeText!==rememberedPlace;
+    rememberedPlace=placeText;savePageView(place);
     const sequence=++saveSequence;
+    if(!moved&&persistence!=='saving'){persistence='saving';syncSummary();}
     let ticket=null;
     return moduleBridge.save(()=>{ticket=presentationLedger.ticket();return repairPresentationPlan(currentPlan(),ticket);},()=>{if(ticket)presentationLedger.saved(ticket);},()=>{if(ticket)rejectPresentation(ticket);},()=>{persistence='saving';syncSummary();}).then(()=>{if(sequence===saveSequence&&persistence!=='saved'){persistence='saved';syncSummary();}}).catch(error=>{if(sequence===saveSequence){persistence='failed';syncSummary();}toast(error.message||'Changes could not be saved');});
   }
@@ -97,6 +101,7 @@
       applyCameraControlState(await moduleBridge.controlState());
       await restoreCameraChoiceCatalogs();
       if(plan){restoreSavedLists(plan);devices.splice(0,devices.length,...plan.devices);cameras=(plan.cameras||[]).map(row=>withoutFormerLensDefaults(restoredRow(row)));lans=withoutDuplicateRows((plan.lans||[]).map(restoredRow));deviceOrder=devices.map(item=>item.id);openControllers.clear();if(devices[0])openControllers.add(devices[0].id);syncConnections();syncFilter();renderLans();renderCameras();const saved=withPageView(plan.uiState,place,true);if(saved)restore(saved);}
+      rememberedPlace=JSON.stringify(splitUiState(uiStateSnapshot())?.view??null);
       moduleBridge.onReceipt(applyReceipts);
       moduleBridge.subscribe(applyLiveState);
       if(plan?.uiState?.privateContent?.ui?.discoveryVersion!==2&&ui.discoveryMethod==='broadcast')ui.discoveryMethod='ping';
