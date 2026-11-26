@@ -310,6 +310,10 @@ export class RouterPageRuntime {
           });
         } finally {
           session.waiting = false;
+          // HubDash ends a page's requests when it closes the page or its window, before the
+          // page can close its own session, so a closed window gives its place back at once.
+          if (signal.aborted && this.sessions.get(input.sessionId) === session)
+            this.sessions.delete(input.sessionId);
         }
       }
       case "resources":
