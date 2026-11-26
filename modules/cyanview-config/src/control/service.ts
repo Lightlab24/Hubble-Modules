@@ -119,6 +119,11 @@ export class CameraControl {
   private planRevision: string | null | undefined;
   /** The newest saved revision the plan's watch has reported, or undefined while no watch is running. */
   private watchedRevision: string | null | undefined;
+  /**
+   * Told each saved revision of the plan the watch reports, whoever saved it: a page, this module's own sends, or
+   * Hubble's Undo. The worker publishes it, so every open copy of the page can tell it is behind and read again.
+   */
+  onPlanRevision?: (revision: string | null) => void;
   private planReadAt = 0;
   private planRefresh?: Promise<void>;
   private planRefreshAgain = false;
@@ -234,6 +239,7 @@ export class CameraControl {
           if (this.stopped) return;
           if (++changes > 1) failures = 0;
           this.watchedRevision = document.revision;
+          this.onPlanRevision?.(document.revision);
           if (!this.planIsCurrent()) this.refreshPlanBehind();
         }
       } catch (error) {

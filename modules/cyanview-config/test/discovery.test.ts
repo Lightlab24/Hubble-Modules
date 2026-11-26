@@ -15,7 +15,7 @@ test('full-page contract preserves the studio frontend identity and bridge comma
   assert.ok(manifest.capabilities.includes('service.page.studio'));
   assert.equal(manifest.pages.length,1);const page=manifest.pages[0]!;assert.equal(page.id,'studio');assert.equal(page.layout,'full-page');assert.equal(page.sections.length,1);
   const section=page.sections[0]!;assert.equal(section.id,'frontend');assert.equal(section.entry,'ui/index.html');
-  assert.deepEqual(section.commands.map(command=>command.id),['read-plan','read-part','save-plan','save-begin','save-part','save-commit','send','clear-network','send-begin','send-part','send-commit','scan','stop-scan','probe','find-rig','import-device','import-part','refresh','choice-catalogs','options','firmware-begin','firmware-part','firmware-commit','firmware-targets','firmware-install','firmware-status','remi-state','remi-send','remi-route','camera-control-state','camera-control-mutate','camera-enabled','camera-refresh','open-device-page','setup-guide']);
+  assert.deepEqual(section.commands.map(command=>command.id),['read-plan','read-part','save-plan','save-begin','save-part','save-commit','send','clear-network','send-begin','send-part','send-commit','scan','stop-scan','probe','find-rig','import-device','import-part','refresh','choice-catalogs','options','firmware-begin','firmware-part','firmware-commit','firmware-targets','firmware-install','firmware-status','remi-state','remi-send','remi-route','camera-control-state','camera-control-mutate','camera-enabled','camera-refresh','open-device-page','setup-guide','page-view']);
 });
 
 test('ping sweep bounds concurrency, covers a /16 exactly and streams batches before completion',async()=>{
