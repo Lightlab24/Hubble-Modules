@@ -1,6 +1,6 @@
 # TSL Tally
 
-Official module `hubble-tsl`, version **1.4.3**, using stable Hubble module API **1**.
+Official module `hubble-tsl`, version **1.5.0**, using stable Hubble module API **1**.
 It receives TSL UMD 3.1 and 5.0 tally over UDP or TCP, shows what a switcher sends, routes a
 router on tally (what TALLY Switch did, merged in at 1.4.0), feeds Button Matrix tally
 feedback, and can set a Ross Carbonite switcher to send its tally to this computer.
@@ -59,8 +59,9 @@ held before the merge, so Hubble's older Tally Switch page stays hidden.
 
 ## Open in several windows
 
-HubDash can show the page in several windows at once, and HubDash on another computer can show it
-too. Each is its own copy of the page over the one running module:
+HubDash can show the page in several windows at once (`windows: true` on the section, which
+requires `module-page-windows-v1`, so 1.5.0 loads only on a Hubble with module windows). Each
+window is its own copy of the page over the one running module:
 
 - A copy never saves its whole switcher setup or camera list. It sends only what it changed
   (`src/changes.ts`): the setup's changed fields, and the cameras deleted, added (after which

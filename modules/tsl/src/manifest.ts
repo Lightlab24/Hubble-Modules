@@ -44,6 +44,8 @@ export default defineModuleManifest({
       "module-fields-v2",
       "module-exchange-v1",
       "module-exchange-peers-v1",
+      // The page is live in every HubDash window that shows it.
+      "module-page-windows-v1",
     ],
   },
   configVersion: 1,
@@ -209,6 +211,10 @@ export default defineModuleManifest({
           settings: [...PAGE_SETTINGS],
           // Saving one of them restarts the listener. The page stays as it is meanwhile.
           restart: "keep-open",
+          // Live in every HubDash window at once (e2e/windows.spec.ts): each copy saves only what it
+          // changed, onto what is saved now, and follows what the others save. The open tab is each
+          // window's own; the one last chosen is where the page opens next time.
+          windows: true,
         },
       ],
     },
