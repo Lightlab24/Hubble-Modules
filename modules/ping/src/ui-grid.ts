@@ -9,15 +9,13 @@ import {
   type SpreadsheetControls,
   type SpreadsheetEdit,
 } from "@hubble/module-sdk/spreadsheet-controls";
+import { cellEdits, hideColumnChange, resizeChange } from "./changes.js";
 import type { DraftStore } from "./draft-store.js";
 import {
-  clearedValue,
-  clone,
   columnOf,
   columns,
   formatMs,
   moveRows,
-  normalizeValue,
   rulesOf,
   ruleText,
   spanOf,
@@ -76,6 +74,10 @@ export async function createDeviceGrid(options: GridOptions) {
   const disposables: { dispose(): void }[] = [];
   let shown: Column[] = [];
   let shownKey = "";
+  /** The devices drawn, in order. The shared controls are told only of these, so they always match the cells on screen. */
+  let drawn: string[] = [];
+  /** A save arrived while a cell was being typed in, so the rows and columns wait until it is finished. */
+  let deferred: ReturnType<typeof setTimeout> | undefined;
   let active: SpreadsheetAddress | undefined;
   let editor: { address: SpreadsheetAddress; cell: HTMLTableCellElement } | undefined;
   let disposed = false;
@@ -89,6 +91,8 @@ export async function createDeviceGrid(options: GridOptions) {
   const view = () => store.document.view;
   const widthOf = (columnId: string) => view().widths[columnId] ?? columnOf(columnId)!.width;
   const rowOf = (id: string) => store.document.devices.find((row) => row.id === id);
+  /** The devices on screen that are still on the list. */
+  const drawnRows = () => drawn.map(rowOf).filter((row): row is DeviceRow => !!row && rows.has(row.id));
   const headingOf = (column: Column) => (column.id === "strip" ? spanOf(view().span).heading : column.label);
   const pinged = (row: DeviceRow) => valueOf(row, "enabled") === "TRUE" && store.document.settings.pinging;
 
@@ -112,22 +116,14 @@ export async function createDeviceGrid(options: GridOptions) {
   }
 
   function submit(edits: readonly SpreadsheetEdit[], expected?: string): boolean {
-    const changes: CellEdit[] = edits.flatMap((edit) => {
-      const row = rowOf(edit.rowId);
-      const cell = cellValue(edit);
-      if (!row || !cell || cell.readOnly) return [];
-      const value = edit.value === "" ? clearedValue(edit.columnId) : normalizeValue(edit.columnId, edit.value);
-      return [{ rowId: edit.rowId, columnId: edit.columnId, value, expected: expected ?? valueOf(row, edit.columnId) }];
-    });
+    // Another window can take a device off while its cell is being typed in here.
+    if (edits.some((edit) => !rowOf(edit.rowId))) options.onError("That device is no longer on the list, so what you typed wasn't kept.");
+    const changes: CellEdit[] = cellEdits(store.document, edits, expected);
     // Putting back the saved value is no change to save, but it does settle a red draft in that cell.
     for (const change of changes)
       if (change.value === change.expected && store.invalid.has(key(change))) store.discard(change.rowId, change.columnId);
     const real = changes.filter((change) => change.value !== change.expected);
     return real.length ? store.submit({ kind: "edit", edits: real }) : true;
-  }
-
-  function layout(next: View) {
-    store.submit({ kind: "view", view: next, expected: clone(view()) });
   }
 
   const corner = document.createElement("th");
@@ -164,6 +160,7 @@ export async function createDeviceGrid(options: GridOptions) {
       ensureRow(row);
       body.append(rows.get(row.id)!);
     }
+    drawn = options.rows().map((row) => row.id);
   }
 
   function ensureRow(row: DeviceRow) {
@@ -196,7 +193,7 @@ export async function createDeviceGrid(options: GridOptions) {
     viewport,
     extendedEditing: true,
     workbookEditing: true,
-    getRows: () => options.rows().map((row) => row.id),
+    getRows: () => drawn,
     getColumns: () => shown.map((column) => ({ id: column.id, label: headingOf(column), fill: column.fill })),
     getCell: cellValue,
     onEdit: (batch) => {
@@ -232,12 +229,12 @@ export async function createDeviceGrid(options: GridOptions) {
         x: event.clientX,
         y: event.clientY,
         label: headingOf(columnOf(columnId)!),
-        items: [{ id: "hide", label: "Hide column", run: () => layout({ ...clone(view()), hidden: [...new Set([...view().hidden, columnId])] }) }],
+        items: [{ id: "hide", label: "Hide column", run: () => store.submit(hideColumnChange(store.document, columnId)) }],
       });
       return;
     }
     event.preventDefault();
-    const index = options.rows().findIndex((row) => row.id === rowId);
+    const index = drawn.indexOf(rowId);
     // Remove acts on everything selected when the click is inside the selection, and on this row alone when it isn't.
     const selected = selectedRowIds();
     const targets = selected.includes(rowId) ? selected : [rowId];
@@ -252,7 +249,7 @@ export async function createDeviceGrid(options: GridOptions) {
           ? [{ id: "discard", label: "Discard invalid draft", run: () => store.discard(rowId, columnId) }]
           : []),
         { id: "above", label: "Add device above", icon: "add", run: () => options.onInsert(rowId) },
-        { id: "below", label: "Add device below", icon: "add", run: () => options.onInsert(options.rows()[index + 1]?.id ?? null) },
+        { id: "below", label: "Add device below", icon: "add", run: () => options.onInsert(drawn[index + 1] ?? null) },
         { separator: true },
         {
           id: "remove",
@@ -283,7 +280,7 @@ export async function createDeviceGrid(options: GridOptions) {
         max: 1200,
       })),
       // Only rows already drawn: the controls ask while mounting, before the first render.
-      ...options.rows().filter((row) => rows.has(row.id)).map((row) => ({
+      ...drawnRows().map((row) => ({
         id: row.id,
         label: valueOf(row, "name"),
         axis: "row" as const,
@@ -293,19 +290,14 @@ export async function createDeviceGrid(options: GridOptions) {
         max: 200,
       })),
     ],
-    onResize(item, size) {
-      const next = clone(view());
-      if (item.axis === "column") next.widths[item.id] = Math.round(size);
-      else next.rowHeights[item.id] = Math.round(size);
-      layout(next);
-    },
+    onResize: (item, size) => store.submit(resizeChange(store.document, item.axis, item.id, size)),
   });
   disposables.push(resize);
 
   const reorder = await mountSpreadsheetReorder({
     root: table,
     getItems: () =>
-      options.rows().filter((row) => rows.has(row.id)).map((row) => ({
+      drawnRows().map((row) => ({
         id: row.id,
         label: valueOf(row, "name"),
         axis: "row" as const,
@@ -341,7 +333,7 @@ export async function createDeviceGrid(options: GridOptions) {
 
   /** Rows the operator has selected: whole rows picked by number, or else every row with a selected cell. */
   function selectedRowIds(): string[] {
-    const order = options.rows().map((row) => row.id);
+    const order = drawn;
     if (pickedRows.length) return order.filter((id) => pickedRows.includes(id));
     const withCells = new Set<string>();
     for (const cell of table.querySelectorAll<HTMLElement>('td[data-hubble-spreadsheet-selected="true"], td[data-hubble-spreadsheet-active="true"]'))
@@ -349,7 +341,7 @@ export async function createDeviceGrid(options: GridOptions) {
     return order.filter((id) => withCells.has(id));
   }
   function pickRow(id: string, how: "one" | "range" | "toggle") {
-    const order = options.rows().map((row) => row.id);
+    const order = drawn;
     if (how === "range" && pickAnchor && order.includes(pickAnchor)) {
       const [from, to] = [order.indexOf(pickAnchor), order.indexOf(id)].sort((a, b) => a - b);
       pickedRows = order.slice(from, to! + 1);
@@ -444,7 +436,7 @@ export async function createDeviceGrid(options: GridOptions) {
   function renderLive() {
     if (disposed) return;
     const live = options.live();
-    for (const row of options.rows()) {
+    for (const row of drawnRows()) {
       const on = pinged(row) && valueOf(row, "host") !== "";
       const summary = live[row.id];
       const limit = rulesOf(row, store.document.settings).overMs;
@@ -467,8 +459,72 @@ export async function createDeviceGrid(options: GridOptions) {
     }
   }
 
+  /** One editable cell's value, as saved or as a typed draft in red. Never the cell being typed in. */
+  function paint(row: DeviceRow, column: Column, cell: HTMLTableCellElement) {
+    if (column.live || cell === editor?.cell) return;
+    const address = { rowId: row.id, columnId: column.id };
+    const value = cellValue(address)!;
+    const invalid = store.invalid.get(key(address));
+    if (invalid) cell.setAttribute("aria-invalid", "true");
+    else cell.removeAttribute("aria-invalid");
+    cell.title = invalid?.message ?? "";
+    cell.setAttribute("aria-label", `${column.label}${invalid ? `: ${invalid.message}` : ""}`);
+    if (value.kind === "boolean" && !invalid) {
+      delete cell.dataset.empty;
+      if (!cell.firstElementChild?.hasAttribute("data-hubble-boolean")) {
+        const slot = document.createElement("span");
+        slot.setAttribute("data-hubble-boolean", "");
+        cell.replaceChildren(slot);
+      }
+      return;
+    }
+    // An alert cell left empty follows the global setting, and shows it dimmed.
+    const rule = !invalid && (column.id === "over" || column.id === "lost") ? ruleText(column.id, value.value, store.document.settings) : undefined;
+    const shownText = invalid?.edit.value ?? rule?.text ?? value.value;
+    if (rule?.inherited) cell.dataset.inherited = "true";
+    else delete cell.dataset.inherited;
+    if (cell.textContent !== shownText || cell.firstElementChild) cell.textContent = shownText;
+    if (!shownText) cell.dataset.empty = "true";
+    else delete cell.dataset.empty;
+  }
+
+  /**
+   * Whether a cell is being typed in: the page's own editor, or Hubble's choice list on a cell.
+   * Rows and columns stay as they are until it is finished, so that cell never moves or clears.
+   */
+  const typing = () => !!editor || !!(document.activeElement as Element | null)?.closest?.("[data-hubble-cell-editor]");
+  /** While a cell is being typed in, other windows' saves change only the text of the other cells. */
+  function renderValues() {
+    for (const row of drawnRows()) {
+      const tr = rows.get(row.id)!;
+      tr.dataset.off = String(valueOf(row, "enabled") !== "TRUE");
+      tr.cells[0]!.setAttribute("aria-label", valueOf(row, "name"));
+      for (const column of shown) {
+        const cell = cells.get(`${row.id}/${column.id}`);
+        if (cell) paint(row, column, cell);
+      }
+    }
+    renderLive();
+    controls.refresh();
+  }
+
   function render() {
     if (disposed) return;
+    if (typing()) {
+      renderValues();
+      // Draw the rest once the typing is finished, however it ends.
+      deferred ??= setTimeout(function check() {
+        deferred = undefined;
+        if (disposed) return;
+        if (typing()) deferred = setTimeout(check, 200);
+        else render();
+      }, 200);
+      return;
+    }
+    if (deferred) {
+      clearTimeout(deferred);
+      deferred = undefined;
+    }
     table.style.setProperty("--grid-text-size", `${view().textSize ?? 13}px`);
     if (visibleColumns(view()).map((column) => column.id).join(",") !== shownKey) buildColumns();
     const ids = new Set(options.rows().map((row) => row.id));
@@ -502,34 +558,11 @@ export async function createDeviceGrid(options: GridOptions) {
         const cell = cells.get(`${row.id}/${column.id}`)!;
         if (column.id === "name") cell.style.left = `${GUTTER}px`;
         cell.setAttribute("aria-readonly", String(!!column.live));
-        if (column.live || cell === editor?.cell) continue;
-        const address = { rowId: row.id, columnId: column.id };
-        const value = cellValue(address)!;
-        const invalid = store.invalid.get(key(address));
-        if (invalid) cell.setAttribute("aria-invalid", "true");
-        else cell.removeAttribute("aria-invalid");
-        cell.title = invalid?.message ?? "";
-        cell.setAttribute("aria-label", `${column.label}${invalid ? `: ${invalid.message}` : ""}`);
-        if (value.kind === "boolean" && !invalid) {
-          delete cell.dataset.empty;
-          if (!cell.firstElementChild?.hasAttribute("data-hubble-boolean")) {
-            const slot = document.createElement("span");
-            slot.setAttribute("data-hubble-boolean", "");
-            cell.replaceChildren(slot);
-          }
-          continue;
-        }
-        // An alert cell left empty follows the global setting, and shows it dimmed.
-        const rule = !invalid && (column.id === "over" || column.id === "lost") ? ruleText(column.id, value.value, store.document.settings) : undefined;
-        const shownText = invalid?.edit.value ?? rule?.text ?? value.value;
-        if (rule?.inherited) cell.dataset.inherited = "true";
-        else delete cell.dataset.inherited;
-        if (cell.textContent !== shownText || cell.firstElementChild) cell.textContent = shownText;
-        if (!shownText) cell.dataset.empty = "true";
-        else delete cell.dataset.empty;
+        paint(row, column, cell);
       }
     }
     while (body.children.length > options.rows().length) body.lastElementChild!.remove();
+    drawn = options.rows().map((row) => row.id);
     pickedRows = pickedRows.filter((id) => ids.has(id));
     markPicked();
     renderLive();
@@ -549,6 +582,7 @@ export async function createDeviceGrid(options: GridOptions) {
     selectedRows: selectedRowIds,
     dispose() {
       disposed = true;
+      clearTimeout(deferred);
       unsubscribe();
       for (const control of disposables.reverse()) control.dispose();
     },

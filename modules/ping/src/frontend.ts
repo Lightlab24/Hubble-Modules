@@ -2,11 +2,11 @@ import { connectModuleFrontend, ModuleFrontendValueSchema } from "@hubble/module
 import { confirm, mountSegmented, mountStepper, mountSwitch, showToast } from "@hubble/module-sdk/controls";
 import { mountSpreadsheetColumnEditor, mountSpreadsheetSheets, mountSpreadsheetToolbar } from "@hubble/module-sdk/spreadsheet-controls";
 import type { LiveReply, LiveRequest } from "./backend.js";
+import { bandsChange, columnMoveChange, columnVisibilityChange, openSheetChange, scaleChange, settingsChange, viewChange } from "./changes.js";
 import { createColorsEditor } from "./colors-editor.js";
-import { DraftStore, type SaveReceipt } from "./draft-store.js";
+import { openDeviceList } from "./page-store.js";
 import {
   bytesPerSecond,
-  clone,
   columnOf,
   formatInterval,
   formatMs,
@@ -57,12 +57,20 @@ function report(message: string) {
   void showToast({ kind: "failure", title: message }).catch(() => undefined);
 }
 
+/** Says when something saved here had also been changed in another window, and that this one's value is kept. */
+function reportClashes(clashes: string[]) {
+  const unique = [...new Set(clashes)];
+  const title = unique.length === 1 ? `${unique[0]} was also changed in another window` : `${unique.length} things were also changed in another window`;
+  const listed = unique.length === 1 ? "" : `${unique.slice(0, 4).join(", ")}${unique.length > 4 ? " and more" : ""}. `;
+  void showToast({ title, message: `${listed}What you entered here is kept.` }).catch(() => undefined);
+}
+
 try {
   const client = await connectModuleFrontend(window);
-  const initial = (await client.call("snapshot")) as unknown as SaveReceipt;
-  const store = new DraftStore(initial, async (operation: Mutation) => {
-    return (await client.call("save", ModuleFrontendValueSchema.parse({ operation }))) as unknown as SaveReceipt;
-  });
+  // Every open copy of this page, in any HubDash window, follows what the others save.
+  const list = await openDeviceList(client);
+  const { store, follow } = list;
+  store.onClash(reportClashes);
   let live: LiveReply = { sequence: 0, now: Date.now(), problem: "", devices: {}, timeline: null };
   let selectedId: string | undefined = sheetRows(store.document)[0]?.id;
   let fetching = false;
@@ -74,23 +82,15 @@ try {
 
   const settings = () => store.document.settings;
   const view = () => store.document.view;
-  const setSettings = (change: Partial<Settings>) => store.submit({ kind: "settings", settings: { ...clone(settings()), ...change }, expected: clone(settings()) });
-  const setView = (change: Partial<View>) => store.submit({ kind: "view", view: { ...clone(view()), ...change }, expected: clone(view()) });
+  const setSettings = (change: Partial<Settings>) => store.submit(settingsChange(store.document, change));
+  const setView = (change: Partial<View>) => store.submit(viewChange(store.document, change));
   /** Saves the timeline's scale. Auto is no scale at all, so older versions read the page as before. */
   function setScale(ms: number | null) {
-    if (ms === (view().scaleMs ?? null)) return;
-    const next = clone(view());
-    if (ms === null) delete next.scaleMs;
-    else next.scaleMs = ms;
-    store.submit({ kind: "view", view: next, expected: clone(view()) });
+    const operation = scaleChange(store.document, ms);
+    if (operation) store.submit(operation);
   }
   /** Saves the times for the bar colours; null goes back to the colours that follow the alert limit. */
-  function setBands(bands: Bands | null) {
-    const next = clone(view());
-    if (bands === null) delete next.bands;
-    else next.bands = bands;
-    store.submit({ kind: "view", view: next, expected: clone(view()) });
-  }
+  const setBands = (bands: Bands | null) => store.submit(bandsChange(store.document, bands));
   /** The scale a drag or pinch on the ms numbers is showing before it is saved. */
   let gestureScale: number | null | undefined;
 
@@ -235,6 +235,8 @@ try {
   }
   timeline.setPingTime(settings().intervalMs);
   timeline.showLast(spanOf(view().span).ms, true);
+  /** The Show last choice the timeline was last set to, here or in another window. */
+  let shownSpan = view().span;
   el("tl-live").addEventListener("click", () => timeline.backToNow());
   el("clear-history").addEventListener("click", async () => {
     const sure = await confirm({
@@ -260,10 +262,8 @@ try {
     label: "Show last",
     layout: "inline",
     getState: () => ({ value: view().span, options: SPANS.map((item) => ({ value: item.id, label: item.label })) }),
-    onValueChange: (value) => {
-      setView({ span: value as SpanId });
-      timeline.showLast(spanOf(value).ms);
-    },
+    // The timeline follows in update(), whichever window chose it.
+    onValueChange: (value) => setView({ span: value as SpanId }),
   });
   const textSize = await mountSpreadsheetToolbar({
     root: el("text-size"),
@@ -331,8 +331,8 @@ try {
   };
   /** Opens a sheet. Which sheet is open is saved with the page but isn't an undo step. */
   function openSheet(id: string) {
-    if (id === openSheetId(store.document)) return;
-    store.submit({ kind: "view", view: { ...clone(view()), sheetId: id }, expected: clone(view()) }, false);
+    const operation = openSheetChange(store.document, id);
+    if (operation) store.submit(operation, false);
   }
   const sheetTabs = await mountSpreadsheetSheets({
     root: el("sheet-tabs"),
@@ -387,18 +387,11 @@ try {
         .order.filter((id) => id !== "name")
         .map((id) => ({ id, label: id === "strip" ? spanOf(view().span).heading : columnOf(id)!.label, visible: !view().hidden.includes(id) })),
     onVisibilityChange(id, visible) {
-      const hidden = view().hidden.filter((item) => item !== id);
-      if (!visible) hidden.push(id);
       const selected = grid.selected();
       if (!visible && selected?.columnId === id) grid.select({ rowId: selected.rowId, columnId: "name" }, false);
-      setView({ hidden });
+      store.submit(columnVisibilityChange(store.document, id, visible));
     },
-    onMove(id, beforeId) {
-      const order = view().order.filter((item) => item !== id);
-      const index = beforeId ? order.indexOf(beforeId) : -1;
-      order.splice(index < 0 ? order.length : index, 0, id);
-      setView({ order });
-    },
+    onMove: (id, beforeId) => store.submit(columnMoveChange(store.document, id, beforeId)),
   });
 
   function updateTimeline() {
@@ -428,6 +421,10 @@ try {
   function update() {
     textSize.refresh();
     timeline.setPingTime(settings().intervalMs);
+    if (view().span !== shownSpan) {
+      shownSpan = view().span;
+      timeline.showLast(spanOf(shownSpan).ms);
+    }
     pinging.refresh();
     notify.refresh();
     span.refresh();
@@ -531,6 +528,7 @@ try {
    * always dropped, or the bars would jump back to the old view and forward again.
    */
   function adopt(reply: LiveReply, asked: { span: string; version: number }) {
+    follow.saw(reply.revision);
     if (reply.sequence < live.sequence || asked.span !== view().span) return;
     const current = asked.version === windowVersion && (!selectedId || reply.timeline?.deviceId === selectedId);
     live = current ? reply : { ...reply, timeline: live.timeline };
@@ -561,7 +559,7 @@ try {
 
   // Follows ping results while the page is on screen. The worker answers as soon as there is a new one.
   let run = 0;
-  async function follow() {
+  async function followLive() {
     const mine = ++run;
     while (mine === run && document.visibilityState === "visible") {
       try {
@@ -575,14 +573,22 @@ try {
     }
   }
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") void follow();
+    if (document.visibilityState === "visible") void followLive();
     else run++;
   });
   setInterval(() => timeline.tick(), 250);
 
   el("loading").hidden = true;
   update();
-  void follow();
+  void followLive();
+  window.addEventListener(
+    "pagehide",
+    () => {
+      run++;
+      list.close();
+    },
+    { once: true },
+  );
 } catch (error) {
   el("loading").textContent = error instanceof Error ? error.message : String(error);
 }
