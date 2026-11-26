@@ -225,7 +225,9 @@ export function applyMutation(before: FsDocument, operation: Mutation): FsDocume
       const key = edit.rowId + '/' + edit.columnId;
       if (addresses.has(key)) throw Error('A batch contains the same cell twice.');
       addresses.add(key);
-      if (valueOf(next, edit.rowId, edit.columnId) !== edit.expected) throw Error('This cell changed in another editor. Your draft is retained.');
+      // Another window may have saved this very value already, which is no conflict.
+      const current = valueOf(next, edit.rowId, edit.columnId);
+      if (current !== edit.expected && current !== edit.value) throw Error('This cell changed in another editor. Your draft is retained.');
       const issue = validateValue(channel === null ? 'unit' : 'channel', edit.columnId, edit.value); if (issue) throw Error(issue);
       const values = channel === null ? unit.values : ((unit.channels ??= {})[String(channel)] ??= {});
       if (edit.value || (channel === null && (planFields as readonly string[]).includes(edit.columnId))) values[edit.columnId] = edit.value; else delete values[edit.columnId];

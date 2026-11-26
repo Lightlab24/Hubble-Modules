@@ -287,6 +287,8 @@ export function createBackend(context: ModuleContext): ModuleInstance {
   async function savePlan(operation: Mutation, signal: AbortSignal): Promise<FsDocument> {
     for (let attempt = 0; attempt < 3; attempt++) {
       const saved = await documents.read(PLAN, signal), next = applyMutation(withCarried(validateDocument(saved.value)), operation);
+      // A change to what is saved already, such as a name two windows both took from a unit, has nothing to save.
+      if (same(next, saved.value)) { if (latestRevision !== saved.revision) { latestRevision = saved.revision; planChanged(next); publishSoon(); } return next; }
       try { const result = await documents.write(saved, ModuleDocumentValueSchema.parse(next), signal); latestRevision = result.revision; planChanged(next); observeNow(); publishSoon(); return next; }
       catch (error) { if (!(error instanceof ModuleDocumentConflictError) || attempt === 2) throw error; }
     }

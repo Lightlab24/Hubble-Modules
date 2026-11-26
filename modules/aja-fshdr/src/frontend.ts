@@ -1,8 +1,8 @@
 import { connectModuleFrontend, ModuleFrontendValueSchema } from '@hubble/module-sdk/frontend';
 import { mountSpreadsheetSheets, mountSpreadsheetToolbar, type SpreadsheetAddress } from '@hubble/module-sdk/spreadsheet-controls';
 import { activeKind, activeSheet, activeSheetId, addSheet, autoSendOn, clone, fieldById, groupsOf, isFlipped, isSimulated, masterSelection, moveSheet, nameField, newUnit, parseRowId, removeSheet, renameSheet, scopeOf, setOrientation, setUnitCount, sheetList, unitHasData, validHost, valueOf, viewChange, type CellEdit, type Field, type Mutation, type Orientation, type SheetKind, type Unit } from './model.js';
-import { displayValue, fromWire, hostOf, isLive, isSimulatedLive, masterRows, pendingFields, rowObservation, rowReady, rowTitle, rowsFor, sendsAfter, shownName, stagedRowIds, unitObservation, waitingLabel } from './rows.js';
-import { DraftStore, type SaveReceipt } from './draft-store.js';
+import { displayValue, fromWire, hostOf, isLive, isSimulatedLive, masterRows, pendingFields, reportedEdits, rowObservation, rowReady, rowTitle, rowsFor, sendsAfter, shownName, stagedRowIds, unitObservation, waitingLabel } from './rows.js';
+import { DraftStore, followSaved, takeReported, type SaveReceipt } from './draft-store.js';
 import { createGrid, type LiveWrite } from './ui-grid.js';
 import type { Observed, WireObserved } from './backend.js';
 import './frontend.css';
@@ -110,20 +110,8 @@ try {
     if (!el('pending-sends').hidden) renderPending();
     adoptNames();
   }
-  // The plan keeps the last name and mode each unit reported, so the row still has them when the unit is offline,
-  // and presets for it go on the channels it really has.
-  function adoptNames() {
-    if (store.pending.length) return;
-    const edits: CellEdit[] = doc().units.flatMap(unit => {
-      const seen = isLive(observed, unit) ? unitObservation(observed, unit)! : undefined, name = seen?.name ?? '', kept = unit.values['unit-name'] ?? '';
-      const mode = seen && !seen.simulated ? seen.modeValue ?? '' : '', keptMode = unit.values['unit-mode'] ?? '';
-      return [
-        ...(name && name !== kept && !unit.values[nameField.id] ? [{ rowId: unit.id, columnId: 'unit-name', value: name, expected: kept }] : []),
-        ...(/^[12]$/.test(mode) && mode !== (keptMode || '1') ? [{ rowId: unit.id, columnId: 'unit-mode', value: mode, expected: keptMode }] : []),
-      ];
-    });
-    if (edits.length) store.submit({ kind: 'edit', edits }, false);
-  }
+  // The plan keeps the last name and mode each unit reported.
+  const adoptNames = () => takeReported(store, () => reportedEdits(doc(), observed));
   function renderDetails() {
     const panel = el('detail-content'); panel.replaceChildren();
     const field = active && (active.columnId === 'unit-name' ? nameField : fieldById.get(active.columnId)), unit = active && unitOf(active.rowId);
@@ -219,19 +207,16 @@ try {
     onError: report,
   }));
   store.subscribe(update);
-  let disposed = false, snapshotRequest = 0;
-  function sawRevision(revision: unknown) {
-    if (revision === undefined || revision === store.revision || store.pending.length) return;
-    const request = ++snapshotRequest, epoch = store.epoch;
-    void client.call('snapshot').then(reply => { const next = reply as unknown as Snapshot; if (!disposed && request === snapshotRequest && epoch === store.epoch && next.revision === revision) store.observe(next, epoch); }).catch(() => {});
-  }
+  let disposed = false;
+  // Every open copy of this page, in any window, follows what the others save.
+  const follow = followSaved(store, async () => await client.call('snapshot') as unknown as Snapshot);
   const stop = client.subscribe(state => {
     if (disposed || !state || typeof state !== 'object' || Array.isArray(state)) return;
     const values = (state as { values?: Reply & { revision?: unknown } }).values;
     if (!values || typeof values !== 'object') return;
     adopt(values);
     refreshGrid(); update();
-    sawRevision(values.revision);
+    follow.saw(values.revision);
   });
   const failureOf = (rowId: string, error: unknown) => rowTitle(doc(), observed, rowId) + ': ' + (error instanceof Error ? error.message : 'The FS-HDR did not take the change.');
   function finish(messages: string[]) { busy = false; refreshGrid(); update(); if (messages.length) report([...new Set(messages)].join(' ')); }
@@ -426,5 +411,5 @@ try {
   void followChanges();
   const first = rowsFor(doc(), observed, activeKind(doc())).find(row => row.kind !== 'master');
   if (first) openGrid().select({ rowId: first.id, columnId: activeKind(doc()) === 'setup' ? 'unit-name' : 'row-unit' });
-  window.addEventListener('pagehide', () => { disposed = true; stop(); for (const grid of grids.values()) grid.dispose(); textControls.dispose(); sheetTabs.dispose(); client.dispose(); }, { once: true });
+  window.addEventListener('pagehide', () => { disposed = true; follow.dispose(); stop(); for (const grid of grids.values()) grid.dispose(); textControls.dispose(); sheetTabs.dispose(); client.dispose(); }, { once: true });
 } catch (error) { el('loading').hidden = true; report(error instanceof Error ? error.message : 'FS-HDR could not start.'); saveStatus.textContent = 'Workspace unavailable'; }

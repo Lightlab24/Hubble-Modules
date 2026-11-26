@@ -1,4 +1,4 @@
-import { channelRowId, fieldById, isSimulated, masterRowId, masterSelection, nameField, parseRowId, plannedChannels, rowValues, unitName, type Field, type FsDocument, type SheetKind, type Unit } from './model.js';
+import { channelRowId, fieldById, isSimulated, masterRowId, masterSelection, nameField, parseRowId, plannedChannels, rowValues, unitName, type CellEdit, type Field, type FsDocument, type SheetKind, type Unit } from './model.js';
 import type { Observed, RowObservation, UnitObservation, WireObserved } from './backend.js';
 import type { Choice } from './device.js';
 import { unpackNumbers } from './wire.js';
@@ -33,6 +33,20 @@ export const hostOf = (unit: Unit): string => unit.values['unit-host'] ?? '';
 /** What the worker last saw of this unit, unless its address or Simulated tick has been changed since. */
 export const unitObservation = (observed: Observed, unit: Unit): UnitObservation | undefined => { const seen = observed.units[unit.id]; return seen?.host === hostOf(unit) && !!seen.simulated === isSimulated(unit) ? seen : undefined; };
 export const isLive = (observed: Observed, unit: Unit): boolean => unitObservation(observed, unit)?.state === 'live';
+/**
+ * The plan keeps the last name and mode each unit reported, so the row still has them when the unit is offline, and presets
+ * for it go on the channels it really has. These edits bring the plan up to what the live units report now.
+ */
+export function reportedEdits(doc: FsDocument, observed: Observed): CellEdit[] {
+  return doc.units.flatMap(unit => {
+    const seen = isLive(observed, unit) ? unitObservation(observed, unit)! : undefined, name = seen?.name ?? '', kept = unit.values['unit-name'] ?? '';
+    const mode = seen && !seen.simulated ? seen.modeValue ?? '' : '', keptMode = unit.values['unit-mode'] ?? '';
+    return [
+      ...(name && name !== kept && !unit.values[nameField.id] ? [{ rowId: unit.id, columnId: 'unit-name', value: name, expected: kept }] : []),
+      ...(/^[12]$/.test(mode) && mode !== (keptMode || '1') ? [{ rowId: unit.id, columnId: 'unit-mode', value: mode, expected: keptMode }] : []),
+    ];
+  });
+}
 export const isSimulatedLive = (observed: Observed, unit: Unit): boolean => isLive(observed, unit) && !!unitObservation(observed, unit)?.simulated;
 /** A live row is read from its unit. A planned one has no values, only the choices and ranges its unit will offer. */
 export const rowObservation = (observed: Observed, unit: Unit | undefined, rowId: string): RowObservation | undefined => unit && unitObservation(observed, unit) ? observed.rows[rowId] : undefined;
