@@ -6,7 +6,9 @@ excluded), built on Hubble's shared spreadsheet controls. Camera names, addresse
 staged values and the layout of every tab are saved in the scoped `camera-plan` document.
 
 Requires Hubble 2.0.18 or later with the spreadsheet, custom page, document and alert host
-features listed in `src/manifest.ts`.
+features listed in `src/manifest.ts`. From 0.2.0 that includes module windows
+(`module-page-windows-v1`): Camera Control is live in every HubDash window at once, and every
+window shows the same tab and layout, which are saved with the plan.
 
 ## Build and test
 
