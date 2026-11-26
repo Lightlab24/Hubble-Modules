@@ -19,6 +19,16 @@ Then import `my-device-1.0.0.hubble-module` in HubDash: **Module Connections** >
 
 ## What each kit adds
 
+The next developer kit adds `module-page-windows-v1`, for the Hubble release that shows a
+module's page in a HubDash window of its own. The operator can then have the same page on
+screen twice, and Hubble keeps a page live in one window at a time unless its custom
+section declares `windows: true`. Declare it only when every copy of the page follows what
+the others save. Such a page can also open parts of itself in windows it names with
+`openWindow(view, title)`, read `view` to know which part to draw, and rename its window
+with `setWindowTitle`. Hubble builds without the feature refuse a package that requires
+it, so check the actual host's `describe` response and keep it out of releases meant for
+older hosts. See "Open in several windows" in the custom pages skill reference.
+
 Developer kit **1.8.1-dev.7** brings the SDK and the module-author skill up to Hubble
 2.3.1. Each addition is optional and named by a host feature, so check for it in the
 actual host's `describe` response and keep it out of releases meant for older hosts.

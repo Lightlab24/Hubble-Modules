@@ -37,6 +37,11 @@ For a page that shows and saves the module's own settings, list them on the cust
 restart unless the section declares `restart: 'keep-open'` (`module-frontend-restart-v1`)
 and listens with `onRestart`. Read [custom pages](references/custom-pages.md) before relying
 on either.
+HubDash can show a module's page in a window of its own, so the same page can be on screen
+twice. Hubble keeps a page live in one window at a time unless its custom section declares
+`windows: true` and requires `module-page-windows-v1`. Declare it only when every copy
+follows what the others save. Such a page can also open parts of itself in windows it names
+with `openWindow`. Read [custom pages](references/custom-pages.md) before declaring it.
 A page can also set `pages[].wideIcon`, a wide logo such as a wordmark, with the same file
 rules, requiring `module-page-wide-icons-v1`. Hubble shows it beside the label in the expanded
 sidebar, fitted into 44 by 16 pixels, and `icon` when the sidebar is collapsed.

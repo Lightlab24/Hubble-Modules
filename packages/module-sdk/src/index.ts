@@ -1143,6 +1143,16 @@ export const ModuleManifestSchema = z
                 message:
                   "A page that stays open through a restart requires module-frontend-restart-v1",
               });
+            if (
+              section.windows &&
+              !features.includes("module-page-windows-v1")
+            )
+              ctx.addIssue({
+                code: "custom",
+                path: [...path, "windows"],
+                message:
+                  "A page that opens in several windows requires module-page-windows-v1",
+              });
             if (section.settings) {
               const declared = manifest.settings.filter((field) =>
                 section.settings?.includes(field.id),
