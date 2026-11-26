@@ -1,7 +1,10 @@
 # AJA KUMO
 
-Official module `hubble-aja-kumo`, version **1.0.0**, using stable Hubble module API **1**.
+Official module `hubble-aja-kumo`, version **1.2.0**, using stable Hubble module API **1**.
 AJA KUMO HTTP, cookies, event polling and confirmed crosspoints.
+
+From version **1.2.0** the Router page is live in every HubDash window at once. That needs a Hubble with module windows
+(host feature `module-page-windows-v1`); a Hubble without it refuses this version.
 
 ## Source ownership
 

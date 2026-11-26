@@ -1,7 +1,10 @@
 # Evertz Quartz
 
-Official module `hubble-evertz-quartz`, version **1.0.0**, using stable Hubble module API **1**.
+Official module `hubble-evertz-quartz`, version **1.2.0**, using stable Hubble module API **1**.
 Evertz Quartz TCP protocol, serialized reply matching and link keepalives.
+
+From version **1.2.0** the Router page is live in every HubDash window at once. That needs a Hubble with module windows
+(host feature `module-page-windows-v1`); a Hubble without it refuses this version.
 
 ## Source ownership
 

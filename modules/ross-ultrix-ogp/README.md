@@ -1,7 +1,10 @@
 # Ross Ultrix OGP
 
-Official module `hubble-ross-ultrix-ogp`, version **1.0.1**, using stable Hubble module API **1**.
+Official module `hubble-ross-ultrix-ogp`, version **1.3.0**, using stable Hubble module API **1**.
 Ross Ultrix OGP JSON subscriptions and confirmed crosspoints.
+
+From version **1.3.0** the Router page is live in every HubDash window at once. That needs a Hubble with module windows
+(host feature `module-page-windows-v1`); a Hubble without it refuses this version.
 
 ## Action grouping
 
