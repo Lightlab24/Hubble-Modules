@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { ModuleContext, ModuleInstance } from '@hubble/module-sdk';
+import manifest from '../src/manifest.js';
 import { createBackend } from '../src/backend.js';
-import { defaultDocument, fields, valueOf, type CameraDocument, type Mutation } from '../src/model.js';
+import { activeSheetId, addSheet, clone, defaultDocument, fields, valueOf, viewChange, type CameraDocument, type Mutation } from '../src/model.js';
 import { applyPresetMutation, defaultPresetDocument, inversePreset, presetFields, type PresetDocument, type PresetMutation } from '../src/presets-model.js';
 import { DraftStore, Drafts, followSaved, type Receipt } from '../src/draft-store.js';
 import { fakeCamera } from './fake-camera.js';
@@ -99,6 +100,12 @@ async function twoWindows(t: { after(fn: () => unknown): void }, staged: Record<
   return { h, first, second };
 }
 
+test('Camera Control is declared for several windows', () => {
+  const section = manifest.pages![0]!.sections[0]!;
+  assert.equal('windows' in section && section.windows, true);
+  assert.ok('requiredFeatures' in manifest.host && manifest.host.requiredFeatures?.includes('module-page-windows-v1'));
+});
+
 test('a setting staged in one window shows in the other without reopening it, each window’s next edit lands, and the other window can send it', async t => {
   const { h, first, second } = await twoWindows(t);
   first.edit(cameraId.id, 'C');
@@ -179,6 +186,16 @@ test('a preset made in one window shows in the other, and the other window’s n
   assert.equal(h.presets().presets.find(preset => preset.id === id)?.values[field.id], 'D');
   assert.equal(h.revision('camera-presets'), revision + 1);
   assert.equal(first.refusals + second.refusals, 0);
+  assert.deepEqual([...first.errors, ...second.errors], []);
+});
+
+test('the open tab and column layout are shared, as chosen: a tab opened in one window opens in the other, and nothing is refused', async t => {
+  const { first, second } = await twoWindows(t);
+  first.store.submit(addSheet(first.store.document, 'sheet-lens', 'Lens'));
+  first.store.submit({ kind: 'select-sheet', sheetId: 'sheet-lens' }, false);
+  await until(() => activeSheetId(second.store.document) === 'sheet-lens', 'the second window opens the same tab');
+  second.store.submit(viewChange(second.store.document, { ...clone(second.store.document.view), textSize: 15 }));
+  await until(() => first.store.document.view.textSize === 15, 'the first window takes the second window’s layout');
   assert.deepEqual([...first.errors, ...second.errors], []);
 });
 
