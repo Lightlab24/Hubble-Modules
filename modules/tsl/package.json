@@ -18,7 +18,8 @@
     "build": "hubble-module build .",
     "test": "hubble-module test .",
     "package": "hubble-module build . && hubble-module test . && hubble-module pack . ../../artifacts/hubble-tsl-1.4.3.hubble-module",
-    "preview": "tsx tools/preview.ts"
+    "preview": "tsx tools/preview.ts",
+    "test:ui": "playwright test --config playwright.config.ts"
   },
   "dependencies": {
     "@hubble/module-sdk": "workspace:1.8.0",
@@ -27,7 +28,8 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@hubble/module-tools": "workspace:1.5.0"
+    "@hubble/module-tools": "workspace:1.5.0",
+    "@playwright/test": "1.61.1"
   },
   "description": "Receives TSL tally, shows what a switcher sends, and sets a Ross switcher to send it here"
 }

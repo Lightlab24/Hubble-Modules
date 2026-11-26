@@ -7,7 +7,7 @@ import {
   showToast,
   type MountedControl,
 } from "@hubble/module-sdk/controls";
-import type { LiveReply, PageSnapshot, TallyRow } from "./page.js";
+import type { LiveReply, PageSnapshot, SetupSaved, SharedReply, TallyRow } from "./page.js";
 import {
   defaultSwitcherDocument,
   DeviceNameSchema,
@@ -59,7 +59,14 @@ const FIELD_ELEMENTS: Record<SentField, string> = {
   oneSecond: "one-second",
   header: "header",
 };
-type Contact = { reading: SwitcherReading | null; readAt: number | null; readError: string | null };
+type Contact = { reading: SwitcherReading | null; readAt: number | null; readError: string | null; stamp?: string };
+const sameValue = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+/**
+ * A change to the switcher setup this copy has not saved yet. One the page made by itself, such
+ * as taking in the device after Read switcher, carries the value it started from: it lands only
+ * where the setup still has that value, so it never undoes another window's change.
+ */
+type Staged = { value: unknown; auto: boolean; expected?: unknown };
 
 function toast(kind: "failure" | "success", title: string) {
   // Hubble's own fading toast, so a message never moves the page.
@@ -92,8 +99,13 @@ try {
   const receiver: ReceiverSettings = structuredClone(snapshot.receiver);
   /** What the module runs with. */
   let saved: ReceiverSettings = structuredClone(snapshot.receiver);
-  let switcher: SwitcherDocument = structuredClone(snapshot.switcher.value);
+  /** The switcher setup as saved, as far as this copy knows. */
+  let base: SwitcherDocument = structuredClone(snapshot.switcher.value);
   let revision = snapshot.switcher.revision;
+  /** The setup as shown: what is saved, with this copy's changes on their way on top. */
+  let switcher: SwitcherDocument = structuredClone(base);
+  /** Which reading of the switcher this copy shows, from any window. */
+  let stamp = snapshot.stamp;
   /** A reading speaks for the page's device only while that is still the device it found. */
   const own = (from: SwitcherReading | null): SwitcherReading | null =>
     from?.mine && from.mine.name !== deviceIdentity(switcher) && from.mine.name !== switcher.name ? { ...from, mine: null } : from;
@@ -331,11 +343,15 @@ try {
       try {
         const reply = (await client.call("live", { after: live.version, run: live.run })) as unknown as LiveReply;
         if (disposed) return;
+        // Another run: the module restarted, perhaps for a setting another window saved.
+        const restarted = reply.run !== live.run;
         if (reply.full) rows.clear();
         for (const key of reply.removed) rows.delete(key);
         for (const row of reply.rows) rows.set(row.key, row);
         live = reply;
         routingView?.live(reply.routing);
+        followSetup();
+        if (restarted) readAgain();
         scheduleTally();
       } catch {
         if (disposed) return;
@@ -370,15 +386,19 @@ try {
     const versionChanged = fresh.receiver.protocol !== saved.protocol;
     saved = structuredClone(fresh.receiver);
     Object.assign(receiver, fresh.receiver, waiting);
-    // The switcher setup is the page's own while a change to it is still being saved.
-    if (!saving && !unsaved) {
-      switcher = structuredClone(fresh.switcher.value);
+    // A change of this copy's own on its way brings back what is saved anyway, with it on top.
+    if (!saving && !pending.size) {
+      base = structuredClone(fresh.switcher.value);
       revision = fresh.switcher.revision;
+      restack();
     }
-    reading = own(fresh.reading);
-    readAt = fresh.readAt;
-    readError = fresh.readError;
-    routeAddress = fresh.routeAddress;
+    // A reading belongs to the address it came from.
+    const here = fresh.switcher.value.host === switcher.host;
+    reading = here ? own(fresh.reading) : null;
+    readAt = here ? fresh.readAt : null;
+    readError = here ? fresh.readError : null;
+    stamp = fresh.stamp;
+    if (here) routeAddress = fresh.routeAddress;
     rows.clear();
     for (const row of fresh.live.rows) rows.set(row.key, row);
     live = fresh.live;
@@ -387,22 +407,39 @@ try {
     redraw();
   };
   /** Waits for the module to answer again with these settings, then takes what it says. */
-  const back = async (values: Partial<ReceiverSettings>) => {
+  const back = async (values: Partial<ReceiverSettings>, before: string) => {
     const deadline = Date.now() + RESTART_WAIT_MS;
+    let latest: PageSnapshot | null = null;
     for (;;) {
       const fresh = (await client.call("snapshot").catch((error: unknown) => {
         if (disposed) throw error;
         return null;
       })) as unknown as PageSnapshot | null;
+      if (fresh) latest = fresh;
       if (fresh && Object.entries(values).every(([id, value]) => fresh.receiver[id as keyof ReceiverSettings] === value)) return take(fresh);
-      if (Date.now() > deadline) throw new Error("The listener did not come back with these settings");
+      if (Date.now() > deadline) {
+        // Another window saved one of these again after this one, and the module came back with
+        // that: the newest change stands, and this copy shows it.
+        if (latest && latest.live.run !== before) return take(latest);
+        throw new Error("The listener did not come back with these settings");
+      }
       await pause(100);
     }
   };
+  /** How long a settings save has waited for a switcher request another window has under way. */
+  let waitedForSwitcher = 0;
   const flushSettings = () => {
     clearTimeout(saveTimer);
     saveTimer = undefined;
     if (held || restarting || disposed) return;
+    // The restart would cut short a switcher request from another window: it goes first, unless
+    // it takes far longer than any request should.
+    if (live.setup?.busy && waitedForSwitcher < 150 && Object.keys(waiting).length) {
+      waitedForSwitcher += 1;
+      saveTimer = setTimeout(flushSettings, 200);
+      return;
+    }
+    waitedForSwitcher = 0;
     // A change put back before it was saved is nothing to save, and Hubble would not restart for it.
     const values = Object.fromEntries(
       Object.entries(waiting).filter(([id, value]) => saved[id as keyof ReceiverSettings] !== value),
@@ -412,10 +449,11 @@ try {
     restarting = true;
     say("Saving, then restarting the listener…");
     drawSwitcher();
+    const before = live.run;
     void (async () => {
       try {
         await client.saveSettings(values);
-        await back(values);
+        await back(values, before);
         say("");
       } catch (error) {
         if (disposed) return;
@@ -456,16 +494,24 @@ try {
     if (now) flushSettings();
     else saveTimer = setTimeout(flushSettings, SETTINGS_SAVE_DELAY_MS);
   };
-  // The module restarted for a reason of its own, such as a save made in Module Connections.
-  client.onRestart(() => {
-    if (restarting || disposed) return;
-    void ask("snapshot").then(
-      (fresh) => {
-        if (!disposed && !restarting) take(fresh as PageSnapshot);
-      },
-      () => undefined,
-    );
-  });
+  // The module restarted for a reason of its own, such as a save made in Module Connections or in
+  // another window. Hubble says so, and the next live answer comes from another run.
+  let readingAgain = false;
+  const readAgain = () => {
+    if (restarting || disposed || readingAgain) return;
+    readingAgain = true;
+    void ask("snapshot")
+      .then(
+        (fresh) => {
+          if (!disposed && !restarting) take(fresh as PageSnapshot);
+        },
+        () => undefined,
+      )
+      .finally(() => {
+        readingAgain = false;
+      });
+  };
+  client.onRestart(readAgain);
   /** A box keeps what was typed and turns red when it can't be used; nothing is saved until it can. */
   const shown: (() => void)[] = [];
   /** Shows a value in its box or list again, unless that is where the person is working. */
@@ -476,16 +522,22 @@ try {
       input.value = value();
     };
     shown.push(write);
+    // Left without a change: it shows what is saved now, which another window may have changed meanwhile.
+    input.addEventListener("blur", () => setTimeout(write));
     write();
+  };
+  /** The Setup tab drawn again from what the page holds now, leaving the box in use alone. */
+  const redrawSetup = () => {
+    drawSwitcher();
+    fillSendTo();
+    for (const control of controls) control.refresh();
+    for (const write of shown) write();
   };
   /** Everything drawn again from what the page holds now. */
   const redraw = () => {
     drawStatus();
-    drawSwitcher();
     drawTally();
-    fillSendTo();
-    for (const control of controls) control.refresh();
-    for (const write of shown) write();
+    redrawSetup();
   };
   const box = <T>(id: string, read: (raw: string) => T | undefined, write: (value: T) => void) => {
     const input = el<HTMLInputElement>(id);
@@ -548,31 +600,117 @@ try {
   });
 
   // ----- Setup: the switcher's device. Saved with the workspace; sent only on Send to switcher. -----
+  // The page can be open in several windows. Each copy saves only the fields it changed, which the
+  // backend puts onto the setup as saved now, and each follows what the others save.
   let saving: Promise<void> | undefined;
-  let unsaved = false;
+  /** This copy's changes not saved yet, and the ones on their way. */
+  let pending = new Map<keyof SwitcherDocument, Staged>();
+  let sending = new Map<keyof SwitcherDocument, Staged>();
+  /** Counts this copy's own changes, so a read that crossed one is not taken in over it. */
+  let edited = 0;
+  /** The setup as shown again: what is saved, with this copy's changes on top. */
+  const restack = () => {
+    const next: Record<string, unknown> = { ...base };
+    for (const [key, entry] of [...sending, ...pending])
+      if (entry.value === undefined || entry.value === null) delete next[key];
+      else next[key] = entry.value;
+    switcher = next as SwitcherDocument;
+  };
   const saveSwitcher = (): Promise<void> => {
-    unsaved = true;
     saving ??= (async () => {
       try {
-        while (unsaved && !disposed) {
-          unsaved = false;
-          const value = structuredClone(switcher);
-          let reply = (await ask("save-switcher", { value, revision })) as unknown as { status: string; revision: string | null };
-          // Someone else saved in between. This edit is the newer one, so it goes on top.
-          if (reply.status === "conflict")
-            reply = (await ask("save-switcher", { value, revision: reply.revision })) as unknown as typeof reply;
-          if (reply.status !== "saved") throw new Error("The switcher setup changed elsewhere. Try again");
-          revision = reply.revision;
+        while (pending.size && !disposed) {
+          sending = pending;
+          pending = new Map();
+          const change: Record<string, unknown> = {};
+          const expected: Record<string, unknown> = {};
+          for (const [key, entry] of sending) {
+            change[key] = entry.value ?? null;
+            if (entry.auto) expected[key] = entry.expected ?? null;
+          }
+          try {
+            const reply = (await ask("save-switcher", { change, expected })) as SetupSaved;
+            base = reply.value;
+            revision = reply.revision;
+          } catch (error) {
+            if (disposed) return;
+            // Refused: only this change is put back, and the copy takes what is saved now, so its
+            // next change is not refused for the same reason.
+            const fresh = (await ask("saved").catch(() => null)) as SharedReply | null;
+            if (fresh) {
+              base = fresh.switcher.value;
+              revision = fresh.switcher.revision;
+            }
+            say(text(error, "The switcher setup could not be saved"), true);
+            toast("failure", text(error, "The switcher setup could not be saved"));
+          }
+          sending = new Map();
+          restack();
+          redrawSetup();
         }
-      } catch (error) {
-        // The value stays as the operator left it; the next edit tries again.
-        say(text(error, "The switcher setup could not be saved"), true);
-        toast("failure", text(error, "The switcher setup could not be saved"));
       } finally {
         saving = undefined;
       }
+      followSetup();
     })();
     return saving;
+  };
+  /**
+   * Puts a whole new setup on what this copy shows, as changes to the fields that differ, and
+   * saves them. `auto` is a change the page makes by itself: see `Staged`.
+   */
+  const stage = (next: SwitcherDocument, auto: boolean) => {
+    for (const key of new Set([...Object.keys(switcher), ...Object.keys(next)]) as Set<keyof SwitcherDocument>) {
+      if (sameValue(switcher[key], next[key])) continue;
+      const was = pending.get(key) ?? sending.get(key);
+      // A field this copy's operator changed and is still saving stays theirs, whatever comes on top.
+      pending.set(
+        key,
+        auto && (!was || was.auto)
+          ? { value: next[key], auto: true, expected: was ? was.expected : switcher[key] }
+          : { value: next[key], auto: false },
+      );
+    }
+    switcher = next;
+    edited += 1;
+    void saveSwitcher();
+  };
+  /** Reads in what another window saved or read from the switcher. Changes of this copy's own win. */
+  let followingSetup = false;
+  const followSetup = () => {
+    const shared = live.setup;
+    if (!shared || disposed || followingSetup || restarting) return;
+    const setupBehind = shared.revision !== revision && !saving && !pending.size;
+    const readingBehind = shared.reading !== stamp && !busy && !picking;
+    if (!setupBehind && !readingBehind) return;
+    followingSetup = true;
+    const at = edited;
+    void (ask("saved") as Promise<SharedReply>)
+      .then((fresh) => {
+        if (disposed) return;
+        if (!saving && !pending.size && edited === at) {
+          base = fresh.switcher.value;
+          revision = fresh.switcher.revision;
+          restack();
+        }
+        if (!busy && !picking) {
+          stamp = fresh.stamp;
+          // A reading belongs to the address it came from: not one this copy is changing.
+          if (fresh.switcher.value.host === switcher.host) {
+            reading = own(fresh.reading);
+            readAt = fresh.readAt;
+            readError = fresh.readError;
+            routeAddress = fresh.routeAddress;
+          }
+        }
+        redrawSetup();
+        // Something newer may have been announced while this was read.
+        setTimeout(followSetup, 50);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        followingSetup = false;
+      });
   };
   const sendToSelect = el<HTMLSelectElement>("send-to");
   const fillSendTo = () => {
@@ -600,11 +738,10 @@ try {
       routeAddress = null;
       fillSendTo();
     }
-    switcher = { ...switcher, ...change };
     // A change made while a picked device is read wins over what the switcher says.
     if (picking) Object.assign(picking.edits, change);
+    stage({ ...switcher, ...change }, false);
     drawSwitcher();
-    void saveSwitcher();
   };
   /** Version, transport and port go together: changing one stops all three following This computer. */
   const setFormat = (change: Partial<Pick<SwitcherDocument, "protocol" | "transport" | "port">>) => {
@@ -614,8 +751,8 @@ try {
   /** The page's setup becomes the device as the switcher has it, keeping what was changed here and not sent. */
   const load = (settings: SwitcherDeviceSettings, edits: Partial<SwitcherDocument>) => {
     const automatic = switcher.sendTo === "" && settings.ip === routeAddress;
-    switcher = { ...documentFromDevice(switcher, settings), ...(automatic ? { sendTo: "" } : {}), ...edits };
-    void saveSwitcher();
+    // Taken in by the page itself: where another window changed a field meanwhile, theirs stays.
+    stage({ ...documentFromDevice(switcher, settings), ...(automatic ? { sendTo: "" } : {}), ...edits }, true);
   };
   /** The page's changes the switcher doesn't have, as setup values. */
   const unsentEdits = (): Partial<SwitcherDocument> => {
@@ -700,6 +837,7 @@ try {
       const reply = (await client.call(command, value as never)) as unknown as Contact;
       readAt = reply.readAt;
       readError = reply.readError;
+      if (reply.stamp) stamp = reply.stamp;
       onReply?.(reply);
       reading = own(reply.reading);
       say(done(reply.readAt ?? Date.now()));
@@ -718,7 +856,7 @@ try {
       el(button).removeAttribute("aria-busy");
       if (!routeAddress && switcher.host) {
         // Which of this computer's addresses reaches the switcher: worked out by the backend.
-        const fresh = (await client.call("snapshot").catch(() => null)) as unknown as PageSnapshot | null;
+        const fresh = (await client.call("saved").catch(() => null)) as unknown as SharedReply | null;
         routeAddress = fresh?.routeAddress ?? null;
       }
       redraw();
@@ -743,10 +881,9 @@ try {
       if (!(await dropUnsent(`Edit ${row.name}`)) || !idle() || !reading) return;
       const edits: Partial<SwitcherDocument> = {};
       picking = { name: row.name, edits };
-      switcher = documentFromRow(switcher, row);
+      stage(documentFromRow(switcher, row), false);
       reading = { ...reading, mine: { ...row, settings: null } };
       redraw();
-      void saveSwitcher();
       try {
         await contact("read", `Reading ${row.name}…`, (at) => `Read ${row.name} ${clock(at)}`, "read-switcher", {}, (reply) => {
           picking = null;
@@ -784,10 +921,9 @@ try {
       let name = "HUBBLE";
       for (let n = 2; used.has(name); n++) name = `HUBBLE${n}`;
       const { protocol, transport, port: listenPort } = receiver;
-      switcher = { ...defaultSwitcherDocument(), host: switcher.host, name, protocol, transport, port: listenPort };
+      stage({ ...defaultSwitcherDocument(), host: switcher.host, name, protocol, transport, port: listenPort }, false);
       if (reading) reading = { ...reading, mine: null };
       redraw();
-      void saveSwitcher();
       say(`New device ${name} · Send to switcher adds it`);
     });
   });
@@ -826,12 +962,10 @@ try {
         adopt,
         receiver: { protocol, transport, port: listenPort },
       }, (reply) => {
-        // The device is now known on the switcher by the name it was sent with.
+        // The device is now known on the switcher by the name it was sent with. Saved by the page
+        // itself: if another window picked another device meanwhile, that one stays.
         const sent = reply.reading?.mine;
-        if (sent && switcher.device !== sent.name) {
-          switcher = { ...switcher, device: sent.name };
-          void saveSwitcher();
-        }
+        if (sent && switcher.device !== sent.name) stage({ ...switcher, device: sent.name }, true);
       });
     });
   });

@@ -16,6 +16,7 @@ import {
   type Mapping,
   type Route,
 } from "./routing-engine.js";
+import { applyRoutingChange, type RoutingChange } from "./changes.js";
 
 /** The camera mappings: saved with the workspace, so they travel with it. */
 export const ROUTING_DOCUMENT_ID = "routing";
@@ -23,8 +24,11 @@ export const ROUTING_DOCUMENT_ID = "routing";
 const SELF = "self";
 const COALESCE_MS = 10;
 const REFRESH_MS = 1000;
-/** How often the saved cameras are read again, for a change made elsewhere: an import, another window. */
+/** How often the saved cameras are read again, for a change made outside this module, such as an import. */
 const DOCUMENT_MS = 2000;
+/** A save that lost a race is put onto what won it and tried again, this many times in all. */
+const SAVE_ATTEMPTS = 8;
+const MAX_CAMERAS = 512;
 
 export const RoutingRowSchema = z.strictObject({
   id: z.string().regex(/^[A-Za-z0-9_-]{1,96}$/u),
@@ -70,9 +74,30 @@ export interface RoutingLive {
 export interface RoutingSnapshot extends RoutingLive {
   readonly rows: readonly RoutingRow[];
 }
-export type RoutingSave =
-  | { status: "saved"; rows: RoutingRow[]; revision: string | null }
-  | { status: "conflict"; rows: RoutingRow[]; revision: string | null };
+const RowIdSchema = RoutingRowSchema.shape.id;
+const ROW_FIELDS = Object.keys(RoutingRowSchema.shape).filter((key) => key !== "id") as [
+  Exclude<keyof RoutingRow, "id">,
+  ...Exclude<keyof RoutingRow, "id">[],
+];
+/** One copy's change to the cameras. Values are checked on the list it makes, as saved. */
+export const RoutingChangeSchema = z.strictObject({
+  removed: z.array(RowIdSchema).max(MAX_CAMERAS).default([]),
+  added: z
+    .array(z.strictObject({ row: RoutingRowSchema, after: RowIdSchema.nullable() }))
+    .max(MAX_CAMERAS)
+    .default([]),
+  changed: z
+    .array(z.strictObject({ id: RowIdSchema, fields: z.partialRecord(z.enum(ROW_FIELDS), z.json()) }))
+    .max(MAX_CAMERAS)
+    .default([]),
+});
+/** A saved change: the cameras as saved now, and the cameras it changed that were deleted elsewhere. */
+export interface RoutingSave {
+  readonly status: "saved";
+  readonly rows: RoutingRow[];
+  readonly revision: string | null;
+  readonly missing: string[];
+}
 
 const toMapping = (row: RoutingRow): Mapping => ({
   id: row.id,
@@ -118,6 +143,9 @@ export class TslRouting {
   /** Why the saved cameras couldn't be read yet. Tally never waits on it, and reads try again. */
   private loadError = "";
   private loaded = false;
+  /** Saves of this module's own under way, and how many times the saved cameras were taken in. */
+  private saving = 0;
+  private adopted = 0;
   private readonly file: string | undefined;
 
   constructor(
@@ -205,20 +233,19 @@ export class TslRouting {
 
   /** Takes in cameras saved elsewhere. This module's own saves already hold that revision. */
   private async reread(): Promise<void> {
-    if (this.closed || this.reading) return;
+    // A read that crosses a save of this module's own may answer with what was saved before it.
+    if (this.closed || this.reading || this.saving) return;
     this.reading = true;
+    const adopted = this.adopted;
     try {
       const saved = await this.documents().read(ROUTING_DOCUMENT_ID, this.controller.signal);
-      if (this.closed) return;
+      if (this.closed || this.saving || this.adopted !== adopted) return;
       const first = !this.loaded;
       this.loaded = true;
       this.loadError = "";
       if (saved.revision === this.revision && !first) return;
       const parsed = RoutingDocumentSchema.safeParse(saved.value);
-      this.rows = parsed.success ? parsed.data.rows : [];
-      this.revision = saved.revision;
-      this.engine = this.build(this.engine);
-      this.feed();
+      this.adopt(parsed.success ? parsed.data.rows : [], saved.revision);
     } catch (error) {
       // The next read tries again.
       if (!this.loaded) this.loadError = unreadable(error);
@@ -363,34 +390,63 @@ export class TslRouting {
     return save;
   }
 
-  /** Saves the camera mappings. A save that lost a race hands back what is saved now. */
-  async save(rows: readonly RoutingRow[], revision: string | null, signal: AbortSignal): Promise<RoutingSave> {
-    const value = RoutingDocumentSchema.parse({ rows });
-    if (new Set(value.rows.map((row) => row.id)).size !== value.rows.length)
-      throw new Error("Two cameras have the same ID");
+  /** The saved cameras, as read or written here: routing follows them at once. */
+  private adopt(rows: RoutingRow[], revision: string | null): void {
+    if (this.closed) return;
+    this.adopted++;
+    this.rows = rows;
+    this.revision = revision;
+    this.loaded = true;
+    this.loadError = "";
+    this.engine = this.build(this.engine);
+    this.feed();
+  }
+
+  /**
+   * Saves one copy's change to the cameras onto what is saved now. A save that lost a race to
+   * another window is put onto what won it and tried again, so neither undoes the other.
+   */
+  async save(change: RoutingChange, signal: AbortSignal): Promise<RoutingSave> {
+    this.saving++;
     try {
-      const saved = await this.documents().write(
-        { id: ROUTING_DOCUMENT_ID, revision },
-        value as unknown as ModuleJsonValue,
-        signal,
-      );
-      const stored = RoutingDocumentSchema.parse(saved.value);
-      if (!this.closed) {
-        this.rows = stored.rows;
-        this.revision = saved.revision;
-        this.engine = this.build(this.engine);
-        this.feed();
-      }
-      return { status: "saved", rows: stored.rows, revision: saved.revision };
-    } catch (error) {
-      if (!(error instanceof ModuleDocumentConflictError)) throw error;
-      const current = RoutingDocumentSchema.safeParse(error.document.value);
-      return {
-        status: "conflict",
-        rows: current.success ? current.data.rows : [],
-        revision: error.document.revision,
-      };
+      return await this.saveOnto(change, signal);
+    } finally {
+      this.saving--;
     }
+  }
+  private async saveOnto(change: RoutingChange, signal: AbortSignal): Promise<RoutingSave> {
+    if (!this.loaded) {
+      const saved = await this.documents().read(ROUTING_DOCUMENT_ID, signal);
+      const parsed = RoutingDocumentSchema.safeParse(saved.value);
+      this.adopt(parsed.success ? parsed.data.rows : [], saved.revision);
+    }
+    let current = { rows: this.rows, revision: this.revision };
+    for (let attempt = 0; attempt < SAVE_ATTEMPTS; attempt++) {
+      const { rows, missing } = applyRoutingChange(current.rows, change);
+      if (rows.length > MAX_CAMERAS) throw new Error(`A routing sheet holds at most ${MAX_CAMERAS} cameras`);
+      if (new Set(rows.map((row) => row.id)).size !== rows.length) throw new Error("Two cameras have the same ID");
+      const value = RoutingDocumentSchema.parse({ rows });
+      // Nothing to write: already saved, as when a save is sent again after a restart.
+      if (JSON.stringify(value.rows) === JSON.stringify(current.rows))
+        return { status: "saved", rows: current.rows, revision: current.revision, missing };
+      try {
+        const saved = await this.documents().write(
+          { id: ROUTING_DOCUMENT_ID, revision: current.revision },
+          value as unknown as ModuleJsonValue,
+          signal,
+        );
+        const stored = RoutingDocumentSchema.parse(saved.value);
+        this.adopt(stored.rows, saved.revision);
+        return { status: "saved", rows: stored.rows, revision: saved.revision, missing };
+      } catch (error) {
+        if (!(error instanceof ModuleDocumentConflictError)) throw error;
+        // Another window saved first: this change goes onto what it saved.
+        const parsed = RoutingDocumentSchema.safeParse(error.document.value);
+        current = { rows: parsed.success ? parsed.data.rows : [], revision: error.document.revision };
+        this.adopt(current.rows, current.revision);
+      }
+    }
+    throw new Error("The camera mappings kept changing in another window. Try again");
   }
 
   live(): RoutingLive {

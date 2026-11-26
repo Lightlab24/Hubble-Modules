@@ -7,7 +7,7 @@
 import dgram from "node:dgram";
 import net from "node:net";
 import { createServer } from "node:http";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { ModuleContext, ModuleInstance } from "@hubble/module-sdk";
@@ -15,7 +15,7 @@ import { createTslModule } from "../src/module.js";
 import { PAGE_ID, PAGE_SECTION_ID, PAGE_SETTINGS, localAddresses } from "../src/page.js";
 import { defaultSwitcherDocument, SWITCHER_DOCUMENT_ID } from "../src/setup.js";
 import { defaultRoutingDocument, ROUTING_DOCUMENT_ID, type RoutingRow } from "../src/routing.js";
-import { FAKE_DRIVER, FakeSwitcher } from "../test/fixtures/fake-switcher.js";
+import { FAKE_DRIVER, FakeSwitcher, realDevices } from "../test/fixtures/fake-switcher.js";
 import { packet31, packet50, stream50 } from "../test/fixtures/tsl-packets.js";
 
 const assets = process.env.TSL_RENDERER_ASSETS || "/Applications/Hubble.app/Contents/Library/HubbleAgent/renderer/main_window/assets";
@@ -70,7 +70,7 @@ setInterval(() => {
 }, 1000).unref();
 
 // ----- A pretend Hubble: settings, the saved document, and a restart when a setting is saved. -----
-const settings: Record<string, unknown> = {
+const startingSettings = (): Record<string, unknown> => ({
   name: "TSL Tally Main",
   routingPeer: "",
   protocol: process.env.TSL_PREVIEW_PROTOCOL || "3.1",
@@ -79,13 +79,15 @@ const settings: Record<string, unknown> = {
   port: Number(process.env.TSL_PREVIEW_LISTEN_PORT || 45727),
   sourceAddress: "",
   staleAfterMs: 0,
-};
-let saved = { id: SWITCHER_DOCUMENT_ID, version: 1, revision: null as string | null, value: { ...defaultSwitcherDocument(), host: realSwitcher || (process.env.TSL_PREVIEW_EMPTY ? "" : `127.0.0.1:${fake.port}`) } };
+});
+const settings: Record<string, unknown> = startingSettings();
+const startingSwitcher = () => ({ id: SWITCHER_DOCUMENT_ID, version: 1, revision: null as string | null, value: { ...defaultSwitcherDocument(), host: realSwitcher || (process.env.TSL_PREVIEW_EMPTY ? "" : `127.0.0.1:${fake.port}`) } });
+let saved = startingSwitcher();
 // The camera mappings. TSL_PREVIEW_CAMERAS=n starts with n cameras on the pretend router,
 // TSL addresses 1..n to output 2 from sources 21.., as the live workspace has them.
 const ROUTER_BINDING = "preview-router";
 const cameraCount = Number(process.env.TSL_PREVIEW_CAMERAS || 0);
-let routingSaved = {
+const startingRouting = () => ({
   id: ROUTING_DOCUMENT_ID,
   version: 1,
   revision: null as string | null,
@@ -104,7 +106,8 @@ let routingSaved = {
       level: 1,
     })),
   } as unknown,
-};
+});
+let routingSaved = startingRouting();
 // A pretend router module, reached through module exchange as a real one is. Routes are recorded.
 const routes: { at: number; source: number; destination: number; level: number }[] = [];
 const routerPeer = { kind: "connection" as const, connectionId: "33333333-3333-4333-8333-333333333333", moduleId: "hubble-pretend-router" };
@@ -126,8 +129,15 @@ let running = new AbortController();
 let generation = 0;
 const logs: unknown[] = [];
 let state: unknown = null;
+/** Page commands running now: Hubble takes a document save only from inside one. */
+let commands = 0;
+/** What each saved document went through, for checks: writes that landed, and saves refused as stale. */
+const counts = { switcherWrites: 0, routingWrites: 0, switcherConflicts: 0, routingConflicts: 0, settingsSaves: 0 };
+/** How many times the open pages asked each command, for checks that an idle page asks nothing more. */
+const calls: Record<string, number> = {};
 const services = {
   async request(_service: string, _version: number, input: { method: string; id?: string; expectedRevision?: string | null; value?: typeof saved.value }) {
+    if (input.method === "write" && !commands) throw new Error("Document edits require an active command");
     if (input.id === ROUTING_DOCUMENT_ID) {
       if (input.method === "write") {
         await holdSaves;
@@ -135,7 +145,11 @@ const services = {
           failNextSave = false;
           throw new Error("The workspace refused this save.");
         }
-        if (input.expectedRevision !== routingSaved.revision) return { status: "conflict", document: routingSaved };
+        if (input.expectedRevision !== routingSaved.revision) {
+          counts.routingConflicts++;
+          return { status: "conflict", document: routingSaved };
+        }
+        counts.routingWrites++;
         routingSaved = { ...routingSaved, revision: `rev-${++writes}`, value: structuredClone(input.value as unknown) };
       }
       return { status: "document", document: routingSaved };
@@ -146,7 +160,11 @@ const services = {
         failNextSave = false;
         throw new Error("The workspace refused this save.");
       }
-      if (input.expectedRevision !== saved.revision) return { status: "conflict", document: saved };
+      if (input.expectedRevision !== saved.revision) {
+        counts.switcherConflicts++;
+        return { status: "conflict", document: saved };
+      }
+      counts.switcherWrites++;
       saved = { ...saved, revision: `rev-${++writes}`, value: structuredClone(input.value!) };
     }
     return { status: "document", document: saved };
@@ -203,40 +221,47 @@ const startInstance = async () => {
 };
 await startInstance();
 
-/** A saved setting: Hubble stops the run, starts the next with the new values, and says so. */
-let noticeDue = false;
-const restartWith = async (values: Record<string, unknown>) => {
-  Object.assign(settings, values);
-  restartingNow = true;
-  running.abort(new Error("Module is restarting"));
-  running = new AbortController();
-  try {
-    await instance.dispose();
-    if (settingsDelayMs) await new Promise((resolve) => setTimeout(resolve, settingsDelayMs));
-    await startInstance();
-  } finally {
-    restartingNow = false;
-  }
-};
-const notice = () => {
-  if (!noticeDue || restartingNow) return {};
-  noticeDue = false;
-  return { restarted: true };
+/** A saved setting: Hubble stops the run and starts the next with the new values, one restart at a time. */
+let restarts: Promise<void> = Promise.resolve();
+const restartWith = (values: Record<string, unknown>, between?: () => Promise<void>) => {
+  const restart = restarts.then(async () => {
+    Object.assign(settings, values);
+    restartingNow = true;
+    running.abort(new Error("Module is restarting"));
+    running = new AbortController();
+    try {
+      await instance.dispose();
+      await between?.();
+      if (settingsDelayMs) await new Promise((resolve) => setTimeout(resolve, settingsDelayMs));
+      await startInstance();
+    } finally {
+      restartingNow = false;
+    }
+  });
+  restarts = restart.catch(() => undefined);
+  return restart;
 };
 
 const manifest = JSON.parse(await readFile(path.resolve("dist/hubble-module.json"), "utf8"));
 const section = manifest.pages[0].sections[0] as { commands: { id: string }[]; settings?: string[] };
 const declared = new Set<string>(section.commands.map((command) => command.id));
 const pagePath = "/api/module-pages/" + "a".repeat(43);
-const html = `<!doctype html><html lang="en"><meta charset="utf-8"><title>TSL Tally preview</title><style>html,body{margin:0;height:100%;overflow:hidden;background:#060606}iframe{display:block;width:100%;height:100dvh;border:0}</style><iframe title="TSL Tally" sandbox="allow-scripts" src="${pagePath}/ui/index.html"></iframe><script>
-let port; window.addEventListener('message', event => {
+// Each address opened is one copy of the page, as each HubDash window is: its own frame and its
+// own bridge to the one running module. Every copy hears of a restart by itself, as each HubDash
+// window does: it sees the module's run change, waits until the module answers, then tells its page.
+const html = () => `<!doctype html><html lang="en"><meta charset="utf-8"><title>TSL Tally preview</title><style>html,body{margin:0;height:100%;overflow:hidden;background:#060606}iframe{display:block;width:100%;height:100dvh;border:0}</style><iframe title="TSL Tally" sandbox="allow-scripts" src="${pagePath}/ui/index.html"></iframe><script>
+let port, told = ${generation};
+const tell = (generation) => {
+  if (typeof generation !== 'number' || generation === told) return;
+  told = generation; window.__restarts = (window.__restarts || 0) + 1; port?.postMessage({ type: 'restarted' });
+};
+setInterval(async () => { try { const value = await (await fetch('/__generation')).json(); if (!value.restarting) tell(value.generation); } catch {} }, 150);
+window.addEventListener('message', event => {
   const frame=document.querySelector('iframe');if(event.source!==frame.contentWindow||event.data?.type!=='hubble.module.frontend.ready.v1')return;
   window.__loads=(window.__loads||0)+1;port?.close();const channel=new MessageChannel();port=channel.port1;
   port.onmessage=async event=>{const message=event.data;try{const response=await fetch('/__rpc',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(message)});const value=await response.json();
     port.postMessage(value.error?{type:'error',id:message.id,message:value.error}:{type:'result',id:message.id,value:value.result});
-    // A saved setting restarts the module. The page asked to stay open, so Hubble keeps it and
-    // tells it once the module answers again. So does this.
-    if(value.restarted){window.__restarts=(window.__restarts||0)+1;port.postMessage({type:'restarted'});}}catch{port.postMessage({type:'error',id:message.id,message:'Preview bridge disconnected'});}};
+    if(!value.restarting)tell(value.generation);}catch{port.postMessage({type:'error',id:message.id,message:'Preview bridge disconnected'});}};
   port.start();frame.contentWindow.postMessage({type:'hubble.module.frontend.connect.v1',id:event.data.id},'*',[channel.port2]);
 });
 </script></html>`;
@@ -256,6 +281,29 @@ const server = createServer(async (request, response) => {
       const chunks: Buffer[] = [];
       for await (const chunk of request) chunks.push(Buffer.from(chunk));
       const input = JSON.parse(Buffer.concat(chunks).toString() || "{}");
+      if (url.pathname === "/__reset") {
+        // Everything as it was when the preview started: what is saved, the pretend switcher's
+        // devices, and a fresh run of the module with nothing remembered on this computer.
+        releaseSaves?.();
+        holdSaves = releaseSaves = undefined;
+        failNextSave = failNextSettings = false;
+        settingsDelayMs = 0;
+        fake.release();
+        fake.options = { chatter: true };
+        fake.devices = realDevices();
+        saved = startingSwitcher();
+        routingSaved = startingRouting();
+        routes.length = 0;
+        routerReady = true;
+        for (const key of Object.keys(counts) as (keyof typeof counts)[]) counts[key] = 0;
+        for (const key of Object.keys(calls)) delete calls[key];
+        for (const key of Object.keys(settings)) delete settings[key];
+        await restartWith(startingSettings(), async () => {
+          await rm(path.join(runtimeDirectory, "page-state.json"), { force: true });
+          await rm(path.join(runtimeDirectory, "routing-following.json"), { force: true });
+        });
+        return send({ reset: true, generation });
+      }
       if (url.pathname === "/__simulate") {
         // Hold, release or fail saves, and make the pretend switcher misbehave.
         if (input.holdSaves && !holdSaves) holdSaves = new Promise((resolve) => (releaseSaves = resolve));
@@ -271,21 +319,23 @@ const server = createServer(async (request, response) => {
         if (Array.isArray(input.routingRows))
           // Cameras saved by something other than the page, as an import or a migration saves them.
           routingSaved = { ...routingSaved, revision: `rev-${++writes}`, value: { rows: input.routingRows } };
+        if (input.switcherDocument && typeof input.switcherDocument === "object")
+          // The switcher setup changed by something other than the page, such as an import.
+          saved = { ...saved, revision: `rev-${++writes}`, value: { ...saved.value, ...input.switcherDocument } };
         if (typeof input.routerReady === "boolean") {
           routerReady = input.routerReady;
           tellRouter();
         }
         if (input.releaseSwitcher) fake.release();
         if (input.settings) {
-          // A save made somewhere else, such as Module Connections. The open page hears of the
-          // restart with the next thing Hubble sends it.
+          // A save made somewhere else, such as Module Connections. Every open copy hears of the
+          // restart the way it hears of its own: its window sees the module's run change.
           await restartWith(input.settings);
-          noticeDue = true;
         }
         return send({ updated: true });
       }
       if (url.pathname !== "/__rpc") return send({ error: "Unknown preview route" }, 404);
-      if (input.operation === "state") return send({ result: state });
+      if (input.operation === "state") return send({ result: state, generation });
       if (input.operation === "settings") {
         // Hubble accepts only the settings the section declares, refuses the rest whole, then restarts the module.
         if (Object.keys(input.values).some((id) => !(section.settings ?? []).includes(id))) return send({ error: "This page did not declare that setting" });
@@ -293,35 +343,43 @@ const server = createServer(async (request, response) => {
           failNextSettings = false;
           return send({ error: "The workspace refused this save." });
         }
+        counts.settingsSaves++;
+        // A value that is already saved changes nothing, and Hubble doesn't restart the module for it.
+        if (Object.entries(input.values).every(([id, value]) => JSON.stringify(settings[id]) === JSON.stringify(value))) return send({ result: null, generation });
         await restartWith(input.values);
-        return send({ result: null, restarted: true });
+        return send({ result: null, generation });
       }
       // Hubble passes a page only the commands its manifest declares, and so does the preview.
       if (!declared.has(input.commandId)) return send({ error: `Module page command is not declared: ${input.commandId}` });
-      if (restartingNow) return send({ error: "Module is restarting" });
+      calls[input.commandId] = (calls[input.commandId] ?? 0) + 1;
+      if (restartingNow) return send({ error: "Module is restarting", restarting: true });
       const abort = new AbortController();
       response.on("close", () => abort.abort());
       const run = running.signal;
       const stopped = () => abort.abort();
       run.addEventListener("abort", stopped, { once: true });
       const serving = instance;
+      const servedBy = generation;
+      commands++;
       try {
         const result = await serving.call!(`page.${PAGE_ID}`, { sectionId: PAGE_SECTION_ID, commandId: input.commandId, value: input.value ?? null } as never, { signal: abort.signal, log: () => undefined } as never);
-        return send({ result, ...notice() });
+        return send({ result, generation: servedBy });
       } catch (error) {
-        if (run.aborted) return send({ error: "Module is restarting" });
+        if (run.aborted) return send({ error: "Module is restarting", restarting: true });
         if (abort.signal.aborted) return void response.end();
-        return send({ error: error instanceof Error ? error.message : "Preview request failed", ...notice() });
+        return send({ error: error instanceof Error ? error.message : "Preview request failed", generation: servedBy });
       } finally {
+        commands--;
         run.removeEventListener("abort", stopped);
       }
     }
     if (url.pathname === "/") {
       response.writeHead(200, { "Content-Type": "text/html" });
-      return void response.end(html);
+      return void response.end(html());
     }
+    if (url.pathname === "/__generation") return send({ generation, restarting: restartingNow });
     if (url.pathname === "/__inspect")
-      return send({ settings, generation, routing: routingSaved.value, routingRevision: routingSaved.revision, routes, document: saved.value, revision: saved.revision, switcher: { port: fake.port, devices: fake.devices, writes: fake.writes, form: fake.form, connections: fake.openConnections }, logs: logs.slice(-40), state, declaredSettings: [...PAGE_SETTINGS] });
+      return send({ settings, generation, counts, calls, routing: routingSaved.value, routingRevision: routingSaved.revision, routes, document: saved.value, revision: saved.revision, switcher: { port: fake.port, devices: fake.devices, writes: fake.writes, form: fake.form, connections: fake.openConnections }, logs: logs.slice(-40), state, declaredSettings: [...PAGE_SETTINGS] });
     if (url.pathname.startsWith("/api/module-controls/")) {
       const name = path.basename(url.pathname);
       const served = /^(spreadsheet|controls|slider|workbook-tools)-v1\.js$|^theme-v1\.css$/u.test(name) ? `module-${name}` : name;

@@ -25,7 +25,7 @@ held before the merge, so Hubble's older Tally Switch page stays hidden.
   `route` action only), as TALLY Switch sent them. The sheet uses Hubble's spreadsheet
   controls: type, F2 or double-click to edit, Enter moves down, copy, paste, fill, Space for
   Enabled, the router list, Add camera and the row menu to add or delete. Edits show at once
-  and save in order; a save the workspace refuses puts back what is saved. Button Matrix
+  and save in order; a save the workspace refuses puts back only that edit. Button Matrix
   "TALLY Switch follow" actions now drive this module's own Follow.
 - **Setup** holds every setting of the link in one place:
   - **This computer** is the receiver. These are the module's own settings; the page saves
@@ -56,6 +56,41 @@ held before the merge, so Hubble's older Tally Switch page stays hidden.
     request, because the restart would cut the request short.
   - Changing a device that sends somewhere else asks first. It may keep sending there; any
     other Send to must be one of this computer's addresses.
+
+## Open in several windows
+
+HubDash can show the page in several windows at once, and HubDash on another computer can show it
+too. Each is its own copy of the page over the one running module:
+
+- A copy never saves its whole switcher setup or camera list. It sends only what it changed
+  (`src/changes.ts`): the setup's changed fields, and the cameras deleted, added (after which
+  camera) and the fields changed. The backend puts that onto a fresh read and, if another
+  window saved in between, onto what that window saved, so a copy that is behind never undoes
+  anything and no save is refused for being behind. A save of what is already saved writes
+  nothing. Where two windows change the same field, the newer change stands.
+- Changes the page makes by itself (the device's settings taken in after Read switcher, the
+  device's name after Send to switcher) land only where the setup still holds what the page
+  started from: another window's change to that field stays.
+- Every copy follows the others without a reload. Each `live` answer carries the saved setup's
+  and the cameras' revisions, a stamp for the switcher's last reading and whether a switcher
+  request is under way. A copy holding something older reads `saved` and redraws in place; its
+  own changes on their way win, and the box or cell being typed in is never redrawn, moved or
+  taken away. A camera deleted in another window while it is typed in stays under the typing
+  and goes when it ends, with a note that it was deleted elsewhere. The backend also reads the
+  setup (once a page has opened) and the cameras every 2 seconds for changes made outside it,
+  such as an import.
+- Receiver settings are saved by Hubble with only the values changed. Every copy hears of the
+  restart (`onRestart`, and a new run in the next `live` answer) and reads everything again;
+  a copy whose save was followed by another window's waits for the module to come back and
+  shows the newest values. A settings save waits for another window's switcher request to end,
+  since the restart would cut it short.
+- Switcher requests from different windows wait their turn for the switcher's single Devices
+  form, and each reads the setup when its turn comes.
+- The open tab, Find and scroll are each window's own. The tab last chosen in any window is
+  remembered on this computer, for where the page opens next time.
+
+`e2e/windows.spec.ts` runs two and three copies of the built page against the preview and
+checks all of the above with real clicks and key presses.
 
 ## Talking to the switcher
 
@@ -94,6 +129,12 @@ Run the repository's `pnpm build` once, then `pnpm --filter @hubble-module/tsl b
 `pnpm --filter @hubble-module/tsl test`.
 `pnpm --filter @hubble-module/tsl preview` serves the built page on http://127.0.0.1:43197
 against the real backend and a pretend switcher on this computer, with Hubble's shared
-control files read from an installed Hubble. `/__simulate` holds or fails saves and makes the
-pretend switcher misbehave; `/__inspect` shows what was saved and every write it received.
+control files read from an installed Hubble. Each browser tab opened on it is another copy of
+the page, as each HubDash window is, and each hears of a restart by itself. `/__simulate` holds
+or fails saves, changes what is saved as an import would and makes the pretend switcher
+misbehave; `/__inspect` shows what was saved, every write and conflict it received and the
+commands the pages asked; `/__reset` puts everything back as it started.
+`pnpm --filter @hubble-module/tsl test:ui` builds nothing: after a build it runs
+`e2e/windows.spec.ts` in Playwright's Chromium against its own preview (port 43198, listener
+port 45728; `TSL_UI_PORT` and `TSL_UI_LISTEN_PORT` move them).
 `pnpm --filter @hubble-module/tsl package` creates the versioned `.hubble-module` artifact.
