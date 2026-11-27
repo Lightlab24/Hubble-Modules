@@ -1,6 +1,6 @@
 import { connectModuleFrontend, ModuleFrontendValueSchema } from '@hubble/module-sdk/frontend';
 import { mountSpreadsheetSheets, mountSpreadsheetToolbar, type SpreadsheetAddress } from '@hubble/module-sdk/spreadsheet-controls';
-import { activeKind, activeSheet, activeSheetId, addSheet, autoSendOn, clone, fieldById, groupsOf, isFlipped, isSimulated, masterSelection, moveSheet, nameField, newUnit, parseRowId, removeSheet, renameSheet, scopeOf, setOrientation, setUnitCount, sheetList, unitHasData, validHost, valueOf, viewChange, type CellEdit, type Field, type Mutation, type Orientation, type SheetKind, type Unit } from './model.js';
+import { activeKind, activeSheet, activeSheetId, addSheet, autoSendOn, clone, fieldById, groupsOf, isFlipped, isSimulated, masterSelection, moveSheet, nameField, newUnit, parseRowId, removeSheet, renameSheet, scopeOf, setOrientation, setUnitCount, sheetList, unitHasData, validHost, valueOf, viewChange, type CellEdit, type Field, type Mutation, type Orientation, type SheetKind, type Unit, type View } from './model.js';
 import { displayValue, fromWire, hostOf, isLive, isSimulatedLive, masterRows, pendingFields, reportedEdits, rowObservation, rowReady, rowTitle, rowsFor, sendsAfter, shownName, stagedRowIds, unitObservation, waitingLabel } from './rows.js';
 import { DraftStore, followSaved, takeReported, type SaveReceipt } from './draft-store.js';
 import { createGrid, type LiveWrite } from './ui-grid.js';
@@ -37,16 +37,22 @@ try {
     const reply = await client.call('save', ModuleFrontendValueSchema.parse({ operation })) as unknown as Snapshot;
     adopt(reply); return reply;
   });
-  const doc = () => store.document;
+  // A window HubDash opened for one tab shows that tab alone, whichever tab the page has open elsewhere, and never changes
+  // which tab that is: no tab strip, and its layout changes stay on its own tab (see showSheet).
+  const part = client.view;
+  store.sheet = part;
+  const doc = () => store.shown;
+  const layoutChange = (view: View) => viewChange(doc(), view, part !== null);
+  const partGone = () => part !== null && !store.document.sheets.some(sheet => sheet.id === part);
   const textControls = await mountSpreadsheetToolbar({ root: el('text-size'), textSize: {
     get: () => doc().view.textSize ?? 13,
-    onChange(textSize) { store.submit(viewChange(doc(), { ...clone(doc().view), textSize })); },
+    onChange(textSize) { store.submit(layoutChange({ ...clone(doc().view), textSize })); },
   } });
   const submitSheets = (operation: Mutation | null, refusal: string) => { if (operation) store.submit(operation); else report(refusal); };
   const sheetTabs = await mountSpreadsheetSheets({
     root: el('sheet-tabs'),
     getState() { const list = sheetList(doc()); return { sheets: list.map(({ id, name }) => ({ id, name })), activeSheetId: activeSheetId(doc()), counts: new Map(list.map(sheet => [sheet.id, rowsFor(doc(), observed, sheet.kind).filter(row => row.kind !== 'master').length])) }; },
-    onSelect(sheetId) { if (sheetId !== activeSheetId(doc())) store.submit({ kind: 'select-sheet', sheetId }, false); },
+    onSelect(sheetId) { if (part === null && sheetId !== activeSheetId(doc())) store.submit({ kind: 'select-sheet', sheetId }, false); },
     onCreate: name => store.submit(addSheet(doc(), crypto.randomUUID(), name)),
     onRename: (sheetId, name) => submitSheets(renameSheet(doc(), sheetId, name), 'Setup and Master keep their names.'),
     onRemove: sheetId => submitSheets(removeSheet(doc(), sheetId), 'Setup and Master can’t be removed.'),
@@ -64,13 +70,25 @@ try {
   const grids = new Map<SheetKind, Awaited<ReturnType<typeof createGrid>>>();
   const openGrid = () => grids.get(activeKind(doc()))!;
   const refreshGrid = () => grids.get(activeKind(doc()))?.refresh();
-  let shownKind: SheetKind | undefined;
+  let shownKind: SheetKind | 'gone' | undefined;
+  if (part !== null) el('sheet-tabs').hidden = true;
   function showKind() {
-    const kind = activeKind(doc());
+    const kind = partGone() ? 'gone' : activeKind(doc());
     if (kind === shownKind) return;
     shownKind = kind;
     for (const item of kinds) el('viewport-' + item).hidden = item !== kind;
     for (const node of document.querySelectorAll<HTMLElement>('.toolbar [data-for], .header-search [data-for]')) node.hidden = !node.dataset.for!.split(' ').includes(kind);
+    // A tab's own window whose tab was removed says so, and shows nothing else.
+    document.querySelector<HTMLElement>('.toolbar')!.hidden = kind === 'gone'; el('part-gone').hidden = kind !== 'gone';
+    if (kind === 'gone') { el('setting-details').hidden = true; el('pending-sends').hidden = true; }
+  }
+  // A tab's own window is named after its tab, and renamed with it.
+  let titled: string | undefined;
+  function nameWindow() {
+    const name = part === null || partGone() ? undefined : doc().sheets.find(sheet => sheet.id === part)?.name;
+    if (name === undefined || name === titled) return;
+    titled = name;
+    void client.setWindowTitle(name).catch(() => { if (titled === name) titled = undefined; });
   }
   function update() {
     showKind();
@@ -105,7 +123,8 @@ try {
     pendingStatus.textContent = inFlight ? inFlight + ' sending · ' + Math.max(0, all - inFlight) + ' pending' : !all ? 'No changes pending' : !waiting ? plural(all, 'change') + ' pending'
       : (all > waiting ? plural(all - waiting, 'change') + ' ready · ' : '') + plural(waiting, 'preset') + ' waiting';
     pendingStatus.dataset.pending = String(all > 0);
-    el('empty').hidden = units.length > 0;
+    el('empty').hidden = units.length > 0 || shownKind === 'gone';
+    nameWindow();
     if (!el('setting-details').hidden) renderDetails();
     if (!el('pending-sends').hidden) renderPending();
     adoptNames();
@@ -385,8 +404,14 @@ try {
   const selectMaster = (selected: string[]) => store.submit({ kind: 'master', selected, expected: masterSelection(doc()) }, false);
   el('master-all').addEventListener('click', () => selectMaster(rowsFor(doc(), observed, 'channels').filter(row => row.kind === 'channel').map(row => row.id)));
   el('master-none').addEventListener('click', () => selectMaster([]));
-  for (const [id, expanded] of [['expand-all', true], ['collapse-all', false]] as const) el(id).addEventListener('click', () => { const view = clone(doc().view); view.expanded = Object.fromEntries(groupsOf(scopeOf(activeKind(doc()))).map(g => [g.id, expanded])); store.submit(viewChange(doc(), view)); });
-  for (const [id, orientation] of orientationButtons) el(id).addEventListener('click', () => { if (activeSheet(doc()).kind === 'channels' && (orientation === 'columns') !== isFlipped(doc())) store.submit(setOrientation(doc(), activeSheetId(doc()), orientation)); });
+  for (const [id, expanded] of [['expand-all', true], ['collapse-all', false]] as const) el(id).addEventListener('click', () => { const view = clone(doc().view); view.expanded = Object.fromEntries(groupsOf(scopeOf(activeKind(doc()))).map(g => [g.id, expanded])); store.submit(layoutChange(view)); });
+  for (const [id, orientation] of orientationButtons) el(id).addEventListener('click', () => {
+    if (activeSheet(doc()).kind !== 'channels' || (orientation === 'columns') === isFlipped(doc())) return;
+    const operation = setOrientation(doc(), activeSheetId(doc()), orientation);
+    // From a tab's own window it turns that tab only, and leaves the open tab as it is in the page's other windows.
+    if (part !== null) delete operation.activeSheetId;
+    store.submit(operation);
+  });
   el('details-toggle').addEventListener('click', () => { const pane = el('setting-details'); pane.hidden = !pane.hidden; el('details-toggle').setAttribute('aria-expanded', String(!pane.hidden)); renderDetails(); });
   for (const id of ['close-dialog', 'cancel-dialog']) el(id).addEventListener('click', () => dialog.close());
   async function submitDialog() {
@@ -410,6 +435,6 @@ try {
   el('loading').hidden = true; update(); refreshGrid();
   void followChanges();
   const first = rowsFor(doc(), observed, activeKind(doc())).find(row => row.kind !== 'master');
-  if (first) openGrid().select({ rowId: first.id, columnId: activeKind(doc()) === 'setup' ? 'unit-name' : 'row-unit' });
+  if (first && !partGone()) openGrid().select({ rowId: first.id, columnId: activeKind(doc()) === 'setup' ? 'unit-name' : 'row-unit' });
   window.addEventListener('pagehide', () => { disposed = true; follow.dispose(); stop(); for (const grid of grids.values()) grid.dispose(); textControls.dispose(); sheetTabs.dispose(); client.dispose(); }, { once: true });
 } catch (error) { el('loading').hidden = true; report(error instanceof Error ? error.message : 'FS-HDR could not start.'); saveStatus.textContent = 'Workspace unavailable'; }

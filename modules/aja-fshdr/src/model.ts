@@ -32,7 +32,8 @@ export type FullSheet = Sheet & { view: View };
 /** `adopted` is set once units from version 1 have been brought across, so removing them later doesn't bring them back. */
 export interface FsDocument { version: 1; units: Unit[]; view: View; sheets: Sheet[]; activeSheetId: string; autoSend?: boolean; master?: string[]; adopted?: boolean }
 export interface CellEdit { rowId: string; columnId: string; value: string; expected: string }
-export type Mutation = { kind: 'edit'; edits: CellEdit[] } | { kind: 'view'; view: View; expected: View; sheetId?: string } | { kind: 'select-sheet'; sheetId: string } | { kind: 'sheets'; sheets: FullSheet[]; expected: FullSheet[]; activeSheetId?: string } | { kind: 'units'; add: Unit[]; remove: Unit[] } | { kind: 'auto-send'; autoSend: boolean; expected: boolean } | { kind: 'master'; selected: string[]; expected: string[] };
+/** `inPlace`: a layout change made in a window that shows that tab alone. It changes the tab where it is, without opening it in the other windows. */
+export type Mutation = { kind: 'edit'; edits: CellEdit[] } | { kind: 'view'; view: View; expected: View; sheetId?: string; inPlace?: true } | { kind: 'select-sheet'; sheetId: string } | { kind: 'sheets'; sheets: FullSheet[]; expected: FullSheet[]; activeSheetId?: string } | { kind: 'units'; add: Unit[]; remove: Unit[] } | { kind: 'auto-send'; autoSend: boolean; expected: boolean } | { kind: 'master'; selected: string[]; expected: string[] };
 
 export const clone = <T>(value: T): T => structuredClone(value);
 const sortedKeys = (value: unknown): unknown => Array.isArray(value) ? value.map(sortedKeys) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, item]) => [key, sortedKeys(item)])) : value;
@@ -146,7 +147,28 @@ function openSheet(doc: FsDocument, sheetId: string): void {
   if (!doc.sheets.some(sheet => sheet.id === sheetId)) throw Error('This tab was removed before the change saved.');
   if (sheetId !== activeSheetId(doc)) putSheets(doc, sheetList(doc), sheetId);
 }
-export const viewChange = (doc: FsDocument, view: View): Mutation => ({ kind: 'view', sheetId: activeSheetId(doc), view, expected: clone(doc.view) });
+export const viewChange = (doc: FsDocument, view: View, inPlace = false): Mutation => ({ kind: 'view', sheetId: activeSheetId(doc), view, expected: clone(doc.view), ...(inPlace ? { inPlace } : {}) });
+/**
+ * The plan as a window that shows one tab draws it: that tab open, whichever one the plan has open, and nothing else changed.
+ * A tab that is gone leaves the plan as it is, and the window says so.
+ */
+export function showSheet(doc: FsDocument, sheetId: string): FsDocument {
+  if (sheetId === activeSheetId(doc) || !doc.sheets.some(sheet => sheet.id === sheetId)) return doc;
+  const list = sheetList(doc), shown = list.find(sheet => sheet.id === sheetId)!;
+  return { ...doc, activeSheetId: sheetId, view: shown.view, sheets: list.map(({ view, ...sheet }) => sheet.id === sheetId ? sheet : { ...sheet, view }) };
+}
+/** The most tabs HubDash's sidebar lists as parts of the page. */
+export const maxWindowParts = 24;
+/**
+ * Each tab as a part of the page HubDash's sidebar can open in a window of its own: its ID, which never changes, and its name
+ * on one line. Only the first 24, as many as the sidebar lists.
+ */
+export function windowParts(doc: FsDocument): { view: string; title: string }[] {
+  return doc.sheets.flatMap(sheet => {
+    const title = sheet.name.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 80);
+    return title && sheet.id.length <= 128 ? [{ view: sheet.id, title }] : [];
+  }).slice(0, maxWindowParts);
+}
 type SheetsChange = Extract<Mutation, { kind: 'sheets' }>;
 const sheetsChange = (doc: FsDocument, sheets: FullSheet[], open = activeSheetId(doc)): SheetsChange => ({ kind: 'sheets', sheets, expected: clone(sheetList(doc)), activeSheetId: open });
 /** A new tab is a settings sheet. It starts as a copy of the settings sheet you're on, or of the first one. */
@@ -234,9 +256,17 @@ export function applyMutation(before: FsDocument, operation: Mutation): FsDocume
       if (channel !== null && !Object.keys(values).length) { delete unit.channels![String(channel)]; if (!Object.keys(unit.channels!).length) delete unit.channels; }
     }
   } else if (operation.kind === 'view') {
-    openSheet(next, operation.sheetId ?? activeSheetId(next));
-    if (!same(next.view, operation.expected)) throw Error('The column layout changed in another editor.');
-    next.view = clone(operation.view);
+    const sheetId = operation.sheetId ?? activeSheetId(next);
+    if (operation.inPlace && sheetId !== activeSheetId(next)) {
+      const sheet = next.sheets.find(item => item.id === sheetId);
+      if (!sheet) throw Error('This tab was removed before the change saved.');
+      if (!same(sheet.view, operation.expected)) throw Error('The column layout changed in another editor.');
+      sheet.view = clone(operation.view);
+    } else {
+      openSheet(next, sheetId);
+      if (!same(next.view, operation.expected)) throw Error('The column layout changed in another editor.');
+      next.view = clone(operation.view);
+    }
   } else if (operation.kind === 'select-sheet') {
     openSheet(next, operation.sheetId);
   } else if (operation.kind === 'sheets') {
@@ -356,9 +386,10 @@ export function withNoColumns(view: View, scope: Scope): View {
 }
 export function inverse(before: FsDocument, operation: Mutation): Mutation {
   if (operation.kind === 'edit') return { kind: 'edit', edits: operation.edits.map(e => ({ ...e, expected: e.value, value: valueOf(before, e.rowId, e.columnId) })) };
-  if (operation.kind === 'view') return { kind: 'view', sheetId: operation.sheetId ?? activeSheetId(before), view: clone(operation.expected), expected: clone(operation.view) };
+  if (operation.kind === 'view') return { kind: 'view', sheetId: operation.sheetId ?? activeSheetId(before), view: clone(operation.expected), expected: clone(operation.view), ...(operation.inPlace ? { inPlace: true as const } : {}) };
   if (operation.kind === 'select-sheet') return { kind: 'select-sheet', sheetId: activeSheetId(before) };
-  if (operation.kind === 'sheets') return { kind: 'sheets', sheets: clone(operation.expected), expected: clone(operation.sheets), activeSheetId: activeSheetId(before) };
+  // A change from a tab's own window leaves the open tab alone, and so does undoing it.
+  if (operation.kind === 'sheets') return { kind: 'sheets', sheets: clone(operation.expected), expected: clone(operation.sheets), ...(operation.activeSheetId === undefined ? {} : { activeSheetId: activeSheetId(before) }) };
   if (operation.kind === 'units') return { kind: 'units', add: clone(operation.remove), remove: clone(operation.add) };
   if (operation.kind === 'auto-send') return { kind: 'auto-send', autoSend: operation.expected, expected: operation.autoSend };
   return { kind: 'master', selected: [...operation.expected], expected: [...operation.selected] };

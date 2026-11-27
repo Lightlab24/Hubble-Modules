@@ -1,4 +1,4 @@
-import { applyMutation, clone, inverse, type FsDocument, type Mutation, type CellEdit } from './model.js';
+import { applyMutation, clone, inverse, showSheet, type FsDocument, type Mutation, type CellEdit } from './model.js';
 export interface SaveReceipt { document:FsDocument; revision:string|null }
 export interface InvalidDraft { edit:CellEdit; message:string }
 /** `quiet`: a change the page makes by itself, such as a name a unit reports. If it is refused the operator isn't told. */
@@ -9,8 +9,17 @@ export class DraftStore {
   epoch=0;
   /** A save of this copy's was refused and it hasn't heard the plan since, so it may be showing an older one. */
   behind=false;
+  /** In a window HubDash opened for one tab of the page: that tab, which this copy shows whichever tab the plan has open. */
+  sheet:string|null=null;
+  private shownFrom?:FsDocument; private shownDocument?:FsDocument;
   private next=0; private running=false; private listeners=new Set<()=>void>(); private lastEdit=new Map<string,number>(); private saved:(()=>void)[]=[]; private refusals=new Set<()=>void>();
   constructor(initial:SaveReceipt,private save:(operation:Mutation)=>Promise<SaveReceipt>){this.document=clone(initial.document);this.base=clone(initial.document);this.revision=initial.revision;}
+  /** The plan as this copy draws it: in a tab's own window, with that tab open (see showSheet). */
+  get shown():FsDocument{
+    if(this.sheet===null)return this.document;
+    if(this.shownFrom!==this.document){this.shownFrom=this.document;this.shownDocument=showSheet(this.document,this.sheet);}
+    return this.shownDocument!;
+  }
   subscribe(fn:()=>void){this.listeners.add(fn);return()=>this.listeners.delete(fn);}
   /** Called once the saves waiting have all been answered, when one of them was refused. */
   onRefused(fn:()=>void){this.refusals.add(fn);return()=>{this.refusals.delete(fn);};}

@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
-import type { ModuleContext, ModuleInstance } from '@hubble/module-sdk';
+import { ModuleWindowPartsSchema, type ModuleContext, type ModuleInstance } from '@hubble/module-sdk';
 import manifest from '../src/manifest.js';
 import { createBackend, type WireObserved } from '../src/backend.js';
-import { activeSheetId, channelRowId, clone, defaultDocument, newUnit, sheetList, valueOf, viewChange, type FsDocument, type Mutation } from '../src/model.js';
+import { activeSheetId, addSheet, channelRowId, clone, defaultDocument, newUnit, removeSheet, renameSheet, setOrientation, sheetList, showSheet, valueOf, viewChange, windowParts, type FsDocument, type Mutation } from '../src/model.js';
 import { fromWire, reportedEdits } from '../src/rows.js';
 import { DraftStore, followSaved, takeReported, type SaveReceipt } from '../src/draft-store.js';
 import type { Observed } from '../src/backend.js';
@@ -47,7 +47,7 @@ async function host(plan: FsDocument) {
  * through the worker, the copy follows the plan revision the worker publishes, and it saves the name and mode live units
  * report. `hold` stops HubDash handing this copy the module's state until `release`.
  */
-async function openCopy(h: Awaited<ReturnType<typeof host>>) {
+async function openCopy(h: Awaited<ReturnType<typeof host>>, sheet: string | null = null) {
   const initial = await h.call('snapshot');
   let observed: Observed = { units: {}, rows: {}, choiceSets: [] }, newest = 0;
   const adopt = (next: Partial<WireObserved>) => {
@@ -58,6 +58,8 @@ async function openCopy(h: Awaited<ReturnType<typeof host>>) {
   adopt(initial);
   let saves = 0;
   const store = new DraftStore(initial, async (operation: Mutation) => { saves++; const reply = await h.call('save', { operation }); adopt(reply); return reply; });
+  // A window HubDash opened for one tab, as frontend.ts sets it from `page.view`.
+  store.sheet = sheet;
   const follow = followSaved(store, () => h.call('snapshot'));
   let refusals = 0;
   store.onRefused(() => { refusals++; });
@@ -231,4 +233,108 @@ test('eight windows each wait for the next change, and a change at the unit answ
     assert.ok((answer.sequence ?? 0) > after);
     assert.equal(fromWire(answer as WireObserved).rows['u1']?.values['ChannelName3'], 'ISO 3');
   }
+});
+
+const sheetOf = (doc: FsDocument, id: string) => sheetList(doc).find(sheet => sheet.id === id);
+
+test('each tab is a part HubDash’s sidebar opens, and the list follows tabs added, renamed and removed', async t => {
+  const { h, first } = await running(t);
+  const section = manifest.pages![0]!.sections[0]!;
+  assert.deepEqual('parts' in section && section.parts, { value: 'windowParts' });
+  const parts = () => (h.latest()?.values as { windowParts?: { view: string; title: string }[] } | undefined)?.windowParts;
+  const titles = () => parts()?.map(part => part.title).join(', ');
+  await until(() => titles() === 'Setup, Master, HDR', 'the worker lists the three tabs');
+  assert.deepEqual(parts()!.map(part => part.view), ['setup', 'master', 'hdr']);
+  // Hubble checks the list against its own schema, and offers none if it fails.
+  ModuleWindowPartsSchema.parse(parts());
+
+  first.store.submit(addSheet(first.store.document, 'sizing-tab', 'Sizing'));
+  await first.saved();
+  await until(() => titles() === 'Setup, Master, HDR, Sizing', 'a tab the operator adds is listed');
+  first.store.submit(renameSheet(first.store.document, 'sizing-tab', 'Sizes')!);
+  await first.saved();
+  await until(() => titles() === 'Setup, Master, HDR, Sizes', 'a renamed tab is listed by its new name');
+  assert.equal(parts()!.at(-1)!.view, 'sizing-tab', 'its window keeps its view: the tab’s ID');
+  first.store.submit(removeSheet(first.store.document, 'sizing-tab')!);
+  await first.saved();
+  await until(() => titles() === 'Setup, Master, HDR', 'a removed tab is no longer listed');
+  assert.deepEqual(first.errors, []);
+});
+
+test('the sidebar lists at most 24 tabs, each by its ID and its name on one line', () => {
+  const plan = defaultDocument();
+  for (let index = 0; index < 29; index++) plan.sheets.push({ id: 'tab-' + index, name: 'Tab ' + index, kind: 'channels', orientation: 'rows', view: clone(plan.sheets[2]!.view!) });
+  plan.sheets[3]!.name = 'Two\nlines';
+  const parts = windowParts(plan);
+  assert.equal(parts.length, 24);
+  assert.deepEqual(parts[3], { view: 'tab-0', title: 'Two lines' });
+  ModuleWindowPartsSchema.parse(parts);
+});
+
+test('a tab’s own window keeps to its tab while the page changes tabs, and never changes the page’s open tab', async t => {
+  const { h, first } = await running(t);
+  const hdr = await openCopy(h, 'hdr');
+  t.after(() => hdr.close());
+  assert.equal(activeSheetId(hdr.store.shown), 'hdr');
+  assert.equal(activeSheetId(h.plan()), 'setup');
+
+  // The whole page opens Master. The HDR window hears it and stays on HDR.
+  first.store.submit({ kind: 'select-sheet', sheetId: 'master' }, false);
+  await first.saved();
+  await until(() => activeSheetId(hdr.store.document) === 'master', 'the HDR window follows the saved plan');
+  assert.equal(activeSheetId(hdr.store.shown), 'hdr');
+
+  // A layout change in the HDR window changes HDR where it is: the page keeps Master open, and shows the change on HDR.
+  const before = clone(hdr.store.shown.view);
+  hdr.store.submit(viewChange(hdr.store.shown, { ...clone(before), textSize: 16 }, true));
+  await hdr.saved();
+  assert.equal(activeSheetId(h.plan()), 'master');
+  assert.equal(sheetOf(h.plan(), 'hdr')!.view.textSize, 16);
+  await until(() => sheetOf(first.store.document, 'hdr')?.view.textSize === 16, 'the page has HDR’s new layout');
+  assert.equal(activeSheetId(first.store.document), 'master');
+  // Undo in the HDR window puts it back, still without opening HDR anywhere else.
+  hdr.store.history(false);
+  await hdr.saved();
+  assert.equal(activeSheetId(h.plan()), 'master');
+  assert.equal(sheetOf(h.plan(), 'hdr')!.view.textSize, before.textSize);
+
+  // Channels on their side, from the HDR window: HDR turns, Master stays open.
+  const turn = setOrientation(hdr.store.shown, 'hdr', 'columns');
+  delete turn.activeSheetId;
+  hdr.store.submit(turn);
+  await hdr.saved();
+  assert.equal(activeSheetId(h.plan()), 'master');
+  assert.equal(h.plan().sheets.find(sheet => sheet.id === 'hdr')!.orientation, 'columns');
+  hdr.store.history(false);
+  await hdr.saved();
+  assert.equal(activeSheetId(h.plan()), 'master');
+  assert.equal(h.plan().sheets.find(sheet => sheet.id === 'hdr')!.orientation, 'rows');
+
+  // With HDR open on the page too, a change from either window is the same layout.
+  first.store.submit({ kind: 'select-sheet', sheetId: 'hdr' }, false);
+  await first.saved();
+  await until(() => activeSheetId(hdr.store.document) === 'hdr', 'the HDR window hears HDR is open');
+  hdr.store.submit(viewChange(hdr.store.shown, { ...clone(hdr.store.shown.view), textSize: 14 }, true));
+  await hdr.saved();
+  await until(() => first.store.document.view.textSize === 14, 'the page shows the layout the HDR window set');
+  first.store.submit(viewChange(first.store.document, { ...clone(first.store.document.view), textSize: 15 }));
+  await first.saved();
+  await until(() => hdr.store.shown.view.textSize === 15, 'the HDR window shows the layout the page set');
+  assert.deepEqual([...first.errors, ...hdr.errors], []);
+  assert.equal(first.refusals + hdr.refusals, 0);
+});
+
+test('a tab removed elsewhere leaves its own window with nothing of another tab to show', async t => {
+  const { h, first } = await running(t);
+  first.store.submit(addSheet(first.store.document, 'gone-tab', 'Going'));
+  await first.saved();
+  const own = await openCopy(h, 'gone-tab');
+  t.after(() => own.close());
+  assert.equal(activeSheetId(own.store.shown), 'gone-tab');
+  first.store.submit(removeSheet(first.store.document, 'gone-tab')!);
+  await first.saved();
+  await until(() => !own.store.document.sheets.some(sheet => sheet.id === 'gone-tab'), 'the window hears the tab is gone');
+  // frontend.ts then shows "This tab is no longer in FS-HDR"; the plan it holds is the page’s, unchanged.
+  assert.equal(own.store.shown, own.store.document);
+  assert.equal(showSheet(own.store.document, 'gone-tab'), own.store.document);
 });

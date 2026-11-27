@@ -66,11 +66,11 @@ export async function createGrid(options: GridOptions) {
   let reorder: Awaited<ReturnType<typeof mountSpreadsheetReorder>> | undefined;
   let zoomRatio = 1, rows: Row[] = [], rowById = new Map<string, Row>();
   // Each kind of tab keeps its own grid. Only the one whose tab is open draws or answers.
-  const showing = () => activeKind(store.document) === kind;
+  const showing = () => activeKind(store.shown) === kind;
   // The layout this grid drew last. While another kind of tab is open, the plan's `view` belongs to that tab.
   let lastView: View | undefined;
-  const view = (): View => showing() ? (lastView = store.document.view) : lastView ?? store.document.view;
-  const flipped = () => kind === 'channels' && isFlipped(store.document);
+  const view = (): View => showing() ? (lastView = store.shown.view) : lastView ?? store.shown.view;
+  const flipped = () => kind === 'channels' && isFlipped(store.shown);
   const position = <T extends SpreadsheetAddress>(address: T): T => flipped() ? { ...address, rowId: address.columnId, columnId: address.rowId } : address;
   const settingLabel = (id: string) => fieldById.get(id)?.label ?? meta.find(m => m.id === id)?.label;
   const orderedGroups = () => [...view().order, ...groups.map(g => g.id).filter(id => !view().order.includes(id))];
@@ -84,10 +84,10 @@ export async function createGrid(options: GridOptions) {
   const observed = () => options.observed();
   const seen = (row: Row) => rowObservation(observed(), row.unit, row.id);
   const live = (row: Row) => !!row.unit && row.kind !== 'placeholder' && isLive(observed(), row.unit);
-  const staged = (row: Row, fieldId: string) => valueOf(store.document, row.id, fieldId);
+  const staged = (row: Row, fieldId: string) => valueOf(store.shown, row.id, fieldId);
   const shown = (row: Row, fieldId: string) => staged(row, fieldId) || seen(row)?.values[fieldId] || '';
-  const ticked = () => new Set(masterSelection(store.document));
-  const editedRows = () => masterRows(store.document, observed());
+  const ticked = () => new Set(masterSelection(store.shown));
+  const editedRows = () => masterRows(store.shown, observed());
   const tickable = () => rows.filter(row => row.kind === 'channel');
 
   function fieldCell(row: Row, field: Field): SpreadsheetCell {
@@ -278,7 +278,8 @@ export async function createGrid(options: GridOptions) {
     if (!move()) { stop(); return; }
     timer = setTimeout(tick, 400);
   }
-  function layout(next: View) { store.submit(viewChange(store.document, next)); }
+  // In a tab's own window the layout changes that tab where it is, without opening it in the page's other windows.
+  function layout(next: View) { store.submit(viewChange(store.shown, next, store.sheet !== null)); }
   function groupDescriptor(id: string): SpreadsheetColumnGroup {
     const group = groupById.get(id)!;
     return { id, label: group.label, columns: fieldsOfGroup(id).map(f => ({ id: f.id, label: f.label, fill: 'copy' })), expanded: !!view().expanded[id], collapsedColumnIds: view().collapsed[id] ?? group.collapsed };
@@ -326,7 +327,7 @@ export async function createGrid(options: GridOptions) {
     const changes: CellEdit[] = [], claimed = new Set<string>();
     let selection: Set<string> | undefined, refused = false;
     const add = (rowId: string, columnId: string, value: string, from?: string) => {
-      const key = rowId + '/' + columnId, before = from ?? valueOf(store.document, rowId, columnId);
+      const key = rowId + '/' + columnId, before = from ?? valueOf(store.shown, rowId, columnId);
       if (claimed.has(key) || value === before) return;
       claimed.add(key); changes.push({ rowId, columnId, value, expected: before });
     };
@@ -350,7 +351,7 @@ export async function createGrid(options: GridOptions) {
         const on = edit.value === 'TRUE', unit = row.unit;
         add(row.id, 'unit-simulated', on ? 'TRUE' : 'FALSE');
         // Turning a simulated unit back into a real one keeps what was set on it, as presets for the real unit.
-        if (!on && isSimulated(unit)) for (const [rowId, values] of Object.entries(unitObservation(observed(), unit)?.changes ?? {})) for (const [fieldId, value] of Object.entries(values)) if (!valueOf(store.document, rowId, fieldId)) add(rowId, fieldId, value);
+        if (!on && isSimulated(unit)) for (const [rowId, values] of Object.entries(unitObservation(observed(), unit)?.changes ?? {})) for (const [fieldId, value] of Object.entries(values)) if (!valueOf(store.shown, rowId, fieldId)) add(rowId, fieldId, value);
       } else if (edit.columnId === 'unit-mode' && row.unit) {
         const mode = modeValue(edit.value);
         if (!mode) { refused = true; store.refuse({ rowId: row.id, columnId: 'unit-mode', value: edit.value, expected: row.unit.values['unit-mode'] ?? '' }, 'Choose HD/SD 4 Ch or 4K/UHD 1 Ch.'); continue; }
@@ -363,7 +364,7 @@ export async function createGrid(options: GridOptions) {
       } else if (field) stage(row, field, edit.value, expected);
       else add(row.id, edit.columnId, edit.value, expected);
     }
-    if (selection) { const before = masterSelection(store.document), next = [...selection]; if (next.length !== before.length || next.some(id => !before.includes(id))) store.submit({ kind: 'master', selected: next, expected: before }, false); }
+    if (selection) { const before = masterSelection(store.shown), next = [...selection]; if (next.length !== before.length || next.some(id => !before.includes(id))) store.submit({ kind: 'master', selected: next, expected: before }, false); }
     if (!changes.length) return !refused;
     const accepted = store.submit({ kind: 'edit', edits: changes });
     if (accepted) options.onEdited?.(changes);
@@ -501,7 +502,7 @@ export async function createGrid(options: GridOptions) {
     if (!field || field.readOnly || field.choices || field.kind === 'boolean') return false;
     const input = document.createElement('input'); input.className = 'cell-input'; input.setAttribute('aria-label', 'Edit ' + (settingLabel(columnId) ?? 'cell'));
     input.value = initial ?? store.invalid.get(addressKey(address))?.edit.value ?? field.value;
-    const current = { address, cell, input, expected: valueOf(store.document, rowId, columnId) }; editor = current;
+    const current = { address, cell, input, expected: valueOf(store.shown, rowId, columnId) }; editor = current;
     const startedWith = field.value, retrying = store.invalid.has(addressKey(address));
     const finish = (commit: boolean, focus: boolean) => {
       if (editor !== current) return; editor = undefined;
@@ -606,7 +607,7 @@ export async function createGrid(options: GridOptions) {
     table.style.setProperty('--camera-text-size', (view().textSize ?? 13) + 'px');
     const flip = flipped();
     table.dataset.orientation = flip ? 'columns' : 'rows';
-    rows = rowsFor(store.document, observed(), kind); rowById = new Map(rows.map(row => [row.id, row]));
+    rows = rowsFor(store.shown, observed(), kind); rowById = new Map(rows.map(row => [row.id, row]));
     for (const [id, element] of rowNodes) if (!rowById.has(id)) {
       element.remove(); rowNodes.delete(id);
       for (const [key, cell] of cells) if (cell.dataset.rowId === id) { dropSlider(key); cell.remove(); cells.delete(key); }
@@ -647,7 +648,7 @@ export async function createGrid(options: GridOptions) {
       }
     }
     controls.refresh(); resize?.refresh(); reorder?.refresh(); columnEditor.refresh();
-    const nowShowing = activeSheetId(store.document) + '/' + table.dataset.orientation;
+    const nowShowing = activeSheetId(store.shown) + '/' + table.dataset.orientation;
     if (nowShowing !== shownLayout) { shownLayout = nowShowing; followSelection(); }
   }
   /**

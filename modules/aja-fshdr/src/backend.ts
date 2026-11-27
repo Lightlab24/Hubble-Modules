@@ -5,7 +5,7 @@ import { ACTION, MATCHES, TARGET_CHOICES, createActions, readCommand, type Comma
 import { catalog, plannedReading } from './catalog.js';
 import { simulatedTransport } from './simulated.js';
 import { packNumbers } from './wire.js';
-import { applyMutation, channelRowId, clone, defaultDocument, fieldById, fields, isSimulated, maxUnits, modeLabel, newUnit, parseRowId, plannedChannels, plannedMode, same, unitName, validHost, validateDocument, valueOf, watchedFieldIds, type FsDocument, type Mutation, type Unit } from './model.js';
+import { applyMutation, channelRowId, clone, defaultDocument, fieldById, fields, isSimulated, maxUnits, modeLabel, newUnit, parseRowId, plannedChannels, plannedMode, same, unitName, validHost, validateDocument, valueOf, watchedFieldIds, windowParts, type FsDocument, type Mutation, type Unit } from './model.js';
 
 export const PLAN = 'fshdr-plan', LEGACY_SETUP = 'setup', SIMULATED = 'fshdr-sim';
 /**
@@ -215,11 +215,13 @@ export function createBackend(context: ModuleContext): ModuleInstance {
     observeNow();
     const all = Object.values(observed.units), states = all.filter(unit => !unit.simulated).map(unit => unit.state), live = states.filter(state => state === 'live').length;
     const simulatedLive = all.some(unit => unit.simulated && unit.state === 'live');
+    // `windowParts`: each tab, which HubDash's sidebar offers to open in a window of its own (the section's `parts`).
+    const extra = { revision: latestRevision, sequence, windowParts: windowParts(plan) };
     context.publishState({
       phase: live > 0 || simulatedLive ? 'ready' : states.includes('connecting') ? 'connecting' : 'unavailable',
       message: live > 0 ? null : simulatedLive ? 'Simulated FS-HDRs only' : plan.units.length ? 'Waiting for FS-HDRs' : 'Add FS-HDRs in Setup',
       observedAt: new Date().toISOString(),
-      values: { revision: latestRevision, sequence, ...(ModuleDocumentValueSchema.parse(fitted({ revision: latestRevision, sequence })) as Record<string, ModuleJsonValue>) },
+      values: { ...extra, ...(ModuleDocumentValueSchema.parse(fitted(extra)) as Record<string, ModuleJsonValue>) },
     });
     publishFeedback();
     for (const wake of [...waiters]) wake();

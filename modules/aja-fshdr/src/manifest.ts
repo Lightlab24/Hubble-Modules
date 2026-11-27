@@ -34,6 +34,9 @@ export default defineModuleManifest({
     // Live in every HubDash window at once: each copy follows what the others save (test/windows.test.ts). The open tab,
     // column layout and expanded sections are saved with the plan, so windows showing the page share them, as chosen.
     windows: true,
+    // Each tab, the ones the operator adds too, in a window of its own from HubDash's sidebar: the worker publishes the list
+    // as `windowParts`, and such a window shows that tab whichever one the page has open.
+    parts: { value: 'windowParts' },
     commands: [
       { id: 'snapshot', label: 'Read the FS-HDR plan' }, { id: 'save', label: 'Save the FS-HDR plan' },
       { id: 'refresh', label: 'Read every unit again' }, { id: 'send', label: 'Send settings to a unit' },
