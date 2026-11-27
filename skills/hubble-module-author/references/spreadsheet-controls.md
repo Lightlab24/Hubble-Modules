@@ -101,9 +101,10 @@ inputs, buttons and other editing controls retain their own input behavior.
 
 Apply drafts synchronously, queue saves in order, reconcile only the batch
 acknowledged, and show validation failures. The host does not write data,
-convert values to domain types, send device commands, or infer undo or rollback
-for these custom controls. Your backend can validate the entire batch before
-writing or sending. Use a portable module document for saved workspace data.
+convert values to domain types, send device commands, or roll back a failed
+save for these custom controls. It keeps undo only for a grid that asks, as
+[Undo kept by Hubble](#undo-kept-by-hubble) describes. Your backend can
+validate the entire batch before writing or sending. Use a portable module document for saved workspace data.
 For the full host Matrix surface with formulas, toolbar, workbook transfer and
 history, compose a [native workbook](native-workbooks.md) alongside the page.
 
@@ -278,6 +279,62 @@ positions and widths. The example styles its viewport's native scrollbar
 with a thin thumb and the dark grid palette. Patch Sheet's custom column widths and row heights are
 view state for the current page. Its native workbook has separate saved layout.
 
+## Undo kept by Hubble
+
+A grid with no undo of its own can ask Hubble to keep it. Require
+`module-spreadsheet-history-v1` and pass `history: true` to
+`mountSpreadsheetControls`; on a host without the feature the mount throws.
+With `history` set, `onHistory` is not called, so don't pass both.
+
+```ts
+const controls = await mountSpreadsheetControls({
+  root: gridElement,
+  history: true, // Or { limit: 50 }. The default is 200 steps.
+  onHistoryChange: (state) => showUndoRedo(state),
+  getRows,
+  getColumns,
+  getCell,
+  onEdit(batch) {
+    applyDraft(batch.edits); // Sources "undo" and "redo" too.
+    enqueueSave(batch).catch(() => {
+      rollBack(batch);
+      controls.history?.forget(batch);
+    });
+  },
+});
+```
+
+- Each paste, fill, clear, cut, choice, toggle and colour change is one step.
+  Hubble reads the cells with `getCell` just before it calls `onEdit`, so apply
+  the edit inside `onEdit`, not before it.
+- Command+Z and Shift+Command+Z (Ctrl+Z and Ctrl+Y elsewhere) and HubDash's
+  Edit menu reach the grid while it has the keyboard. Hubble calls `onEdit`
+  with source `undo` or `redo` and the cells to write, then selects them, as
+  one range when they fill one, and scrolls to them. Treat those batches like
+  any other edit: show them at once, validate, save in order.
+- Cells that have gone, are read-only or already hold the step's values are
+  left out. A step with nothing left is passed over, so one press reaches the
+  newest step that still changes something.
+- Edits the module makes itself, such as typed text, join the history when you
+  call `controls.history.record(edits)` **just before** applying them, while
+  `getCell` still returns the old values. It returns a token for `forget`.
+- When a save fails, roll the cells back and call
+  `controls.history.forget(batch)` with the batch `onEdit` received or the
+  token from `record`. The step goes, so Undo never brings back a value that
+  never held. For a refused `undo` or `redo` batch the step goes back where it
+  was, ready to try again.
+- For Undo and Redo buttons, mount the toolbar's history section with
+  `getHistory: () => controls.history.state()` and
+  `onHistory: (direction) => controls.history[direction]()`, and call the
+  toolbar's `refresh()` from `onHistoryChange`.
+- With the search field on Rows, call `search.reveal(address)` for the cells of
+  an `undo` or `redo` batch, so a row the search hides comes back.
+- Hubble remembers cell values only. Row inserts, deletes and moves, sheet
+  changes and layout are not steps; a module that needs them keeps its own
+  history with `onHistory`, or uses the workbook session below. The history
+  lasts until the grid is disposed, and `controls.history.clear()` empties it,
+  for example after the page loads a different document.
+
 ## Workbook tools for custom layouts
 
 Kit 1.8.0-dev.16 adds `mountSpreadsheetColumnEditor`. Require
@@ -387,7 +444,7 @@ formulas and grid history shortcuts work independently of the toolbar.
 
 Turn on `workbookEditing` in `mountSpreadsheetControls` for Cut, formula
 clipboard metadata, and Tab navigation. Provide `onHistory` for Undo and
-Redo shortcuts. Cell editors can call `move(columns, rows)` after committing
+Redo shortcuts, or pass `history: true` to have Hubble keep them. Cell editors can call `move(columns, rows)` after committing
 on Tab or Enter. Cut holds a source snapshot until a compatible paste into
 the same grid. A successful move emits one batch. A changed or protected
 source, or an incompatible destination, leaves the source intact. A different

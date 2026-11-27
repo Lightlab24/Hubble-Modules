@@ -50,6 +50,8 @@ For Button Matrix controls inside a custom layout, read
 [the spreadsheet controls API](references/spreadsheet-controls.md) and build
 the `custom-spreadsheet` example from the kit. For module-owned controls,
 use the [spreadsheet styling and implementation guide](references/spreadsheet-styling.md).
+A grid with no undo of its own can have Hubble keep it (`module-spreadsheet-history-v1`);
+the same reference describes it.
 Patch Sheet is the reference for
 package-owned cell editing and an adjacent native workbook over one document.
 Use the public browser bridge and packaged assets; keep the actual Matrix surface

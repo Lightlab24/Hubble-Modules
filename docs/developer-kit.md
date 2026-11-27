@@ -76,6 +76,13 @@ The next developer kit adds `module-sliders-v1`: Hubble's shared slider, either 
 `@hubble/module-sdk/slider-controls`. Check for the feature in the actual host's
 `describe` response. See the sliders skill reference and `examples/custom-slider`.
 
+The next developer kit also adds `module-spreadsheet-history-v1`: a grid mounted with
+`mountSpreadsheetControls({ history: true })` has Hubble keep its undo and redo, so a
+module with no history of its own gets Command+Z, HubDash's Edit menu and the toolbar's
+Undo and Redo buttons without writing any. Check for the feature in the actual host's
+`describe` response; on a host without it the mount throws. See "Undo kept by Hubble" in
+the spreadsheet controls skill reference.
+
 Developer kit **1.8.1-dev.4** adds optional spreadsheet controls requiring these
 capabilities from the actual host's `describe` response:
 

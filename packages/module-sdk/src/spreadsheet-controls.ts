@@ -18,6 +18,9 @@ export const MODULE_SPREADSHEET_COLUMN_SEARCH_FEATURE =
   "module-spreadsheet-column-search-v1";
 /** The Button Matrix's search field: Find, Rows and Columns. */
 export const MODULE_SPREADSHEET_SEARCH_FEATURE = "module-spreadsheet-search-v1";
+/** Undo and redo that Hubble keeps for a grid mounted with `history`. */
+export const MODULE_SPREADSHEET_HISTORY_FEATURE =
+  "module-spreadsheet-history-v1";
 export const MODULE_SPREADSHEET_COLUMN_SECTIONS_FEATURE =
   "module-spreadsheet-column-sections-v1";
 export const MODULE_SPREADSHEET_TEXT_SIZE_FEATURE =
@@ -87,9 +90,37 @@ export interface SpreadsheetEdit extends SpreadsheetAddress {
   readonly formula?: string;
 }
 export interface SpreadsheetEditBatch {
+  /** `undo` and `redo` reach only a grid mounted with `history`. */
   readonly source:
-    "choice" | "paste" | "fill" | "clear" | "toggle" | "cut" | "color";
+    | "choice"
+    | "paste"
+    | "fill"
+    | "clear"
+    | "toggle"
+    | "cut"
+    | "color"
+    | "undo"
+    | "redo";
   readonly edits: readonly SpreadsheetEdit[];
+}
+/** Undo and redo that Hubble keeps for a grid mounted with `history`. */
+export interface SpreadsheetHistory {
+  state(): { undo: boolean; redo: boolean };
+  undo(): void;
+  redo(): void;
+  /**
+   * Remembers an edit the module makes itself, such as typed text, as one
+   * step. Call it just before applying the edit, while getCell still returns
+   * the old values. Returns a token for `forget`.
+   */
+  record(edits: readonly SpreadsheetEdit[]): object;
+  /**
+   * A save failed: pass the batch onEdit received or a `record` token. A
+   * gesture's step is dropped, so Undo never brings back a value that never
+   * held; a refused undo or redo goes back where it was.
+   */
+  forget(batchOrToken: object): void;
+  clear(): void;
 }
 export interface SpreadsheetControlsOptions {
   readonly root: HTMLElement;
@@ -107,6 +138,15 @@ export interface SpreadsheetControlsOptions {
     set(colors: readonly string[]): void;
   };
   onHistory?(direction: "undo" | "redo"): void;
+  /**
+   * Lets Hubble keep undo and redo for this grid. Requires
+   * module-spreadsheet-history-v1. Each paste, fill, clear, cut, choice,
+   * toggle, colour and recorded edit is one step, up to `limit` (200). Undo
+   * and Redo send the cells back through onEdit with source `undo` or `redo`.
+   * When set, onHistory is not called.
+   */
+  readonly history?: boolean | { readonly limit?: number };
+  onHistoryChange?(state: { undo: boolean; redo: boolean }): void;
   onSelection?(address: SpreadsheetAddress | undefined): void;
   onReferencePick?(address: SpreadsheetAddress): boolean;
   /** Visible rows and columns in display order; IDs must be unique and stable. */
@@ -128,6 +168,8 @@ export interface SpreadsheetControls {
   /** Clear all editable selected cells in one batch on extended-editing hosts. */
   clear?(): void;
   move?(columns: number, rows: number): boolean;
+  /** Present when the grid was mounted with `history`. */
+  readonly history?: SpreadsheetHistory;
   dispose(): void;
 }
 /** Matrix context-menu chrome; commands and their effects remain module-owned. */
@@ -206,6 +248,10 @@ export async function mountSpreadsheetControls(
       `Host does not supply ${MODULE_SPREADSHEET_EXTENDED_EDITING_FEATURE}`,
     );
   if (options.workbookEditing) requireWorkbookTools(runtime.mountToolbar);
+  if (options.history && runtime.historySupported !== true)
+    throw new Error(
+      `Host does not supply ${MODULE_SPREADSHEET_HISTORY_FEATURE}`,
+    );
   return runtime.mount(options);
 }
 
@@ -267,6 +313,7 @@ async function loadRuntime() {
     mountReorder?: (
       input: SpreadsheetReorderOptions,
     ) => SpreadsheetReorderControls;
+    historySupported?: boolean;
   };
   try {
     runtime = await import(/* @vite-ignore */ url);
