@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ModuleContext, ModuleJsonValue } from "@hubble/module-sdk";
-import { TslPage, switcherTarget, type LiveReply, type PageSnapshot } from "../src/page.js";
+import { TslPage, switcherTarget, type LiveReply, type PageSnapshot, type SharedReply } from "../src/page.js";
 import type { TslDiscoveredDisplay, TslReceiver } from "../src/receiver.js";
 import { defaultSwitcherDocument, SWITCHER_DOCUMENT_ID, type SwitcherDocument } from "../src/setup.js";
 import { TslRouting } from "../src/routing.js";
@@ -215,15 +215,53 @@ describe("what stays on this computer", () => {
     expect(await second.call<PageSnapshot>("snapshot")).toMatchObject({ reading: null, readAt: null, readError: null });
   });
 
-  it("saves the switcher setup with the workspace, and reports a save that lost a race", async () => {
-    const { call, document } = await world();
+  it("saves the switcher setup with the workspace, only the fields a page changed, onto what is saved now", async () => {
+    const { call, document, setDocument } = await world();
     const value = { ...defaultSwitcherDocument(), host: "10.20.20.41", fsfc: true };
-    expect(await call("save-switcher", { value, revision: null })).toEqual({ status: "saved", value, revision: "rev-1" });
+    expect(await call("save-switcher", { change: { host: "10.20.20.41", fsfc: true } })).toEqual({ status: "saved", value, revision: "rev-1", kept: [] });
     expect(document().value).toEqual(value);
-    expect(await call("save-switcher", { value: { ...value, center: true }, revision: null })).toEqual({ status: "conflict", value, revision: "rev-1" });
-    await expect(call("save-switcher", { value: { ...value, name: "TOO LONG NAME" }, revision: "rev-1" })).rejects.toThrow();
-    expect(document().value).toEqual(value);
+    // Another window saved since: this page's field goes on top of it, and neither undoes the other.
+    setDocument({ name: "CAM1" });
+    expect(await call("save-switcher", { change: { center: true } })).toEqual({
+      status: "saved",
+      value: { ...value, name: "CAM1", center: true },
+      revision: "rev-3",
+      kept: [],
+    });
+    // The same change again writes nothing.
+    expect(await call("save-switcher", { change: { center: true } })).toMatchObject({ revision: "rev-3" });
+    // A field the page changed by itself lands only where the setup still has what it started from.
+    expect(await call("save-switcher", { change: { name: "ADAM", device: "ADAM" }, expected: { name: "HUBBLE", device: "" } })).toMatchObject({
+      value: { name: "CAM1", device: "ADAM" },
+      kept: ["name"],
+    });
+    // A value the switcher can't hold, or a field the setup doesn't have, is refused and nothing is saved.
+    await expect(call("save-switcher", { change: { name: "TOO LONG NAME" } })).rejects.toThrow();
+    await expect(call("save-switcher", { change: { colour: "red" } })).rejects.toThrow();
+    expect(document()).toMatchObject({ revision: "rev-4", value: { ...value, name: "CAM1", center: true, device: "ADAM" } });
   });
+
+  it("tells every open page where the saved setup and the last reading stand, and hands them over", async () => {
+    const fake = await fakeSwitcher();
+    const { call, setDocument } = await world({ fake });
+    const first = await call<PageSnapshot>("snapshot");
+    expect(first.live.setup).toEqual({ revision: "rev-1", reading: first.stamp, busy: false });
+    // Another window reads the switcher: the next live answer says so at once, with a new stamp.
+    const waiting = call<LiveReply>("live", { after: first.live.version, run: first.live.run });
+    await call<Contact>("read-switcher");
+    const told = await waiting;
+    expect(told.setup.reading).not.toBe(first.stamp);
+    const shared = await call<SharedReply>("saved");
+    expect(shared).toMatchObject({ switcher: { revision: "rev-1" }, stamp: told.setup.reading, reading: { product: "Carbonite Ultra" } });
+    expect(shared).not.toHaveProperty("routing");
+    expect(await call<SharedReply>("saved", { routing: true })).toHaveProperty("routing.rows", []);
+    // A change saved outside the module, such as an import, is noticed within a couple of seconds.
+    setDocument({ center: true });
+    let latest = await call<LiveReply>("live", { after: told.version, run: told.run });
+    for (let wait = 0; latest.setup.revision !== "rev-2" && wait < 6; wait++)
+      latest = await call<LiveReply>("live", { after: latest.version, run: latest.run });
+    expect(latest.setup.revision).toBe("rev-2");
+  }, 15_000);
 });
 
 describe("the switcher", () => {
@@ -383,16 +421,47 @@ describe("the switcher", () => {
     await vi.waitFor(() => expect(fake.openConnections).toBe(0));
   });
 
-  it("takes one request at a time", async () => {
+  it("takes one request at a time: another window's waits its turn and sends what is saved then", async () => {
+    const fake = await fakeSwitcher();
+    const { call, setDocument } = await world({ fake });
+    fake.hold();
+    const first = call<Contact>("read-switcher");
+    await vi.waitFor(() => expect(fake.openConnections).toBe(1));
+    // Every open page hears that the switcher is busy.
+    expect((await call<LiveReply>("live", { after: 0 })).setup.busy).toBe(true);
+    let sent = false;
+    const second = call<Contact>("send-switcher", {}).then((reply) => {
+      sent = true;
+      return reply;
+    });
+    // Saved while the second request waits: it is sent with the setup as saved when its turn comes.
+    setDocument({ center: true });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(sent).toBe(false);
+    expect(fake.openConnections).toBe(1);
+    fake.release();
+    expect((await first).reading?.devices).toHaveLength(3);
+    expect((await second).reading?.mine).toMatchObject({ name: "HUBBLE", settings: { center: true } });
+    expect(fake.devices).toHaveLength(4);
+    expect(fake.formIsIdle).toBe(true);
+  });
+
+  it("lets a waiting request go when its page does, without holding up the next", async () => {
     const fake = await fakeSwitcher();
     const { call } = await world({ fake });
     fake.hold();
     const first = call<Contact>("read-switcher");
     await vi.waitFor(() => expect(fake.openConnections).toBe(1));
-    await expect(call("send-switcher", {})).rejects.toThrow("Still working on the last switcher request");
+    const gone = new AbortController();
+    const abandoned = call("delete-switcher", {}, gone.signal).catch((error: unknown) => error);
+    gone.abort();
+    expect(await abandoned).toBeInstanceOf(Error);
+    const third = call<Contact>("read-switcher");
     fake.release();
-    expect((await first).reading?.devices).toHaveLength(3);
-    expect(fake.devices).toHaveLength(3);
+    await first;
+    expect((await third).reading?.devices).toHaveLength(3);
+    // Deleting never ran.
+    expect(fake.devices.map((device) => device.name)).toEqual(["CP", "ADAM", "RTR TALL"]);
   });
 
   it("reads an address with or without a port", () => {

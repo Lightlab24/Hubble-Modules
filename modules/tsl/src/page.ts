@@ -28,11 +28,13 @@ import {
   type SwitcherReading,
 } from "./switcher/index.js";
 import {
-  RoutingRowSchema,
+  RoutingChangeSchema,
   type RoutingLive,
   type RoutingSnapshot,
   type TslRouting,
 } from "./routing.js";
+import { applySetupChange, type RoutingChange, type SetupChange } from "./changes.js";
+import { PAGE_VIEW_IDS, type PageView } from "./views.js";
 
 export const PAGE_ID = "tsl";
 export const PAGE_SECTION_ID = "app";
@@ -40,6 +42,7 @@ export const PAGE_COMMANDS = [
   { id: "snapshot", label: "Read the page" },
   { id: "live", label: "Read the latest tally" },
   { id: "view", label: "Remember the open tab" },
+  { id: "saved", label: "Read what is saved" },
   { id: "save-switcher", label: "Save the switcher setup" },
   { id: "read-switcher", label: "Read the switcher" },
   { id: "send-switcher", label: "Send to the switcher" },
@@ -87,10 +90,44 @@ export interface LiveReply {
   };
   /** Each camera's tally and routing status, the routers here, and whether tally is followed. */
   readonly routing: RoutingLive;
+  /** Where the switcher setup and the last reading of the switcher stand. */
+  readonly setup: SetupLive;
+}
+/**
+ * Every open copy of the page hears of a change to the switcher setup or to what the switcher was
+ * last read to have, whichever window made it, and reads it again when it holds something older.
+ */
+export interface SetupLive {
+  /** The saved switcher setup's revision. */
+  readonly revision: string | null;
+  /** Changes with each read, send or delete, from any window. */
+  readonly reading: string;
+  /** A request to the switcher is under way, from any window. */
+  readonly busy: boolean;
+}
+/** What is saved and shared by every copy of the page, without the live tally. */
+export interface SharedReply {
+  readonly switcher: { readonly value: SwitcherDocument; readonly revision: string | null };
+  readonly reading: SwitcherReading | null;
+  readonly readAt: number | null;
+  readonly readError: string | null;
+  readonly routeAddress: string | null;
+  /** The reading's stamp, as `SetupLive.reading` gives it. */
+  readonly stamp: string;
+  /** The camera mappings, when asked for. */
+  readonly routing?: RoutingSnapshot;
+}
+/** A saved change to the switcher setup: the setup as saved now. */
+export interface SetupSaved {
+  readonly status: "saved";
+  readonly value: SwitcherDocument;
+  readonly revision: string | null;
+  /** Fields the page changed by itself that another window had changed first, so theirs stayed. */
+  readonly kept: readonly string[];
 }
 export interface PageSnapshot {
   readonly name: string;
-  readonly tab: "tally" | "routing" | "setup";
+  readonly tab: PageView;
   readonly receiver: ReceiverSettings;
   readonly addresses: readonly { id: string; label: string }[];
   readonly peers: readonly { id: string; label: string }[];
@@ -103,10 +140,12 @@ export interface PageSnapshot {
   readonly live: LiveReply;
   /** The camera mappings as saved, with their revision. */
   readonly routing: RoutingSnapshot;
+  /** The reading's stamp, as `SetupLive.reading` gives it. */
+  readonly stamp: string;
 }
 
 const LocalState = z.object({
-  tab: z.enum(["tally", "routing", "setup"]).default("tally"),
+  tab: z.enum(PAGE_VIEW_IDS).default("tally"),
   reading: z.unknown().optional(),
   readAt: z.number().nullable().default(null),
   readError: z.string().nullable().default(null),
@@ -114,6 +153,18 @@ const LocalState = z.object({
 });
 const LIVE_WAIT_MS = 20_000;
 const COALESCE_MS = 40;
+/** How often the saved switcher setup is read again, for a change made outside this module, such as an import. */
+const DOCUMENT_MS = 2000;
+/** A save that lost a race is put onto what won it and tried again, this many times in all. */
+const SAVE_ATTEMPTS = 8;
+/** How long a switcher request waits for another window's to finish. */
+const SWITCHER_QUEUE_MS = 30_000;
+/** How long the address that reaches the switcher is worked out once for. */
+const ROUTE_MS = 5000;
+const SETUP_FIELDS = Object.keys(SwitcherDocumentSchema.shape) as [keyof SwitcherDocument, ...(keyof SwitcherDocument)[]];
+/** One copy's change to the switcher setup. Values are checked on the setup it makes, as saved. */
+const SetupChangeSchema = z.partialRecord(z.enum(SETUP_FIELDS), z.json());
+const sameJson = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 const rowOf = (display: TslDiscoveredDisplay): TallyRow => ({
   key: `${display.screen}:${display.address}`,
@@ -204,9 +255,22 @@ export class TslPage {
   private reading: SwitcherReading | null = null;
   private loaded: Promise<void> | undefined;
   private writes: Promise<unknown> = Promise.resolve();
+  /** A switcher conversation is under way, asked for by any window. */
   private busy = false;
   /** The switcher conversation in progress. Closing waits for it, so its form is left tidy. */
   private talking: Promise<void> | undefined;
+  /** Switcher requests in turn: the one under way, then each waiting one. */
+  private queue: Promise<void> = Promise.resolve();
+  /** The saved switcher setup as last read or written here, followed for changes from elsewhere. */
+  private setup: { value: SwitcherDocument; revision: string | null } | undefined;
+  private setupSaving = 0;
+  private setupAdopted = 0;
+  private setupReading = false;
+  private setupTimer: ReturnType<typeof setInterval> | undefined;
+  /** How many times the switcher was read, sent to or deleted from, by any window, in this run. */
+  private readings = 0;
+  private route: { host: string; at: number; address: Promise<string | null> } | undefined;
+  private readonly stopping = new AbortController();
   private closed = false;
   private readonly file: string | undefined;
   private readonly switcher: PageDependencies;
@@ -290,7 +354,12 @@ export class TslPage {
         lastSender,
       },
       routing: this.routing.live(),
+      setup: { revision: this.setup?.revision ?? null, reading: this.stamp(), busy: this.busy },
     };
+  }
+  /** Names this run, so a page that kept a stamp from the last run never takes it for this one's. */
+  private stamp(): string {
+    return `${this.run}:${this.readings}`;
   }
 
   private async waitLive(after: number, run: string | undefined, signal: AbortSignal): Promise<LiveReply> {
@@ -353,9 +422,93 @@ export class TslPage {
     return createModuleDocumentClient(this.context.services);
   }
   private async document(signal?: AbortSignal): Promise<{ value: SwitcherDocument; revision: string | null }> {
+    const adopted = this.setupAdopted;
     const saved = await this.documents().read(SWITCHER_DOCUMENT_ID, signal);
     const parsed = SwitcherDocumentSchema.safeParse(saved.value);
-    return { value: parsed.success ? parsed.data : defaultSwitcherDocument(), revision: saved.revision };
+    const document = { value: parsed.success ? parsed.data : defaultSwitcherDocument(), revision: saved.revision };
+    // A read that crossed a save may answer with what was saved before it: only a clean one is kept.
+    if (!this.setupSaving && this.setupAdopted === adopted) this.adoptSetup(document);
+    return document;
+  }
+  /** The saved setup, as read or written here. Every open page hears of a new revision. */
+  private adoptSetup(document: { value: SwitcherDocument; revision: string | null }): void {
+    const known = this.setup !== undefined && this.setup.revision === document.revision;
+    this.setup = document;
+    this.setupAdopted++;
+    if (!known) this.changed();
+  }
+  /** Follows the saved setup from now on, for a change made outside this module, such as an import. */
+  private followSetup(): void {
+    if (this.setupTimer || this.closed || !this.context.services) return;
+    this.setupTimer = setInterval(() => {
+      if (this.closed || this.setupReading || this.setupSaving) return;
+      this.setupReading = true;
+      void this.document(this.stopping.signal)
+        .catch(() => undefined)
+        .finally(() => {
+          this.setupReading = false;
+        });
+    }, DOCUMENT_MS);
+    this.setupTimer.unref?.();
+  }
+  /**
+   * Puts one copy's change onto the setup as saved now. A save that lost a race to another window
+   * is put onto what won it and tried again, so neither undoes the other.
+   */
+  private async saveSetup(change: SetupChange, expected: SetupChange, signal: AbortSignal): Promise<SetupSaved> {
+    this.setupSaving++;
+    try {
+      let current = await this.document(signal);
+      for (let attempt = 0; attempt < SAVE_ATTEMPTS; attempt++) {
+        const applied = applySetupChange(current.value, change, expected);
+        const value = SwitcherDocumentSchema.parse(applied.value);
+        // Nothing to write: already saved, as when a save is sent again after a restart.
+        if (sameJson(value, current.value)) return { status: "saved", value: current.value, revision: current.revision, kept: applied.kept };
+        try {
+          const saved = await this.documents().write(
+            { id: SWITCHER_DOCUMENT_ID, revision: current.revision },
+            value as unknown as ModuleJsonValue,
+            signal,
+          );
+          const stored = SwitcherDocumentSchema.parse(saved.value);
+          this.adoptSetup({ value: stored, revision: saved.revision });
+          return { status: "saved", value: stored, revision: saved.revision, kept: applied.kept };
+        } catch (error) {
+          if (!(error instanceof ModuleDocumentConflictError)) throw error;
+          // Another window saved first: this change goes onto what it saved.
+          const parsed = SwitcherDocumentSchema.safeParse(error.document.value);
+          current = { value: parsed.success ? parsed.data : defaultSwitcherDocument(), revision: error.document.revision };
+          this.adoptSetup(current);
+        }
+      }
+      throw new Error("The switcher setup kept changing in another window. Try again");
+    } finally {
+      this.setupSaving--;
+    }
+  }
+  /** The address this computer uses to reach a host, worked out at most once every few seconds. */
+  private routeFor(host: string): Promise<string | null> {
+    const target = switcherTarget(host).host;
+    const now = Date.now();
+    if (!this.route || this.route.host !== target || now - this.route.at > ROUTE_MS)
+      this.route = { host: target, at: now, address: this.switcher.routeAddress(target).catch(() => null) };
+    return this.route.address;
+  }
+  /** What is saved and shared by every copy of the page: the setup, the last reading and, if asked, the cameras. */
+  private async shared(signal: AbortSignal, routing: boolean): Promise<SharedReply> {
+    this.followSetup();
+    const switcher = await this.document(signal);
+    // A reading belongs to the address it came from.
+    const here = this.local.readHost === switcher.value.host;
+    return {
+      switcher,
+      routeAddress: await this.routeFor(switcher.value.host),
+      reading: here ? this.reading : null,
+      readAt: here ? this.local.readAt : null,
+      readError: here ? this.local.readError : null,
+      stamp: this.stamp(),
+      ...(routing ? { routing: this.routing.snapshot() } : {}),
+    };
   }
   private receiverSettings(): ReceiverSettings {
     return ReceiverSettingsSchema.parse({
@@ -372,21 +525,21 @@ export class TslPage {
   private async snapshot(signal: AbortSignal): Promise<PageSnapshot> {
     await this.load();
     this.collectNow();
-    const [switcher, peers] = await Promise.all([this.document(signal), this.peers().catch(() => [])]);
+    const [shared, peers] = await Promise.all([this.shared(signal, false), this.peers().catch(() => [])]);
     return {
       name: String(this.context.settings.name ?? ""),
       tab: this.local.tab,
       receiver: this.receiverSettings(),
       addresses: this.switcher.localAddresses(),
       peers,
-      switcher,
-      routeAddress: await this.switcher.routeAddress(switcherTarget(switcher.value.host).host),
-      // A reading belongs to the address it came from.
-      reading: this.local.readHost === switcher.value.host ? this.reading : null,
-      readAt: this.local.readHost === switcher.value.host ? this.local.readAt : null,
-      readError: this.local.readHost === switcher.value.host ? this.local.readError : null,
+      switcher: shared.switcher,
+      routeAddress: shared.routeAddress,
+      reading: shared.reading,
+      readAt: shared.readAt,
+      readError: shared.readError,
       live: this.live(0),
       routing: this.routing.snapshot(),
+      stamp: shared.stamp,
     };
   }
   private collectNow(): void {
@@ -395,47 +548,64 @@ export class TslPage {
     this.collect();
   }
 
-  /** One conversation with the switcher at a time: its Devices form is a single shared form. */
-  private async withSwitcher<T>(work: () => Promise<T>): Promise<T> {
-    if (this.busy) throw new Error("Still working on the last switcher request");
-    this.busy = true;
-    const talk = work();
-    this.talking = talk.then(
-      () => undefined,
-      () => undefined,
-    );
+  /**
+   * One conversation with the switcher at a time: its Devices form is a single shared form. A
+   * request from another window waits its turn rather than being refused, and reads the setup
+   * once its turn comes, so it sends what is saved then.
+   */
+  private async withSwitcher<T>(signal: AbortSignal, work: () => Promise<T>): Promise<T> {
+    const before = this.queue;
+    let done!: () => void;
+    const turn = new Promise<void>((resolve) => (done = resolve));
+    // The next request waits for this one and for every one before it.
+    this.queue = before.then(() => turn);
     try {
-      return await talk;
+      await waitTurn(before, signal);
+      if (this.closed) throw new Error("TSL Tally stopped");
+      this.busy = true;
+      this.changed();
+      const talk = work();
+      this.talking = talk.then(
+        () => undefined,
+        () => undefined,
+      );
+      try {
+        return await talk;
+      } finally {
+        this.busy = false;
+        this.talking = undefined;
+        this.changed();
+      }
     } finally {
-      this.busy = false;
-      this.talking = undefined;
+      done();
     }
   }
   private async took(host: string, reading: SwitcherReading | null, error: string | null) {
     this.reading = reading ?? (error ? null : this.reading);
     this.local = { ...this.local, readHost: host, readAt: Date.now(), readError: error };
+    // Every open page takes in what the switcher has now.
+    this.readings++;
+    this.changed();
     await this.remember();
-    return { reading: this.reading, readAt: this.local.readAt, readError: error };
+    return { reading: this.reading, readAt: this.local.readAt, readError: error, stamp: this.stamp() };
   }
   private async contact(
     host: string,
     stage: string,
     work: () => Promise<SwitcherReading>,
-  ): Promise<{ reading: SwitcherReading | null; readAt: number | null; readError: string | null }> {
+  ): Promise<{ reading: SwitcherReading | null; readAt: number | null; readError: string | null; stamp: string }> {
     if (!host) throw new Error("Enter the switcher's address first");
-    return this.withSwitcher(async () => {
-      try {
-        const reading = await work();
-        this.context.log({ level: "info", stage, message: `${stage} on ${host}: ${reading.devices.length} devices listed` });
-        return await this.took(host, reading, null);
-      } catch (error) {
-        const message = error instanceof Error ? error.message.slice(0, 300) : "The switcher could not be reached";
-        this.context.log({ level: "error", stage, message: `${stage} on ${host} failed: ${message}` });
-        // A failed read replaces the reading; a failed send or delete keeps what was last read.
-        if (stage === "read-switcher") await this.took(host, null, message);
-        throw new Error(message);
-      }
-    });
+    try {
+      const reading = await work();
+      this.context.log({ level: "info", stage, message: `${stage} on ${host}: ${reading.devices.length} devices listed` });
+      return await this.took(host, reading, null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message.slice(0, 300) : "The switcher could not be reached";
+      this.context.log({ level: "error", stage, message: `${stage} on ${host} failed: ${message}` });
+      // A failed read replaces the reading; a failed send or delete keeps what was last read.
+      if (stage === "read-switcher") await this.took(host, null, message);
+      throw new Error(message);
+    }
   }
 
   /** How the page's device is found on the switcher: by the name it has there, or the one it is being given. */
@@ -454,43 +624,37 @@ export class TslPage {
         return json(await this.snapshot(signal));
       case "live": {
         const { after, run } = z.object({ after: z.int().min(0), run: z.string().max(64).optional() }).parse(request.value);
+        // Each reply says where the saved setup stands, so this run has to know it first.
+        if (!this.setup && this.context.services) {
+          this.followSetup();
+          await this.document(signal).catch(() => undefined);
+        }
         return json(await this.waitLive(after, run, signal));
       }
+      case "saved": {
+        const { routing } = z.object({ routing: z.boolean().default(false) }).parse(request.value ?? {});
+        return json(await this.shared(signal, routing));
+      }
       case "view": {
-        const { tab } = z.object({ tab: z.enum(["tally", "routing", "setup"]) }).parse(request.value);
+        const { tab } = z.object({ tab: z.enum(PAGE_VIEW_IDS) }).parse(request.value);
         this.local = { ...this.local, tab };
         await this.remember();
         return null;
       }
       case "save-switcher": {
-        const input = z
-          .object({ value: SwitcherDocumentSchema, revision: z.string().nullable() })
-          .parse(request.value);
-        try {
-          const saved = await this.documents().write(
-            { id: SWITCHER_DOCUMENT_ID, revision: input.revision },
-            input.value as unknown as ModuleJsonValue,
-            signal,
-          );
-          return json({ status: "saved", value: SwitcherDocumentSchema.parse(saved.value), revision: saved.revision });
-        } catch (error) {
-          if (!(error instanceof ModuleDocumentConflictError)) throw error;
-          const current = SwitcherDocumentSchema.safeParse(error.document.value);
-          return json({
-            status: "conflict",
-            value: current.success ? current.data : defaultSwitcherDocument(),
-            revision: error.document.revision,
-          });
-        }
+        // Only what the page changed, never its whole setup: the backend puts it onto what is saved now.
+        const input = z.object({ change: SetupChangeSchema, expected: SetupChangeSchema.default({}) }).parse(request.value);
+        return json(await this.saveSetup(input.change as SetupChange, input.expected as SetupChange, signal));
       }
-      case "read-switcher": {
-        const { value: document } = await this.document(signal);
+      case "read-switcher":
         return json(
-          await this.contact(document.host, "read-switcher", () =>
-            this.switcher.readSwitcher({ ...switcherTarget(document.host), ...this.names(document), signal }),
-          ),
+          await this.withSwitcher(signal, async () => {
+            const { value: document } = await this.document(signal);
+            return this.contact(document.host, "read-switcher", () =>
+              this.switcher.readSwitcher({ ...switcherTarget(document.host), ...this.names(document), signal }),
+            );
+          }),
         );
-      }
       case "send-switcher": {
         // The page sends what it shows for This computer: a change there may still be on its way
         // through Hubble, and the switcher has to get what the person is looking at.
@@ -500,50 +664,53 @@ export class TslPage {
             receiver: ReceiverSettingsSchema.pick({ protocol: true, transport: true, port: true }).optional(),
           })
           .parse(request.value ?? {});
-        const { value: document } = await this.document(signal);
-        const target = switcherTarget(document.host);
-        const sendTo = document.sendTo || (await this.switcher.routeAddress(target.host));
-        if (!sendTo) throw new Error("Choose which of this computer's addresses the switcher should send to");
-        const local = this.switcher.localAddresses().map((item) => item.id);
-        const notHere = () => new Error(`${sendTo} isn't one of this computer's addresses`);
-        // Only this computer's addresses, or the one the device already sends to: a device that
-        // feeds something else can have its other settings changed and still send there.
-        if (!local.includes(sendTo) && !document.device) throw notHere();
         return json(
-          await this.contact(document.host, "send-switcher", async () => {
-            const before = await this.switcher.readSwitcher({ ...target, ...this.names(document), signal });
-            if (!local.includes(sendTo) && before.mine?.ip !== sendTo) throw notHere();
-            // Never change someone else's device without being told to.
-            if (before.mine && !local.includes(before.mine.ip) && !adopt)
-              throw new Error(`${before.mine.name} on the switcher sends to ${before.mine.ip}. Confirm before changing it`);
-            return this.switcher.sendDevice({
-              ...target,
-              settings: wantedDevice(document, { ...this.receiverSettings(), ...receiver }, sendTo),
-              // The device as the switcher has it now, so a rename changes it rather than adding one.
-              deviceName: before.mine?.name ?? document.name,
-              signal,
+          await this.withSwitcher(signal, async () => {
+            // The setup as saved when this request's turn comes, with every window's changes in it.
+            const { value: document } = await this.document(signal);
+            const target = switcherTarget(document.host);
+            const sendTo = document.sendTo || (await this.switcher.routeAddress(target.host));
+            if (!sendTo) throw new Error("Choose which of this computer's addresses the switcher should send to");
+            const local = this.switcher.localAddresses().map((item) => item.id);
+            const notHere = () => new Error(`${sendTo} isn't one of this computer's addresses`);
+            // Only this computer's addresses, or the one the device already sends to: a device that
+            // feeds something else can have its other settings changed and still send there.
+            if (!local.includes(sendTo) && !document.device) throw notHere();
+            return this.contact(document.host, "send-switcher", async () => {
+              const before = await this.switcher.readSwitcher({ ...target, ...this.names(document), signal });
+              if (!local.includes(sendTo) && before.mine?.ip !== sendTo) throw notHere();
+              // Never change someone else's device without being told to.
+              if (before.mine && !local.includes(before.mine.ip) && !adopt)
+                throw new Error(`${before.mine.name} on the switcher sends to ${before.mine.ip}. Confirm before changing it`);
+              return this.switcher.sendDevice({
+                ...target,
+                settings: wantedDevice(document, { ...this.receiverSettings(), ...receiver }, sendTo),
+                // The device as the switcher has it now, so a rename changes it rather than adding one.
+                deviceName: before.mine?.name ?? document.name,
+                signal,
+              });
             });
           }),
         );
       }
       case "routing-save": {
-        const input = z
-          .object({ rows: z.array(RoutingRowSchema).max(512), revision: z.string().nullable() })
-          .parse(request.value);
-        return json(await this.routing.save(input.rows, input.revision, signal));
+        // Only what the page changed, never its whole list: the backend puts it onto what is saved now.
+        const { change } = z.object({ change: RoutingChangeSchema }).parse(request.value);
+        return json(await this.routing.save(change as RoutingChange, signal));
       }
       case "routing-follow": {
         const { mode } = z.object({ mode: z.enum(["follow", "unfollow", "toggle"]) }).parse(request.value);
         return json({ following: await this.routing.follow(mode) });
       }
-      case "delete-switcher": {
-        const { value: document } = await this.document(signal);
+      case "delete-switcher":
         return json(
-          await this.contact(document.host, "delete-switcher", () =>
-            this.switcher.deleteDevice({ ...switcherTarget(document.host), ...this.names(document), signal }),
-          ),
+          await this.withSwitcher(signal, async () => {
+            const { value: document } = await this.document(signal);
+            return this.contact(document.host, "delete-switcher", () =>
+              this.switcher.deleteDevice({ ...switcherTarget(document.host), ...this.names(document), signal }),
+            );
+          }),
         );
-      }
       default:
         throw new Error("Unknown page command");
     }
@@ -551,10 +718,33 @@ export class TslPage {
 
   async close(): Promise<void> {
     this.closed = true;
+    clearInterval(this.setupTimer);
+    this.stopping.abort();
     clearTimeout(this.coalesce);
     for (const wake of [...this.waiters]) wake();
     // A request cut short by a restart still cancels its edit and lets go of the switcher's form.
     await this.talking;
     await this.writes;
   }
+}
+
+/** Waits for the switcher request before this one, while the page still wants an answer. */
+function waitTurn(before: Promise<void>, signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted();
+  return new Promise<void>((resolve, reject) => {
+    const finish = (error?: Error) => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", stop);
+      if (error) reject(error);
+      else resolve();
+    };
+    const stop = () => finish(signal.reason instanceof Error ? signal.reason : new Error("Request cancelled"));
+    const timer = setTimeout(
+      () => finish(new Error("The switcher is still busy with a request from another window. Try again")),
+      SWITCHER_QUEUE_MS,
+    );
+    timer.unref?.();
+    signal.addEventListener("abort", stop, { once: true });
+    void before.then(() => finish());
+  });
 }

@@ -7,7 +7,8 @@ import {
   type SpreadsheetColumn,
   type SpreadsheetEdit,
 } from "@hubble/module-sdk/spreadsheet-controls";
-import type { RoutingLive, RoutingRow, RoutingSnapshot } from "./routing.js";
+import type { RoutingLive, RoutingRow, RoutingSave, RoutingSnapshot } from "./routing.js";
+import { applyRoutingChange, noRoutingChange, routingChange } from "./changes.js";
 
 /** The routing engine's on-air lamps, as the operator reads them. */
 const INDICATORS = [
@@ -60,21 +61,31 @@ export interface RoutingViewOptions {
 
 /**
  * The Routing tab: the camera mappings and Follow, merged in from TALLY Switch. Edits show at
- * once and save in order behind; a save the workspace refuses puts back what is saved.
+ * once and save in order behind; a save the workspace refuses puts back only that edit.
+ *
+ * The page can be open in several HubDash windows at once. Each copy sends only what it changed,
+ * which the backend puts onto what is saved now, and each follows what the others save without a
+ * reload. The cell being typed in is never redrawn, moved or taken away while typing goes on.
  */
 export async function mountRoutingView(options: RoutingViewOptions) {
   const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
   const grid = el<HTMLTableElement>("routing-grid");
   const viewport = el("routing-view");
   const body = grid.tBodies[0]!;
+  /** The cameras as shown: what is saved, with this copy's changes on their way on top. */
   let rows: RoutingRow[] = structuredClone([...options.snapshot.rows]);
-  let saved: RoutingRow[] = structuredClone(rows);
+  /** The cameras as saved, as far as this copy knows: its own changes are counted from these. */
+  let base: RoutingRow[] = structuredClone(rows);
   let revision = options.snapshot.revision;
+  /** The newest revision the backend has said it holds, and how many times it has said one. */
+  let announced = options.snapshot.revision;
+  let announcements = 0;
   let live: RoutingLive = options.live;
   let following = options.snapshot.following;
   let followPending = 0;
   let saving: Promise<void> | undefined;
-  let dirty = false;
+  /** Counts this copy's own changes, so a read that crossed one is not taken in over it. */
+  let edits = 0;
   /** Cameras saved elsewhere are being read in. */
   let rereading = false;
   const rowElements = new Map<string, HTMLTableRowElement>();
@@ -149,12 +160,16 @@ export async function mountRoutingView(options: RoutingViewOptions) {
   };
   const draw = () => {
     const order = rows.map((row) => row.id);
+    // A camera deleted in another window while its cell is typed in here stays where it is until
+    // the typing ends.
+    const typedIn = editor && !order.includes(editor.address.rowId) ? rowElements.get(editor.address.rowId) : undefined;
     for (const [id, element] of rowElements)
-      if (!order.includes(id)) {
+      if (!order.includes(id) && element !== typedIn) {
         element.remove();
         rowElements.delete(id);
         for (const column of COLUMNS) cells.delete(key({ rowId: id, columnId: column.id }));
       }
+    let place = 0;
     order.forEach((id, index) => {
       let element = rowElements.get(id);
       if (!element) {
@@ -177,7 +192,10 @@ export async function mountRoutingView(options: RoutingViewOptions) {
         }
         rowElements.set(id, element);
       }
-      if (body.children[index] !== element) body.insertBefore(element, body.children[index] ?? null);
+      // Rows are placed around the one being typed in; it is never moved, which would end the typing.
+      if (typedIn && body.children[place] === typedIn) place++;
+      if (body.children[place] !== element) body.insertBefore(element, body.children[place] ?? null);
+      place++;
       element.cells[0]!.textContent = String(index + 1);
       element.dataset.air = String(statusOf(id)?.program === "ON AIR");
       for (const column of COLUMNS) paint({ rowId: id, columnId: column.id });
@@ -228,39 +246,81 @@ export async function mountRoutingView(options: RoutingViewOptions) {
     },
   });
 
-  // ----- Saving: in order, newest on top; a refused save puts back what is saved -----
+  // ----- Saving: in order, only what changed here, onto what is saved now -----
+  const named = (from: readonly RoutingRow[], ids: readonly string[]) =>
+    ids.length === 1
+      ? `${from.find((row) => row.id === ids[0])?.name || "A camera"} was deleted in another window`
+      : `${ids.length} cameras were deleted in another window`;
+  /** The cameras as saved now, from the backend, without the live tally. */
+  const readSaved = async () => ((await options.ask("saved", { routing: true })) as { routing?: RoutingSnapshot }).routing;
+  /** This copy now holds what is saved: shown as it is, unless a change of its own is on its way. */
+  const takeSaved = (snapshot: RoutingSnapshot) => {
+    base = structuredClone([...snapshot.rows]);
+    rows = structuredClone(base);
+    revision = snapshot.revision;
+    draw();
+  };
   const save = (): Promise<void> => {
-    dirty = true;
     saving ??= (async () => {
       try {
-        while (dirty && !options.isDisposed()) {
-          dirty = false;
-          const value = structuredClone(rows);
-          type Reply = { status: string; rows: RoutingRow[]; revision: string | null };
-          let reply = (await options.ask("routing-save", { rows: value, revision })) as Reply;
-          // Saved elsewhere in between. This edit is the newer one, so it goes on top.
-          if (reply.status === "conflict")
-            reply = (await options.ask("routing-save", { rows: value, revision: reply.revision })) as Reply;
-          if (reply.status !== "saved") throw new Error("The camera mappings changed elsewhere. Try again");
-          revision = reply.revision;
-          saved = reply.rows;
+        while (!options.isDisposed()) {
+          const change = routingChange(base, rows);
+          if (noRoutingChange(change)) break;
+          const sent = rows;
+          try {
+            const reply = (await options.ask("routing-save", { change })) as RoutingSave;
+            base = reply.rows;
+            revision = reply.revision;
+            // A change to a camera that another window deleted is not kept, and says so.
+            if (reply.missing.length) options.failed(named(sent, reply.missing));
+          } catch (error) {
+            if (options.isDisposed()) return;
+            // Refused: only this change is put back, and the copy takes what is saved now, so its
+            // next change is not refused for the same reason.
+            const fresh = await readSaved().catch(() => undefined);
+            if (fresh) {
+              base = structuredClone([...fresh.rows]);
+              revision = fresh.revision;
+            }
+            options.failed(error instanceof Error ? error.message : "The camera mappings could not be saved");
+          }
+          if (options.isDisposed()) return;
+          // Changes made here while that one was saving go on top of what is saved now.
+          rows = applyRoutingChange(base, routingChange(sent, rows)).rows;
+          draw();
         }
-      } catch (error) {
-        if (options.isDisposed()) return;
-        dirty = false;
-        rows = structuredClone(saved);
-        draw();
-        options.failed(error instanceof Error ? error.message : "The camera mappings could not be saved");
       } finally {
         saving = undefined;
       }
+      follow();
     })();
     return saving;
   };
   const change = (next: RoutingRow[]) => {
     rows = next;
+    edits += 1;
     draw();
     void save();
+  };
+  /** Reads in what another window saved. A change of this copy's own, made meanwhile, wins. */
+  const follow = () => {
+    if (options.isDisposed() || saving || rereading || announced === revision) return;
+    rereading = true;
+    const at = edits;
+    const heard = announcements;
+    void readSaved()
+      .then((fresh) => {
+        // Saving brings back what is saved anyway, this copy's change on top.
+        if (!fresh || saving || edits !== at || options.isDisposed()) return;
+        takeSaved(fresh);
+        // What was read is the newest, unless another revision was announced meanwhile.
+        if (announcements === heard) announced = fresh.revision;
+        else setTimeout(follow, 50);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        rereading = false;
+      });
   };
 
   // ----- Edits: checked here, shown at once, saved behind -----
@@ -337,20 +397,30 @@ export async function mountRoutingView(options: RoutingViewOptions) {
     input.setAttribute("aria-label", `Edit ${COLUMNS.find((column) => column.id === address.columnId)?.label ?? "cell"}`);
     input.value = initial ?? field.value;
     const current = { address, input };
+    const camera = rows.find((row) => row.id === address.rowId);
     editor = current;
-    const finish = (commit: boolean, focusGrid: boolean) => {
-      if (editor !== current) return;
+    /** Ends the typing. False when the camera was deleted in another window meanwhile. */
+    const finish = (commit: boolean, focusGrid: boolean): boolean => {
+      if (editor !== current) return true;
       editor = undefined;
+      if (!rows.some((row) => row.id === address.rowId)) {
+        // Deleted in another window while it was typed in: it goes now, and what was typed with it.
+        draw();
+        if (commit && input.value !== field.value && camera) options.failed(named([camera], [camera.id]));
+        if (focusGrid) grid.focus({ preventScroll: true });
+        return false;
+      }
       if (commit && input.value !== field.value) submit([{ ...address, value: input.value }]);
       paint(address);
       if (focusGrid) controls.select(address);
+      return true;
     };
     input.addEventListener("keydown", (event) => {
       if (event.isComposing) return;
       if (event.key === "Escape" || event.key === "Tab" || event.key === "Enter") {
         event.preventDefault();
         event.stopPropagation();
-        finish(event.key !== "Escape", true);
+        if (!finish(event.key !== "Escape", true)) return;
         if (event.key === "Tab") controls.move?.(event.shiftKey ? -1 : 1, 0);
         else if (event.key === "Enter") controls.move?.(0, event.shiftKey ? -1 : 1);
       }
@@ -449,22 +519,9 @@ export async function mountRoutingView(options: RoutingViewOptions) {
     /** Live tally and routing status: drawn in place. Cameras saved elsewhere are read in. */
     live(next: RoutingLive) {
       live = next;
-      if (next.revision !== revision && !saving && !dirty && !editor && !rereading) {
-        rereading = true;
-        void (options.ask("snapshot") as Promise<{ routing: RoutingSnapshot }>)
-          .then((fresh) => {
-            // A change of the page's own, made meanwhile, wins: it saves on top.
-            if (saving || dirty || editor || options.isDisposed()) return;
-            rows = structuredClone([...fresh.routing.rows]);
-            saved = structuredClone(rows);
-            revision = fresh.routing.revision;
-            draw();
-          })
-          .catch(() => undefined)
-          .finally(() => {
-            rereading = false;
-          });
-      }
+      announced = next.revision;
+      announcements += 1;
+      follow();
       if (!followPending) following = next.following;
       for (const row of rows) {
         const element = rowElements.get(row.id);
@@ -475,14 +532,12 @@ export async function mountRoutingView(options: RoutingViewOptions) {
     },
     /** The backend as it stands after a restart: mappings too, unless a change is on its way. */
     take(snapshot: RoutingSnapshot, next: RoutingLive) {
-      if (!saving && !dirty) {
-        rows = structuredClone([...snapshot.rows]);
-        saved = structuredClone(rows);
-        revision = snapshot.revision;
-      }
       live = next;
+      announced = next.revision;
+      announcements += 1;
       if (!followPending) following = next.following;
-      draw();
+      if (!saving && noRoutingChange(routingChange(base, rows))) takeSaved(snapshot);
+      else draw();
     },
     dispose() {
       followControl.dispose();

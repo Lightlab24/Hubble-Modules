@@ -446,6 +446,9 @@ importers:
       '@hubble/module-tools':
         specifier: workspace:1.5.0
         version: link:../../packages/module-tools
+      '@playwright/test':
+        specifier: 1.61.1
+        version: 1.61.1
 
   modules/venice-camera-control:
     dependencies:

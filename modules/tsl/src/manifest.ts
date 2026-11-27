@@ -10,6 +10,7 @@ import {
 } from "./page.js";
 import { defaultSwitcherDocument, SWITCHER_DOCUMENT_ID } from "./setup.js";
 import { defaultRoutingDocument, ROUTING_DOCUMENT_ID } from "./routing.js";
+import { PAGE_VIEWS } from "./views.js";
 
 export default defineModuleManifest({
   formatVersion: 1,
@@ -44,6 +45,8 @@ export default defineModuleManifest({
       "module-fields-v2",
       "module-exchange-v1",
       "module-exchange-peers-v1",
+      // The page is live in every HubDash window that shows it.
+      "module-page-windows-v1",
     ],
   },
   configVersion: 1,
@@ -209,6 +212,13 @@ export default defineModuleManifest({
           settings: [...PAGE_SETTINGS],
           // Saving one of them restarts the listener. The page stays as it is meanwhile.
           restart: "keep-open",
+          // Live in every HubDash window at once (e2e/windows.spec.ts): each copy saves only what it
+          // changed, onto what is saved now, and follows what the others save. The open tab is each
+          // window's own; the one last chosen is where the page opens next time.
+          windows: true,
+          // The sidebar's Open in its own window › offers each view as a part: its window shows
+          // only that view, with no View control, and never changes where the whole page opens.
+          parts: PAGE_VIEWS.map((part) => ({ ...part })),
         },
       ],
     },

@@ -11,6 +11,7 @@ import type {
   ModulePeerBinding,
   ModulePeerDescription,
 } from "@hubble/module-sdk";
+import { routingChange } from "../src/changes.js";
 import {
   defaultRoutingDocument,
   ROUTING_DOCUMENT_ID,
@@ -247,22 +248,54 @@ it("saves the camera mappings with the workspace, and routes by them at once", a
   await settle();
   expect(test.routed()).toEqual([21]);
   const moved = cameras.map((row) => ({ ...row, source: row.source + 10 }));
-  const saved = await test.routing.save(moved, test.document().revision, new AbortController().signal);
-  expect(saved).toEqual({ status: "saved", rows: moved, revision: "rev-1" });
+  const signal = new AbortController().signal;
+  const saved = await test.routing.save(routingChange(cameras, moved), signal);
+  expect(saved).toEqual({ status: "saved", rows: moved, revision: "rev-1", missing: [] });
   expect(RoutingDocumentSchema.parse(test.document().value).rows).toEqual(moved);
   expect(test.routing.snapshot()).toMatchObject({ rows: moved, revision: "rev-1", following: true });
   // New mappings start from what is on air now, as a restart would; the next cut uses them.
   await test.setTally(onAir(2));
   expect(test.routed()).toEqual([21, 32]);
 
-  // A save that lost a race hands back what is saved now and changes nothing.
-  test.setSaved(cameras);
-  const lost = await test.routing.save(moved, "rev-1", new AbortController().signal);
-  expect(lost).toEqual({ status: "conflict", rows: cameras, revision: "rev-2" });
-  // Two cameras with one ID, or a value the switcher can't hold, are refused before saving.
-  await expect(test.routing.save([cameras[0]!, cameras[0]!], "rev-2", new AbortController().signal)).rejects.toThrow("same ID");
-  await expect(test.routing.save([{ ...cameras[0]!, level: 0 }], "rev-2", new AbortController().signal)).rejects.toThrow();
-  expect(test.document().revision).toBe("rev-2");
+  // Another window saved first: this change goes onto what it saved, and neither undoes the other.
+  test.setSaved([{ ...moved[0]!, name: "Jib" }, moved[1]!]);
+  const onTop = await test.routing.save(routingChange(moved, [moved[0]!, { ...moved[1]!, level: 2 }]), signal);
+  expect(onTop).toEqual({ status: "saved", rows: [{ ...moved[0]!, name: "Jib" }, { ...moved[1]!, level: 2 }], revision: "rev-3", missing: [] });
+  // A save of what is already saved writes nothing.
+  expect(await test.routing.save(routingChange(moved, [moved[0]!, { ...moved[1]!, level: 2 }]), signal)).toMatchObject({ revision: "rev-3" });
+  expect(test.document().revision).toBe("rev-3");
+  // A change to a camera deleted elsewhere is left out and named.
+  test.setSaved([{ ...moved[0]!, name: "Jib" }]);
+  expect(await test.routing.save(routingChange(moved, [moved[0]!, { ...moved[1]!, name: "Gone" }]), signal)).toMatchObject({
+    rows: [{ ...moved[0]!, name: "Jib" }],
+    revision: "rev-4",
+    missing: ["camera-2"],
+  });
+  // A value the switcher can't hold, or more cameras than a sheet holds, is refused before saving.
+  await expect(test.routing.save(routingChange([], [{ ...cameras[1]!, level: 0 }]), signal)).rejects.toThrow();
+  const many = Array.from({ length: 512 }, (_, index) => ({ ...cameras[0]!, id: `many-${index}` }));
+  await expect(test.routing.save(routingChange([], many), signal)).rejects.toThrow("at most 512 cameras");
+  expect(test.document().revision).toBe("rev-4");
+});
+
+it("puts saves from several windows at the same moment onto each other, and stops if it never settles", async () => {
+  const test = await world();
+  await test.routing.start();
+  const signal = new AbortController().signal;
+  // Every write loses a race to another window's, which renames the second camera.
+  const services = test.context.services as unknown as { request: (service: string, version: number, input: { method: string }) => Promise<unknown> };
+  const request = services.request.bind(services);
+  let races = 2;
+  services.request = async (service, version, input) => {
+    if (input.method === "write" && races-- > 0) test.setSaved([cameras[0]!, { ...cameras[1]!, name: `Race ${races}` }]);
+    return request(service, version, input);
+  };
+  const saved = await test.routing.save(routingChange(cameras, [{ ...cameras[0]!, name: "Wide" }, cameras[1]!]), signal);
+  expect(saved.rows.map((row) => row.name)).toEqual(["Wide", "Race 0"]);
+  races = Number.POSITIVE_INFINITY;
+  await expect(test.routing.save(routingChange(cameras, [{ ...cameras[0]!, name: "Again" }, cameras[1]!]), signal)).rejects.toThrow(
+    "kept changing in another window",
+  );
 });
 
 it("keeps Follow on this computer, not in the workspace", async () => {
