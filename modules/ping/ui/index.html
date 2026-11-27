@@ -4,9 +4,10 @@
 <body>
 <div class="ping-app" id="app">
   <header class="app-header">
-    <div class="app-title"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12h4l2.5-6 4 12 2.5-6h6"/></svg><div><h1>Ping</h1><p>Network devices</p></div></div>
+    <div class="app-title"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12h4l2.5-6 4 12 2.5-6h6"/></svg><div><h1>Ping</h1><p id="app-sub">Network devices</p></div></div>
     <div class="header-status" id="fleet" data-tone="idle"><span class="status-dot"></span><span id="fleet-status">Loading workspace…</span></div>
   </header>
+  <div id="gone" class="gone" role="status" hidden><h2>This sheet is no longer here</h2><p>It was removed from Ping. If it is put back, it shows here again.</p></div>
   <div class="toolbar" role="toolbar" aria-label="Ping controls">
     <button id="add-device" class="primary"><span aria-hidden="true">+</span> Add device</button>
     <label class="field count">Devices <input id="device-count" type="number" min="0" max="128" step="1" inputmode="numeric" autocomplete="off" aria-label="Number of devices"></label>

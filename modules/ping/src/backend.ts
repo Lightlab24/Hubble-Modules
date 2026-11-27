@@ -12,6 +12,7 @@ import { DEVICE_FIELD, DEVICE_PROVIDER, FEEDBACK, MATRIX_ACTION, PAGE_ID } from 
 import { Pinger, type PingerOptions, type PingSample } from "./engine.js";
 import { HISTORY_SPAN_MS, type Series } from "./history.js";
 import { applyMutation, DOCUMENT_ID, rulesOf, same, sameName, spanOf, validateDocument, valueOf, type DeviceRow, type Mutation, type PingDocument } from "./model.js";
+import { windowParts } from "./sheet-window.js";
 import { DeviceWatch, type Alert, type DeviceState, type DeviceSummary } from "./watch.js";
 
 /** Hubble's channel for telling the operator something outside its window. */
@@ -84,7 +85,9 @@ export function createBackend(context: ModuleContext, options: BackendOptions = 
       phase: "ready",
       message: null,
       observedAt: new Date(now()).toISOString(),
-      values: { revision, ...counts() },
+      // The sheets, for the sidebar's Open in its own window › (manifest: parts). Sent with every
+      // state, so a sheet added, renamed, moved or removed in any window shows there at once.
+      values: { revision, ...counts(), ...(plan ? { windowParts: windowParts(plan) } : {}) },
     });
   }
 

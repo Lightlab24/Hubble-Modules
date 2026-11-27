@@ -652,22 +652,30 @@ export const deviceHasData = (row: DeviceRow): boolean =>
     id === "name" ? !/^Device \d+$/u.test(value.trim()) : id === "enabled" ? value !== "TRUE" : value !== "",
   );
 
-/** Sets how many devices the open sheet has: adds blank rows at its end, or takes its last rows off, as one undo step. */
-export function setDeviceCount(document: PingDocument, count: number, newId: () => string): (Extract<Mutation, { kind: "rows" }> & { removed: DeviceRow[] }) | null {
-  const mine = sheetRows(document);
+/**
+ * Sets how many devices a sheet has, the open one unless another is named: adds blank rows at its
+ * end, or takes its last rows off, as one undo step.
+ */
+export function setDeviceCount(
+  document: PingDocument,
+  count: number,
+  newId: () => string,
+  sheetId = openSheetId(document),
+): (Extract<Mutation, { kind: "rows" }> & { removed: DeviceRow[] }) | null {
+  const mine = sheetRows(document, sheetId);
   const others = document.devices.length - mine.length;
   const most = MAX_DEVICES - others;
   if (!Number.isInteger(count) || count < 0 || count > most)
     throw Error(others ? `Use from 0 to ${most} devices on this sheet (${MAX_DEVICES} in all).` : `Use from 0 to ${MAX_DEVICES} devices.`);
   const have = mine.length;
   if (count === have) return null;
-  const asked = { sheetId: openSheetId(document), count };
+  const asked = { sheetId, count };
   if (count < have) {
     const removed = mine.slice(count);
     return { kind: "rows", rows: clone(document.devices.filter((row) => !removed.includes(row))), expected: clone(document.devices), count: asked, removed: clone(removed) };
   }
   const next = clone(document);
-  for (let index = have; index < count; index++) next.devices.push(newDevice(next, newId()));
+  for (let index = have; index < count; index++) next.devices.push(newDevice(next, newId(), sheetId));
   return { kind: "rows", rows: next.devices, expected: clone(document.devices), count: asked, removed: [] };
 }
 

@@ -100,6 +100,10 @@ button.quiet.toggle[aria-pressed=true]{background:var(--hubble-selected,#373737)
 .loading{position:absolute;inset:0;display:grid;place-content:center;background:var(--hubble-sheet,#111);color:var(--hubble-text-secondary,#999)}
 .empty{position:absolute;inset:70px 20px auto;max-width:460px;margin:auto;padding:28px;border:1px dashed var(--hubble-line-strong,#414141);border-radius:var(--hubble-radius-surface,8px);text-align:center;color:var(--hubble-text-secondary,#999);background:var(--hubble-bar,#171717)}
 .empty h2{margin:0 0 8px;font-size:15px;color:var(--hubble-text,#dedede)}.empty p{line-height:1.5;margin:0 0 14px}
+/* A sheet's own window whose sheet was removed shows only this. */
+.ping-app[data-gone=true]>:not(.app-header):not(.gone),.ping-app[data-gone=true] .header-status{display:none}
+.gone{width:min(460px,calc(100% - 40px));margin:70px auto 0;padding:28px;border:1px dashed var(--hubble-line-strong,#414141);border-radius:var(--hubble-radius-surface,8px);text-align:center;color:var(--hubble-text-secondary,#999);background:var(--hubble-bar,#171717)}
+.gone h2{margin:0 0 8px;font-size:15px;color:var(--hubble-text,#dedede)}.gone p{line-height:1.5;margin:0}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
 /* Sheets sit just above the timeline. "Move selected rows…" comes and goes with a selection, so it shares the tabs' line and never moves the timeline. */
 .sheet-tabs{border-top:1px solid var(--hubble-line,#3b3b3b);background:var(--hubble-bar,#131313)}

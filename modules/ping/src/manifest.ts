@@ -65,6 +65,9 @@ export default defineModuleManifest({
           // Live in every window at once: each copy follows the others, and none is refused for
           // being behind or undoes another's work (merge.ts, test/windows.test.ts).
           windows: true,
+          // Each sheet can open in a window of its own, from the sidebar's Open in its own window ›.
+          // The worker publishes them as windowParts; a sheet's window shows only that sheet.
+          parts: { value: "windowParts" },
           commands: [
             { id: "snapshot", label: "Read the device list" },
             { id: "save", label: "Save the device list" },

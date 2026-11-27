@@ -11,7 +11,7 @@
  */
 import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, describe, expect, it } from "vitest";
-import { ModuleFrontendValueSchema, createModuleFrontendClient, type ModuleFrontendValue } from "@hubble/module-sdk/frontend";
+import { ModuleFrontendValueSchema, ModuleWindowPartsSchema, createModuleFrontendClient, type ModuleFrontendValue } from "@hubble/module-sdk/frontend";
 import type { ModuleContext } from "@hubble/module-sdk";
 import { createBackend, type LiveReply } from "../src/backend.js";
 import type { PingProcess } from "../src/engine.js";
@@ -34,11 +34,13 @@ import {
   sheetRows,
   sheetsOf,
   valueOf,
+  validateDocument,
   type DeviceRow,
   type Mutation,
   type PingDocument,
 } from "../src/model.js";
 import { openDeviceList, revisionIn } from "../src/page-store.js";
+import { partTitle, sheetWindow, windowParts } from "../src/sheet-window.js";
 import source from "../src/manifest.js";
 
 const cleanup: (() => unknown)[] = [];
@@ -94,6 +96,7 @@ async function runModule(devices: DeviceRow[], change: (doc: PingDocument) => vo
   };
   /** Each open page's side of its channel, which Hubble hands the worker's state. */
   const pages = new Set<(state: unknown) => void>();
+  let published: unknown;
   const context = {
     connectionEnabled: true,
     instanceId: "ping-windows",
@@ -102,6 +105,7 @@ async function runModule(devices: DeviceRow[], change: (doc: PingDocument) => vo
     services,
     log: () => undefined,
     publishState: (state: unknown) => {
+      published = state;
       for (const push of pages) push(state);
     },
     publishFeedback: () => undefined,
@@ -118,6 +122,8 @@ async function runModule(devices: DeviceRow[], change: (doc: PingDocument) => vo
     declared,
     saved: () => saved.value,
     revision: () => saved.revision,
+    /** What the worker published last, which Hubble reads the sidebar's parts from. */
+    state: () => published as { values?: Record<string, unknown> } | undefined,
     writes: () => writes,
     /** Saves the store turned away because another had landed first. */
     conflicts: () => conflicts,
@@ -134,15 +140,29 @@ type Module = Awaited<ReturnType<typeof runModule>>;
 /**
  * One copy of the page in a window of its own. Hubble passes the page's calls to the worker and,
  * about every 50 ms, the worker's latest state. `hold()` keeps the state from this copy, as if
- * its window were slow to hear, until `release()`.
+ * its window were slow to hear, until `release()`. `view` is a sheet's ID for a window the sidebar
+ * opened for that one sheet, which Hubble names as the page asks (`titles`); null is the whole page.
  */
-async function openWindow(module: Module) {
+async function openWindow(module: Module, view: string | null = null) {
   const channel = new MessageChannel();
   const host = channel.port1;
   let held = false;
   let latest: unknown;
+  const titles: string[] = [];
+  /** Every change this copy sent to be saved. */
+  const operations: Mutation[] = [];
   host.addEventListener("message", (event: MessageEvent) => {
-    const request = event.data as { id: string; operation: string; commandId?: string; value?: unknown };
+    const request = event.data as { id: string; operation: string; commandId?: string; value?: unknown; title?: string };
+    if (request.operation === "window-title") {
+      // As Hubble: only a window that shows one part of the page takes a title from the page.
+      if (view === null) host.postMessage({ type: "error", id: request.id, message: "This page is not in a window of its own" });
+      else {
+        titles.push(request.title!);
+        host.postMessage({ type: "result", id: request.id, value: null });
+      }
+      return;
+    }
+    if (request.operation === "call" && request.commandId === "save") operations.push(structuredClone((request.value as { operation: Mutation }).operation));
     void (async () => {
       try {
         if (request.operation !== "call" || !module.declared.has(request.commandId!)) throw Error(`Module page command is not declared: ${request.commandId}`);
@@ -159,8 +179,10 @@ async function openWindow(module: Module) {
     if (!held) setTimeout(() => host.postMessage({ type: "state", value: JSON.parse(JSON.stringify(state)) }), 10);
   };
   module.pages.add(push);
-  const client = createModuleFrontendClient(channel.port2 as never);
+  const client = createModuleFrontendClient(channel.port2 as never, { view, canOpen: true });
   const list = await openDeviceList(client);
+  // The sheet this copy shows, as the page works it out (frontend.ts).
+  const shown = sheetWindow(client, list.store);
   const errors: string[] = [];
   const clashes: string[] = [];
   list.store.subscribe(() => {
@@ -170,6 +192,9 @@ async function openWindow(module: Module) {
   const copy = {
     ...list,
     client,
+    shown,
+    titles,
+    operations,
     errors,
     clashes,
     get doc() {
@@ -194,6 +219,7 @@ async function openWindow(module: Module) {
   };
   cleanup.push(() => {
     module.pages.delete(push);
+    shown.dispose();
     list.close();
     client.dispose();
     host.close();
@@ -558,5 +584,147 @@ describe("the Ping page in several windows", () => {
     await settled(module, [one]);
     await until(() => states.some((state) => revisionIn(state) === module.revision()), "the state carried the new revision");
     stop();
+  });
+});
+
+describe("a sheet in a window of its own", () => {
+  /** Network holds the router, Cameras every device whose ID starts with "cam". */
+  const twoSheets = (doc: PingDocument) => {
+    doc.sheets = [{ id: "devices", name: "Network" }, { id: "cams", name: "Cameras" }];
+    doc.devices = doc.devices.map((row) => (row.id.startsWith("cam") ? { ...row, sheetId: "cams" } : row));
+  };
+  const parts = (module: Module) => module.state()?.values?.windowParts;
+
+  it("lists each sheet for the sidebar by its ID, and again when one is added, renamed, moved or removed", async () => {
+    const module = await runModule([device("a", "Router", "10.0.0.1")], (doc) => (doc.sheets = [{ id: "devices", name: "Cameras" }]));
+    const whole = await openWindow(module);
+    expect(parts(module)).toEqual([{ view: "devices", title: "Cameras" }]);
+    whole.submit(addSheet(whole.doc, "lights", "Lights"));
+    await settled(module, [whole]);
+    expect(parts(module)).toEqual([{ view: "devices", title: "Cameras" }, { view: "lights", title: "Lights" }]);
+    whole.submit(renameSheet(whole.doc, "lights", "Lighting desk")!);
+    whole.submit(moveSheet(whole.doc, "lights", "devices")!);
+    await settled(module, [whole]);
+    expect(parts(module)).toEqual([{ view: "lights", title: "Lighting desk" }, { view: "devices", title: "Cameras" }]);
+    const { removed: _none, ...remove } = removeSheet(whole.doc, "lights")!;
+    whole.submit(remove);
+    await settled(module, [whole]);
+    expect(parts(module)).toEqual([{ view: "devices", title: "Cameras" }]);
+    // Hubble reads the list with this, and lists no parts at all for anything it refuses.
+    expect(ModuleWindowPartsSchema.safeParse(parts(module)).success).toBe(true);
+  });
+
+  it("lists up to 24 sheets with one-line titles, and the one sheet of a list that never had more", () => {
+    expect(windowParts(defaultDocument())).toEqual([{ view: "devices", title: "Devices" }]);
+    const doc = defaultDocument();
+    doc.sheets = Array.from({ length: 30 }, (_, index) => ({ id: `sheet-${index + 1}`, name: index === 2 ? "Stage\nleft " : `Sheet ${index + 1}` }));
+    const listed = windowParts(validateDocument(doc));
+    expect(listed).toHaveLength(24);
+    expect(listed[2]).toEqual({ view: "sheet-3", title: "Stage left" });
+    expect(ModuleWindowPartsSchema.safeParse(listed).success).toBe(true);
+    expect(partTitle(" \t ")).toBe("Sheet");
+    expect(partTitle("Bell\u0007box")).toBe("Bell box");
+  });
+
+  it("keeps to its own sheet whichever sheet the whole page opens, and never saves which sheet is open", async () => {
+    const module = await runModule([device("a", "Router", "10.0.0.1"), device("cam-1", "Camera 1", "10.0.0.11")], twoSheets);
+    const whole = await openWindow(module);
+    const cams = await openWindow(module, "cams");
+    expect(openSheetId(whole.doc)).toBe("devices");
+    expect(cams.shown.rows().map((row) => row.id)).toEqual(["cam-1"]);
+    // The whole page opens Cameras, then Network again: the sheet's window stays on Cameras.
+    whole.submit(openSheetChange(whole.doc, "cams"), false);
+    await settled(module, [whole, cams]);
+    whole.submit(openSheetChange(whole.doc, "devices"), false);
+    await settled(module, [whole, cams]);
+    expect(cams.shown.sheet()?.id).toBe("cams");
+    // What is done in the sheet's window goes onto its sheet: a device added, the Devices box, a
+    // typed address and its Undo, and the layout and settings every window shares.
+    cams.submit(insertRows(cams.doc, [cams.shown.newDevice("cam-2")!], null));
+    let added = 0;
+    const { removed: _none, ...grow } = cams.shown.count(4, () => `cam-new-${++added}`)!;
+    cams.submit(grow);
+    cams.type([{ rowId: "cam-1", columnId: "host", value: "10.0.0.99" }]);
+    cams.store.history(false);
+    cams.submit(viewChange(cams.doc, { textSize: 15 }));
+    cams.submit(settingsChange(cams.doc, { intervalMs: 2000 }));
+    await settled(module, [whole, cams]);
+    const saved = module.saved();
+    expect(sheetRows(saved, "cams").map((row) => row.id)).toEqual(["cam-1", "cam-2", "cam-new-1", "cam-new-2"]);
+    expect(sheetRows(saved, "devices").map((row) => row.id)).toEqual(["a"]);
+    expect(valueOf(saved.devices.find((row) => row.id === "cam-1")!, "host")).toBe("10.0.0.11");
+    expect(saved.view.textSize).toBe(15);
+    expect(saved.settings.intervalMs).toBe(2000);
+    // The whole page is still on the sheet it had open: nothing the sheet's window sent moves it.
+    expect(saved.view.sheetId).toBe("devices");
+    expect(openSheetId(whole.doc)).toBe("devices");
+    expect(cams.operations.map((operation) => operation.kind)).toEqual(["rows", "rows", "edit", "edit", "view", "settings"]);
+    for (const operation of cams.operations) if (operation.kind === "view") expect(operation.view.sheetId).toBe(operation.expected.sheetId);
+    expect([...whole.errors, ...cams.errors]).toEqual([]);
+  });
+
+  it("takes the whole page and two sheets' windows adding devices at once, each onto its own sheet", async () => {
+    const module = await runModule([device("a", "Router", "10.0.0.1")], (doc) => {
+      doc.sheets = [{ id: "devices", name: "Network" }, { id: "cams", name: "Cameras" }, { id: "lights", name: "Lights" }];
+    });
+    const whole = await openWindow(module);
+    const cams = await openWindow(module, "cams");
+    const lights = await openWindow(module, "lights");
+    for (const [copy, prefix] of [[whole, "w"], [cams, "c"], [lights, "l"]] as const)
+      for (const n of [1, 2]) copy.submit(insertRows(copy.doc, [copy.shown.newDevice(`${prefix}${n}`)!], null));
+    await settled(module, [whole, cams, lights]);
+    const saved = module.saved();
+    expect(sheetRows(saved, "devices").map((row) => row.id)).toEqual(["a", "w1", "w2"]);
+    expect(sheetRows(saved, "cams").map((row) => row.id)).toEqual(["c1", "c2"]);
+    expect(sheetRows(saved, "lights").map((row) => row.id)).toEqual(["l1", "l2"]);
+    // Each "Device N" another window had taken by then moved on to a free number.
+    expect(new Set(saved.devices.map((row) => valueOf(row, "name").toLowerCase())).size).toBe(saved.devices.length);
+    expect(module.conflicts()).toBe(0);
+    expect(saved.view.sheetId).toBeUndefined();
+    expect([...whole.errors, ...cams.errors, ...lights.errors]).toEqual([]);
+  });
+
+  it("names its window after its sheet at once, and again when any window renames that sheet", async () => {
+    const module = await runModule([], twoSheets);
+    const cams = await openWindow(module, "cams");
+    await until(() => cams.titles.length === 1, "the window was named on opening");
+    expect(cams.titles).toEqual(["Cameras"]);
+    const whole = await openWindow(module);
+    whole.submit(renameSheet(whole.doc, "cams", "Studio cameras")!);
+    await until(() => cams.titles.length === 2, "the window was renamed with its sheet");
+    expect(cams.titles).toEqual(["Cameras", "Studio cameras"]);
+    // Another sheet's new name, or any other change, leaves the title as it is.
+    whole.submit(renameSheet(whole.doc, "devices", "Switches")!);
+    whole.submit(settingsChange(whole.doc, { intervalMs: 500 }));
+    await settled(module, [whole, cams]);
+    await delay(50);
+    expect(cams.titles).toEqual(["Cameras", "Studio cameras"]);
+    // The whole page has no window title of its own to set.
+    expect(whole.titles).toEqual([]);
+  });
+
+  it("is no longer here once another window removes its sheet, and shows it again after Undo there", async () => {
+    const module = await runModule([device("a", "Router", "10.0.0.1"), device("cam-1", "Camera 1", "10.0.0.11")], twoSheets);
+    const whole = await openWindow(module);
+    const cams = await openWindow(module, "cams");
+    const { removed: _gone, ...remove } = removeSheet(whole.doc, "cams")!;
+    whole.submit(remove);
+    await settled(module, [whole, cams]);
+    expect(cams.shown.gone()).toBe(true);
+    expect(cams.shown.rows()).toEqual([]);
+    // Nothing goes onto a sheet that is gone.
+    expect(cams.shown.newDevice("x")).toBeUndefined();
+    expect(cams.shown.count(3, () => "y")).toBeNull();
+    whole.store.history(false);
+    await settled(module, [whole, cams]);
+    expect(cams.shown.gone()).toBe(false);
+    expect(cams.shown.rows().map((row) => row.id)).toEqual(["cam-1"]);
+    expect(cams.titles).toEqual(["Cameras"]);
+    // A window HubDash opens again for a sheet removed meanwhile is no longer here from the start.
+    const late = await openWindow(module, "removed-before");
+    expect(late.shown.gone()).toBe(true);
+    await delay(30);
+    expect(late.titles).toEqual([]);
+    expect([...whole.errors, ...cams.errors, ...late.errors]).toEqual([]);
   });
 });

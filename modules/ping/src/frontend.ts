@@ -5,6 +5,7 @@ import type { LiveReply, LiveRequest } from "./backend.js";
 import { bandsChange, columnMoveChange, columnVisibilityChange, openSheetChange, scaleChange, settingsChange, viewChange } from "./changes.js";
 import { createColorsEditor } from "./colors-editor.js";
 import { openDeviceList } from "./page-store.js";
+import { sheetWindow } from "./sheet-window.js";
 import {
   bytesPerSecond,
   columnOf,
@@ -14,7 +15,6 @@ import {
   insertRows,
   INTERVALS_MS,
   MAX_DEVICES,
-  newDevice,
   rulesOf,
   colorsOf,
   roundScale,
@@ -35,7 +35,6 @@ import {
   sheetRows,
   sheetsOf,
   deviceHasData,
-  setDeviceCount,
   SIZES_BYTES,
   SPANS,
   spanOf,
@@ -71,8 +70,11 @@ try {
   const list = await openDeviceList(client);
   const { store, follow } = list;
   store.onClash(reportClashes);
+  // In a sheet's own window, from the sidebar's Open in its own window ›, the page shows only that
+  // sheet and never saves which sheet is open. The whole page shows the open sheet, as before.
+  const shown = sheetWindow(client, store);
   let live: LiveReply = { sequence: 0, now: Date.now(), problem: "", devices: {}, timeline: null };
-  let selectedId: string | undefined = sheetRows(store.document)[0]?.id;
+  let selectedId: string | undefined = shown.rows()[0]?.id;
   let fetching = false;
   /** Counts every change to what the timeline should show: its stretch of time, or its device. */
   let windowVersion = 0;
@@ -196,7 +198,8 @@ try {
 
   /** The bar colours for the device on show: from the user's times, or following its alert limit. */
   function shownColors(): Colors {
-    const row = sheetRows(store.document).find((item) => item.id === selectedId) ?? sheetRows(store.document)[0];
+    const rows = shown.rows();
+    const row = rows.find((item) => item.id === selectedId) ?? rows[0];
     return colorsOf(view().bands, row ? rulesOf(row, settings()).overMs : settings().alertOverMs);
   }
   const colorsEditor = createColorsEditor({
@@ -275,8 +278,8 @@ try {
       report(`Use up to ${MAX_DEVICES} devices.`);
       return;
     }
-    const row = newDevice(store.document, crypto.randomUUID());
-    if (store.submit(insertRows(store.document, [row], beforeId))) grid.select({ rowId: row.id, columnId: "host" });
+    const row = shown.newDevice(crypto.randomUUID());
+    if (row && store.submit(insertRows(store.document, [row], beforeId))) grid.select({ rowId: row.id, columnId: "host" });
   }
 
   /** Removes devices as one undo step. One row goes at once; several are named first when any is filled in. */
@@ -306,7 +309,7 @@ try {
     viewport: el("viewport"),
     store,
     live: () => live.devices,
-    rows: () => sheetRows(store.document),
+    rows: () => shown.rows(),
     onInsert: insert,
     onRemove: (rowIds) => void removeDevices(rowIds),
     onSelect(rowId) {
@@ -334,7 +337,8 @@ try {
     const operation = openSheetChange(store.document, id);
     if (operation) store.submit(operation, false);
   }
-  const sheetTabs = await mountSpreadsheetSheets({
+  // A sheet's own window has no sheet tabs: it shows its one sheet and never opens another.
+  const sheetTabs = shown.own ? undefined : await mountSpreadsheetSheets({
     root: el("sheet-tabs"),
     getState: () => ({
       sheets: sheetsOf(store.document).map(({ id, name }) => ({ id, name })),
@@ -375,7 +379,8 @@ try {
     },
   });
 
-  refreshTabs = () => sheetTabs.refresh();
+  el("sheet-tabs").hidden = !sheetTabs;
+  refreshTabs = () => sheetTabs?.refresh();
   // A selection made by dragging or with the keyboard changes no device, so look again after each.
   for (const type of ["pointerup", "keyup"]) el("device-grid").addEventListener(type, () => refreshTabs());
 
@@ -395,8 +400,8 @@ try {
   });
 
   function updateTimeline() {
-    // The timeline shows a device on the open sheet: the one picked there, or else its first.
-    const onSheet = sheetRows(store.document);
+    // The timeline shows a device on the sheet shown: the one picked in this window, or else its first.
+    const onSheet = shown.rows();
     const row = onSheet.find((item) => item.id === selectedId) ?? onSheet[0];
     if (row?.id !== selectedId) windowVersion++;
     selectedId = row?.id;
@@ -419,6 +424,12 @@ try {
   }
 
   function update() {
+    // A sheet's window says when its sheet has been removed, and shows it again if it is put back.
+    const gone = shown.gone();
+    el("app").dataset.gone = String(gone);
+    el("gone").hidden = !gone;
+    const sheet = shown.sheet();
+    if (shown.own && sheet && el("app-sub").textContent !== sheet.name) el("app-sub").textContent = sheet.name;
     textSize.refresh();
     timeline.setPingTime(settings().intervalMs);
     if (view().span !== shownSpan) {
@@ -442,14 +453,19 @@ try {
       if (lastSaveError) report(lastSaveError);
     }
     const devices = store.document.devices;
-    const pingedRows = devices.filter((row) => valueOf(row, "enabled") === "TRUE" && valueOf(row, "host"));
-    const states = pingedRows.map((row) => (settings().pinging ? (live.devices[row.id]?.state ?? "not-checked") : "not-checked"));
+    const pinged = (rows: typeof devices) => rows.filter((row) => valueOf(row, "enabled") === "TRUE" && valueOf(row, "host"));
+    const pingedRows = pinged(devices);
+    // The status counts the devices on show: all of them in the whole page, the sheet's in its own window.
+    const listed = shown.own ? shown.rows() : devices;
+    const states = pinged(listed).map((row) => (settings().pinging ? (live.devices[row.id]?.state ?? "not-checked") : "not-checked"));
     const checked = states.filter((state) => state !== "not-checked").length;
     const online = states.filter((state) => state === "online" || state === "slow").length;
     const alerts = states.filter((state) => state === "offline" || state === "slow").length;
     const fleet = el("fleet");
-    el("fleet-status").textContent = !devices.length
-      ? "No devices yet"
+    el("fleet-status").textContent = !listed.length
+      ? shown.own
+        ? "No devices on this sheet"
+        : "No devices yet"
       : !settings().pinging
         ? "Paused"
         : `${online} of ${checked} online · ${alerts} alert${alerts === 1 ? "" : "s"}`;
@@ -462,14 +478,14 @@ try {
     el("data-use").textContent = settings().pinging
       ? `${count} device${count === 1 ? "" : "s"} · ${settings().sizeBytes} bytes every ${formatInterval(settings().intervalMs)} · about ${formatRate(bytesPerSecond(count, settings()))} in total · Alerts go to the Status Log${settings().notify ? ", a notification" : ""} and any key that shows the device`
       : "Paused · nothing is being sent";
-    // The Devices box counts the open sheet. Never overwrite the number while it is being typed.
-    const onSheet = sheetRows(store.document).length;
+    // The Devices box counts the sheet shown. Never overwrite the number while it is being typed.
+    const onSheet = shown.rows().length;
     const counter = el<HTMLInputElement>("device-count");
     if (document.activeElement !== counter && counter.value !== String(onSheet)) counter.value = String(onSheet);
     el("empty").hidden = onSheet > 0;
     el("empty-title").textContent = devices.length ? "No devices on this sheet" : "No devices yet";
     el<HTMLButtonElement>("add-device").disabled = devices.length >= MAX_DEVICES;
-    sheetTabs.refresh();
+    refreshTabs();
     updateTimeline();
   }
   store.subscribe(update);
@@ -483,7 +499,7 @@ try {
     if (counting) return;
     counting = true;
     try {
-      const operation = setDeviceCount(store.document, countInput.value.trim() === "" ? NaN : Number(countInput.value), () => crypto.randomUUID());
+      const operation = shown.count(countInput.value.trim() === "" ? NaN : Number(countInput.value), () => crypto.randomUUID());
       if (!operation) return;
       const { removed, ...mutation } = operation;
       const filled = removed.filter(deviceHasData);
@@ -503,7 +519,7 @@ try {
       report(error instanceof Error ? error.message : String(error));
     } finally {
       counting = false;
-      countInput.value = String(sheetRows(store.document).length);
+      countInput.value = String(shown.rows().length);
     }
   }
   countInput.addEventListener("change", () => void applyCount());
@@ -585,6 +601,7 @@ try {
     "pagehide",
     () => {
       run++;
+      shown.dispose();
       list.close();
     },
     { once: true },

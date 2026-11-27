@@ -82,6 +82,20 @@ cells, settings, sheets and layout.
 - The open sheet, Show last, Scale, bar colours, columns and text size are saved with the page, so
   every window shows the same ones. The device whose timeline is shown is each window's own.
 
+### A sheet in its own window
+
+Right-click Ping in the sidebar and point to **Open in its own window**: it offers **Whole module**
+and each sheet, such as *Cameras*. A sheet opens in a window titled "Hubble - Ping - Cameras" that
+shows only that sheet: its devices, a timeline of its own and the toolbars, with no sheet tabs.
+
+- It keeps to its sheet whichever sheet the whole page has open, and never changes which sheet that
+  is, so Ping's whole page opens where it was left. Devices added there go onto its sheet, and the
+  Devices box and the status count that sheet.
+- Rename the sheet in any window and the window's title follows. If the sheet is removed, the window
+  says it is no longer here, and shows it again if the sheet is put back.
+- The sidebar lists up to 24 sheets. Every window, a sheet's or the whole page's, follows what the
+  others save, as above.
+
 ## Alerts
 
 A device goes **Offline** once it hasn't answered for its lost time and **Slow** as soon as an
