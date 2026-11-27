@@ -41,7 +41,8 @@ HubDash can show a module's page in a window of its own, so the same page can be
 twice. Hubble keeps a page live in one window at a time unless its custom section declares
 `windows: true` and requires `module-page-windows-v1`. Declare it only when every copy
 follows what the others save. Such a page can also open parts of itself in windows it names
-with `openWindow`. Read [custom pages](references/custom-pages.md) before declaring it.
+with `openWindow`, and list those parts with `parts` so the sidebar's **Open in its own window ›**
+offers them. Read [custom pages](references/custom-pages.md) before declaring it.
 A page can also set `pages[].wideIcon`, a wide logo such as a wordmark, with the same file
 rules, requiring `module-page-wide-icons-v1`. Hubble shows it beside the label in the expanded
 sidebar, fitted into 44 by 16 pixels, and `icon` when the sidebar is collapsed.
