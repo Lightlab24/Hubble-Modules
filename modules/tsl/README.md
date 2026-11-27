@@ -1,6 +1,6 @@
 # TSL Tally
 
-Official module `hubble-tsl`, version **1.5.0**, using stable Hubble module API **1**.
+Official module `hubble-tsl`, version **1.6.0**, using stable Hubble module API **1**.
 It receives TSL UMD 3.1 and 5.0 tally over UDP or TCP, shows what a switcher sends, routes a
 router on tally (what TALLY Switch did, merged in at 1.4.0), feeds Button Matrix tally
 feedback, and can set a Ross Carbonite switcher to send its tally to this computer.
@@ -25,8 +25,12 @@ held before the merge, so Hubble's older Tally Switch page stays hidden.
   `route` action only), as TALLY Switch sent them. The sheet uses Hubble's spreadsheet
   controls: type, F2 or double-click to edit, Enter moves down, copy, paste, fill, Space for
   Enabled, the router list, Add camera and the row menu to add or delete. Edits show at once
-  and save in order; a save the workspace refuses puts back only that edit. Button Matrix
-  "TALLY Switch follow" actions now drive this module's own Follow.
+  and save in order; a save the workspace refuses puts back only that edit. Command+Z and
+  Shift+Command+Z (and HubDash's Edit menu) undo and redo edits and added or deleted cameras,
+  one gesture at a time; a deleted camera comes back whole, in its place. Hubble keeps that
+  history for the grid (`module-spreadsheet-history-v1`, from 1.6.0); on a Hubble without it
+  the tab has no undo, as before. Button Matrix "TALLY Switch follow" actions now drive this
+  module's own Follow.
 - **Setup** holds every setting of the link in one place:
   - **This computer** is the receiver. These are the module's own settings; the page saves
     them through Hubble (`settings` on the custom section, `module-frontend-settings-v1`),
@@ -60,7 +64,7 @@ held before the merge, so Hubble's older Tally Switch page stays hidden.
 ## Open in several windows
 
 HubDash can show the page in several windows at once (`windows: true` on the section, which
-requires `module-page-windows-v1`, so 1.5.0 loads only on a Hubble with module windows). Each
+requires `module-page-windows-v1`, so from 1.5.0 it loads only on a Hubble with module windows). Each
 window is its own copy of the page over the one running module:
 
 - A copy never saves its whole switcher setup or camera list. It sends only what it changed

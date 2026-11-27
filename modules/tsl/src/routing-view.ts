@@ -1,11 +1,15 @@
 import { mountSwitch, type MountedControl } from "@hubble/module-sdk/controls";
 import {
   createSpreadsheetContextMenu,
+  MODULE_SPREADSHEET_HISTORY_FEATURE,
   mountSpreadsheetControls,
   type SpreadsheetAddress,
   type SpreadsheetCell,
   type SpreadsheetColumn,
+  type SpreadsheetControlsOptions,
   type SpreadsheetEdit,
+  type SpreadsheetEditBatch,
+  type SpreadsheetHistoryChange,
 } from "@hubble/module-sdk/spreadsheet-controls";
 import type { RoutingLive, RoutingRow, RoutingSave, RoutingSnapshot } from "./routing.js";
 import { applyRoutingChange, noRoutingChange, routingChange } from "./changes.js";
@@ -66,6 +70,9 @@ export interface RoutingViewOptions {
  * The page can be open in several HubDash windows at once. Each copy sends only what it changed,
  * which the backend puts onto what is saved now, and each follows what the others save without a
  * reload. The cell being typed in is never redrawn, moved or taken away while typing goes on.
+ *
+ * On a Hubble with grid undo (module-spreadsheet-history-v1), Command+Z and Shift+Command+Z undo
+ * and redo cell edits and added or deleted cameras, one gesture at a time, in this copy.
  */
 export async function mountRoutingView(options: RoutingViewOptions) {
   const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -88,6 +95,8 @@ export async function mountRoutingView(options: RoutingViewOptions) {
   let edits = 0;
   /** Cameras saved elsewhere are being read in. */
   let rereading = false;
+  /** What Hubble's undo holds for each change not saved yet, so a refused save can hand them back. */
+  let unsaved: object[] = [];
   const rowElements = new Map<string, HTMLTableRowElement>();
   const cells = new Map<string, HTMLTableCellElement>();
   const key = (address: SpreadsheetAddress) => `${address.rowId}/${address.columnId}`;
@@ -267,6 +276,8 @@ export async function mountRoutingView(options: RoutingViewOptions) {
           const change = routingChange(base, rows);
           if (noRoutingChange(change)) break;
           const sent = rows;
+          const carried = unsaved;
+          unsaved = [];
           try {
             const reply = (await options.ask("routing-save", { change })) as RoutingSave;
             base = reply.rows;
@@ -283,6 +294,8 @@ export async function mountRoutingView(options: RoutingViewOptions) {
               revision = fresh.revision;
             }
             options.failed(error instanceof Error ? error.message : "The camera mappings could not be saved");
+            // Undo forgets a change that never held, and keeps an undo or redo that didn't take to try again.
+            for (const token of carried) controls.history?.forget(token);
           }
           if (options.isDisposed()) return;
           // Changes made here while that one was saving go on top of what is saved now.
@@ -296,9 +309,11 @@ export async function mountRoutingView(options: RoutingViewOptions) {
     })();
     return saving;
   };
-  const change = (next: RoutingRow[]) => {
+  /** Shows a change at once and saves it behind. `token` is what Hubble's undo holds for it. */
+  const change = (next: RoutingRow[], token?: object) => {
     rows = next;
     edits += 1;
+    if (token) unsaved.push(token);
     draw();
     void save();
   };
@@ -357,12 +372,14 @@ export async function mountRoutingView(options: RoutingViewOptions) {
       }
     }
   };
-  const submit = (edits: readonly SpreadsheetEdit[], source?: string) => {
+  /** Applies edits from the grid (`batch`) or from typing in a cell (no batch). */
+  const submit = (edits: readonly SpreadsheetEdit[], batch?: SpreadsheetEditBatch) => {
     let next = rows;
     const problems: string[] = [];
+    const applied: SpreadsheetEdit[] = [];
     for (const edit of edits) {
       // Clearing leaves numbers as they are: a camera always has an address, output and source.
-      if (source === "clear" && edit.columnId in NUMBERS) continue;
+      if (batch?.source === "clear" && edit.columnId in NUMBERS) continue;
       const index = next.findIndex((row) => row.id === edit.rowId);
       if (index < 0 || READ_ONLY.has(edit.columnId)) continue;
       const result = parse(next[index]!, edit);
@@ -370,21 +387,29 @@ export async function mountRoutingView(options: RoutingViewOptions) {
       else if (JSON.stringify(result) !== JSON.stringify(next[index])) {
         next = [...next];
         next[index] = result;
+        applied.push(edit);
       }
     }
-    if (next !== rows) change(next);
+    // Hubble's undo already holds the grid's own gestures; typing joins it here, before it shows.
+    if (next !== rows) change(next, batch ?? controls.history?.record(applied));
     if (problems.length) options.failed(problems[0]!);
   };
 
-  const controls = await mountSpreadsheetControls({
+  const gridOptions: SpreadsheetControlsOptions = {
     root: grid,
     viewport,
     extendedEditing: true,
     getRows: () => rows.map((row) => row.id),
     getColumns: () => COLUMNS,
     getCell: cellOf,
-    onEdit: ({ source, edits }) => submit(edits, source),
+    onEdit: (batch) => submit(batch.edits, batch),
     onError: (error) => options.failed(error.message),
+  };
+  // Hubble keeps undo for the grid where it can. An earlier Hubble has none, and the tab works as before.
+  const controls = await mountSpreadsheetControls({ ...gridOptions, history: true }).catch((error: unknown) => {
+    if (error instanceof Error && error.message.includes(MODULE_SPREADSHEET_HISTORY_FEATURE))
+      return mountSpreadsheetControls(gridOptions);
+    throw error;
   });
 
   // ----- Typing in a cell: F2, a character or a double-click. Enter moves on, as in the Matrix. -----
@@ -477,11 +502,38 @@ export async function mountRoutingView(options: RoutingViewOptions) {
       return;
     }
     const next = [...rows];
-    next.splice(index < 0 ? next.length : index + 1, 0, row);
-    change(next);
+    const at = index < 0 ? next.length : index + 1;
+    next.splice(at, 0, row);
+    change(next, controls.history?.recordChange(cameraChange([{ row, index: at }], true)));
     controls.select({ rowId: row.id, columnId: "name" });
   };
-  const remove = (ids: readonly string[]) => change(rows.filter((row) => !ids.includes(row.id)));
+  const remove = (ids: readonly string[]) => {
+    const gone = rows.flatMap((row, index) => (ids.includes(row.id) ? [{ row, index }] : []));
+    if (gone.length)
+      change(
+        rows.filter((row) => !ids.includes(row.id)),
+        controls.history?.recordChange(cameraChange(gone, false)),
+      );
+  };
+  /**
+   * Adding or deleting cameras, as one step of Hubble's undo. Cameras come back whole, as they were
+   * when they went, in their places; ones another window has already put back or taken away are left.
+   */
+  const cameraChange = (cameras: readonly { row: RoutingRow; index: number }[], added: boolean): SpreadsheetHistoryChange => {
+    const ids = cameras.map(({ row }) => row.id);
+    const putBack = (attempt: object) => {
+      const next = [...rows];
+      for (const { row, index } of [...cameras].sort((a, b) => a.index - b.index))
+        if (!next.some((item) => item.id === row.id)) next.splice(Math.min(index, next.length), 0, structuredClone(row));
+      if (next.length === rows.length) return;
+      change(next, attempt);
+      controls.select({ rowId: cameras[0]!.row.id, columnId: "name" }, undefined, { focus: document.activeElement === grid });
+    };
+    const takeAway = (attempt: object) => {
+      if (rows.some((row) => ids.includes(row.id))) change(rows.filter((row) => !ids.includes(row.id)), attempt);
+    };
+    return added ? { undo: takeAway, redo: putBack } : { undo: putBack, redo: takeAway };
+  };
   el("add-camera").addEventListener("click", () => add());
 
   const menu = await createSpreadsheetContextMenu({ root: grid, onError: (error) => options.failed(error.message) });
