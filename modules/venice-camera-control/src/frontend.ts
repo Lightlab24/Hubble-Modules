@@ -25,9 +25,15 @@ function adopt(next:{observations?:Observations;sequence?:number}){
   if(typeof next.sequence==='number'){if(next.sequence<newestState)return;newestState=next.sequence;}
   observations=next.observations;
 }
+/** A window opened for a part this version doesn't have, such as one a later version named. */
+class PartGone extends Error {}
 function report(message:string,kind:'error'|'info'='error'){clearTimeout(errorTimer);errorBox.getAnimations().forEach(animation=>animation.cancel());errorBox.textContent=message;errorBox.hidden=!message;errorBox.classList.toggle('info',kind==='info');if(message){errorBox.animate([{opacity:1},{opacity:0}],{duration:250,delay:4250,fill:'forwards'});errorTimer=setTimeout(()=>{errorBox.hidden=true;},4500);}}
 try {
   const client=await connectModuleFrontend(window);
+  // A window HubDash opened for Cameras or Presets shows that part alone, with no tabs, and never saves which tab or camera
+  // sheet is open: the whole page opens where the operator left it. The Cameras window shows the camera sheet the plan has open.
+  const part=client.view;
+  if(part!==null&&part!=='cameras'&&part!=='presets'){client.dispose();throw new PartGone();}
   const initial=await client.call('snapshot') as unknown as Snapshot;
   adopt(initial);
   const store=new DraftStore(initial,async(operation:Mutation)=>{
@@ -42,7 +48,7 @@ try {
   const sheetTabs=await mountSpreadsheetSheets({
     root:el('sheet-tabs'),
     getState(){const document=store.document,list=sheetList(document);return {sheets:list.map(({id,name})=>({id,name})),activeSheetId:activeSheetId(document),counts:new Map(list.map(sheet=>[sheet.id,sheetRowCount(document,sheet)]))};},
-    onSelect(sheetId){if(sheetId!==activeSheetId(store.document))store.submit({kind:'select-sheet',sheetId},false);},
+    onSelect(sheetId){if(part===null&&sheetId!==activeSheetId(store.document))store.submit({kind:'select-sheet',sheetId},false);},
     onCreate:name=>submitSheets(addSheet(store.document,crypto.randomUUID(),name)),
     onRename:(sheetId,name)=>submitSheets(renameSheet(store.document,sheetId,name)),
     onRemove:sheetId=>submitSheets(removeSheet(store.document,sheetId)),
@@ -66,14 +72,15 @@ try {
     if(open===presetsOpen)return;
     presetsOpen=open;
     const saved=store.document.presetsOpen===true;
-    if(saved!==open)store.submit({kind:'presets-open',open,expected:saved},false);
+    if(part===null&&saved!==open)store.submit({kind:'presets-open',open,expected:saved},false);
     cameraTab.setAttribute('aria-selected',String(!open));presetsTab.setAttribute('aria-selected',String(open));
     cameraTab.tabIndex=open?-1:0;presetsTab.tabIndex=open?0:-1;
-    el('camera-toolbar').hidden=open;el('camera-area').hidden=open;el('sheet-tabs').hidden=open;el('pending-status').hidden=open;
+    el('camera-toolbar').hidden=open;el('camera-area').hidden=open;el('sheet-tabs').hidden=open||part!==null;el('pending-status').hidden=open;
     el('search-cameras').hidden=open;el('search-presets').hidden=!open;el('preset-toolbar').hidden=!open;el('preset-area').hidden=!open;el('preset-status').hidden=!open;
     if(open){if(presets)presets.show();else void loadPresets();}
     else {presets?.hide();grid.refresh();update();}
   }
+  if(part!==null){document.querySelector<HTMLElement>('.page-tabs')!.hidden=true;el('sheet-tabs').hidden=true;}
   cameraTab.addEventListener('click',()=>openPresets(false));
   presetsTab.addEventListener('click',()=>openPresets(true));
   // Left and right move between the two tabs, as in any tab list.
@@ -437,9 +444,17 @@ try {
   el('loading').hidden=true;pageReady=true;update();
   knownFields=new Set(readIds());store.subscribe(noticeNewFields);
   void watchCameras();
-  if(store.document.presetsOpen===true)openPresets(true);
+  if(part==='presets'||(part===null&&store.document.presetsOpen===true))openPresets(true);
   else {const first=store.document.cameras[0];if(first)grid.select({rowId:first.id,columnId:'camera-name'});}
-  // Loaded behind the Cameras tab, so the Presets tab shows its count and opens at once.
-  setTimeout(()=>void loadPresets(),0);
+  // Loaded behind the Cameras tab, so the Presets tab shows its count and opens at once. The Cameras window has no tab for it.
+  if(part===null)setTimeout(()=>void loadPresets(),0);
   window.addEventListener('pagehide',()=>{disposed=true;follow.dispose();clearTimeout(watchTimer);stop();grid.dispose();textControls.dispose();sheetTabs.dispose();presets?.dispose();client.dispose();},{once:true});
-}catch(error){el('loading').hidden=true;report(error instanceof Error?error.message:'Camera Control could not start.');saveStatus.textContent='Workspace unavailable';}
+}catch(error){
+  el('loading').hidden=true;
+  if(error instanceof PartGone){
+    // Plainly that, with nothing else to use.
+    document.querySelector<HTMLElement>('.page-tabs')!.hidden=true;
+    for(const id of ['camera-toolbar','preset-toolbar','preset-area','sheet-tabs','viewport'])el(id).hidden=true;
+    el('part-gone').hidden=false;saveStatus.textContent='';el('pending-status').hidden=true;
+  } else {report(error instanceof Error?error.message:'Camera Control could not start.');saveStatus.textContent='Workspace unavailable';}
+}

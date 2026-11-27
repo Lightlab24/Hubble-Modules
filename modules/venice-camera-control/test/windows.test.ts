@@ -100,6 +100,11 @@ async function twoWindows(t: { after(fn: () => unknown): void }, staged: Record<
   return { h, first, second };
 }
 
+test('the sidebar offers Cameras and Presets, each in a window of its own', () => {
+  const section = manifest.pages![0]!.sections[0]!;
+  assert.deepEqual('parts' in section && section.parts, [{ view: 'cameras', title: 'Cameras' }, { view: 'presets', title: 'Presets' }]);
+});
+
 test('Camera Control is declared for several windows', () => {
   const section = manifest.pages![0]!.sections[0]!;
   assert.equal('windows' in section && section.windows, true);

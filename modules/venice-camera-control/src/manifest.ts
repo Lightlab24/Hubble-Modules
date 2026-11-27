@@ -24,6 +24,9 @@ export default defineModuleManifest({
     // Live in every HubDash window at once: each copy follows what the others save (test/windows.test.ts). The open tab,
     // column layout and expanded sections are saved with the plan, so windows showing the page share them, as chosen.
     windows: true,
+    // Cameras and Presets, each in a window of its own from HubDash's sidebar, with no tabs and nothing saved about which
+    // tab or camera sheet is open. The views are the tabs' own names.
+    parts: [{ view: 'cameras', title: 'Cameras' }, { view: 'presets', title: 'Presets' }],
     commands: [
       { id: 'snapshot', label: 'Read camera plan' }, { id: 'save', label: 'Save camera plan' },
       { id: 'refresh', label: 'Read camera settings' },
