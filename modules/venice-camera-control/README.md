@@ -8,7 +8,10 @@ staged values and the layout of every tab are saved in the scoped `camera-plan` 
 Requires Hubble 2.0.18 or later with the spreadsheet, custom page, document and alert host
 features listed in `src/manifest.ts`. From 0.2.0 that includes module windows
 (`module-page-windows-v1`): Camera Control is live in every HubDash window at once, and every
-window shows the same tab and layout, which are saved with the plan.
+window shows the same tab and layout, which are saved with the plan. Cameras and Presets also
+open alone, each in a window of its own, from HubDash's sidebar (Open in its own window ›).
+Such a window has no tabs and never changes which tab or camera sheet the page opens on; the
+Cameras window shows the camera sheet the page has open.
 
 ## Build and test
 

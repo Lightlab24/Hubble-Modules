@@ -4,7 +4,9 @@ Official module `hubble-ross-ultrix-ogp`, version **1.3.0**, using stable Hubble
 Ross Ultrix OGP JSON subscriptions and confirmed crosspoints.
 
 From version **1.3.0** the Router page is live in every HubDash window at once. That needs a Hubble with module windows
-(host feature `module-page-windows-v1`); a Hubble without it refuses this version.
+(host feature `module-page-windows-v1`); a Hubble without it refuses this version. Its Patch and Routes views also open
+alone, each in a window of its own, from HubDash's sidebar (Open in its own window ›). Such a window has no Patch and
+Routes tabs and saves neither the open view nor the zoom, so the whole page opens where it was left.
 
 ## Action grouping
 

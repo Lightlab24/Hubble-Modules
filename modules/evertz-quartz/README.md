@@ -4,7 +4,9 @@ Official module `hubble-evertz-quartz`, version **1.2.0**, using stable Hubble m
 Evertz Quartz TCP protocol, serialized reply matching and link keepalives.
 
 From version **1.2.0** the Router page is live in every HubDash window at once. That needs a Hubble with module windows
-(host feature `module-page-windows-v1`); a Hubble without it refuses this version.
+(host feature `module-page-windows-v1`); a Hubble without it refuses this version. Its Patch and Routes views also open
+alone, each in a window of its own, from HubDash's sidebar (Open in its own window ›). Such a window has no Patch and
+Routes tabs and saves neither the open view nor the zoom, so the whole page opens where it was left.
 
 ## Source ownership
 
