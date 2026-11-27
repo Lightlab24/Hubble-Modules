@@ -86,8 +86,11 @@ window is its own copy of the page over the one running module:
   left as it is, with "Camera 2's Source was changed in another window since, so it was left
   as it is". The page checks what it has read; the backend checks again with what the page
   last read (`expected` in the change, answered by `kept`), for a change another window saved
-  a moment before. One case gets past both: this window types over the other window's value,
-  undoes that, and then undoes an older step of its own on the same cell.
+  a moment before. A Hubble whose grid undo checks cells itself, step by step, leaves such a
+  cell before the page sees it and names it through `onHistoryLeft`, which the page answers in
+  the same words; there, too, an older step stays off a cell this window typed over another
+  window's value and then undid. With an earlier Hubble's grid undo that one case gets past the
+  page's check. A camera added or deleted is the page's own step, so the page checks it.
 - Every copy follows the others without a reload. Each `live` answer carries the saved setup's
   and the cameras' revisions, a stamp for the switcher's last reading and whether a switcher
   request is under way. A copy holding something older reads `saved` and redraws in place; its

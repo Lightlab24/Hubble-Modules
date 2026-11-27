@@ -510,6 +510,13 @@ export async function mountRoutingView(options: RoutingViewOptions) {
     getCell: cellOf,
     onEdit: (batch) => submit(batch.edits, batch),
     onError: (error) => options.failed(error.message),
+    // A Hubble whose grid undo itself leaves a cell that changed since names those cells here, in
+    // this page's words. The kit's type for it comes later; an earlier Hubble never calls it, and
+    // the page's own check below says the same.
+    ...({
+      onHistoryLeft: (cells: readonly SpreadsheetAddress[]) =>
+        options.failed(leftAlone(cells.map(({ rowId, columnId }) => ({ id: rowId, field: columnId })), rows)),
+    } as object),
   };
   // Hubble keeps undo for the grid where it can. An earlier Hubble has none, and the tab works as before.
   const controls = await mountSpreadsheetControls({ ...gridOptions, history: true }).catch((error: unknown) => {

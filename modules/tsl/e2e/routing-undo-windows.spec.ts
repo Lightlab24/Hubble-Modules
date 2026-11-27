@@ -188,6 +188,28 @@ test("an Undo in one window shows in the other at once, and never undoes the oth
   await expect(failures(two)).toHaveCount(0);
 });
 
+test("with Hubble's own check, an older step is left too after this window typed over the other window's value", async ({ page, request }) => {
+  const runtime = await (await request.get("/api/module-controls/spreadsheet-v1.js")).text();
+  test.skip(!runtime.includes("onHistoryLeft"), "This Hubble's grid undo doesn't check for changes made since");
+  const [one, two] = (await copies(page, request, 2)) as [Copy, Copy];
+
+  await typeCell(one, "camera-1", "source", "31");
+  await expect(cell(two, "camera-1", "source")).toHaveText("31");
+  await typeCell(two, "camera-1", "source", "50");
+  await expect(cell(one, "camera-1", "source")).toHaveText("50");
+  // This window types over it and undoes that, which puts back the other window's 50.
+  await typeCell(one, "camera-1", "source", "60");
+  await expect(cell(two, "camera-1", "source")).toHaveText("60");
+  await undo(one);
+  await expect(cell(two, "camera-1", "source")).toHaveText("50");
+  // The step before left 31; the cell holds the other window's 50, so it stays, in this page's words.
+  await undo(one);
+  await toastSays(one, "Camera 1's Source was changed in another window since, so it was left as it is");
+  await expect(cell(one, "camera-1", "source")).toHaveText("50");
+  await expect(cell(two, "camera-1", "source")).toHaveText("50");
+  expect((await savedRow(request, "camera-1"))?.source).toBe(50);
+});
+
 test("a camera added in one window and changed in another stays through the first window's Undo", async ({ page, request }) => {
   test.skip(!(await keepsUndo(request)), "This Hubble keeps no grid undo");
   const [one, two] = (await copies(page, request, 2)) as [Copy, Copy];
