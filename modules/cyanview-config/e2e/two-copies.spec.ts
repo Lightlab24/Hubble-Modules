@@ -160,12 +160,12 @@ test('a device name being typed in one copy survives the other copy renaming ano
   const two = await open(second);
   await expect(name(two, LEAF)).toBeVisible();
   await settled(request);
-  // The second copy is part way through a name.
-  await name(two, LEAF).click();
+  // The second copy is part way through a name. A click selects its cell; typing goes into its box.
+  await name(two, LEAF).locator('xpath=ancestor::td[1]').click();
   await second.keyboard.press('ControlOrMeta+A');
   await second.keyboard.type('Typed in two');
   // The first copy renames another device.
-  await name(one, MASTER).click();
+  await name(one, MASTER).locator('xpath=ancestor::td[1]').click();
   await page.keyboard.press('ControlOrMeta+A');
   await page.keyboard.type('Master renamed');
   await page.keyboard.press('Enter');

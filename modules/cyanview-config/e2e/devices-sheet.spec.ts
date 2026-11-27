@@ -5,6 +5,15 @@ const sheet = (f: FrameLocator) => f.locator('[data-role="device-sheet"]');
 const rows = (f: FrameLocator) => sheet(f).locator('tr[data-device-row]');
 const row = (f: FrameLocator, id: string) => sheet(f).locator('tr[data-device-row="' + id + '"]');
 const cell = (f: FrameLocator, id: string, field: string) => sheet(f).locator('[data-device-cell="' + id + ':' + field + '"]');
+// The cell itself. A click selects it, as in every grid; its box takes the mouse only while it is typed in.
+const pick = (f: FrameLocator, id: string, field: string) => row(f, id).locator('td[data-device-column="' + field + '"]');
+// Where the keyboard is: the box being typed in, or else the grid's cell in use.
+const keyboardAt = (f: FrameLocator) => f.locator('body').evaluate(() => {
+  const active = document.activeElement as HTMLElement | null;
+  if (active?.dataset?.deviceCell) return active.dataset.deviceCell;
+  const cell = active?.matches('[data-role="device-sheet"]') ? active.querySelector<HTMLElement>('td[data-hubble-spreadsheet-active="true"]') : null;
+  return cell ? cell.dataset.hubbleRow + ':' + cell.dataset.hubbleColumn : active?.tagName;
+});
 const group = (f: FrameLocator, name: string) => sheet(f).locator('[data-action="toggle-device-group"][data-group="' + name + '"]');
 const panel = (f: FrameLocator) => f.locator('[data-role="pending-sends"]');
 const RIO = 'CY-RIO-1-10', MASTER = 'CY-RCP-1-20', LEAF = 'CY-RCP-1-30';
@@ -214,9 +223,9 @@ test('Tab, a click and Enter keep the keyboard in the sheet, and Enter moves dow
   const f = await open(page, request, { wan: true });
   await group(f, 'wan').click();
   await group(f, 'lan').click();
-  const focusedCell = () => f.locator('body').evaluate(() => (document.activeElement as HTMLElement)?.dataset?.deviceCell ?? document.activeElement?.tagName);
+  const focusedCell = () => keyboardAt(f);
   await cell(f, RIO, 'wanMode').selectOption('Static');
-  await cell(f, RIO, 'wanIp').click();
+  await pick(f, RIO, 'wanIp').click();
   await page.keyboard.type('10.20.101.102');
   await page.keyboard.press('Tab');
   await expect.poll(focusedCell).toBe(RIO + ':gateway');
@@ -224,13 +233,13 @@ test('Tab, a click and Enter keep the keyboard in the sheet, and Enter moves dow
   await expect(cell(f, RIO, 'gateway')).toHaveValue('10.20.100.1');
   await expect(cell(f, RIO, 'wanIp')).toHaveValue('10.20.101.102/16');
   // A click on another cell keeps it.
-  await cell(f, RIO, 'dns1').click();
+  await pick(f, RIO, 'dns1').click();
   await expect.poll(focusedCell).toBe(RIO + ':dns1');
   await page.keyboard.type('10.20.100.2');
   await expect(cell(f, RIO, 'gateway')).toHaveValue('10.20.100.1');
   await expect(row(f, RIO).locator('[data-device-column="gateway"]')).toHaveClass(/hc-changed/);
   // Enter moves down the column.
-  await cell(f, MASTER, 'lan2').click();
+  await pick(f, MASTER, 'lan2').click();
   await page.keyboard.type('10.20.101.212');
   await page.keyboard.press('Enter');
   await expect.poll(focusedCell).toBe(LEAF + ':lan2');
@@ -256,7 +265,7 @@ async function controllerReportsAChange(request: APIRequestContext, name: string
   // The page has read the change, redrawn and saved once the new name is in the saved plan.
   await expect.poll(async () => ((await rpcOf(request)('read-plan')).plan.cameras as { name: string }[]).some(camera => camera.name === name)).toBe(true);
 }
-const focusedCell = (f: FrameLocator) => f.locator('body').evaluate(() => (document.activeElement as HTMLElement)?.dataset?.deviceCell ?? document.activeElement?.tagName);
+const focusedCell = (f: FrameLocator) => keyboardAt(f);
 
 test('a change reported by a controller leaves the cell being typed in alone', async ({ page, request }) => {
   const f = await open(page, request, { wan: true, live: true });
@@ -266,7 +275,7 @@ test('a change reported by a controller leaves the cell being typed in alone', a
   await expect(cell(f, RIO, 'wanIp')).toBeEnabled();
   const toast = f.locator('[data-role="toast"]');
   for (const [index, [field, start, rest, committed]] of ([['wanIp', '10.20.', '101.102', '10.20.101.102/16'], ['name', 'Cam 1', ' Rio', 'Cam 1 Rio'], ['gateway', '10.20.', '100.1', '10.20.100.1'], ['lan1', '10.20.10', '1.210', '10.20.101.210/16']] as const).entries()) {
-    await cell(f, RIO, field).click();
+    await pick(f, RIO, field).click();
     await page.keyboard.press('ControlOrMeta+a');
     await page.keyboard.type(start);
     // The same box stays in the page, so the caret and the text are exactly where they were.
@@ -284,15 +293,15 @@ test('a change reported by a controller leaves the cell being typed in alone', a
     await page.keyboard.press('Tab');
     await expect(cell(f, RIO, field)).toHaveValue(committed);
   }
-  // Tab from the name lands on the next control and stays there.
-  await cell(f, MASTER, 'name').click();
+  // Tab from the name goes on to the next cell, Type, and stays there: the remove button is not a cell.
+  await pick(f, MASTER, 'name').click();
   await page.keyboard.press('ControlOrMeta+a');
   await page.keyboard.type('Truck A');
   await page.keyboard.press('Tab');
   await expect(cell(f, MASTER, 'name')).toHaveValue('Truck A');
-  await expect.poll(() => f.locator('body').evaluate(() => (document.activeElement as HTMLElement)?.dataset?.action)).toBe('remove-device');
+  await expect.poll(() => focusedCell(f)).toBe(MASTER + ':type');
   // A cell nobody is typing in follows what its controller reports.
-  await cell(f, LEAF, 'name').click();
+  await pick(f, LEAF, 'name').click();
   await controllerReportsAChange(request, 'Reported last');
   expect(await focusedCell(f)).toBe(LEAF + ':name');
   await expect.poll(async () => (await rpcOf(request)('read-plan')).plan.devices.map((device: { name: string }) => device.name)).toEqual(['Cam 1 Rio', 'Truck A', 'Downstream RCP']);
@@ -306,10 +315,10 @@ test('typing goes on in the next cell while a save is held, and after it lands',
   await expect(cell(f, RIO, 'wanIp')).toBeEnabled();
   await expect(f.locator('[data-role="saved-label"]')).toContainText('Workspace saved');
   await request.post('/__simulate', { data: { holdPlanWrites: true } });
-  await cell(f, RIO, 'name').click();
+  await pick(f, RIO, 'name').click();
   await page.keyboard.press('ControlOrMeta+a');
   await page.keyboard.type('Cam 1 Rio');
-  await cell(f, RIO, 'wanIp').click();
+  await pick(f, RIO, 'wanIp').click();
   await page.keyboard.type('10.20.1');
   await expect(f.locator('[data-role="saved-label"]')).toContainText('Saving');
   expect(await focusedCell(f)).toBe(RIO + ':wanIp');
@@ -323,7 +332,7 @@ test('typing goes on in the next cell while a save is held, and after it lands',
   await expect(cell(f, RIO, 'wanIp')).toHaveValue('10.20.101.102/16');
   await expect(cell(f, RIO, 'name')).toHaveValue('Cam 1 Rio');
   // Escape puts back what a cell held.
-  await cell(f, RIO, 'gateway').click();
+  await pick(f, RIO, 'gateway').click();
   await page.keyboard.type('10.99');
   await page.keyboard.press('Escape');
   await expect(cell(f, RIO, 'gateway')).toHaveValue('');
@@ -336,13 +345,13 @@ test('a cell typed in while its device is sending keeps the keyboard, and its te
   const f = await open(page, request, { wan: true });
   await group(f, 'wan').click();
   await cell(f, RIO, 'wanMode').selectOption('Static');
-  await cell(f, RIO, 'wanIp').click();
+  await pick(f, RIO, 'wanIp').click();
   await page.keyboard.type('10.20.101.102');
   await page.keyboard.press('Tab');
   await showPending(f);
   await expect(panel(f).locator('[data-pending-lan-line]')).toContainText('10.20.101.102/16');
   await request.post('/__simulate', { data: { holdAction: 'update' } });
-  await cell(f, RIO, 'gateway').click();
+  await pick(f, RIO, 'gateway').click();
   await page.keyboard.type('10.20.');
   // A send reaches this device while the cell is in use, as one queued behind other devices does.
   // Starting it from the page leaves the keyboard where it is.
@@ -527,15 +536,17 @@ test('a controller’s address opens its own web page: the Base IP is the link, 
   // A LAN address stays a box to type in. Its button only shows with the pointer or the keyboard in the cell.
   const lan = row(f, RIO).locator('[data-device-column="lan1"]'), opener = lan.locator('button.hc-ip-open');
   await expect(opener).toBeHidden();
-  await cell(f, RIO, 'lan1').click();
-  await expect(cell(f, RIO, 'lan1')).toBeFocused();
+  await pick(f, RIO, 'lan1').click();
+  await expect.poll(() => keyboardAt(f)).toBe(RIO + ':lan1');
   expect(await openedPages(request)).toEqual(['10.192.1.20']);
+  // The cell in use shows it even once the pointer has gone.
+  await page.mouse.move(0, 0);
   await expect(opener).toBeVisible();
   await expect(opener).toHaveAttribute('title', 'Open 10.20.101.200 in Safari');
   await opener.click();
   await expect.poll(() => openedPages(request)).toEqual(['10.192.1.20', '10.20.101.200']);
-  // Opening it leaves the keyboard in the box, and Tab goes on to the next box as it always has.
-  await expect(cell(f, RIO, 'lan1')).toBeFocused();
+  // Opening it leaves the keyboard on that cell, and Tab never stops on the button.
+  await expect.poll(() => keyboardAt(f)).toBe(RIO + ':lan1');
   await page.keyboard.press('Tab');
   expect(await f.locator('body').evaluate(() => (document.activeElement as HTMLElement)?.className ?? '')).not.toContain('hc-ip-open');
 
@@ -551,7 +562,7 @@ test('a controller’s address opens its own web page: the Base IP is the link, 
 test('an address that is typed but not sent yet opens the one the device still has, and a browser that won’t open says so', async ({ page, request }) => {
   const f = await open(page, request);
   await cell(f, RIO, 'lan1').fill('10.20.101.250/16');
-  await cell(f, RIO, 'name').click();
+  await pick(f, RIO, 'name').click();
   await expect(row(f, RIO).locator('[data-device-column="lan1"]')).toHaveClass(/hc-changed/);
   await row(f, RIO).locator('[data-device-column="lan1"]').hover();
   await row(f, RIO).locator('[data-device-column="lan1"] button.hc-ip-open').click();

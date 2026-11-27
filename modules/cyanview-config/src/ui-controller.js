@@ -1,4 +1,4 @@
-import { createSpreadsheetContextMenu, mountSpreadsheetControls, mountSpreadsheetColumnGroup, mountSpreadsheetResize, mountSpreadsheetColumnEditor, mountSpreadsheetViewport, spreadsheetColumnSectionsSupported } from '@hubble/module-sdk/spreadsheet-controls';
+import { createSpreadsheetContextMenu, MODULE_SPREADSHEET_HISTORY_FEATURE, mountSpreadsheetControls, mountSpreadsheetColumnGroup, mountSpreadsheetResize, mountSpreadsheetColumnEditor, mountSpreadsheetViewport, spreadsheetColumnSectionsSupported } from '@hubble/module-sdk/spreadsheet-controls';
 import { columnSectionItems, sectionItemId, withSectionVisibility, withShownWhenCollapsed } from './column-sections-model.js';
 import { cameraChoiceKey } from './choice-context.js';
 import { cyanviewCameraModels } from './camera-models.js';
@@ -4320,7 +4320,9 @@ import { windowParts, windowPartOfTab, windowPartTabs } from './window-parts.js'
     const net = deviceNetwork(d), id = esc(d.id), busy = deviceBusy(d.id);
     const held = field => heldDeviceEdits.get(d.id + ':' + field);
     const input = (field, value, label, disabled = false, extra = '') => '<input class="hc-cell-input hc-mono" data-device-cell="' + id + ':' + field + '" value="' + esc(held(field) ?? value ?? '') + '" aria-label="' + esc(label + ' for ' + d.name) + '"' + (disabled ? ' disabled' : '') + extra + ' spellcheck="false" autocomplete="off">';
-    const cell = (content, changed = false, extra = '') => '<td data-device-column="' + column.id + '"' + (changed || held(column.id) !== undefined ? ' class="hc-changed"' : '') + extra + '>' + content + '</td>';
+    // Every cell but the remove button's is a cell of Hubble's grid, which selects, fills, pastes and undoes (ui-device-grid.js).
+    const gridCell = column.id === 'remove' ? '' : ' data-hubble-row="' + id + '" data-hubble-column="' + esc(column.id) + '"';
+    const cell = (content, changed = false, extra = '') => '<td data-device-column="' + column.id + '"' + gridCell + (changed || held(column.id) !== undefined ? ' class="hc-changed"' : '') + extra + '>' + content + '</td>';
     const waiting = rows => { const count = rows.filter(row => row?.pending).length; return count ? '<span class="hc-device-waiting">+' + count + ' pending</span>' : ''; };
     const quiet = text => '<span class="hc-muted">' + esc(text) + '</span>';
     // Folded away, the one LAN column says how many more addresses the device has, and opens the rest.
@@ -4425,6 +4427,8 @@ import { windowParts, windowPartOfTab, windowPartTabs } from './window-parts.js'
       } else {
         // A cell being worked in is never greyed out under the keyboard. What is typed in it during a send waits for the send.
         copyAttributes(kept, twin, ['disabled']);
+        // What the cell holds follows the device, even while it is typed in, so Undo knows what was there.
+        if (kept.tagName === 'INPUT' && twin.tagName === 'INPUT') kept.defaultValue = twin.defaultValue;
         const committed = key && key === committingDeviceCell;
         // Text typed here stays exactly as typed. A cell nobody has typed in follows what the device has.
         if (key && (committed || typedDeviceCell !== key) && kept.value !== twin.value) kept.value = twin.value;
@@ -6327,6 +6331,344 @@ import { windowParts, windowPartOfTab, windowPartTabs } from './window-parts.js'
     setConflictListOpen(false);
     conflictChip.focus();
   });
+
+  // ── Devices on Hubble's grid ─────────────────────────────────────────────────────────────────
+  // The Devices sheet is a grid like the camera sheets (asked for Nov 27, 2026): click, drag or
+  // Shift+arrows select, typing, F2 or a double-click edits a cell's box, Enter moves down as in the
+  // Button Matrix, and Delete, paste and the fill handles work on a selection. Hubble keeps undo and
+  // redo for it (module-spreadsheet-history-v1): Command+Z and Shift+Command+Z step back and forward
+  // through cell edits and removed devices. An address change still waits in Pending sends, or goes
+  // at once in Auto send, whether it was typed or undone. On a Hubble without grid undo the sheet
+  // works the same, without undo.
+  let deviceGrid = null, deviceGridReady = null, replayingDeviceStep = false;
+  // Grid edits for a device that is mid-send are held, as typed ones are. Hubble's undo already holds
+  // them, so they are not recorded again when they go in.
+  const gridHeldDeviceEdits = new Set();
+  const deviceGridHost = () => $('device-sheet');
+  const deviceGridColumns = () => deviceSheetColumns().filter(column => column.id !== 'remove')
+    .map(column => ({ id: column.id, label: column.label || column.id, fill: column.id === 'name' || column.id === 'row' || lanIndex(column.id) >= 0 || column.id === 'wanIp' ? 'series' : 'copy' }));
+  const deviceGridRows = () => [...(deviceGridHost()?.querySelectorAll('tr[data-device-row]') ?? [])].map(row => row.dataset.deviceRow);
+  function deviceGridElement({ rowId, columnId }) {
+    return deviceGridHost()?.querySelector('td[data-hubble-row="' + CSS.escape(rowId) + '"][data-hubble-column="' + CSS.escape(columnId) + '"]') ?? null;
+  }
+  // What a cell holds, from the cell as last drawn: text still being typed isn't in it yet, and an
+  // edit held back for a send is.
+  function deviceGridCell(address) {
+    const td = deviceGridElement(address);
+    if (!td || !device(address.rowId)) return null;
+    const box = td.querySelector('[data-device-cell]');
+    // WAN Mode keeps Cyanview's own list, which F2 or a click opens; paste and fill still set it.
+    if (box?.tagName === 'SELECT') {
+      const drawn = [...box.options].find(option => option.defaultSelected) ?? box.options[box.selectedIndex];
+      return { value: drawn?.value ?? box.value, readOnly: box.disabled };
+    }
+    if (box) return { value: box.defaultValue, readOnly: box.disabled };
+    // A blank entry holds no address.
+    return { value: lanIndex(address.columnId) >= 0 ? '' : td.innerText.trim(), readOnly: true };
+  }
+  function commitDeviceGridEdits(batch) {
+    for (const edit of batch.edits) {
+      const key = edit.rowId + ':' + edit.columnId;
+      commitDeviceCell(edit.rowId, edit.columnId, edit.value);
+      if (heldDeviceEdits.has(key)) gridHeldDeviceEdits.add(key);
+    }
+  }
+  async function mountDeviceGrid() {
+    const host = deviceGridHost();
+    if (!host || deviceGrid) return;
+    const options = {
+      root: host, viewport: host, extendedEditing: true,
+      getRows: deviceGridRows, getColumns: deviceGridColumns, getCell: deviceGridCell,
+      onEdit: commitDeviceGridEdits,
+      onSelection(address) { if (address && address.rowId !== selectedDeviceId) { selectedDeviceId = address.rowId; paintDeviceSheet(); } },
+      onError: error => toast(error.message),
+    };
+    try {
+      deviceGrid = await mountSpreadsheetControls({ ...options, history: true }).catch(error => {
+        if (error instanceof Error && error.message.includes(MODULE_SPREADSHEET_HISTORY_FEATURE)) return mountSpreadsheetControls(options);
+        throw error;
+      });
+    } catch (error) { toast(error.message); return; }
+    deviceGrid.refresh();
+  }
+
+  // A box comes alive only to be typed in. Until then the cell around it is what a click selects.
+  const editingBox = element => element?.matches?.('[data-role="device-sheet"] input[data-device-cell].hc-cell-editing') ? element : null;
+  function startDeviceEdit(td, replacement) {
+    const list = td?.querySelector('select[data-device-cell]:enabled + .hc-dropdown');
+    // The list's keys go to its button, so the keyboard moves there first, as a click would move it.
+    if (list) { if (replacement !== undefined) return false; list.focus({ preventScroll: true }); list.click(); return true; }
+    const box = td?.querySelector('input[data-device-cell]');
+    if (!box || box.disabled) return false;
+    box.classList.add('hc-cell-editing');
+    box.focus({ preventScroll: true });
+    if (replacement === undefined) box.select();
+    else {
+      box.value = replacement;
+      typedDeviceCell = box.dataset.deviceCell;
+      box.setSelectionRange(replacement.length, replacement.length);
+    }
+    return true;
+  }
+  // Leaving the box commits what was typed (the sheet's own focusout), then the grid has the keyboard again.
+  function finishDeviceEdit(box, { cancel = false, columns = 0, rows = 0 } = {}) {
+    if (cancel) { if (typedDeviceCell === box.dataset.deviceCell) typedDeviceCell = ''; box.value = box.defaultValue; }
+    box.classList.remove('hc-cell-editing');
+    deviceGridHost()?.focus({ preventScroll: true });
+    if (columns || rows) deviceGrid?.move?.(columns, rows);
+  }
+  root.addEventListener('keydown', event => {
+    const host = deviceGridHost();
+    if (!deviceGrid || !host || event.isComposing || !host.contains(event.target)) return;
+    const box = editingBox(event.target);
+    if (box) {
+      if (!['Enter', 'Tab', 'Escape'].includes(event.key)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      finishDeviceEdit(box, { cancel: event.key === 'Escape', columns: event.key === 'Tab' ? (event.shiftKey ? -1 : 1) : 0, rows: event.key === 'Enter' ? (event.shiftKey ? -1 : 1) : 0 });
+      return;
+    }
+    if (event.target !== host || event.metaKey || event.ctrlKey || event.altKey) return;
+    const td = host.querySelector('td[data-hubble-spreadsheet-active="true"]');
+    if (!td) return;
+    // Enter moves down, as in the Button Matrix. Typing or F2 edits; a list cell opens its list (Hubble's).
+    if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); deviceGrid.move?.(0, event.shiftKey ? -1 : 1); return; }
+    const replacement = event.key.length === 1 ? event.key : undefined;
+    if ((replacement !== undefined || event.key === 'F2') && startDeviceEdit(td, replacement)) { event.preventDefault(); event.stopPropagation(); }
+  }, { capture: true });
+  root.addEventListener('dblclick', event => {
+    const td = event.target.closest?.('[data-role="device-sheet"] td[data-hubble-row]');
+    if (deviceGrid && td && !editingBox(document.activeElement)) startDeviceEdit(td);
+  });
+  // A box reached some other way (Tab from the page, a check) is in use as if typed into.
+  root.addEventListener('focusin', event => {
+    const box = event.target;
+    if (!deviceGrid || !box.matches?.('[data-role="device-sheet"] input[data-device-cell]')) return;
+    box.classList.add('hc-cell-editing');
+    const td = box.closest('td[data-hubble-row]');
+    if (td) deviceGrid.select({ rowId: td.dataset.hubbleRow, columnId: td.dataset.hubbleColumn }, undefined, { focus: false });
+  });
+  root.addEventListener('focusout', event => { editingBox(event.target)?.classList.remove('hc-cell-editing'); });
+
+  // What is typed joins the grid's undo when it goes in, so Undo puts back what the cell held.
+  const runDeviceCommitBeforeGrid = runDeviceCommit;
+  runDeviceCommit = function(key, value) {
+    const id = key.slice(0, key.lastIndexOf(':')), field = key.slice(key.lastIndexOf(':') + 1);
+    if (!gridHeldDeviceEdits.delete(key) && !deviceBusy(id)) deviceGrid?.history?.record([{ rowId: id, columnId: field, value: String(value) }]);
+    return runDeviceCommitBeforeGrid(key, value);
+  };
+  // Removing a device only takes it off this list, so Undo can put it back, as Undo removal does.
+  function restoreRemovedDevice(id) {
+    const index = removedDevices.map(entry => entry.device.id).lastIndexOf(id);
+    if (index < 0 || device(id)) return;
+    removedDevices.push(...removedDevices.splice(index, 1));
+    undoDeviceRemoval();
+  }
+  const removeManagedDeviceBeforeGrid = removeManagedDevice;
+  removeManagedDevice = function(id) {
+    const listed = !!device(id);
+    const result = removeManagedDeviceBeforeGrid(id);
+    if (listed && !device(id) && !replayingDeviceStep) {
+      const replay = run => () => { replayingDeviceStep = true; try { run(); } finally { replayingDeviceStep = false; } };
+      deviceGrid?.history?.recordChange({ undo: replay(() => restoreRemovedDevice(id)), redo: replay(() => removeManagedDevice(id)) });
+    }
+    return result;
+  };
+  // A redraw draws new cells: the grid paints the selection onto them.
+  const renderDeviceSheetBeforeGrid = renderDeviceSheet;
+  renderDeviceSheet = function(...args) { const drawn = renderDeviceSheetBeforeGrid(...args); deviceGrid?.refresh(); return drawn; };
+  const initializeDeviceWorkflowBeforeGrid = initializeDeviceWorkflow;
+  initializeDeviceWorkflow = function(...args) { const result = initializeDeviceWorkflowBeforeGrid(...args); deviceGridReady = mountDeviceGrid(); return result; };
+
+  // ── Defaults' two tables on Hubble's grid ───────────────────────────────────────────────────────
+  // Devices (a name, LAN IP and mask pattern for each kind) and the camera models are grids like the
+  // Devices sheet (Nov 27, 2026): a click selects, typing or F2 edits, Enter moves down, and Delete,
+  // paste and the fill handles work on a selection. Hubble keeps undo for each table, and adding or
+  // removing a camera model is a step too. The boxes outside the tables stay boxes, each with its own
+  // text undo while typed in. On a Hubble without grid undo the tables work the same, without undo.
+  const defaultsGrids = [];
+  // A camera model row has no ID of its own, and its place changes as rows are removed.
+  const cameraTypeIds = new Map();
+  let nextCameraTypeId = 1, defaultsGridCommitting = false;
+  const cameraTypeId = row => { if (!cameraTypeIds.has(row)) cameraTypeIds.set(row, 't' + nextCameraTypeId++); return cameraTypeIds.get(row); };
+  const cameraTypeById = id => cameraTypes.find(row => cameraTypeId(row) === id);
+  const defaultsGridSpecs = [
+    {
+      table: 'devices', columns: [{ id: 'name', label: 'Name' }, { id: 'lan', label: 'LAN IP' }, { id: 'mask', label: 'Mask' }],
+      rows: () => deviceKinds.slice(), key: (rowId, columnId) => 'device:' + rowId + ':' + columnId,
+      value: (rowId, columnId) => defaults.devices[rowId]?.[columnId],
+    },
+    {
+      table: 'types', columns: [{ id: 'model', label: 'Camera model' }, { id: 'type', label: '%type%' }, { id: 'ip', label: 'Camera IP' }, { id: 'login', label: 'Username' }, { id: 'password', label: 'Password' }],
+      rows: () => cameraTypes.map(cameraTypeId), key: (rowId, columnId) => { const index = cameraTypes.indexOf(cameraTypeById(rowId)); return index < 0 ? '' : 'type:' + index + ':' + columnId; },
+      value: (rowId, columnId) => cameraTypeById(rowId)?.[columnId],
+    },
+  ];
+  const defaultsBox = (spec, rowId, columnId) => { const key = spec.key(rowId, columnId); return key ? defaultsPanel?.querySelector('[data-defaults-field="' + CSS.escape(key) + '"]') : null; };
+  // Each table sits in a host that outlives the panel's redraws, so the grid and its undo do too.
+  function placeDefaultsGrids() {
+    for (const grid of defaultsGrids) {
+      const table = defaultsPanel?.querySelector('[data-defaults-table="' + grid.spec.table + '"]');
+      const sheet = table?.closest('.hc-sheet');
+      if (!sheet || sheet.parentElement === grid.host) continue;
+      sheet.replaceWith(grid.host);
+      grid.host.replaceChildren(sheet);
+      const rowIds = grid.spec.rows();
+      for (const tr of table.tBodies[0]?.rows ?? []) {
+        const rowId = grid.spec.table === 'devices' ? tr.dataset.defaultsKind : rowIds[Number(tr.dataset.defaultsType)];
+        if (!rowId || (grid.spec.table === 'types' && tr.dataset.defaultsType === undefined)) continue;
+        const cells = [...tr.cells].filter(td => td.tagName === 'TD' && !td.classList.contains('hc-defaults-remove'));
+        cells.forEach((td, column) => { const id = grid.spec.columns[column]?.id; if (id) { td.dataset.hubbleRow = rowId; td.dataset.hubbleColumn = id; } });
+      }
+    }
+  }
+  async function mountDefaultsGrid(spec) {
+    const host = document.createElement('div');
+    host.className = 'hc-defaults-grid';
+    host.dataset.defaultsGrid = spec.table;
+    const grid = { spec, host, controls: null };
+    defaultsGrids.push(grid);
+    placeDefaultsGrids();
+    const options = {
+      root: host, viewport: host, extendedEditing: true,
+      getRows: () => spec.rows(),
+      getColumns: () => spec.columns.map(column => ({ ...column, fill: column.id === 'model' || column.id === 'mask' ? 'copy' : 'series' })),
+      getCell({ rowId, columnId }) {
+        const value = spec.value(rowId, columnId), element = defaultsBox(spec, rowId, columnId);
+        if (value === undefined || !element) return null;
+        return { value: String(value ?? ''), readOnly: element.disabled };
+      },
+      onEdit(batch) {
+        defaultsGridCommitting = true;
+        try {
+          for (const edit of batch.edits) {
+            const element = defaultsBox(spec, edit.rowId, edit.columnId);
+            if (!element || element.disabled) continue;
+            element.value = edit.value;
+            commitDefaultsField(element);
+          }
+        } finally { defaultsGridCommitting = false; }
+        renderDefaults();
+      },
+      onError: error => toast(error.message),
+    };
+    try {
+      grid.controls = await mountSpreadsheetControls({ ...options, history: true }).catch(error => {
+        if (error instanceof Error && error.message.includes(MODULE_SPREADSHEET_HISTORY_FEATURE)) return mountSpreadsheetControls(options);
+        throw error;
+      });
+    } catch (error) { toast(error.message); }
+  }
+  const defaultsGridOf = element => defaultsGrids.find(grid => grid.host.contains(element));
+  const defaultsCellOf = element => { const td = element?.closest?.('td[data-hubble-row]'); return td ? { rowId: td.dataset.hubbleRow, columnId: td.dataset.hubbleColumn } : null; };
+
+  // What is typed joins the table's undo when it goes in.
+  const commitDefaultsFieldBeforeGrid = commitDefaultsField;
+  commitDefaultsField = function(element) {
+    const grid = !defaultsGridCommitting && element?.type !== 'checkbox' ? defaultsGridOf(element) : null, address = grid && defaultsCellOf(element);
+    if (address) grid.controls?.history?.record([{ ...address, value: element.value }]);
+    return commitDefaultsFieldBeforeGrid(element);
+  };
+  // Adding or removing a camera model is a step of the camera models table's undo.
+  const typesGrid = () => defaultsGrids.find(grid => grid.spec.table === 'types')?.controls;
+  function recordCameraTypeChange(row, index, added) {
+    const putBack = () => { if (!cameraTypes.includes(row)) { cameraTypes.splice(Math.min(index, cameraTypes.length), 0, row); renderDefaults(); remember(); } };
+    const takeAway = () => { const at = cameraTypes.indexOf(row); if (at >= 0) { cameraTypes.splice(at, 1); renderDefaults(); remember(); } };
+    typesGrid()?.history?.recordChange(added ? { undo: takeAway, redo: putBack } : { undo: putBack, redo: takeAway });
+  }
+  // The panel's own click handler adds or removes the row, and redraws, so the button is gone by the
+  // time the click reaches here. What it was for is noted on the way in; the step is kept once it ran.
+  let cameraTypeClick = null;
+  root.addEventListener('click', event => {
+    const button = event.target.closest?.('#hc-defaults button[data-action]'), index = Number(button?.dataset.index);
+    cameraTypeClick = !button || button.disabled ? null
+      : button.dataset.action === 'add-camera-type' ? { added: true, rows: cameraTypes.slice() }
+      : button.dataset.action === 'remove-camera-type' && cameraTypes[index] ? { added: false, row: cameraTypes[index], index } : null;
+  }, { capture: true });
+  root.addEventListener('click', () => {
+    const click = cameraTypeClick;
+    cameraTypeClick = null;
+    if (!click) return;
+    if (!click.added) { if (!cameraTypes.includes(click.row)) recordCameraTypeChange(click.row, click.index, false); return; }
+    const row = cameraTypes.find(item => !click.rows.includes(item));
+    if (row) recordCameraTypeChange(row, cameraTypes.indexOf(row), true);
+  });
+
+  // A box comes alive only to be typed in, as on the Devices sheet.
+  const defaultsEditing = element => element?.matches?.('.hc-defaults-grid input[data-defaults-field].hc-cell-editing') ? element : null;
+  function startDefaultsEdit(grid, td, replacement) {
+    const box = td?.querySelector('input[data-defaults-field]');
+    if (!box || box.disabled) return false;
+    box.classList.add('hc-cell-editing');
+    box.focus({ preventScroll: true });
+    if (replacement === undefined) box.select();
+    else { box.value = replacement; box.setSelectionRange(replacement.length, replacement.length); }
+    return true;
+  }
+  function finishDefaultsEdit(grid, box, { cancel = false, columns = 0, rows = 0 } = {}) {
+    if (cancel) { const address = defaultsCellOf(box); box.value = String(address ? grid.spec.value(address.rowId, address.columnId) ?? '' : box.defaultValue); }
+    box.classList.remove('hc-cell-editing');
+    // Leaving the box commits what was typed (its change event), then the table has the keyboard again.
+    grid.host.focus({ preventScroll: true });
+    if (columns || rows) grid.controls?.move?.(columns, rows);
+  }
+  root.addEventListener('keydown', event => {
+    const grid = defaultsGridOf(event.target);
+    if (!grid?.controls || event.isComposing) return;
+    const box = defaultsEditing(event.target);
+    if (box) {
+      if (!['Enter', 'Tab', 'Escape'].includes(event.key)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      finishDefaultsEdit(grid, box, { cancel: event.key === 'Escape', columns: event.key === 'Tab' ? (event.shiftKey ? -1 : 1) : 0, rows: event.key === 'Enter' ? (event.shiftKey ? -1 : 1) : 0 });
+      return;
+    }
+    if (event.target !== grid.host || event.metaKey || event.ctrlKey || event.altKey) return;
+    const td = grid.host.querySelector('td[data-hubble-spreadsheet-active="true"]');
+    if (!td) return;
+    if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); grid.controls.move?.(0, event.shiftKey ? -1 : 1); return; }
+    const replacement = event.key.length === 1 ? event.key : undefined;
+    if ((replacement !== undefined || event.key === 'F2') && startDefaultsEdit(grid, td, replacement)) { event.preventDefault(); event.stopPropagation(); }
+  }, { capture: true });
+  root.addEventListener('dblclick', event => {
+    const td = event.target.closest?.('.hc-defaults-grid td[data-hubble-row]'), grid = td && defaultsGridOf(td);
+    if (grid?.controls && !defaultsEditing(document.activeElement)) startDefaultsEdit(grid, td);
+  });
+  root.addEventListener('focusin', event => {
+    const box = event.target, grid = defaultsGridOf(box);
+    if (!grid?.controls || !box.matches?.('input[data-defaults-field]')) return;
+    box.classList.add('hc-cell-editing');
+    const address = defaultsCellOf(box);
+    if (address) grid.controls.select(address, undefined, { focus: false });
+  });
+  root.addEventListener('focusout', event => { defaultsEditing(event.target)?.classList.remove('hc-cell-editing'); });
+
+  // A redraw draws new tables: they go back into their hosts, the box in use keeps the keyboard, and
+  // each grid paints its selection onto the new cells.
+  const renderDefaultsBeforeGrid = renderDefaults;
+  renderDefaults = function(...args) {
+    const focused = document.activeElement, hostFocused = defaultsGrids.find(grid => grid.host === focused);
+    const key = focused?.dataset?.defaultsField, caret = key && focused.tagName === 'INPUT' ? [focused.selectionStart, focused.selectionEnd, focused.value, focused.classList.contains('hc-cell-editing')] : null;
+    const result = renderDefaultsBeforeGrid(...args);
+    placeDefaultsGrids();
+    if (hostFocused) hostFocused.host.focus({ preventScroll: true });
+    else if (caret && document.activeElement !== focused) {
+      const box = defaultsPanel?.querySelector('[data-defaults-field="' + CSS.escape(key) + '"]');
+      if (box && box !== document.activeElement) {
+        if (caret[3]) box.classList.add('hc-cell-editing');
+        box.focus({ preventScroll: true });
+        try { box.setSelectionRange(caret[0], caret[1]); } catch { /* Not a text box. */ }
+      }
+    }
+    for (const grid of defaultsGrids) grid.controls?.refresh();
+    return result;
+  };
+  const initializeDefaultsTabBeforeGrid = initializeDefaultsTab;
+  initializeDefaultsTab = function(...args) {
+    const result = initializeDefaultsTabBeforeGrid(...args);
+    if (defaultsPanel && !defaultsGrids.length) for (const spec of defaultsGridSpecs) void mountDefaultsGrid(spec).then(() => { placeDefaultsGrids(); for (const grid of defaultsGrids) grid.controls?.refresh(); });
+    return result;
+  };
 
   // The setup tour: Next and Back walk through this page in the order Cyanview is set up. Each stop
   // rings one part of the page and points at it with a short arrow and its name; a panel fixed at the

@@ -135,7 +135,9 @@
     const net = deviceNetwork(d), id = esc(d.id), busy = deviceBusy(d.id);
     const held = field => heldDeviceEdits.get(d.id + ':' + field);
     const input = (field, value, label, disabled = false, extra = '') => '<input class="hc-cell-input hc-mono" data-device-cell="' + id + ':' + field + '" value="' + esc(held(field) ?? value ?? '') + '" aria-label="' + esc(label + ' for ' + d.name) + '"' + (disabled ? ' disabled' : '') + extra + ' spellcheck="false" autocomplete="off">';
-    const cell = (content, changed = false, extra = '') => '<td data-device-column="' + column.id + '"' + (changed || held(column.id) !== undefined ? ' class="hc-changed"' : '') + extra + '>' + content + '</td>';
+    // Every cell but the remove button's is a cell of Hubble's grid, which selects, fills, pastes and undoes (ui-device-grid.js).
+    const gridCell = column.id === 'remove' ? '' : ' data-hubble-row="' + id + '" data-hubble-column="' + esc(column.id) + '"';
+    const cell = (content, changed = false, extra = '') => '<td data-device-column="' + column.id + '"' + gridCell + (changed || held(column.id) !== undefined ? ' class="hc-changed"' : '') + extra + '>' + content + '</td>';
     const waiting = rows => { const count = rows.filter(row => row?.pending).length; return count ? '<span class="hc-device-waiting">+' + count + ' pending</span>' : ''; };
     const quiet = text => '<span class="hc-muted">' + esc(text) + '</span>';
     // Folded away, the one LAN column says how many more addresses the device has, and opens the rest.
@@ -240,6 +242,8 @@
       } else {
         // A cell being worked in is never greyed out under the keyboard. What is typed in it during a send waits for the send.
         copyAttributes(kept, twin, ['disabled']);
+        // What the cell holds follows the device, even while it is typed in, so Undo knows what was there.
+        if (kept.tagName === 'INPUT' && twin.tagName === 'INPUT') kept.defaultValue = twin.defaultValue;
         const committed = key && key === committingDeviceCell;
         // Text typed here stays exactly as typed. A cell nobody has typed in follows what the device has.
         if (key && (committed || typedDeviceCell !== key) && kept.value !== twin.value) kept.value = twin.value;

@@ -45,15 +45,17 @@ async function sendAll(f: FrameLocator) {
   await showPending(f);
   await panel(f).locator('[data-action="send-all-pending"]').click();
 }
-// Real keys: the cell is clicked, its text selected and typed over, and Enter commits it.
+// Real keys: the cell is clicked (the grid selects it; its box takes the mouse only while typed in),
+// its text selected and typed over, and Enter commits it.
+const cellOf = (input: Locator) => input.locator('xpath=ancestor::td[1]');
 async function typeOver(input: Locator, text: string) {
-  await input.click();
+  await cellOf(input).click();
   await input.press('ControlOrMeta+a');
   await input.pressSequentially(text);
   await input.press('Enter');
 }
 async function empty(input: Locator) {
-  await input.click();
+  await cellOf(input).click();
   await input.press('ControlOrMeta+a');
   await input.press('Backspace');
   await input.press('Enter');

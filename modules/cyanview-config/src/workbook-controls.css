@@ -282,7 +282,7 @@ body:has(#cyanview-design .hc-veil:not([hidden])) .hubble-column-resize-handles 
 #cyanview-design .hc-grid[data-device-sheet] .hc-ip-link:is(:hover, :focus-visible) { color: var(--hc-focus); text-decoration-color: currentColor; }
 #cyanview-design .hc-grid[data-device-sheet] td:has(> .hc-ip-open) { position: relative; }
 #cyanview-design .hc-grid[data-device-sheet] .hc-ip-open { position: absolute; top: 50%; right: 4px; translate: 0 -50%; display: none; place-items: center; min-height: 0; width: 24px; height: 22px; padding: 0; border: 0; border-radius: 4px; background: var(--hc-surface); color: var(--hc-secondary); cursor: pointer; }
-#cyanview-design .hc-grid[data-device-sheet] td:is(:hover, :focus-within) > .hc-ip-open { display: inline-grid; }
+#cyanview-design .hc-grid[data-device-sheet] td:is(:hover, :focus-within, [data-hubble-spreadsheet-active='true']) > .hc-ip-open { display: inline-grid; }
 #cyanview-design .hc-grid[data-device-sheet] td:has(> .hc-device-waiting) > .hc-ip-open { right: 82px; }
 #cyanview-design .hc-grid[data-device-sheet] .hc-ip-open:is(:hover, :focus-visible) { color: var(--hc-focus); }
 #cyanview-design .hc-grid[data-device-sheet] .hc-ip-open .hc-icon { width: 14px; height: 14px; }
@@ -463,3 +463,11 @@ body:has(#cyanview-design .hc-veil:not([hidden])) .hubble-column-resize-handles 
 #cyanview-design .hc-defaults-problem { display: flex; flex-direction: column; gap: 2px; min-height: 18px; margin: 6px 0 0; font-size: 12px; line-height: 18px; }
 #cyanview-design .hc-defaults-warning { color: var(--hc-amber); }
 #cyanview-design .hc-cell-input.hc-defaults-invalid { box-shadow: inset 0 0 0 1px var(--hc-red); }
+/* Devices on Hubble's grid (ui-device-grid.js): a box takes the mouse only while it is typed in, so a click selects its cell. */
+#cyanview-design [data-role="device-sheet"] td[data-hubble-row] :is(input, select)[data-device-cell]:not(.hc-cell-editing) { pointer-events: none; }
+#cyanview-design [data-role="device-sheet"]:focus-visible { outline: none; }
+#cyanview-design [data-role="device-sheet"] td[data-hubble-spreadsheet-selected]:not(.hc-changed) { background-image: linear-gradient(rgb(206 206 206 / 12%), rgb(206 206 206 / 12%)); }
+/* Defaults' tables on Hubble's grid (ui-defaults-grid.js), the same way. */
+#cyanview-design .hc-defaults-grid td[data-hubble-row] input[data-defaults-field]:not(.hc-cell-editing) { pointer-events: none; }
+#cyanview-design .hc-defaults-grid:focus-visible { outline: none; }
+#cyanview-design .hc-defaults-grid td[data-hubble-spreadsheet-selected] { background-image: linear-gradient(rgb(206 206 206 / 12%), rgb(206 206 206 / 12%)); }
