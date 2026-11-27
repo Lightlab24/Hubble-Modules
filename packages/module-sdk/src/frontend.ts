@@ -1,6 +1,32 @@
 import { z } from 'zod'
 
 const Id = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,95}$/u)
+/** The part of its page a module shows in a window. Only the module reads it. */
+export const ModuleFrontendViewSchema = z.string().min(1).max(128)
+/** What a module calls that part: one line, shown after Hubble and the module's name. */
+export const ModuleFrontendWindowTitleSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(80)
+  .refine((value) => !/[\u0000-\u001f\u007f]/u.test(value), 'A window title is one line')
+/** One part of a page the sidebar offers to open in a window of its own. */
+export const ModuleWindowPartSchema = z.strictObject({
+  view: ModuleFrontendViewSchema,
+  title: ModuleFrontendWindowTitleSchema,
+})
+/** The most parts one page lists in the sidebar. */
+export const MODULE_WINDOW_PARTS_LIMIT = 24
+/** Parts a page lists: the same views twice would open the same window. */
+export const ModuleWindowPartsSchema = z
+  .array(ModuleWindowPartSchema)
+  .min(1)
+  .max(MODULE_WINDOW_PARTS_LIMIT)
+  .refine(
+    (parts) => new Set(parts.map((part) => part.view)).size === parts.length,
+    'Each part needs its own view',
+  )
+export type ModuleWindowPart = z.infer<typeof ModuleWindowPartSchema>
 /** Static browser assets live under ui/; backend files are never served to a page. */
 export const ModuleFrontendSectionSchema = z
   .strictObject({
@@ -38,6 +64,19 @@ export const ModuleFrontendSectionSchema = z
      * Requires module-page-windows-v1.
      */
     windows: z.literal(true).optional(),
+    /**
+     * Parts of the page the sidebar offers under **Open in its own window ›**, each opened in a
+     * window that shows only that part: `page.view` is the part's `view` there. Either the list
+     * itself, for parts that never change, or `{ value }`, the name of a published state value
+     * that holds the list, for parts the operator adds, such as sheets. Requires `windows: true`.
+     */
+    parts: z
+      .union([ModuleWindowPartsSchema, z.strictObject({ value: z.string().min(1).max(96) })])
+      .optional(),
+  })
+  .refine((value) => value.parts === undefined || value.windows === true, {
+    message: 'A page lists parts to open in windows only with windows: true',
+    path: ['parts'],
   })
   .refine(
     (value) => new Set(value.commands.map((command) => command.id)).size === value.commands.length,
@@ -58,15 +97,6 @@ export const ModuleFrontendReadySchema = z.strictObject({
   type: z.literal('hubble.module.frontend.ready.v1'),
   id: z.string().regex(/^[a-f0-9]{32}$/u),
 })
-/** The part of its page a module shows in a window. Only the module reads it. */
-export const ModuleFrontendViewSchema = z.string().min(1).max(128)
-/** What a module calls that part: one line, shown after Hubble and the module's name. */
-export const ModuleFrontendWindowTitleSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(80)
-  .refine((value) => !/[\u0000-\u001f\u007f]/u.test(value), 'A window title is one line')
 /** Sent with the port: where the page is shown. Pages built before windows do not read it. */
 export const ModuleFrontendWindowSchema = z.strictObject({
   /** The view this window shows, or null for the module's whole page. */

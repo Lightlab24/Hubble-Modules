@@ -240,6 +240,37 @@ openButton.onclick = () => void page.openWindow("camera-3", "Camera 3");
   open anything but its own page.
 - One HubDash keeps at most 16 module windows open, and `openWindow` rejects beyond that.
 
+### List its parts in the sidebar
+
+Right-click a module in the sidebar, and **Open in its own window ›** offers **Whole module**
+and each part the page lists. Choosing a part opens the page in a window that shows only that
+part, with `page.view` set to the part's `view`, titled "Hubble - TSL Tally - Routing". List the
+parts on the section, beside `windows: true`:
+
+```ts
+{
+  type: 'custom', id: 'app', label: 'TSL Tally', entry: 'ui/index.html', commands: [],
+  windows: true,
+  parts: [
+    { view: 'tally', title: 'Tally' },
+    { view: 'routing', title: 'Routing' },
+    { view: 'setup', title: 'Setup' },
+  ],
+}
+```
+
+- For parts the operator adds, such as sheets, name a value the module publishes instead:
+  `parts: { value: 'windowParts' }`, then `publishState` with
+  `values.windowParts = [{ view, title }, …]`. Publish it again when a part is added, renamed or
+  removed. A module that isn't running lists none.
+- Draw only that part in its window: no tab strip and no other parts. Leave out what the page
+  would save about where it is (the open tab, the selected sheet), so the module's whole page
+  opens where it was.
+- Use the same views the page passes to `openWindow`, so a part opened either way is one window.
+- Up to 24 parts, each with its own `view`. A title is one line of up to 80 characters.
+- A page Hubble draws, with no custom section, lists each of its sections by itself when it has
+  more than one.
+
 ## Declare and build
 
 Add a `custom` section to a normal page. Require both `module-pages-v1` and
