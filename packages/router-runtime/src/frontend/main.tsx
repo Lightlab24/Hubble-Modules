@@ -12,6 +12,7 @@ import { PreferenceSaveQueue } from "./preference-save-queue.js";
 import { initializeRouterZoom } from "./zoom-storage.js";
 import { uuid } from "./uuid.js";
 import type { ConnectionView } from "./connection-view.js";
+import { routerPagePart } from "../page-contract.js";
 import "./page.css";
 
 /** A failure message that fades on its own, like the host's failure toast. */
@@ -31,11 +32,14 @@ function RouterPage({
   initial,
   initialAutomaticTake,
   initialView,
+  part,
 }: {
   bridge: ButtonMatrixSettingsBridge;
   initial: ConnectionView;
   initialAutomaticTake: boolean;
   initialView: RouterPageView;
+  /** In a window the sidebar opened for Patch or Routes: that view alone, and nothing about it saved. */
+  part: RouterPageView | null;
 }) {
   const [connection, setConnection] = useState(initial);
   const [revision, setRevision] = useState("initial");
@@ -84,14 +88,16 @@ function RouterPage({
   });
   return (
     <main className="router-page">
-      <details className="router-groups">
-        <summary>Button Matrix: Automatic Take and groups</summary>
-        <ButtonMatrixSettings
-          bridge={bridge}
-          revision={revision}
-          failed={failed}
-        />
-      </details>
+      {part === null ? (
+        <details className="router-groups">
+          <summary>Button Matrix: Automatic Take and groups</summary>
+          <ButtonMatrixSettings
+            bridge={bridge}
+            revision={revision}
+            failed={failed}
+          />
+        </details>
+      ) : null}
       {message && (
         <div className="router-failure" role="alert">
           {message}
@@ -103,8 +109,9 @@ function RouterPage({
         onConnectionChange={() => {}}
         router={router}
         onRouteFailure={failed}
-        initialPageView={initialView}
-        onPageViewChange={saveView}
+        initialPageView={part ?? initialView}
+        {...(part === null ? { onPageViewChange: saveView } : {})}
+        showViewTabs={part === null}
         automaticTake={automaticTake}
         onAutomaticTakeChange={(enabled) => {
           void automaticTakeQueue.set(enabled);
@@ -152,6 +159,13 @@ async function start() {
     );
     return;
   }
+  // A window the sidebar opened for one part of the page shows that part alone.
+  const part = routerPagePart(bridge.view);
+  if (part === "gone") {
+    element.textContent = "This part of the Router page is no longer here.";
+    window.addEventListener("pagehide", () => bridge.dispose(), { once: true });
+    return;
+  }
   const settings = (await bridge.call("settings")) as unknown as {
     connection: ConnectionView;
     zoom: number;
@@ -161,19 +175,22 @@ async function start() {
   let zoomTail: Promise<unknown> = Promise.resolve();
   initializeRouterZoom(
     JSON.stringify({ version: 1, zoom: settings.zoom }),
-    (value) => {
-      const zoom: unknown = JSON.parse(value).zoom;
-      zoomTail = zoomTail
-        .then(() => bridge.call("set-zoom", zoom as number))
-        .catch((error) => {
-          // Keep the current visual preference usable; explain failed persistence.
-          window.dispatchEvent(
-            new CustomEvent("router-preference-failure", {
-              detail: String(error),
-            }),
-          );
-        });
-    },
+    // A part's window opens at the saved zoom and can zoom, but only the whole page saves it.
+    part !== null
+      ? () => {}
+      : (value) => {
+          const zoom: unknown = JSON.parse(value).zoom;
+          zoomTail = zoomTail
+            .then(() => bridge.call("set-zoom", zoom as number))
+            .catch((error) => {
+              // Keep the current visual preference usable; explain failed persistence.
+              window.dispatchEvent(
+                new CustomEvent("router-preference-failure", {
+                  detail: String(error),
+                }),
+              );
+            });
+        },
   );
   const root = createRoot(element);
   root.render(
@@ -182,6 +199,7 @@ async function start() {
       initial={settings.connection}
       initialAutomaticTake={settings.automaticTake === true}
       initialView={settings.view ?? "patch"}
+      part={part}
     />,
   );
   window.addEventListener(

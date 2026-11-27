@@ -56,6 +56,17 @@ it.each([
           features: features.filter((item) => item !== feature),
         }),
       ).toContain(feature);
+    // The sidebar's Open in its own window › offers Patch and Routes, each alone in its window.
+    const routerSection = manifest.pages?.find((page) => page.id === "routing")
+      ?.sections[0];
+    expect(routerSection).toMatchObject({
+      type: "custom",
+      windows: true,
+      parts: [
+        { view: "patch", title: "Patch" },
+        { view: "routes", title: "Routes" },
+      ],
+    });
     // The connection settings screen shows the same saved Automatic Take as the Router page.
     expect(features).toContain("module-settings-pages-v1");
     expect(manifest.capabilities).toContain("service.page.routing-settings");

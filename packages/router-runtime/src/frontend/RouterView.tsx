@@ -138,6 +138,8 @@ export interface RouterViewProps {
   readonly initialPageView?: RouterPageView;
   /** Called when the operator picks a different view. */
   readonly onPageViewChange?: (view: RouterPageView) => void;
+  /** False in a window that shows one view only: no Patch and Routes tabs. */
+  readonly showViewTabs?: boolean;
 }
 
 interface RouterListModel<T> {
@@ -179,6 +181,7 @@ export function RouterView({
   onRouteFailure,
   initialPageView = "patch",
   onPageViewChange,
+  showViewTabs = true,
 }: RouterViewProps): React.JSX.Element {
   const [pageView, setPageView] = useState<RouterPageView>(initialPageView);
   const [routerViewZoom, setRouterViewZoom] = useState<RouterViewZoom>(() =>
@@ -373,28 +376,30 @@ export function RouterView({
         </button>
       </header>
 
-      <div
-        className="router-view-tabs"
-        role="tablist"
-        aria-label="Router views"
-      >
-        {ROUTER_PAGE_VIEWS.map(({ id, label }) => (
-          <button
-            key={id}
-            className="router-view-tab"
-            type="button"
-            role="tab"
-            aria-selected={pageView === id}
-            onClick={() => {
-              if (id === pageView) return;
-              setPageView(id);
-              onPageViewChange?.(id);
-            }}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      {showViewTabs ? (
+        <div
+          className="router-view-tabs"
+          role="tablist"
+          aria-label="Router views"
+        >
+          {ROUTER_PAGE_VIEWS.map(({ id, label }) => (
+            <button
+              key={id}
+              className="router-view-tab"
+              type="button"
+              role="tab"
+              aria-selected={pageView === id}
+              onClick={() => {
+                if (id === pageView) return;
+                setPageView(id);
+                onPageViewChange?.(id);
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       <NoRouteLabelContext.Provider
         value={

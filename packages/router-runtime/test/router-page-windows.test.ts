@@ -29,6 +29,7 @@ import type { RouterType } from "../src/matrix.js";
 import { routerSettings, withRouterInterface } from "../src/manifest.js";
 import { routerModule, routerViewPreferences } from "../src/module.js";
 import { createRouterPageApi } from "../src/frontend/page-client.js";
+import { ROUTER_PAGE_PARTS, routerPagePart } from "../src/page-contract.js";
 import {
   createRouterState,
   reduceRouterEvent,
@@ -400,6 +401,15 @@ it("declares the Router page and its Button Matrix settings for several windows"
   expect(
     "requiredFeatures" in manifest.host ? manifest.host.requiredFeatures : [],
   ).toContain("module-page-windows-v1");
+});
+
+it("a window the sidebar opens for Patch or Routes shows that part, and any other view is gone", () => {
+  expect(routerPagePart(null)).toBeNull();
+  expect(routerPagePart("patch")).toBe("patch");
+  expect(routerPagePart("routes")).toBe("routes");
+  // A view a later version named, restored by HubDash after a downgrade.
+  expect(routerPagePart("levels")).toBe("gone");
+  expect(ROUTER_PAGE_PARTS.map((part) => part.view)).toEqual(["patch", "routes"]);
 });
 
 it("a route taken in one window shows in the other at once, and either window can route next", async () => {

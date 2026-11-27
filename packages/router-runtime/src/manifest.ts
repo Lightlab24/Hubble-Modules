@@ -2,6 +2,7 @@ import type { ModuleField, ModuleManifest } from "@hubble/module-sdk";
 import type { ModuleManifestSource } from "@hubble/module-sdk/authoring";
 import { routerMatrix, routerLabels, type RouterType } from "./matrix.js";
 import { directRouteAction } from "./public-api.js";
+import { ROUTER_PAGE_PARTS } from "./page-contract.js";
 
 /** Device-address and timing settings that a simulated router doesn't use. */
 const hiddenWhenSimulated = {
@@ -267,6 +268,9 @@ export function withRouterInterface(
             // route, groups follow the published routing revision, and each saved preference is
             // merged into a fresh read (test/router-page-windows.test.ts).
             windows: true,
+            // Patch and Routes, each in a window of its own from the sidebar: that window shows
+            // only its view and saves neither the open view nor the zoom.
+            parts: ROUTER_PAGE_PARTS.map((part) => ({ ...part })),
             commands: [
               "open",
               "close",

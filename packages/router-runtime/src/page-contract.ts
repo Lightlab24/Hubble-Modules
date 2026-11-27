@@ -23,6 +23,27 @@ const MAX_STANDARD_ROUTER_LEVEL = 16;
 const MAX_ROUTER_CROSSPOINT_COUNT = MAX_ROUTER_ADDRESS * MAX_ROUTER_LEVEL;
 export const MAX_ROUTER_SEARCH_LENGTH = 128;
 
+/**
+ * The Router page's parts. HubDash's sidebar offers each under Open in its own window ›, and a
+ * part's window shows only that view of the page, with no tabs to switch it.
+ */
+export const ROUTER_PAGE_PARTS = [
+  { view: "patch", title: "Patch" },
+  { view: "routes", title: "Routes" },
+] as const;
+export type RouterPagePart = (typeof ROUTER_PAGE_PARTS)[number]["view"];
+/**
+ * What one window of the Router page shows: the whole page (null), one of its parts, or `gone`
+ * for a part this version doesn't have, such as one a later version named.
+ */
+export function routerPagePart(
+  view: string | null,
+): RouterPagePart | "gone" | null {
+  if (view === null) return null;
+  const part = ROUTER_PAGE_PARTS.find((item) => item.view === view);
+  return part ? part.view : "gone";
+}
+
 export const RouterGenerationSchema = z.uuid().brand<"RouterGeneration">();
 export const RouterListenerIdSchema = z.uuid().brand<"RouterListenerId">();
 export const RouterOperationIdSchema = z.uuid().brand<"RouterOperationId">();
