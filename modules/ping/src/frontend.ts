@@ -2,11 +2,12 @@ import { connectModuleFrontend, ModuleFrontendValueSchema } from "@hubble/module
 import { confirm, mountSegmented, mountStepper, mountSwitch, showToast } from "@hubble/module-sdk/controls";
 import { mountSpreadsheetColumnEditor, mountSpreadsheetSheets, mountSpreadsheetToolbar } from "@hubble/module-sdk/spreadsheet-controls";
 import type { LiveReply, LiveRequest } from "./backend.js";
+import { bandsChange, columnMoveChange, columnVisibilityChange, openSheetChange, scaleChange, settingsChange, viewChange } from "./changes.js";
 import { createColorsEditor } from "./colors-editor.js";
-import { DraftStore, type SaveReceipt } from "./draft-store.js";
+import { openDeviceList } from "./page-store.js";
+import { sheetWindow } from "./sheet-window.js";
 import {
   bytesPerSecond,
-  clone,
   columnOf,
   formatInterval,
   formatMs,
@@ -14,7 +15,6 @@ import {
   insertRows,
   INTERVALS_MS,
   MAX_DEVICES,
-  newDevice,
   rulesOf,
   colorsOf,
   roundScale,
@@ -35,7 +35,6 @@ import {
   sheetRows,
   sheetsOf,
   deviceHasData,
-  setDeviceCount,
   SIZES_BYTES,
   SPANS,
   spanOf,
@@ -57,14 +56,46 @@ function report(message: string) {
   void showToast({ kind: "failure", title: message }).catch(() => undefined);
 }
 
+/** Says when something saved here had also been changed in another window, and that this one's value is kept. */
+function reportClashes(clashes: string[]) {
+  const unique = [...new Set(clashes)];
+  const title = unique.length === 1 ? `${unique[0]} was also changed in another window` : `${unique.length} things were also changed in another window`;
+  const listed = unique.length === 1 ? "" : `${unique.slice(0, 4).join(", ")}${unique.length > 4 ? " and more" : ""}. `;
+  void showToast({ title, message: `${listed}What you entered here is kept.` }).catch(() => undefined);
+}
+
+/**
+ * A toolbar too wide for its window wraps onto another line. A divider means nothing at either end
+ * of a line, so it is hidden there; it keeps its room, so hiding it never moves anything.
+ */
+function tidyToolbars() {
+  const middle = (element: Element | null) => {
+    if (!element) return Number.NaN;
+    const box = element.getBoundingClientRect();
+    return box.top + box.height / 2;
+  };
+  const tidy = () => {
+    for (const divider of document.querySelectorAll<HTMLElement>(".toolbar-divider")) {
+      const at = middle(divider);
+      const inLine = Math.abs(middle(divider.previousElementSibling) - at) < 4 && Math.abs(middle(divider.nextElementSibling) - at) < 4;
+      divider.style.visibility = inLine ? "" : "hidden";
+    }
+  };
+  const watch = new ResizeObserver(tidy);
+  for (const toolbar of document.querySelectorAll(".toolbar")) for (const part of [toolbar, ...toolbar.children]) watch.observe(part);
+}
+
 try {
   const client = await connectModuleFrontend(window);
-  const initial = (await client.call("snapshot")) as unknown as SaveReceipt;
-  const store = new DraftStore(initial, async (operation: Mutation) => {
-    return (await client.call("save", ModuleFrontendValueSchema.parse({ operation }))) as unknown as SaveReceipt;
-  });
+  // Every open copy of this page, in any HubDash window, follows what the others save.
+  const list = await openDeviceList(client);
+  const { store, follow } = list;
+  store.onClash(reportClashes);
+  // In a sheet's own window, from the sidebar's Open in its own window ›, the page shows only that
+  // sheet and never saves which sheet is open. The whole page shows the open sheet, as before.
+  const shown = sheetWindow(client, store);
   let live: LiveReply = { sequence: 0, now: Date.now(), problem: "", devices: {}, timeline: null };
-  let selectedId: string | undefined = sheetRows(store.document)[0]?.id;
+  let selectedId: string | undefined = shown.rows()[0]?.id;
   let fetching = false;
   /** Counts every change to what the timeline should show: its stretch of time, or its device. */
   let windowVersion = 0;
@@ -74,23 +105,15 @@ try {
 
   const settings = () => store.document.settings;
   const view = () => store.document.view;
-  const setSettings = (change: Partial<Settings>) => store.submit({ kind: "settings", settings: { ...clone(settings()), ...change }, expected: clone(settings()) });
-  const setView = (change: Partial<View>) => store.submit({ kind: "view", view: { ...clone(view()), ...change }, expected: clone(view()) });
+  const setSettings = (change: Partial<Settings>) => store.submit(settingsChange(store.document, change));
+  const setView = (change: Partial<View>) => store.submit(viewChange(store.document, change));
   /** Saves the timeline's scale. Auto is no scale at all, so older versions read the page as before. */
   function setScale(ms: number | null) {
-    if (ms === (view().scaleMs ?? null)) return;
-    const next = clone(view());
-    if (ms === null) delete next.scaleMs;
-    else next.scaleMs = ms;
-    store.submit({ kind: "view", view: next, expected: clone(view()) });
+    const operation = scaleChange(store.document, ms);
+    if (operation) store.submit(operation);
   }
   /** Saves the times for the bar colours; null goes back to the colours that follow the alert limit. */
-  function setBands(bands: Bands | null) {
-    const next = clone(view());
-    if (bands === null) delete next.bands;
-    else next.bands = bands;
-    store.submit({ kind: "view", view: next, expected: clone(view()) });
-  }
+  const setBands = (bands: Bands | null) => store.submit(bandsChange(store.document, bands));
   /** The scale a drag or pinch on the ms numbers is showing before it is saved. */
   let gestureScale: number | null | undefined;
 
@@ -141,7 +164,8 @@ try {
       el("tl-hint").textContent = text ?? "Pinch to zoom · two fingers to move through time";
     },
     onFollow: (following) => {
-      el("tl-live").hidden = following;
+      // It keeps its room while hidden, so its coming and going never moves the controls beside it.
+      el("tl-live").dataset.shown = String(!following);
     },
     onScale: (ms, done) => {
       gestureScale = done ? undefined : ms;
@@ -196,7 +220,8 @@ try {
 
   /** The bar colours for the device on show: from the user's times, or following its alert limit. */
   function shownColors(): Colors {
-    const row = sheetRows(store.document).find((item) => item.id === selectedId) ?? sheetRows(store.document)[0];
+    const rows = shown.rows();
+    const row = rows.find((item) => item.id === selectedId) ?? rows[0];
     return colorsOf(view().bands, row ? rulesOf(row, settings()).overMs : settings().alertOverMs);
   }
   const colorsEditor = createColorsEditor({
@@ -235,6 +260,8 @@ try {
   }
   timeline.setPingTime(settings().intervalMs);
   timeline.showLast(spanOf(view().span).ms, true);
+  /** The Show last choice the timeline was last set to, here or in another window. */
+  let shownSpan = view().span;
   el("tl-live").addEventListener("click", () => timeline.backToNow());
   el("clear-history").addEventListener("click", async () => {
     const sure = await confirm({
@@ -260,10 +287,8 @@ try {
     label: "Show last",
     layout: "inline",
     getState: () => ({ value: view().span, options: SPANS.map((item) => ({ value: item.id, label: item.label })) }),
-    onValueChange: (value) => {
-      setView({ span: value as SpanId });
-      timeline.showLast(spanOf(value).ms);
-    },
+    // The timeline follows in update(), whichever window chose it.
+    onValueChange: (value) => setView({ span: value as SpanId }),
   });
   const textSize = await mountSpreadsheetToolbar({
     root: el("text-size"),
@@ -275,8 +300,8 @@ try {
       report(`Use up to ${MAX_DEVICES} devices.`);
       return;
     }
-    const row = newDevice(store.document, crypto.randomUUID());
-    if (store.submit(insertRows(store.document, [row], beforeId))) grid.select({ rowId: row.id, columnId: "host" });
+    const row = shown.newDevice(crypto.randomUUID());
+    if (row && store.submit(insertRows(store.document, [row], beforeId))) grid.select({ rowId: row.id, columnId: "host" });
   }
 
   /** Removes devices as one undo step. One row goes at once; several are named first when any is filled in. */
@@ -306,7 +331,7 @@ try {
     viewport: el("viewport"),
     store,
     live: () => live.devices,
-    rows: () => sheetRows(store.document),
+    rows: () => shown.rows(),
     onInsert: insert,
     onRemove: (rowIds) => void removeDevices(rowIds),
     onSelect(rowId) {
@@ -331,10 +356,11 @@ try {
   };
   /** Opens a sheet. Which sheet is open is saved with the page but isn't an undo step. */
   function openSheet(id: string) {
-    if (id === openSheetId(store.document)) return;
-    store.submit({ kind: "view", view: { ...clone(view()), sheetId: id }, expected: clone(view()) }, false);
+    const operation = openSheetChange(store.document, id);
+    if (operation) store.submit(operation, false);
   }
-  const sheetTabs = await mountSpreadsheetSheets({
+  // A sheet's own window has no sheet tabs: it shows its one sheet and never opens another.
+  const sheetTabs = shown.own ? undefined : await mountSpreadsheetSheets({
     root: el("sheet-tabs"),
     getState: () => ({
       sheets: sheetsOf(store.document).map(({ id, name }) => ({ id, name })),
@@ -375,7 +401,8 @@ try {
     },
   });
 
-  refreshTabs = () => sheetTabs.refresh();
+  el("sheet-tabs").hidden = !sheetTabs;
+  refreshTabs = () => sheetTabs?.refresh();
   // A selection made by dragging or with the keyboard changes no device, so look again after each.
   for (const type of ["pointerup", "keyup"]) el("device-grid").addEventListener(type, () => refreshTabs());
 
@@ -387,23 +414,16 @@ try {
         .order.filter((id) => id !== "name")
         .map((id) => ({ id, label: id === "strip" ? spanOf(view().span).heading : columnOf(id)!.label, visible: !view().hidden.includes(id) })),
     onVisibilityChange(id, visible) {
-      const hidden = view().hidden.filter((item) => item !== id);
-      if (!visible) hidden.push(id);
       const selected = grid.selected();
       if (!visible && selected?.columnId === id) grid.select({ rowId: selected.rowId, columnId: "name" }, false);
-      setView({ hidden });
+      store.submit(columnVisibilityChange(store.document, id, visible));
     },
-    onMove(id, beforeId) {
-      const order = view().order.filter((item) => item !== id);
-      const index = beforeId ? order.indexOf(beforeId) : -1;
-      order.splice(index < 0 ? order.length : index, 0, id);
-      setView({ order });
-    },
+    onMove: (id, beforeId) => store.submit(columnMoveChange(store.document, id, beforeId)),
   });
 
   function updateTimeline() {
-    // The timeline shows a device on the open sheet: the one picked there, or else its first.
-    const onSheet = sheetRows(store.document);
+    // The timeline shows a device on the sheet shown: the one picked in this window, or else its first.
+    const onSheet = shown.rows();
     const row = onSheet.find((item) => item.id === selectedId) ?? onSheet[0];
     if (row?.id !== selectedId) windowVersion++;
     selectedId = row?.id;
@@ -426,8 +446,18 @@ try {
   }
 
   function update() {
+    // A sheet's window says when its sheet has been removed, and shows it again if it is put back.
+    const gone = shown.gone();
+    el("app").dataset.gone = String(gone);
+    el("gone").hidden = !gone;
+    const sheet = shown.sheet();
+    if (shown.own && sheet && el("app-sub").textContent !== sheet.name) el("app-sub").textContent = sheet.name;
     textSize.refresh();
     timeline.setPingTime(settings().intervalMs);
+    if (view().span !== shownSpan) {
+      shownSpan = view().span;
+      timeline.showLast(spanOf(shownSpan).ms);
+    }
     pinging.refresh();
     notify.refresh();
     span.refresh();
@@ -445,14 +475,19 @@ try {
       if (lastSaveError) report(lastSaveError);
     }
     const devices = store.document.devices;
-    const pingedRows = devices.filter((row) => valueOf(row, "enabled") === "TRUE" && valueOf(row, "host"));
-    const states = pingedRows.map((row) => (settings().pinging ? (live.devices[row.id]?.state ?? "not-checked") : "not-checked"));
+    const pinged = (rows: typeof devices) => rows.filter((row) => valueOf(row, "enabled") === "TRUE" && valueOf(row, "host"));
+    const pingedRows = pinged(devices);
+    // The status counts the devices on show: all of them in the whole page, the sheet's in its own window.
+    const listed = shown.own ? shown.rows() : devices;
+    const states = pinged(listed).map((row) => (settings().pinging ? (live.devices[row.id]?.state ?? "not-checked") : "not-checked"));
     const checked = states.filter((state) => state !== "not-checked").length;
     const online = states.filter((state) => state === "online" || state === "slow").length;
     const alerts = states.filter((state) => state === "offline" || state === "slow").length;
     const fleet = el("fleet");
-    el("fleet-status").textContent = !devices.length
-      ? "No devices yet"
+    el("fleet-status").textContent = !listed.length
+      ? shown.own
+        ? "No devices on this sheet"
+        : "No devices yet"
       : !settings().pinging
         ? "Paused"
         : `${online} of ${checked} online · ${alerts} alert${alerts === 1 ? "" : "s"}`;
@@ -465,14 +500,14 @@ try {
     el("data-use").textContent = settings().pinging
       ? `${count} device${count === 1 ? "" : "s"} · ${settings().sizeBytes} bytes every ${formatInterval(settings().intervalMs)} · about ${formatRate(bytesPerSecond(count, settings()))} in total · Alerts go to the Status Log${settings().notify ? ", a notification" : ""} and any key that shows the device`
       : "Paused · nothing is being sent";
-    // The Devices box counts the open sheet. Never overwrite the number while it is being typed.
-    const onSheet = sheetRows(store.document).length;
+    // The Devices box counts the sheet shown. Never overwrite the number while it is being typed.
+    const onSheet = shown.rows().length;
     const counter = el<HTMLInputElement>("device-count");
     if (document.activeElement !== counter && counter.value !== String(onSheet)) counter.value = String(onSheet);
     el("empty").hidden = onSheet > 0;
     el("empty-title").textContent = devices.length ? "No devices on this sheet" : "No devices yet";
     el<HTMLButtonElement>("add-device").disabled = devices.length >= MAX_DEVICES;
-    sheetTabs.refresh();
+    refreshTabs();
     updateTimeline();
   }
   store.subscribe(update);
@@ -486,7 +521,7 @@ try {
     if (counting) return;
     counting = true;
     try {
-      const operation = setDeviceCount(store.document, countInput.value.trim() === "" ? NaN : Number(countInput.value), () => crypto.randomUUID());
+      const operation = shown.count(countInput.value.trim() === "" ? NaN : Number(countInput.value), () => crypto.randomUUID());
       if (!operation) return;
       const { removed, ...mutation } = operation;
       const filled = removed.filter(deviceHasData);
@@ -506,7 +541,7 @@ try {
       report(error instanceof Error ? error.message : String(error));
     } finally {
       counting = false;
-      countInput.value = String(sheetRows(store.document).length);
+      countInput.value = String(shown.rows().length);
     }
   }
   countInput.addEventListener("change", () => void applyCount());
@@ -531,6 +566,7 @@ try {
    * always dropped, or the bars would jump back to the old view and forward again.
    */
   function adopt(reply: LiveReply, asked: { span: string; version: number }) {
+    follow.saw(reply.revision);
     if (reply.sequence < live.sequence || asked.span !== view().span) return;
     const current = asked.version === windowVersion && (!selectedId || reply.timeline?.deviceId === selectedId);
     live = current ? reply : { ...reply, timeline: live.timeline };
@@ -561,7 +597,7 @@ try {
 
   // Follows ping results while the page is on screen. The worker answers as soon as there is a new one.
   let run = 0;
-  async function follow() {
+  async function followLive() {
     const mine = ++run;
     while (mine === run && document.visibilityState === "visible") {
       try {
@@ -575,14 +611,24 @@ try {
     }
   }
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") void follow();
+    if (document.visibilityState === "visible") void followLive();
     else run++;
   });
   setInterval(() => timeline.tick(), 250);
 
+  tidyToolbars();
   el("loading").hidden = true;
   update();
-  void follow();
+  void followLive();
+  window.addEventListener(
+    "pagehide",
+    () => {
+      run++;
+      shown.dispose();
+      list.close();
+    },
+    { once: true },
+  );
 } catch (error) {
   el("loading").textContent = error instanceof Error ? error.message : String(error);
 }

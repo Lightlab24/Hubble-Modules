@@ -62,13 +62,22 @@ describe("the monitor list", () => {
     expect(() => validateDocument(plan(row("a", "Grade 1"), row("b", "grade 1 ")))).toThrow(/already called/);
   });
 
-  it("applies an edit only over the value it was made on, and undoes it", () => {
+  it("applies an edit over what is saved now, says when that was another window's value, and undoes only its own", () => {
     const before = plan(row("a", "Grade 1"));
     const change = edit("a", "host", "10.0.0.6", "10.0.0.5");
     const after = applyMutation(before, change);
     expect(after.monitors[0]!.values.host).toBe("10.0.0.6");
-    expect(() => applyMutation(after, change)).toThrow(/changed before/);
-    expect(applyMutation(after, inverse(before, change))).toEqual(before);
+    // Saving the same value again changes nothing and is no clash.
+    const clashes: string[] = [];
+    expect(applyMutation(after, change, clashes)).toEqual(after);
+    expect(clashes).toEqual([]);
+    // Made over 10.0.0.5 while another window had saved 10.0.0.7: the typed value is kept, and the clash noted.
+    const elsewhere = applyMutation(before, edit("a", "host", "10.0.0.7", "10.0.0.5"));
+    expect(applyMutation(elsewhere, change, clashes).monitors[0]!.values.host).toBe("10.0.0.6");
+    expect(clashes).toEqual(["Grade 1's IP address"]);
+    // Undo puts back only this edit's value, and leaves another window's alone.
+    expect(applyMutation(after, { ...inverse(before, change), strict: true })).toEqual(before);
+    expect(() => applyMutation(elsewhere, { ...inverse(before, change), strict: true })).toThrow("Grade 1's IP address was changed in another window since, so it was left as it is.");
   });
 
   it("adds, moves and removes monitors as single undoable steps", () => {

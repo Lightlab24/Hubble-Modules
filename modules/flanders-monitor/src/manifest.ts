@@ -26,6 +26,8 @@ export default defineModuleManifest({
       "module-fields-v2",
       "module-matrix-v1",
       "module-feedback-observers-v1",
+      // The page can be open in several HubDash windows at once.
+      "module-page-windows-v1",
     ],
   },
   configVersion: 1,
@@ -50,6 +52,11 @@ export default defineModuleManifest({
           label: "Flanders monitors",
           entry: "ui/index.html",
           height: 560,
+          // Live in every window at once: each copy follows the others, and none is refused for
+          // being behind or undoes another's work (merge.ts, test/windows.test.ts). The page is one
+          // grid with nothing to split, so it lists no parts: the sidebar keeps its single
+          // Open in its own window item, which opens the whole page.
+          windows: true,
           commands: [
             { id: "snapshot", label: "Read the monitor list" },
             { id: "save", label: "Save the monitor list" },

@@ -10,19 +10,9 @@ import {
   type SpreadsheetEdit,
 } from "@hubble/module-sdk/spreadsheet-controls";
 import type { Statuses } from "./backend.js";
+import { cellEdits, resizeChange } from "./changes.js";
 import type { DraftStore } from "./draft-store.js";
-import {
-  clearedValue,
-  clone,
-  columns,
-  idleStatus,
-  moveRows,
-  valueOf,
-  whenInUseChoices,
-  type CellEdit,
-  type MonitorRow,
-  type View,
-} from "./model.js";
+import { columns, idleStatus, moveRows, valueOf, whenInUseChoices, type CellEdit, type MonitorRow } from "./model.js";
 
 export interface GridOptions {
   readonly table: HTMLTableElement;
@@ -64,10 +54,16 @@ export async function createMonitorGrid(options: GridOptions) {
   let editor: { address: SpreadsheetAddress; cell: HTMLTableCellElement } | undefined;
   let disposed = false;
   let zoom = 1;
+  /** The monitors drawn, in order. The shared controls are told only of these, so they always match the cells on screen. */
+  let drawn: string[] = store.document.monitors.map((row) => row.id);
+  /** A save arrived while a cell was being typed in, so the rows wait until it is finished. */
+  let deferred: ReturnType<typeof setTimeout> | undefined;
 
   const view = () => store.document.view;
   const widthOf = (columnId: string) => view().widths[columnId] ?? columns.find((column) => column.id === columnId)!.width;
   const rowOf = (id: string) => store.document.monitors.find((row) => row.id === id);
+  /** The monitors on screen that are still on the list. */
+  const drawnRows = () => drawn.map(rowOf).filter((row): row is MonitorRow => !!row && rows.has(row.id));
 
   function statusOf(row: MonitorRow) {
     const status = options.statuses()[row.id];
@@ -94,22 +90,14 @@ export async function createMonitorGrid(options: GridOptions) {
   }
 
   function submit(edits: readonly SpreadsheetEdit[], expected?: string): boolean {
-    const changes: CellEdit[] = edits.flatMap((edit) => {
-      const row = rowOf(edit.rowId);
-      const cell = cellValue(edit);
-      if (!row || !cell || cell.readOnly) return [];
-      const value = edit.value === "" ? clearedValue(edit.columnId) : edit.value;
-      return [{ rowId: edit.rowId, columnId: edit.columnId, value, expected: expected ?? valueOf(row, edit.columnId) }];
-    });
+    // Another window can take a monitor off while its cell is being typed in here.
+    if (edits.some((edit) => !rowOf(edit.rowId))) options.onError("That monitor is no longer on the list, so what you typed wasn't kept.");
+    const changes: CellEdit[] = cellEdits(store.document, edits, expected);
     // Putting back the saved value is no change to save, but it does settle a red draft in that cell.
     for (const change of changes)
       if (change.value === change.expected && store.invalid.has(key(change))) store.discard(change.rowId, change.columnId);
     const real = changes.filter((change) => change.value !== change.expected);
     return real.length ? store.submit({ kind: "edit", edits: real }) : true;
-  }
-
-  function layout(next: View) {
-    store.submit({ kind: "view", view: next, expected: clone(view()) });
   }
 
   // Header: the row-number corner, then one header per column.
@@ -145,7 +133,7 @@ export async function createMonitorGrid(options: GridOptions) {
     viewport,
     extendedEditing: true,
     workbookEditing: true,
-    getRows: () => store.document.monitors.map((row) => row.id),
+    getRows: () => drawn,
     getColumns: () => columns.map((column) => ({ id: column.id, label: column.label, fill: column.fill })),
     getCell: cellValue,
     onEdit: (batch) => {
@@ -172,7 +160,7 @@ export async function createMonitorGrid(options: GridOptions) {
     const rowId = target?.dataset.rowId;
     if (!rowId) return;
     event.preventDefault();
-    const index = store.document.monitors.findIndex((row) => row.id === rowId);
+    const index = drawn.indexOf(rowId);
     const columnId = target.dataset.columnId;
     menu.open({
       x: event.clientX,
@@ -186,7 +174,7 @@ export async function createMonitorGrid(options: GridOptions) {
           ? [{ id: "discard", label: "Discard invalid draft", run: () => store.discard(rowId, columnId) }]
           : []),
         { id: "above", label: "Add monitor above", icon: "add", run: () => options.onInsert(rowId) },
-        { id: "below", label: "Add monitor below", icon: "add", run: () => options.onInsert(store.document.monitors[index + 1]?.id ?? null) },
+        { id: "below", label: "Add monitor below", icon: "add", run: () => options.onInsert(drawn[index + 1] ?? null) },
         { separator: true },
         { id: "remove", label: "Remove monitor", icon: "delete", danger: true, run: () => options.onRemove(rowId) },
       ],
@@ -208,7 +196,7 @@ export async function createMonitorGrid(options: GridOptions) {
         max: 800,
       })),
       // Only rows already drawn: the controls ask while mounting, before the first render.
-      ...store.document.monitors.filter((row) => rows.has(row.id)).map((row) => ({
+      ...drawnRows().map((row) => ({
         id: row.id,
         label: valueOf(row, "name"),
         axis: "row" as const,
@@ -218,19 +206,14 @@ export async function createMonitorGrid(options: GridOptions) {
         max: 200,
       })),
     ],
-    onResize(item, size) {
-      const next = clone(view());
-      if (item.axis === "column") next.widths[item.id] = Math.round(size);
-      else next.rowHeights[item.id] = Math.round(size);
-      layout(next);
-    },
+    onResize: (item, size) => store.submit(resizeChange(store.document, item.axis, item.id, size)),
   });
   disposables.push(resize);
 
   const reorder = await mountSpreadsheetReorder({
     root: table,
     getItems: () =>
-      store.document.monitors.filter((row) => rows.has(row.id)).map((row) => ({
+      drawnRows().map((row) => ({
         id: row.id,
         label: valueOf(row, "name"),
         axis: "row" as const,
@@ -335,8 +318,66 @@ export async function createMonitorGrid(options: GridOptions) {
     rows.set(row.id, tr);
   }
 
+  /** One cell's value, as saved or as a typed draft in red. Never the cell being typed in. */
+  function paint(row: MonitorRow, column: (typeof columns)[number], cell: HTMLTableCellElement) {
+    if (cell === editor?.cell) return;
+    const address = { rowId: row.id, columnId: column.id };
+    const value = cellValue(address)!;
+    const invalid = store.invalid.get(key(address));
+    cell.setAttribute("aria-readonly", String(!!value.readOnly));
+    if (invalid) cell.setAttribute("aria-invalid", "true");
+    else cell.removeAttribute("aria-invalid");
+    cell.title = invalid?.message ?? "";
+    cell.setAttribute("aria-label", `${column.label}${invalid ? `: ${invalid.message}` : ""}`);
+    if (column.id === "status") {
+      const tone = statusOf(row)?.tone;
+      if (tone) cell.dataset.tone = tone;
+      else delete cell.dataset.tone;
+    }
+    if (value.kind === "boolean" && !invalid) {
+      delete cell.dataset.empty;
+      if (!cell.firstElementChild?.hasAttribute("data-hubble-boolean")) {
+        const slot = document.createElement("span");
+        slot.setAttribute("data-hubble-boolean", "");
+        cell.replaceChildren(slot);
+      }
+      return;
+    }
+    cell.textContent =
+      invalid?.edit.value ?? (column.id === "whenInUse" ? whenInUseChoices.find((choice) => choice.value === value.value)?.label : undefined) ?? value.value;
+    if (!cell.textContent && !value.readOnly) cell.dataset.empty = "true";
+    else delete cell.dataset.empty;
+  }
+
+  /**
+   * Whether a cell is being typed in: the page's own editor, or Hubble's choice list on a cell.
+   * Rows stay as they are until it is finished, so that cell never moves or clears.
+   */
+  const typing = () => !!editor || !!(document.activeElement as Element | null)?.closest?.("[data-hubble-cell-editor]");
+
   function render() {
     if (disposed) return;
+    if (typing()) {
+      // While a cell is being typed in, other windows' saves change only the text of the other cells.
+      for (const row of drawnRows())
+        for (const column of columns) {
+          const cell = cells.get(`${row.id}/${column.id}`);
+          if (cell) paint(row, column, cell);
+        }
+      controls.refresh();
+      // Draw the rest once the typing is finished, however it ends.
+      deferred ??= setTimeout(function check() {
+        deferred = undefined;
+        if (disposed) return;
+        if (typing()) deferred = setTimeout(check, 200);
+        else render();
+      }, 200);
+      return;
+    }
+    if (deferred) {
+      clearTimeout(deferred);
+      deferred = undefined;
+    }
     table.style.setProperty("--grid-text-size", `${view().textSize ?? 13}px`);
     const ids = new Set(store.document.monitors.map((row) => row.id));
     for (const [id, tr] of rows)
@@ -364,36 +405,11 @@ export async function createMonitorGrid(options: GridOptions) {
       for (const column of columns) {
         const cell = cells.get(`${row.id}/${column.id}`)!;
         if (column.id === "name") cell.style.left = `${GUTTER}px`;
-        if (cell === editor?.cell) continue;
-        const address = { rowId: row.id, columnId: column.id };
-        const value = cellValue(address)!;
-        const invalid = store.invalid.get(key(address));
-        cell.setAttribute("aria-readonly", String(!!value.readOnly));
-        if (invalid) cell.setAttribute("aria-invalid", "true");
-        else cell.removeAttribute("aria-invalid");
-        cell.title = invalid?.message ?? "";
-        cell.setAttribute("aria-label", `${column.label}${invalid ? `: ${invalid.message}` : ""}`);
-        if (column.id === "status") {
-          const tone = statusOf(row)?.tone;
-          if (tone) cell.dataset.tone = tone;
-          else delete cell.dataset.tone;
-        }
-        if (value.kind === "boolean" && !invalid) {
-          delete cell.dataset.empty;
-          if (!cell.firstElementChild?.hasAttribute("data-hubble-boolean")) {
-            const slot = document.createElement("span");
-            slot.setAttribute("data-hubble-boolean", "");
-            cell.replaceChildren(slot);
-          }
-          continue;
-        }
-        cell.textContent =
-          invalid?.edit.value ?? (column.id === "whenInUse" ? whenInUseChoices.find((choice) => choice.value === value.value)?.label : undefined) ?? value.value;
-        if (!cell.textContent && !value.readOnly) cell.dataset.empty = "true";
-        else delete cell.dataset.empty;
+        paint(row, column, cell);
       }
     }
     while (body.children.length > store.document.monitors.length) body.lastElementChild!.remove();
+    drawn = store.document.monitors.map((row) => row.id);
     controls.refresh();
     resize.refresh();
     reorder.refresh();
@@ -406,6 +422,7 @@ export async function createMonitorGrid(options: GridOptions) {
     select: (address: SpreadsheetAddress) => controls.select(address),
     dispose() {
       disposed = true;
+      clearTimeout(deferred);
       unsubscribe();
       for (const control of disposables.reverse()) control.dispose();
     },

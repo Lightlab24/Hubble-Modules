@@ -139,12 +139,15 @@ function backend(monitors: MonitorDocument["monitors"], options: BackendOptions 
 
 describe("Flanders module", () => {
   it("declares one workspace module with a full Flanders page, its monitor document and a Monitor + Key column", () => {
-    const parsed = ModuleManifestSchema.parse({ ...source, id: "flanders-monitor", name: "Flanders", version: "0.2.1", entry: "module.mjs", files: ["module.mjs", "ui/index.html", "ui/monitor.svg"] });
+    const parsed = ModuleManifestSchema.parse({ ...source, id: "flanders-monitor", name: "Flanders", version: "0.3.0", entry: "module.mjs", files: ["module.mjs", "ui/index.html", "ui/monitor.svg"] });
     expect(parsed.instanceScope).toBe("workspace");
     expect(parsed.documents?.map((document) => document.id)).toEqual([DOCUMENT_ID]);
-    expect(parsed.pages?.[0]).toMatchObject({ id: "flanders", label: "Flanders", layout: "full-page", sections: [{ type: "custom", id: "frontend" }] });
+    // Live in several HubDash windows at once, which only a Hubble with module windows accepts.
+    expect(parsed.pages?.[0]).toMatchObject({ id: "flanders", label: "Flanders", layout: "full-page", sections: [{ type: "custom", id: "frontend", windows: true }] });
+    // One grid, nothing to split: no parts, so the sidebar's Open in its own window stays one item.
+    expect(parsed.pages?.[0]?.sections[0]).not.toHaveProperty("parts");
     expect(parsed.host).toMatchObject({
-      requiredFeatures: expect.arrayContaining(["module-spreadsheet-controls-v1", "module-documents-v1", "module-workspace-instances-v1"]),
+      requiredFeatures: expect.arrayContaining(["module-spreadsheet-controls-v1", "module-documents-v1", "module-workspace-instances-v1", "module-page-windows-v1"]),
     });
     expect(matrix.fields.map((field) => [field.id, field.type, field.fill])).toEqual([
       ["enabled", "boolean", "copy"],

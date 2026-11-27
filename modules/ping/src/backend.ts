@@ -11,7 +11,8 @@ import {
 import { DEVICE_FIELD, DEVICE_PROVIDER, FEEDBACK, MATRIX_ACTION, PAGE_ID } from "./actions.js";
 import { Pinger, type PingerOptions, type PingSample } from "./engine.js";
 import { HISTORY_SPAN_MS, type Series } from "./history.js";
-import { applyMutation, DOCUMENT_ID, rulesOf, sameName, spanOf, validateDocument, valueOf, type DeviceRow, type Mutation, type PingDocument } from "./model.js";
+import { applyMutation, DOCUMENT_ID, rulesOf, same, sameName, spanOf, validateDocument, valueOf, type DeviceRow, type Mutation, type PingDocument } from "./model.js";
+import { windowParts } from "./sheet-window.js";
 import { DeviceWatch, type Alert, type DeviceState, type DeviceSummary } from "./watch.js";
 
 /** Hubble's channel for telling the operator something outside its window. */
@@ -31,6 +32,8 @@ export interface LiveRequest {
 }
 export interface LiveReply {
   sequence: number;
+  /** The device list's revision, so every open copy of the page hears of a save at once. */
+  revision?: string | null;
   now: number;
   /** Why nothing is being pinged, or "" while pings run. */
   problem: string;
@@ -82,7 +85,9 @@ export function createBackend(context: ModuleContext, options: BackendOptions = 
       phase: "ready",
       message: null,
       observedAt: new Date(now()).toISOString(),
-      values: { revision, ...counts() },
+      // The sheets, for the sidebar's Open in its own window › (manifest: parts). Sent with every
+      // state, so a sheet added, renamed, moved or removed in any window shows there at once.
+      values: { revision, ...counts(), ...(plan ? { windowParts: windowParts(plan) } : {}) },
     });
   }
 
@@ -190,20 +195,45 @@ export function createBackend(context: ModuleContext, options: BackendOptions = 
     return { document: plan!, revision, sequence };
   }
 
-  async function save(operation: Mutation, signal: AbortSignal) {
-    for (let attempt = 0; attempt < 3; attempt++) {
+  /**
+   * Puts one change from a copy of the page onto the list as saved now, so a copy that hasn't
+   * heard of another window's change yet keeps it rather than being refused (see merge.ts).
+   * Saves go one at a time, so copies in several windows never collide with each other here;
+   * a collision with Hubble itself (an Undo, an import) is read again and retried.
+   */
+  async function store(operation: Mutation, signal: AbortSignal) {
+    for (let attempt = 0; attempt < 4; attempt++) {
       const saved = await documents.read(DOCUMENT_ID, signal);
-      const next = applyMutation(validateDocument(saved.value), operation);
+      const current = validateDocument(saved.value);
+      const clashes: string[] = [];
+      const next = applyMutation(current, operation, clashes);
+      // A change to what is saved already, such as one another window made first, writes nothing.
+      if (same(next, current)) {
+        if (saved.revision !== revision || !plan) {
+          revision = saved.revision;
+          adopt(current);
+        }
+        return { document: current, revision: saved.revision, sequence, clashes };
+      }
       try {
         const result = await documents.write(saved, ModuleDocumentValueSchema.parse(next), signal);
         revision = result.revision;
         adopt(next);
-        return { document: next, revision, sequence };
+        return { document: next, revision, sequence, clashes };
       } catch (error) {
-        if (!(error instanceof ModuleDocumentConflictError) || attempt === 2) throw error;
+        if (!(error instanceof ModuleDocumentConflictError) || attempt === 3) throw error;
       }
     }
     throw Error("The device list changed before saving.");
+  }
+  let saving: Promise<unknown> = Promise.resolve();
+  function save(operation: Mutation, signal: AbortSignal) {
+    const run = saving.then(() => {
+      signal.throwIfAborted();
+      return store(operation, signal);
+    });
+    saving = run.catch(() => undefined);
+    return run;
   }
 
   async function live(request: LiveRequest, signal: AbortSignal): Promise<LiveReply> {
@@ -239,7 +269,7 @@ export function createBackend(context: ModuleContext, options: BackendOptions = 
       const points = Math.min(1200, Math.max(10, Math.round(Number(wanted.points) || 600)));
       if (to > from) timeline = { deviceId: wanted.deviceId, ...watch.history.series(from, to, points, at, plan?.settings.intervalMs ?? 1000) };
     }
-    return { sequence, now: at, problem: active() ? pinger.problem : "", devices, timeline };
+    return { sequence, revision, now: at, problem: active() ? pinger.problem : "", devices, timeline };
   }
 
   return {

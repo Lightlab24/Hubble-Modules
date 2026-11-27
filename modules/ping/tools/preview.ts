@@ -1,6 +1,9 @@
 // Runs the built Ping page against the real backend and real pings, outside Hubble.
 // The page sits in the same kind of sandboxed frame Hubble gives it, and the shared
 // control files are read, unchanged, from an installed Hubble (PING_RENDERER_ASSETS).
+// PREVIEW_COPIES=2 shows that many copies of the page side by side, as in several HubDash
+// windows: each its own frame and channel, all on the one worker. Like Hubble, the preview
+// hands every copy the worker's state when it changes (checked every PREVIEW_STATE_MS, 50).
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -18,7 +21,8 @@ const seeded = (process.env.PING_PREVIEW_DEVICES || "This Mac=127.0.0.1,Nobody=1
   return device(`seed-${index + 1}`, name!.trim(), (host ?? "").trim(), index === 0 ? { over: "20" } : {});
 });
 
-let saved = { id: DOCUMENT_ID, version: 1, revision: "rev-1", value: { ...defaultDocument(), devices: process.env.PING_PREVIEW_EMPTY ? [] : seeded } as PingDocument };
+const seededDocument = () => ({ ...defaultDocument(), devices: process.env.PING_PREVIEW_EMPTY ? [] : structuredClone(seeded) }) as PingDocument;
+let saved = { id: DOCUMENT_ID, version: 1, revision: "rev-1", value: seededDocument() };
 let writes = 1;
 let holdSaves: Promise<void> | undefined;
 let releaseSaves: (() => void) | undefined;
@@ -113,13 +117,19 @@ await instance.start!();
 const manifest = JSON.parse(await readFile(path.resolve("dist/hubble-module.json"), "utf8"));
 const declared = new Set<string>(manifest.pages[0].sections[0].commands.map((command: { id: string }) => command.id));
 const pagePath = "/api/module-pages/" + "a".repeat(43);
-const html = `<!doctype html><html lang="en"><meta charset="utf-8"><title>Ping preview</title><style>html,body{margin:0;height:100%;overflow:hidden;background:#141414}iframe{display:block;width:100%;height:100dvh;border:0}</style><iframe title="Ping" sandbox="allow-scripts" src="${pagePath}/ui/index.html"></iframe><script>
-let port; window.addEventListener('message', event => {
-  const frame=document.querySelector('iframe');if(event.source!==frame.contentWindow||event.data?.type!=='hubble.module.frontend.ready.v1')return;
-  port?.close();const channel=new MessageChannel();port=channel.port1;
+const copies = Math.max(1, Math.min(4, Number(process.env.PREVIEW_COPIES || 1)));
+const stateMs = Math.max(20, Number(process.env.PREVIEW_STATE_MS || 50));
+const frames = Array.from({ length: copies }, (_, index) => `<iframe title="Ping ${index + 1}" sandbox="allow-scripts" src="${pagePath}/ui/index.html"></iframe>`).join("");
+const html = `<!doctype html><html lang="en"><meta charset="utf-8"><title>Ping preview</title><style>html,body{margin:0;height:100%;overflow:hidden;background:#141414}body{display:flex;gap:4px}iframe{display:block;flex:1;min-width:0;height:100dvh;border:0}</style>${frames}<script>
+const ports=new Map();
+window.addEventListener('message', event => {
+  const frame=[...document.querySelectorAll('iframe')].find(item=>item.contentWindow===event.source);if(!frame||event.data?.type!=='hubble.module.frontend.ready.v1')return;
+  ports.get(frame)?.close();const channel=new MessageChannel();const port=channel.port1;ports.set(frame,port);
   port.onmessage=async event=>{const message=event.data;try{const response=await fetch('/__rpc',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(message)});const value=await response.json();port.postMessage(value.error?{type:'error',id:message.id,message:value.error}:{type:'result',id:message.id,value:value.result});}catch{port.postMessage({type:'error',id:message.id,message:'Preview bridge disconnected'});}};
   port.start();frame.contentWindow.postMessage({type:'hubble.module.frontend.connect.v1',id:event.data.id},'*',[channel.port2]);
 });
+// Like Hubble: every open copy is handed the worker's state whenever it changes.
+let shown='';setInterval(async()=>{try{const text=await (await fetch('/__state')).text();if(text===shown)return;shown=text;const value=JSON.parse(text);for(const port of ports.values())port.postMessage({type:'state',value});}catch{}},${stateMs});
 </script></html>`;
 const types: Record<string, string> = { ".js": "text/javascript", ".css": "text/css", ".html": "text/html", ".svg": "image/svg+xml" };
 const server = createServer(async (request, response) => {
@@ -145,6 +155,11 @@ const server = createServer(async (request, response) => {
           holdSaves = releaseSaves = undefined;
         }
         if (input.failNextSave) failNextSave = true;
+        // Puts the seeded list back, as a new save, so a check can start again without restarting the preview.
+        if (input.reset) {
+          saved = { ...saved, revision: `rev-${++writes}`, value: seededDocument() };
+          for (const wake of [...watchers]) wake();
+        }
         return send({ updated: true });
       }
       if (url.pathname !== "/__rpc") return send({ error: "Unknown preview route" }, 404);
@@ -163,7 +178,8 @@ const server = createServer(async (request, response) => {
       response.writeHead(200, { "Content-Type": "text/html" });
       return void response.end(html);
     }
-    if (url.pathname === "/__inspect") return send({ document: saved.value, revision: saved.revision, logs, alerts, feedback: feedback.slice(-20), state });
+    if (url.pathname === "/__inspect") return send({ document: saved.value, revision: saved.revision, writes, logs, alerts, feedback: feedback.slice(-20), state });
+    if (url.pathname === "/__state") return send(state);
     if (url.pathname.startsWith("/api/module-controls/")) {
       const name = path.basename(url.pathname);
       const served = /^(spreadsheet|controls|slider|workbook-tools)-v1\.js$|^theme-v1\.css$/u.test(name) ? `module-${name}` : name;

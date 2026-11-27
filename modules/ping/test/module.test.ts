@@ -104,9 +104,14 @@ function backend(devices: DeviceRow[], options: BackendOptions & { connectionEna
 
 describe("the manifest", () => {
   it("is a valid workspace module with one full page", () => {
-    const manifest = ModuleManifestSchema.parse({ ...source, id: "network-ping", name: "Ping", version: "0.1.8", entry: "module.mjs", files: ["module.mjs", "ui/index.html", "ui/app.js", "ui/ping.svg"] });
+    const manifest = ModuleManifestSchema.parse({ ...source, id: "network-ping", name: "Ping", version: "0.2.0", entry: "module.mjs", files: ["module.mjs", "ui/index.html", "ui/app.js", "ui/ping.svg"] });
     expect(manifest.instanceScope).toBe("workspace");
     expect(manifest.pages?.[0]?.layout).toBe("full-page");
+    // Live in several HubDash windows at once, which only a Hubble with module windows accepts.
+    expect(manifest.pages?.[0]?.sections[0]).toMatchObject({ type: "custom", windows: true });
+    // Each sheet can open in a window of its own; the worker publishes the list (sheet-window.ts).
+    expect(manifest.pages?.[0]?.sections[0]).toMatchObject({ parts: { value: "windowParts" } });
+    expect(manifest.host).toMatchObject({ requiredFeatures: expect.arrayContaining(["module-page-windows-v1"]) });
     expect(manifest.matrix?.triggers?.map((trigger) => trigger.id)).toEqual(["offline", "slow", "online"]);
   });
 });

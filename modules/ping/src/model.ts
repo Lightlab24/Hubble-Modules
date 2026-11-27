@@ -1,3 +1,5 @@
+import { mergeOrder, mergeRecord, mergeSet, mergeValue, quietly, same, leftAlone, type Merge } from "./merge.js";
+
 /**
  * The Ping page's saved data: one row per device, the ping time and size every
  * device shares, and the page's layout. It lives in the workspace's portable
@@ -158,29 +160,34 @@ export interface CellEdit {
   rowId: string;
   columnId: string;
   value: string;
-  /** The value the edit was made over, so a late save can't overwrite a newer one. */
+  /** The value the edit was made over: another window may have saved a different one since. */
   expected: string;
 }
-export type Mutation =
+/**
+ * A change, as the copy of the page that made it saw it: `expected` is what it read, the other
+ * half what it wants. The worker puts only the difference onto what is saved now (see merge.ts),
+ * so a copy that hasn't caught up with another window yet is never refused for that.
+ * `strict` marks an Undo or Redo, which is refused rather than undo another window's work.
+ */
+export type Mutation = (
   | { kind: "edit"; edits: CellEdit[] }
-  /** Adding, removing and reordering devices replace the list as one step. */
-  | { kind: "rows"; rows: DeviceRow[]; expected: DeviceRow[] }
+  /**
+   * Adding, removing, moving and counting devices, as one step. `count` is what the Devices box
+   * was set to: if another window added devices to the sheet meanwhile, fewer new ones are added.
+   */
+  | { kind: "rows"; rows: DeviceRow[]; expected: DeviceRow[]; count?: { sheetId: string; count: number }; moved?: string[] }
   | { kind: "settings"; settings: Settings; expected: Settings }
-  | { kind: "view"; view: View; expected: View }
+  /** `moved`: the column a move in the Columns list moved, so another window's moves stay as they are. */
+  | { kind: "view"; view: View; expected: View; moved?: string[] }
   /**
    * Adding, renaming, moving or removing sheets, as one step. Removing a sheet takes its devices
    * with it, and adding one opens it, so the device list and the open sheet can change too.
    */
-  | { kind: "sheets"; sheets: Sheet[]; expected: Sheet[]; rows?: DeviceRow[]; expectedRows?: DeviceRow[]; open?: string; expectedOpen?: string };
+  | { kind: "sheets"; sheets: Sheet[]; expected: Sheet[]; rows?: DeviceRow[]; expectedRows?: DeviceRow[]; open?: string; expectedOpen?: string; moved?: string[] }
+) & { strict?: boolean };
 
 export const clone = <T>(value: T): T => structuredClone(value);
-const sorted = (value: unknown): unknown =>
-  Array.isArray(value)
-    ? value.map(sorted)
-    : value && typeof value === "object"
-      ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([key, item]) => [key, sorted(item)]))
-      : value;
-export const same = (a: unknown, b: unknown) => JSON.stringify(sorted(a)) === JSON.stringify(sorted(b));
+export { same };
 export const valueOf = (row: DeviceRow, columnId: string) => row.values[columnId] ?? "";
 export const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
@@ -357,39 +364,174 @@ export function validateDocument(value: unknown): PingDocument {
   return doc;
 }
 
-export function applyMutation(document: PingDocument, operation: Mutation): PingDocument {
+/** The settings as the toolbars name them, for a note that another window changed one too. */
+const SETTING_NAMES: Record<string, string> = {
+  intervalMs: "Ping every",
+  sizeBytes: "Size",
+  pinging: "Pinging",
+  alertOverMs: "Answer over",
+  alertLostMs: "No answer for",
+  notify: "Notifications",
+};
+const deviceName = (row: DeviceRow) => valueOf(row, "name").trim() || "A device";
+const cellName = (row: DeviceRow, columnId: string) => `${deviceName(row)}'s ${columnOf(columnId)?.label ?? columnId}`;
+
+/** Each device's sheet written down, so that a change to which sheet comes first never moves a device. */
+function pinned(rows: readonly DeviceRow[], sheets: readonly Sheet[]): DeviceRow[] {
+  const doc = { sheets } as PingDocument;
+  return rows.map((row) => {
+    const sheetId = sheetOf(doc, row);
+    return row.sheetId === sheetId ? row : { ...row, sheetId };
+  });
+}
+
+/** The device list with this copy's additions, removals, moves and values put onto the one saved now. */
+function mergeRows(base: readonly DeviceRow[], mine: readonly DeviceRow[], theirs: readonly DeviceRow[], merge: Merge, moved?: readonly string[]): DeviceRow[] {
+  const was = new Map(base.map((row) => [row.id, row]));
+  const wanted = new Map(mine.map((row) => [row.id, row]));
+  const now = new Map(theirs.map((row) => [row.id, row]));
+  // An Undo takes out only a device as this copy left it, never one another window has changed since.
+  if (merge.strict)
+    for (const [id, row] of was) {
+      const current = now.get(id);
+      if (!wanted.has(id) && current && !same(current, row)) throw leftAlone(deviceName(current));
+    }
+  return mergeOrder([...was.keys()], [...wanted.keys()], [...now.keys()], moved).map((id) => {
+    const current = now.get(id);
+    const before = was.get(id);
+    const after = wanted.get(id);
+    if (!current) return clone(after!);
+    if (!before || !after) return current;
+    const values = mergeRecord((columnId) => cellName(current, columnId), before.values, after.values, current.values, merge);
+    const sheetId = mergeValue(`${deviceName(current)}'s sheet`, before.sheetId, after.sheetId, current.sheetId, merge);
+    const { sheetId: _was, ...rest } = current;
+    return { ...rest, values, ...(sheetId === undefined ? {} : { sheetId }) };
+  });
+}
+
+/**
+ * A device the page named "Device N" by itself takes the next free number if another window's
+ * device has that name by now. A name someone gave it is never changed.
+ */
+function freeNames(next: PingDocument, added: ReadonlySet<string>) {
+  next.devices.forEach((row, index) => {
+    const name = valueOf(row, "name").trim();
+    if (!added.has(row.id) || !/^Device \d+$/u.test(name)) return;
+    const taken = (candidate: string) => next.devices.some((other) => other.id !== row.id && sameName(valueOf(other, "name"), candidate));
+    if (!taken(name)) return;
+    let number = next.devices.length;
+    while (taken(`Device ${number}`)) number++;
+    next.devices[index] = { ...row, values: { ...row.values, name: `Device ${number}` } };
+  });
+}
+
+/** The page's layout: the newest change to each part wins, so a layout change is never refused. */
+function mergeView(base: View, mine: View, theirs: View, moved?: readonly string[]): View {
+  const merge = quietly();
+  const out: View = {
+    ...theirs,
+    widths: mergeRecord(() => "", base.widths ?? {}, mine.widths ?? {}, theirs.widths ?? {}, merge),
+    rowHeights: mergeRecord(() => "", base.rowHeights ?? {}, mine.rowHeights ?? {}, theirs.rowHeights ?? {}, merge),
+    hidden: mergeSet(base.hidden, mine.hidden, theirs.hidden),
+    order: mergeOrder(base.order, mine.order, theirs.order, moved),
+    span: mergeValue("", base.span, mine.span, theirs.span, merge),
+  };
+  for (const key of ["textSize", "scaleMs", "sheetId"] as const) {
+    const value = mergeValue<number | string | undefined>("", base[key], mine[key], theirs[key], merge);
+    if (value === undefined) delete out[key];
+    else (out as unknown as Record<string, unknown>)[key] = value;
+  }
+  // Two windows setting different colours' times keep both, unless together they would overlap.
+  let bands = mergeValue("", base.bands, mine.bands, theirs.bands, merge);
+  if (base.bands && mine.bands && theirs.bands) {
+    const each = mergeRecord(() => "", base.bands, mine.bands, theirs.bands, merge) as unknown as Bands;
+    try {
+      validateBands(each);
+      bands = each;
+    } catch {
+      bands = mine.bands;
+    }
+  }
+  if (bands === undefined) delete out.bands;
+  else out.bands = bands;
+  return out;
+}
+
+/**
+ * Puts a change onto the document as it is saved now. A change made from an older copy changes
+ * only what that copy changed (see merge.ts). `clashes` collects what another window had also
+ * changed, which this change's value now replaces.
+ */
+export function applyMutation(document: PingDocument, operation: Mutation, clashes: string[] = []): PingDocument {
   const next = clone(document);
+  const merge: Merge = { strict: operation.strict === true, clashes };
   if (operation.kind === "edit") {
     for (const edit of operation.edits) {
       const row = next.devices.find((item) => item.id === edit.rowId);
       if (!row) throw Error("That device was removed before the change saved.");
-      if (valueOf(row, edit.columnId) !== edit.expected) throw Error("That cell changed before the edit saved.");
+      const now = valueOf(row, edit.columnId);
+      if (now !== edit.expected && now !== edit.value) {
+        if (merge.strict) throw leftAlone(cellName(row, edit.columnId));
+        clashes.push(cellName(row, edit.columnId));
+      }
       const problem = validateValue(edit.columnId, edit.value);
       if (problem) throw Error(problem);
       row.values[edit.columnId] = edit.value;
     }
   } else if (operation.kind === "rows") {
-    if (!same(next.devices, operation.expected)) throw Error("The device list changed before this change saved.");
-    next.devices = clone(operation.rows);
-  } else if (operation.kind === "settings") {
-    if (!same(next.settings, operation.expected)) throw Error("The ping settings changed before this change saved.");
-    next.settings = clone(operation.settings);
-  } else if (operation.kind === "sheets") {
-    if (!same(sheetsOf(next), operation.expected)) throw Error("The sheets changed before this change saved.");
-    if (operation.rows) {
-      if (!same(next.devices, operation.expectedRows)) throw Error("The device list changed before this change saved.");
-      next.devices = clone(operation.rows);
-    } else {
-      // A device with no sheet of its own is on the first sheet. Write its sheet down before the
-      // sheets change, so that moving another sheet to the front never moves devices with it.
-      const before = next;
-      next.devices = next.devices.map((row) => (row.sheetId === sheetOf(before, row) ? row : { ...row, sheetId: sheetOf(before, row) }));
+    const had = new Set(next.devices.map((row) => row.id));
+    next.devices = mergeRows(operation.expected, operation.rows, next.devices, merge, operation.moved);
+    const added = new Set(next.devices.filter((row) => !had.has(row.id)).map((row) => row.id));
+    freeNames(next, added);
+    if (operation.count) {
+      // The Devices box asked for this many on the sheet: devices another window added meanwhile
+      // count, so fewer new ones go in. Nothing already there is taken off for it.
+      const { sheetId, count } = operation.count;
+      while (sheetRows(next, sheetId).length > count) {
+        const extra = sheetRows(next, sheetId).filter((row) => added.has(row.id)).at(-1);
+        if (!extra) break;
+        next.devices = next.devices.filter((row) => row.id !== extra.id);
+      }
     }
-    next.sheets = clone(operation.sheets);
-    if (operation.open !== undefined) next.view = { ...next.view, sheetId: operation.open };
+  } else if (operation.kind === "settings") {
+    const merged = mergeRecord((key) => SETTING_NAMES[key] ?? key, { ...operation.expected }, { ...operation.settings }, { ...next.settings }, merge);
+    next.settings = merged as unknown as Settings;
+  } else if (operation.kind === "sheets") {
+    // A device with no sheet of its own is on the first sheet. Write its sheet down before the
+    // sheets change, so that moving another sheet to the front never moves devices with it.
+    next.devices = pinned(next.devices, sheetsOf(next));
+    if (operation.rows) {
+      const had = new Set(next.devices.map((row) => row.id));
+      next.devices = mergeRows(pinned(operation.expectedRows ?? [], operation.expected), pinned(operation.rows, operation.sheets), next.devices, merge);
+      freeNames(next, new Set(next.devices.filter((row) => !had.has(row.id)).map((row) => row.id)));
+    }
+    const was = new Map(operation.expected.map((sheet) => [sheet.id, sheet]));
+    const wanted = new Map(operation.sheets.map((sheet) => [sheet.id, sheet]));
+    const now = new Map(sheetsOf(next).map((sheet) => [sheet.id, sheet]));
+    const sheets = mergeOrder([...was.keys()], [...wanted.keys()], [...now.keys()], operation.moved).map((id) => {
+      const current = now.get(id);
+      const before = was.get(id);
+      const after = wanted.get(id);
+      if (!current) return clone(after!);
+      if (!before || !after) return current;
+      return { ...current, name: mergeValue(`The ${current.name} sheet's name`, before.name, after.name, current.name, merge) };
+    });
+    // A sheet named "Sheet N" for this copy takes the next free number if another window has one by now.
+    sheets.forEach((sheet, index) => {
+      const taken = (name: string) => sheets.some((other) => other.id !== sheet.id && sameName(other.name, name));
+      if (now.has(sheet.id) || !/^Sheet \d+$/u.test(sheet.name.trim()) || !taken(sheet.name)) return;
+      let number = 1;
+      while (taken(`Sheet ${number}`)) number++;
+      sheets[index] = { ...sheet, name: `Sheet ${number}` };
+    });
+    next.sheets = sheets;
+    if (operation.open !== undefined && operation.open !== operation.expectedOpen) {
+      // Opening the sheet next to one this copy removed matters only where that one was open.
+      const leaving = operation.expectedOpen !== undefined && !wanted.has(operation.expectedOpen);
+      if (!leaving || !sheets.some((sheet) => sheet.id === next.view.sheetId)) next.view = { ...next.view, sheetId: operation.open };
+    }
   } else {
-    if (!same(next.view, operation.expected)) throw Error("The layout changed before this change saved.");
-    next.view = clone(operation.view);
+    next.view = mergeView(operation.expected, operation.view, next.view, operation.moved);
   }
   return validateDocument(next);
 }
@@ -403,7 +545,8 @@ export function inverse(before: PingDocument, operation: Mutation): Mutation {
         return { rowId: edit.rowId, columnId: edit.columnId, value: valueOf(row, edit.columnId), expected: edit.value };
       }),
     };
-  if (operation.kind === "rows") return { kind: "rows", rows: clone(operation.expected), expected: clone(operation.rows) };
+  const moved = operation.kind !== "settings" && operation.moved ? { moved: [...operation.moved] } : {};
+  if (operation.kind === "rows") return { kind: "rows", rows: clone(operation.expected), expected: clone(operation.rows), ...moved };
   if (operation.kind === "settings") return { kind: "settings", settings: clone(operation.expected), expected: clone(operation.settings) };
   if (operation.kind === "sheets")
     return {
@@ -412,8 +555,9 @@ export function inverse(before: PingDocument, operation: Mutation): Mutation {
       expected: clone(operation.sheets),
       ...(operation.rows ? { rows: clone(operation.expectedRows!), expectedRows: clone(operation.rows) } : {}),
       ...(operation.open !== undefined ? { open: before.view.sheetId ?? sheetsOf(before)[0]!.id, expectedOpen: operation.open } : {}),
+      ...moved,
     };
-  return { kind: "view", view: clone(operation.expected), expected: clone(operation.view) };
+  return { kind: "view", view: clone(operation.expected), expected: clone(operation.view), ...moved };
 }
 
 /** A new device, named after the first free "Device N". */
@@ -473,7 +617,7 @@ export function moveSheet(document: PingDocument, id: string, beforeId: string |
   const rest = sheets.filter((item) => item !== sheet);
   const index = beforeId ? rest.findIndex((item) => item.id === beforeId) : -1;
   rest.splice(index < 0 ? rest.length : index, 0, sheet);
-  return same(rest.map((item) => item.id), sheets.map((item) => item.id)) ? null : sheetsChange(document, rest);
+  return same(rest.map((item) => item.id), sheets.map((item) => item.id)) ? null : sheetsChange(document, rest, { moved: [id] });
 }
 /** Removes a sheet and its devices as one step; the last sheet stays. */
 export function removeSheet(document: PingDocument, id: string): (SheetsChange & { removed: DeviceRow[] }) | null {
@@ -508,22 +652,31 @@ export const deviceHasData = (row: DeviceRow): boolean =>
     id === "name" ? !/^Device \d+$/u.test(value.trim()) : id === "enabled" ? value !== "TRUE" : value !== "",
   );
 
-/** Sets how many devices the open sheet has: adds blank rows at its end, or takes its last rows off, as one undo step. */
-export function setDeviceCount(document: PingDocument, count: number, newId: () => string): (Extract<Mutation, { kind: "rows" }> & { removed: DeviceRow[] }) | null {
-  const mine = sheetRows(document);
+/**
+ * Sets how many devices a sheet has, the open one unless another is named: adds blank rows at its
+ * end, or takes its last rows off, as one undo step.
+ */
+export function setDeviceCount(
+  document: PingDocument,
+  count: number,
+  newId: () => string,
+  sheetId = openSheetId(document),
+): (Extract<Mutation, { kind: "rows" }> & { removed: DeviceRow[] }) | null {
+  const mine = sheetRows(document, sheetId);
   const others = document.devices.length - mine.length;
   const most = MAX_DEVICES - others;
   if (!Number.isInteger(count) || count < 0 || count > most)
     throw Error(others ? `Use from 0 to ${most} devices on this sheet (${MAX_DEVICES} in all).` : `Use from 0 to ${MAX_DEVICES} devices.`);
   const have = mine.length;
   if (count === have) return null;
+  const asked = { sheetId, count };
   if (count < have) {
     const removed = mine.slice(count);
-    return { kind: "rows", rows: clone(document.devices.filter((row) => !removed.includes(row))), expected: clone(document.devices), removed: clone(removed) };
+    return { kind: "rows", rows: clone(document.devices.filter((row) => !removed.includes(row))), expected: clone(document.devices), count: asked, removed: clone(removed) };
   }
   const next = clone(document);
-  for (let index = have; index < count; index++) next.devices.push(newDevice(next, newId()));
-  return { kind: "rows", rows: next.devices, expected: clone(document.devices), removed: [] };
+  for (let index = have; index < count; index++) next.devices.push(newDevice(next, newId(), sheetId));
+  return { kind: "rows", rows: next.devices, expected: clone(document.devices), count: asked, removed: [] };
 }
 
 export function insertRows(document: PingDocument, rows: DeviceRow[], beforeId: string | null): Mutation {
@@ -544,7 +697,7 @@ export function moveRows(document: PingDocument, ids: readonly string[], beforeI
   rest.splice(index < 0 ? rest.length : index, 0, ...moving);
   return same(rest.map((row) => row.id), document.devices.map((row) => row.id))
     ? null
-    : { kind: "rows", rows: clone(rest), expected: clone(document.devices) };
+    : { kind: "rows", rows: clone(rest), expected: clone(document.devices), moved: moving.map((row) => row.id) };
 }
 
 /** Bytes a second Ping puts on the network: each ping is its data plus 28 bytes of ICMP and IP headers. */

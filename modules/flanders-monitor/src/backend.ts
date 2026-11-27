@@ -11,7 +11,7 @@ import {
 } from "@hubble/module-sdk";
 import { FEEDBACK, KEY_FIELD, MATRIX_ACTION, MONITOR_FIELD, MONITOR_PROVIDER, PAGE_ID, PRESS_ACTION } from "./actions.js";
 import { keyById, type FlandersKey } from "./keys.js";
-import { applyMutation, DEFAULT_PORT, DOCUMENT_ID, sameName, validateDocument, valueOf, type MonitorDocument, type MonitorRow, type Mutation } from "./model.js";
+import { applyMutation, DEFAULT_PORT, DOCUMENT_ID, same, sameName, validateDocument, valueOf, type MonitorDocument, type MonitorRow, type Mutation } from "./model.js";
 import { keyPacket } from "./protocol.js";
 import { describeApps, listOtherConnections, type ConnectionLister } from "./sharing.js";
 import { resolveAddress, SendError, sendOnce } from "./transport.js";
@@ -214,21 +214,47 @@ export function createBackend(context: ModuleContext, options: BackendOptions = 
     return busy ? `Another app is connected to ${busy} monitor${busy > 1 ? "s" : ""}` : "No other apps are connected";
   }
 
-  async function save(operation: Mutation, signal: AbortSignal) {
-    for (let attempt = 0; attempt < 3; attempt++) {
+  /**
+   * Puts one change from a copy of the page onto the list as saved now, so a copy that hasn't
+   * heard of another window's change yet keeps it rather than being refused (see merge.ts).
+   * Saves go one at a time, so copies in several windows never collide with each other here;
+   * a collision with Hubble itself (an Undo, an import) is read again and retried.
+   */
+  async function store(operation: Mutation, signal: AbortSignal) {
+    for (let attempt = 0; attempt < 4; attempt++) {
       const saved = await documents.read(DOCUMENT_ID, signal);
-      const next = applyMutation(validateDocument(saved.value), operation);
+      const current = validateDocument(saved.value);
+      const clashes: string[] = [];
+      const next = applyMutation(current, operation, clashes);
+      // A change to what is saved already, such as one another window made first, writes nothing.
+      if (same(next, current)) {
+        if (saved.revision !== revision || !plan) {
+          revision = saved.revision;
+          adopt(current);
+          publish();
+        }
+        return { document: current, revision: saved.revision, statuses, sequence, clashes };
+      }
       try {
         const result = await documents.write(saved, ModuleDocumentValueSchema.parse(next), signal);
         revision = result.revision;
         adopt(next);
         publish();
-        return { document: next, revision, statuses, sequence };
+        return { document: next, revision, statuses, sequence, clashes };
       } catch (error) {
-        if (!(error instanceof ModuleDocumentConflictError) || attempt === 2) throw error;
+        if (!(error instanceof ModuleDocumentConflictError) || attempt === 3) throw error;
       }
     }
     throw Error("The monitor list changed before saving.");
+  }
+  let saving: Promise<unknown> = Promise.resolve();
+  function save(operation: Mutation, signal: AbortSignal) {
+    const run = saving.then(() => {
+      signal.throwIfAborted();
+      return store(operation, signal);
+    });
+    saving = run.catch(() => undefined);
+    return run;
   }
 
   return {
@@ -264,7 +290,7 @@ export function createBackend(context: ModuleContext, options: BackendOptions = 
       signal.throwIfAborted();
       if (command.commandId === "snapshot") return (await snapshot(signal)) as unknown as ModuleJsonValue;
       if (command.commandId === "save") return (await save(command.value!.operation!, signal)) as unknown as ModuleJsonValue;
-      if (command.commandId === "check") return { message: await checkOtherApps(signal), statuses, sequence } as unknown as ModuleJsonValue;
+      if (command.commandId === "check") return { message: await checkOtherApps(signal), statuses, sequence, revision } as unknown as ModuleJsonValue;
       if (command.commandId === "changes") {
         // Parks until something changes, so a key's result reaches the page straight away.
         const after = Number(command.value?.after ?? 0);
@@ -280,7 +306,8 @@ export function createBackend(context: ModuleContext, options: BackendOptions = 
             signal.addEventListener("abort", finish, { once: true });
             waiters.add(finish);
           });
-        return { statuses, sequence } as unknown as ModuleJsonValue;
+        // With the list's revision, so every open copy of the page hears of a save at once.
+        return { statuses, sequence, revision } as unknown as ModuleJsonValue;
       }
       throw Error("Unknown Flanders page command.");
     },

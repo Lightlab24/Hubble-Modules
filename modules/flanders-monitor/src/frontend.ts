@@ -1,13 +1,14 @@
-import { connectModuleFrontend, ModuleFrontendValueSchema } from "@hubble/module-sdk/frontend";
+import { connectModuleFrontend } from "@hubble/module-sdk/frontend";
 import { mountSpreadsheetToolbar } from "@hubble/module-sdk/spreadsheet-controls";
 import type { Statuses } from "./backend.js";
-import { DraftStore, type SaveReceipt } from "./draft-store.js";
-import { clone, insertRows, MAX_MONITORS, newMonitor, removeRows, type Mutation } from "./model.js";
+import { textSizeChange } from "./changes.js";
+import type { SaveReceipt } from "./draft-store.js";
+import { insertRows, MAX_MONITORS, newMonitor, removeRows } from "./model.js";
+import { openMonitorList } from "./page-store.js";
 import { createMonitorGrid } from "./ui-grid.js";
 import "./frontend.css";
 
-type Snapshot = SaveReceipt & { statuses: Statuses; sequence?: number };
-type StatusReply = { statuses?: Statuses; sequence?: number; message?: string };
+type StatusReply = { statuses?: Statuses; sequence?: number; message?: string; revision?: unknown };
 
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const errorBox = el("error");
@@ -26,10 +27,12 @@ function adopt(next: StatusReply) {
   statuses = next.statuses;
 }
 
-function report(message: string) {
+/** Floats a message over the page for a few seconds, so it never moves anything. A note is not an error. */
+function report(message: string, tone: "error" | "note" = "error") {
   clearTimeout(errorTimer);
   errorBox.getAnimations().forEach((animation) => animation.cancel());
   errorBox.textContent = message;
+  errorBox.dataset.tone = tone;
   errorBox.hidden = !message;
   if (message) {
     errorBox.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 250, delay: 4250, fill: "forwards" });
@@ -39,21 +42,20 @@ function report(message: string) {
 
 try {
   const client = await connectModuleFrontend(window);
-  const initial = (await client.call("snapshot")) as unknown as Snapshot;
-  adopt(initial);
-  const store = new DraftStore(initial, async (operation: Mutation) => {
-    const reply = (await client.call("save", ModuleFrontendValueSchema.parse({ operation }))) as unknown as Snapshot;
-    adopt(reply);
-    return reply;
+  // Every open copy of this page, in any HubDash window, follows what the others save.
+  const list = await openMonitorList(client, (reply) => adopt(reply as SaveReceipt & StatusReply));
+  const { store, follow } = list;
+  adopt(list.initial as SaveReceipt & StatusReply);
+  store.onClash((clashes) => {
+    const unique = [...new Set(clashes)];
+    report(`${unique.length === 1 ? `${unique[0]} was` : `${unique.slice(0, 4).join(", ")}${unique.length > 4 ? " and more" : ""} were`} also changed in another window. What you entered here is kept.`, "note");
   });
 
   const textSize = await mountSpreadsheetToolbar({
     root: el("text-size"),
     textSize: {
       get: () => store.document.view.textSize ?? 13,
-      onChange(size) {
-        store.submit({ kind: "view", view: { ...clone(store.document.view), textSize: size }, expected: clone(store.document.view) });
-      },
+      onChange: (size) => store.submit(textSizeChange(store.document, size)),
     },
   });
 
@@ -105,6 +107,7 @@ try {
     try {
       const reply = (await client.call("check")) as unknown as StatusReply;
       adopt(reply);
+      follow.saw(reply.revision);
       checkResult.textContent = reply.message ?? "";
       checkResult.dataset.tone = reply.message?.startsWith("Another") ? "held" : "ok";
       grid.refresh();
@@ -119,11 +122,13 @@ try {
 
   // Follows key results while the page is on screen. The worker answers as soon as a status changes.
   let run = 0;
-  async function follow() {
+  async function followStatus() {
     const mine = ++run;
     while (mine === run && document.visibilityState === "visible") {
       try {
-        adopt((await client.call("changes", { after: newest })) as unknown as StatusReply);
+        const reply = (await client.call("changes", { after: newest })) as unknown as StatusReply;
+        adopt(reply);
+        follow.saw(reply.revision);
         if (mine !== run) return;
         grid.refresh();
         update();
@@ -133,13 +138,21 @@ try {
     }
   }
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") void follow();
+    if (document.visibilityState === "visible") void followStatus();
     else run++;
   });
 
   el("loading").hidden = true;
   update();
-  void follow();
+  void followStatus();
+  window.addEventListener(
+    "pagehide",
+    () => {
+      run++;
+      list.close();
+    },
+    { once: true },
+  );
 } catch (error) {
   el("loading").textContent = error instanceof Error ? error.message : String(error);
 }

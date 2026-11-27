@@ -4,30 +4,38 @@
   --font-ui:var(--hubble-font,-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',Arial,sans-serif)}
 html,body{height:100%;margin:0;overflow:hidden;color-scheme:dark}
 body{color:var(--hubble-text,#dedede);font:var(--hubble-text-size,13px) var(--hubble-font,system-ui)}
-.ping-app{height:100%;display:grid;grid-template-rows:auto auto auto minmax(0,1fr) auto auto auto;background:var(--hubble-sheet,#111)}
+/* The page is never wider than its window: a narrow window wraps the toolbars and shortens text,
+   rather than cutting off whatever is on the right. */
+.ping-app{height:100%;display:grid;grid-template-rows:auto auto auto minmax(0,1fr) auto auto auto;grid-template-columns:minmax(0,1fr);background:var(--hubble-sheet,#111)}
 .ping-app *{box-sizing:border-box}
 [hidden]{display:none!important}
 .app-header{min-height:72px;padding:14px 20px;display:flex;align-items:center;gap:20px;border-bottom:1px solid var(--hubble-line,#292929);background:var(--hubble-bar,#151515)}
-.app-title{display:flex;align-items:center;gap:12px}
+.app-title{display:flex;align-items:center;gap:12px;min-width:0}
+.app-title>div{min-width:0}
 .app-title>svg{width:27px;height:27px;fill:none;stroke:var(--hubble-text-secondary,#b2b2b2);stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
 h1{margin:0;font-size:16px;font-weight:600;color:var(--hubble-text-strong,#f4f4f4)}
-.app-title p{margin:3px 0 0;color:var(--hubble-text-secondary,#b2b2b2);font-size:var(--hubble-text-size-small,12px)}
-.header-status{margin-left:auto;display:flex;gap:7px;align-items:center;color:var(--hubble-text-secondary,#b2b2b2);font-size:var(--hubble-text-size-small,12px);white-space:nowrap}
+.app-title p{margin:3px 0 0;color:var(--hubble-text-secondary,#b2b2b2);font-size:var(--hubble-text-size-small,12px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.header-status{margin-left:auto;display:flex;gap:7px;align-items:center;min-width:0;color:var(--hubble-text-secondary,#b2b2b2);font-size:var(--hubble-text-size-small,12px);white-space:nowrap}
+#fleet-status{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .status-dot{width:6px;height:6px;border-radius:50%;background:var(--hubble-text-disabled,#777)}
 .header-status[data-tone=ok] .status-dot{background:var(--ping-ok)}
 .header-status[data-tone=warn] .status-dot{background:var(--ping-warn)}
 .header-status[data-tone=bad] .status-dot{background:var(--ping-bad)}
 .toolbar.alerts{min-height:42px;padding:6px 16px}
 .toolbar .group-label{color:var(--hubble-text,#dedede);font-size:var(--hubble-text-size-small,12px);font-weight:600;margin-right:4px}
-.toolbar .note{color:var(--hubble-text-disabled,#7a7a7a);font-size:var(--hubble-control-text-size,11px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.toolbar{display:flex;align-items:center;gap:8px;min-height:51px;padding:9px 16px;background:var(--hubble-bar,#171717);border-bottom:1px solid var(--hubble-line,#3b3b3b)}
+/* The note takes the room left at the end of its line and shortens, so it never starts a line of its own. */
+.toolbar .note{flex:1 1 0;min-width:0;text-align:right;color:var(--hubble-text-disabled,#7a7a7a);font-size:var(--hubble-control-text-size,11px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* A toolbar wider than its window wraps a group of controls onto the next line; the controls on
+   the right stay on the right. A divider left at either end of a line is hidden (frontend.ts). */
+.toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-height:51px;padding:9px 16px;background:var(--hubble-bar,#171717);border-bottom:1px solid var(--hubble-line,#3b3b3b)}
+.toolbar-group{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-width:0}
+.toolbar-end{margin-left:auto;justify-content:flex-end}
 button.primary{appearance:none;min-height:var(--hubble-control-height-row,30px);padding:0 12px;border:1px solid var(--hubble-text,#dedede);border-radius:var(--hubble-radius-control,7px);background:var(--hubble-text,#dedede);color:var(--hubble-sheet,#111);font:550 var(--hubble-text-size,13px) var(--hubble-font,system-ui);display:inline-flex;align-items:center;gap:6px;white-space:nowrap;cursor:pointer}
 button.primary:hover:not(:disabled){background:var(--hubble-text-strong,#fff)}
 button.primary:disabled{opacity:.43;cursor:default}
 button.quiet{appearance:none;min-height:var(--hubble-control-height,26px);padding:0 9px;border:1px solid var(--hubble-line-strong,#414141);border-radius:var(--hubble-radius-control,7px);background:var(--hubble-raised,#222);color:var(--hubble-text,#dedede);font:var(--hubble-control-text-size,11px) var(--hubble-font,system-ui);cursor:pointer}
 button.quiet:hover{background:var(--hubble-hover,#2e2e2e)}
 .toolbar-divider{height:20px;width:1px;background:var(--hubble-line-strong,#3b3b3b);margin:0 3px}
-.toolbar-spacer{flex:1}
 .field.count input{width:58px;min-height:var(--hubble-control-height,26px);padding:0 6px;border:1px solid var(--hubble-line-strong,#414141);border-radius:var(--hubble-radius-control,7px);background:var(--hubble-bar,#111);color:var(--hubble-text,#dedede);font:var(--hubble-control-text-size,11px) var(--hubble-font,system-ui);font-variant-numeric:tabular-nums}
 .field{display:inline-flex;align-items:center;gap:7px;color:var(--hubble-text-secondary,#b2b2b2);font-size:var(--hubble-text-size-small,12px);white-space:nowrap}
 #text-size .hubble-spreadsheet-workbook-tools{margin:0;padding:0;border:0;background:transparent;min-height:30px}
@@ -61,25 +69,35 @@ button.quiet:hover{background:var(--hubble-hover,#2e2e2e)}
 #device-grid td.strip{padding:0 6px}
 #device-grid td.strip canvas{display:block;width:100%;height:26px}
 .hubble-spreadsheet-row-resize{min-height:0}
-.timeline{border-top:1px solid var(--hubble-line,#3b3b3b);background:var(--hubble-bar,#131313);padding:10px 16px 8px}
+.timeline{border-top:1px solid var(--hubble-line,#3b3b3b);background:var(--hubble-bar,#131313);padding:10px 16px 8px;container-type:inline-size}
+/* A window too narrow for all five numbers drops Average and Best (the grid shows Average), by its width
+   alone, so a number growing never moves the chart. */
+@container (max-width:640px){.tl-head .stats>:nth-child(2),.tl-head .stats>:nth-child(3){display:none}}
 .tl-head{display:flex;align-items:baseline;gap:14px;margin-bottom:6px;min-height:18px;white-space:nowrap;overflow:hidden}
-.tl-head h2{margin:0;font-size:var(--hubble-text-size,13px);font-weight:600;color:var(--hubble-text-strong,#f4f4f4)}
-.tl-head .sub{color:var(--hubble-text-secondary,#b2b2b2);font-size:var(--hubble-text-size-small,12px);overflow:hidden;text-overflow:ellipsis}
-.tl-head .stats{margin-left:auto;display:flex;gap:18px;font-size:var(--hubble-text-size-small,12px);color:var(--hubble-text-secondary,#b2b2b2);font-variant-numeric:tabular-nums}
+/* In a narrow window the address shortens first, then a long name past 40% of the row; the numbers stay whole. */
+.tl-head h2{flex:none;max-width:40%;overflow:hidden;text-overflow:ellipsis;margin:0;font-size:var(--hubble-text-size,13px);font-weight:600;color:var(--hubble-text-strong,#f4f4f4)}
+.tl-head .sub{flex:0 1 auto;min-width:0;color:var(--hubble-text-secondary,#b2b2b2);font-size:var(--hubble-text-size-small,12px);overflow:hidden;text-overflow:ellipsis}
+.tl-head .stats{flex:none;margin-left:auto;display:flex;gap:18px;font-size:var(--hubble-text-size-small,12px);color:var(--hubble-text-secondary,#b2b2b2);font-variant-numeric:tabular-nums}
 .tl-head .stats b{color:var(--hubble-text,#dedede);font-weight:500}
 #chart{display:block;width:100%;height:190px;outline:none;touch-action:none;cursor:crosshair}
 #chart:focus-visible{outline:2px solid var(--hubble-focus,#cecece);outline-offset:2px}
-.legend{display:flex;gap:16px;align-items:center;min-height:26px;font-size:var(--hubble-control-text-size,11px);color:var(--hubble-text-secondary,#b2b2b2);margin-top:4px}
+/* In a narrow window Back to now, Scale, Clear history and the hint wrap below the colours together,
+   on the right. Back to now always keeps its room, and the hint is as wide as the room it has (up to
+   320 px) whatever it says, so neither the one coming and going nor hover text ever moves anything. */
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;min-height:26px;font-size:var(--hubble-control-text-size,11px);color:var(--hubble-text-secondary,#b2b2b2);margin-top:4px}
 .legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px}
 .legend i.ok{background:var(--ping-ok)}.legend i.warn{background:var(--ping-warn)}.legend i.bad{background:var(--ping-bad)}
 /*
  * Nothing on the right of this row ever moves: the hint has a set width, so hovering the timeline
  * can't push Scale and Clear history, and Back to now appears to their left, in the free space.
  */
-.legend .legend-spacer{flex:1}
-.legend .hint{width:320px;flex:none;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.legend-start,.legend-end{display:flex;flex-wrap:wrap;align-items:center;gap:6px 16px;min-width:0}
+.legend-start>*,.legend-end>:not(.hint){flex:none}
+.legend-end{margin-left:auto;justify-content:flex-end}
+#tl-live[data-shown=false]{visibility:hidden}
+.legend .hint{width:320px;max-width:320px;flex:1 1 0;min-width:0;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
 .legend .scale{font-size:var(--hubble-control-text-size,11px)}
-.legend-chips{display:flex;gap:14px;align-items:center;white-space:nowrap}
+.legend-chips{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;white-space:nowrap}
 button.quiet.toggle[aria-pressed=true]{background:var(--hubble-selected,#373737);color:var(--hubble-text-strong,#f4f4f4);border-color:var(--hubble-line-strong,#4a4a4a)}
 /* On Auto the box shows Auto's choice, dimmed, until − + or a typed number fixes it. */
 #scale[data-auto=true] .hubble-stepper-input{color:var(--hubble-text-disabled,#7a7a7a)}
@@ -97,9 +115,16 @@ button.quiet.toggle[aria-pressed=true]{background:var(--hubble-selected,#373737)
 .color-actions:has(.follow-alert[hidden]){display:none}
 .app-footer{display:flex;gap:14px;justify-content:space-between;align-items:center;min-height:34px;padding:8px 16px;border-top:1px solid var(--hubble-line,#3b3b3b);background:var(--hubble-bar,#171717);font-size:var(--hubble-control-text-size,11px);color:var(--hubble-text-secondary,#b2b2b2);white-space:nowrap}
 #save-status[data-error=true]{color:#f2aaa5}
+/* A narrow window shortens the line about data use; the save status stays whole up to 70% of the line. */
+#save-status{flex:none;max-width:70%;overflow:hidden;text-overflow:ellipsis}
+#data-use{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .loading{position:absolute;inset:0;display:grid;place-content:center;background:var(--hubble-sheet,#111);color:var(--hubble-text-secondary,#999)}
 .empty{position:absolute;inset:70px 20px auto;max-width:460px;margin:auto;padding:28px;border:1px dashed var(--hubble-line-strong,#414141);border-radius:var(--hubble-radius-surface,8px);text-align:center;color:var(--hubble-text-secondary,#999);background:var(--hubble-bar,#171717)}
 .empty h2{margin:0 0 8px;font-size:15px;color:var(--hubble-text,#dedede)}.empty p{line-height:1.5;margin:0 0 14px}
+/* A sheet's own window whose sheet was removed shows only this. */
+.ping-app[data-gone=true]>:not(.app-header):not(.gone),.ping-app[data-gone=true] .header-status{display:none}
+.gone{width:min(460px,calc(100% - 40px));margin:70px auto 0;padding:28px;border:1px dashed var(--hubble-line-strong,#414141);border-radius:var(--hubble-radius-surface,8px);text-align:center;color:var(--hubble-text-secondary,#999);background:var(--hubble-bar,#171717)}
+.gone h2{margin:0 0 8px;font-size:15px;color:var(--hubble-text,#dedede)}.gone p{line-height:1.5;margin:0}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
 /* Sheets sit just above the timeline. "Move selected rows…" comes and goes with a selection, so it shares the tabs' line and never moves the timeline. */
 .sheet-tabs{border-top:1px solid var(--hubble-line,#3b3b3b);background:var(--hubble-bar,#131313)}
