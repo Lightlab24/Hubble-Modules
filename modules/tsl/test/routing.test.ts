@@ -15,6 +15,7 @@ import { routingChange } from "../src/changes.js";
 import {
   defaultRoutingDocument,
   ROUTING_DOCUMENT_ID,
+  RoutingChangeSchema,
   RoutingDocumentSchema,
   TslRouting,
   type RoutingDocument,
@@ -250,7 +251,7 @@ it("saves the camera mappings with the workspace, and routes by them at once", a
   const moved = cameras.map((row) => ({ ...row, source: row.source + 10 }));
   const signal = new AbortController().signal;
   const saved = await test.routing.save(routingChange(cameras, moved), signal);
-  expect(saved).toEqual({ status: "saved", rows: moved, revision: "rev-1", missing: [] });
+  expect(saved).toEqual({ status: "saved", rows: moved, revision: "rev-1", missing: [], kept: [] });
   expect(RoutingDocumentSchema.parse(test.document().value).rows).toEqual(moved);
   expect(test.routing.snapshot()).toMatchObject({ rows: moved, revision: "rev-1", following: true });
   // New mappings start from what is on air now, as a restart would; the next cut uses them.
@@ -260,7 +261,7 @@ it("saves the camera mappings with the workspace, and routes by them at once", a
   // Another window saved first: this change goes onto what it saved, and neither undoes the other.
   test.setSaved([{ ...moved[0]!, name: "Jib" }, moved[1]!]);
   const onTop = await test.routing.save(routingChange(moved, [moved[0]!, { ...moved[1]!, level: 2 }]), signal);
-  expect(onTop).toEqual({ status: "saved", rows: [{ ...moved[0]!, name: "Jib" }, { ...moved[1]!, level: 2 }], revision: "rev-3", missing: [] });
+  expect(onTop).toEqual({ status: "saved", rows: [{ ...moved[0]!, name: "Jib" }, { ...moved[1]!, level: 2 }], revision: "rev-3", missing: [], kept: [] });
   // A save of what is already saved writes nothing.
   expect(await test.routing.save(routingChange(moved, [moved[0]!, { ...moved[1]!, level: 2 }]), signal)).toMatchObject({ revision: "rev-3" });
   expect(test.document().revision).toBe("rev-3");
@@ -276,6 +277,29 @@ it("saves the camera mappings with the workspace, and routes by them at once", a
   const many = Array.from({ length: 512 }, (_, index) => ({ ...cameras[0]!, id: `many-${index}` }));
   await expect(test.routing.save(routingChange([], many), signal)).rejects.toThrow("at most 512 cameras");
   expect(test.document().revision).toBe("rev-4");
+});
+
+it("saves an Undo only over what the window last read, so it never undoes another window's change", async () => {
+  const test = await world();
+  await test.routing.start();
+  const signal = new AbortController().signal;
+  const jib = { ...cameras[0]!, name: "Jib" };
+  // The window read "Jib" and source 21, and its Undo puts back "Camera 1" and source 31. Another
+  // window has since saved source 50: that stays, and is named, while the name lands.
+  test.setSaved([{ ...jib, source: 50 }, cameras[1]!]);
+  const undo = {
+    ...routingChange([jib, cameras[1]!], [{ ...cameras[0]!, source: 31 }, cameras[1]!]),
+    expected: [{ id: jib.id, fields: { name: "Jib", source: 21 } }],
+  };
+  expect(await test.routing.save(undo, signal)).toMatchObject({
+    rows: [{ ...cameras[0]!, source: 50 }, cameras[1]!],
+    missing: [],
+    kept: [{ id: jib.id, field: "source" }],
+  });
+  expect(RoutingDocumentSchema.parse(test.document().value).rows[0]).toMatchObject({ name: "Camera 1", source: 50 });
+  // A page before 1.6.0 sends no `expected`, and its change lands as always.
+  expect(RoutingChangeSchema.parse(routingChange(cameras, cameras))).not.toHaveProperty("expected");
+  expect(() => RoutingChangeSchema.parse({ ...undo, expected: [{ id: jib.id, fields: { colour: "red" } }] })).toThrow();
 });
 
 it("puts saves from several windows at the same moment onto each other, and stops if it never settles", async () => {

@@ -39,12 +39,54 @@ describe("what one window changed in the cameras", () => {
     expect(applyRoutingChange(theirs, mine)).toEqual({
       rows: [camera(1, { name: "Wide" }), camera(2, { source: 99 }), camera(3), camera(4)],
       missing: [],
+      kept: [],
     });
   });
 
   it("leaves a camera deleted elsewhere deleted, and names the change that could not land", () => {
     const mine = routingChange(cameras, [camera(1), camera(2, { name: "Gone" }), camera(3)]);
-    expect(applyRoutingChange([camera(1), camera(3)], mine)).toEqual({ rows: [camera(1), camera(3)], missing: ["camera-2"] });
+    expect(applyRoutingChange([camera(1), camera(3)], mine)).toEqual({ rows: [camera(1), camera(3)], missing: ["camera-2"], kept: [] });
+  });
+
+  it("lands an Undo only where a field still holds what the window last read", () => {
+    // The window last read source 21 on camera 1 and 22 on camera 2, and its Undo puts back 30 on
+    // both, with a new name for camera 1 that is no Undo. Another window has since changed camera
+    // 1's source to 50.
+    const undo = {
+      ...routingChange(
+        [camera(1), camera(2)],
+        [camera(1, { name: "Wide", source: 30 }), camera(2, { source: 30 })],
+      ),
+      expected: [
+        { id: "camera-1", fields: { source: 21 } },
+        { id: "camera-2", fields: { source: 22 } },
+      ],
+    };
+    expect(applyRoutingChange([camera(1, { source: 50 }), camera(2)], undo)).toEqual({
+      rows: [camera(1, { name: "Wide", source: 50 }), camera(2, { source: 30 })],
+      missing: [],
+      kept: [{ id: "camera-1", field: "source" }],
+    });
+    // Another window already put back the same value: nothing is left out, and nothing is said.
+    expect(applyRoutingChange([camera(1, { source: 30 }), camera(2)], undo).kept).toEqual([]);
+    // Without `expected`, as every other change is sent, the newest change wins.
+    const { expected: _, ...plain } = undo;
+    expect(applyRoutingChange([camera(1, { source: 50 }), camera(2)], plain).rows[0]).toEqual(camera(1, { name: "Wide", source: 30 }));
+  });
+
+  it("takes a camera away for an Undo only as the window last read it", () => {
+    // An Undo of adding camera 3: it goes only while it holds what this window read.
+    const { id: _, ...asRead } = camera(3);
+    const undo = { ...routingChange(cameras, [camera(1), camera(2)]), expected: [{ id: "camera-3", fields: asRead }] };
+    expect(applyRoutingChange(cameras, undo)).toEqual({ rows: [camera(1), camera(2)], missing: [], kept: [] });
+    // Another window renamed it since: it stays, and is named.
+    expect(applyRoutingChange([camera(1), camera(2), camera(3, { name: "Crane" })], undo)).toEqual({
+      rows: [camera(1), camera(2), camera(3, { name: "Crane" })],
+      missing: [],
+      kept: [{ id: "camera-3" }],
+    });
+    // Another window deleted it already: nothing is left to take away, and nothing is said.
+    expect(applyRoutingChange([camera(1), camera(2)], undo)).toEqual({ rows: [camera(1), camera(2)], missing: [], kept: [] });
   });
 
   it("puts a camera added after one deleted elsewhere at the end, and adds it only once", () => {

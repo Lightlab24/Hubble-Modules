@@ -52,7 +52,22 @@ export interface RoutingChange {
   readonly added: readonly { readonly row: RoutingRow; readonly after: string | null }[];
   /** For each camera changed, only the fields changed. */
   readonly changed: readonly { readonly id: string; readonly fields: RowFields }[];
+  /**
+   * What an Undo or Redo changed or took away, with each field as this copy last read it. A field
+   * another window has changed since is left as saved, and so is a camera it would take away, so
+   * an Undo never undoes another window's work. Every other change lands; the newest one wins.
+   */
+  readonly expected?: readonly { readonly id: string; readonly fields: RowFields }[];
 }
+/**
+ * What an Undo or Redo left as saved because another window had changed it since: one field, or,
+ * with no field, a camera it would have taken away.
+ */
+export interface KeptField {
+  readonly id: string;
+  readonly field?: RowField;
+}
+type RowField = Exclude<keyof RoutingRow, "id">;
 export const noRoutingChange = (change: RoutingChange) =>
   !change.removed.length && !change.added.length && !change.changed.length;
 
@@ -79,13 +94,24 @@ export function routingChange(from: readonly RoutingRow[], to: readonly RoutingR
 
 /**
  * A camera list with a change on top. A camera deleted elsewhere stays deleted: a change to it is
- * left out and named in `missing`. A camera added after one that is gone goes at the end.
+ * left out and named in `missing`. A camera added after one that is gone goes at the end. A field
+ * in `expected` that holds another value now is left as it is and named in `kept`, and so is a
+ * camera to take away that no longer holds what `expected` has for it.
  */
 export function applyRoutingChange(
   rows: readonly RoutingRow[],
   change: RoutingChange,
-): { rows: RoutingRow[]; missing: string[] } {
-  const removed = new Set(change.removed);
+): { rows: RoutingRow[]; missing: string[]; kept: KeptField[] } {
+  const expectedFor = (id: string): Record<string, unknown> => change.expected?.find((item) => item.id === id)?.fields ?? {};
+  const kept: KeptField[] = [];
+  const removed = new Set(
+    change.removed.filter((id) => {
+      const row = rows.find((item) => item.id === id);
+      const changedSince = !!row && Object.entries(expectedFor(id)).some(([key, value]) => !same(row[key as RowField], value));
+      if (changedSince) kept.push({ id });
+      return !changedSince;
+    }),
+  );
   let next = rows.filter((row) => !removed.has(row.id));
   const missing: string[] = [];
   for (const { id, fields } of change.changed) {
@@ -94,9 +120,18 @@ export function applyRoutingChange(
       if (!removed.has(id)) missing.push(id);
       continue;
     }
-    if (Object.entries(fields).every(([key, value]) => same(next[index]![key as keyof RoutingRow], value))) continue;
+    const current = next[index]!;
+    const expected = expectedFor(id);
+    const landing: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(fields)) {
+      const field = key as RowField;
+      if (same(current[field], value)) continue;
+      if (key in expected && !same(current[field], expected[key])) kept.push({ id, field });
+      else landing[key] = value;
+    }
+    if (!Object.keys(landing).length) continue;
     next = [...next];
-    next[index] = { ...next[index]!, ...fields, id };
+    next[index] = { ...current, ...landing, id };
   }
   for (const { row, after } of change.added) {
     // Added already, as when a save is sent again after a restart cut its answer short.
@@ -107,5 +142,5 @@ export function applyRoutingChange(
     else if (index < 0) next.push(row);
     else next.splice(index + 1, 0, row);
   }
-  return { rows: next, missing };
+  return { rows: next, missing, kept };
 }

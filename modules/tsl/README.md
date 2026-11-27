@@ -1,6 +1,6 @@
 # TSL Tally
 
-Official module `hubble-tsl`, version **1.6.0**, using stable Hubble module API **1**.
+Official module `hubble-tsl`, version **1.6.1**, using stable Hubble module API **1**.
 It receives TSL UMD 3.1 and 5.0 tally over UDP or TCP, shows what a switcher sends, routes a
 router on tally (what TALLY Switch did, merged in at 1.4.0), feeds Button Matrix tally
 feedback, and can set a Ross Carbonite switcher to send its tally to this computer.
@@ -29,8 +29,11 @@ held before the merge, so Hubble's older Tally Switch page stays hidden.
   Shift+Command+Z (and HubDash's Edit menu) undo and redo edits and added or deleted cameras,
   one gesture at a time; a deleted camera comes back whole, in its place. Hubble keeps that
   history for the grid (`module-spreadsheet-history-v1`, from 1.6.0); on a Hubble without it
-  the tab has no undo, as before. Button Matrix "TALLY Switch follow" actions now drive this
-  module's own Follow.
+  the tab has no undo, as before. A step is what the tab took, as it shows it (from 1.6.1): a
+  value it refused, a number Delete left alone or text that changed nothing is no step, so
+  Redo of a Delete leaves numbers alone too. Undo selects what it put back and saves it like
+  any other edit. There are no Undo or Redo buttons. Button Matrix "TALLY Switch follow"
+  actions now drive this module's own Follow.
 - **Setup** holds every setting of the link in one place:
   - **This computer** is the receiver. These are the module's own settings; the page saves
     them through Hubble (`settings` on the custom section, `module-frontend-settings-v1`),
@@ -76,6 +79,15 @@ window is its own copy of the page over the one running module:
 - Changes the page makes by itself (the device's settings taken in after Read switcher, the
   device's name after Send to switcher) land only where the setup still holds what the page
   started from: another window's change to that field stays.
+- Each window has its own Undo, for what was done in it (from 1.6.1, as Ping and Flanders).
+  An Undo is saved like any other change, so every window shows it at once, but it puts a
+  cell back only while the cell still holds what this window last put there, and takes a
+  camera away only as this window last left it. What another window has changed since is
+  left as it is, with "Camera 2's Source was changed in another window since, so it was left
+  as it is". The page checks what it has read; the backend checks again with what the page
+  last read (`expected` in the change, answered by `kept`), for a change another window saved
+  a moment before. One case gets past both: this window types over the other window's value,
+  undoes that, and then undoes an older step of its own on the same cell.
 - Every copy follows the others without a reload. Each `live` answer carries the saved setup's
   and the cameras' revisions, a stamp for the switcher's last reading and whether a switcher
   request is under way. A copy holding something older reads `saved` and redraws in place; its
@@ -101,8 +113,9 @@ window is its own copy of the page over the one running module:
   page does not have says "This part of the page is no longer here."
 
 `e2e/windows.spec.ts` runs two and three copies of the built page against the preview and
-checks all of the above with real clicks and key presses. The preview opens a copy as one
-part's window at `/?view=tally`, `/?view=routing` or `/?view=setup`.
+checks all of the above with real clicks and key presses; `e2e/routing-undo-windows.spec.ts`
+does the same for Undo. The preview opens a copy as one part's window at `/?view=tally`,
+`/?view=routing` or `/?view=setup`.
 
 ## Talking to the switcher
 
@@ -146,7 +159,10 @@ the page, as each HubDash window is, and each hears of a restart by itself. `/__
 or fails saves, changes what is saved as an import would and makes the pretend switcher
 misbehave; `/__inspect` shows what was saved, every write and conflict it received and the
 commands the pages asked; `/__reset` puts everything back as it started.
-`pnpm --filter @hubble-module/tsl test:ui` builds nothing: after a build it runs
-`e2e/windows.spec.ts` in Playwright's Chromium against its own preview (port 43198, listener
-port 45728; `TSL_UI_PORT` and `TSL_UI_LISTEN_PORT` move them).
+`pnpm --filter @hubble-module/tsl test:ui` builds nothing: after a build it runs the `e2e`
+specs in Playwright's Chromium against its own preview (port 43198, listener port 45728;
+`TSL_UI_PORT` and `TSL_UI_LISTEN_PORT` move them). The undo specs need shared controls from a
+Hubble with `module-spreadsheet-history-v1`: point `TSL_RENDERER_ASSETS` at such a build's
+`renderer/main_window/assets` (or a folder of its `module-*-v1` files). With an earlier
+Hubble's files they are skipped, and one check that the tab works without undo runs instead.
 `pnpm --filter @hubble-module/tsl package` creates the versioned `.hubble-module` artifact.

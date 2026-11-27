@@ -12,7 +12,7 @@ import {
   type SpreadsheetHistoryChange,
 } from "@hubble/module-sdk/spreadsheet-controls";
 import type { RoutingLive, RoutingRow, RoutingSave, RoutingSnapshot } from "./routing.js";
-import { applyRoutingChange, noRoutingChange, routingChange } from "./changes.js";
+import { applyRoutingChange, noRoutingChange, routingChange, type RoutingChange } from "./changes.js";
 
 /** The routing engine's on-air lamps, as the operator reads them. */
 const INDICATORS = [
@@ -53,6 +53,22 @@ const COLUMNS: readonly Column[] = [
 ];
 const READ_ONLY = new Set(["program", "status"]);
 const ROW_NUMBER_WIDTH = 44;
+/** A camera's value in an editable column, as the grid holds it: what Undo compares and puts back. */
+const valueOf = (row: RoutingRow, columnId: string): string => {
+  switch (columnId) {
+    case "name":
+      return row.name;
+    case "enabled":
+      return row.enabled ? "TRUE" : "FALSE";
+    case "router":
+      return row.router;
+    case "indicator":
+      return row.indicator;
+    default:
+      return columnId in NUMBERS ? String(row[columnId as Numeric]) : "";
+  }
+};
+const EDITABLE = COLUMNS.filter((column) => !READ_ONLY.has(column.id)).map((column) => column.id);
 
 export interface RoutingViewOptions {
   readonly snapshot: RoutingSnapshot;
@@ -72,7 +88,9 @@ export interface RoutingViewOptions {
  * reload. The cell being typed in is never redrawn, moved or taken away while typing goes on.
  *
  * On a Hubble with grid undo (module-spreadsheet-history-v1), Command+Z and Shift+Command+Z undo
- * and redo cell edits and added or deleted cameras, one gesture at a time, in this copy.
+ * and redo cell edits and added or deleted cameras, one gesture at a time, in this copy. An Undo
+ * is saved like any other change, so every copy shows it, but it puts back only what this copy
+ * did: a cell or camera another window has changed since is left as it is, and the page says so.
  */
 export async function mountRoutingView(options: RoutingViewOptions) {
   const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -95,11 +113,38 @@ export async function mountRoutingView(options: RoutingViewOptions) {
   let edits = 0;
   /** Cameras saved elsewhere are being read in. */
   let rereading = false;
-  /** What Hubble's undo holds for each change not saved yet, so a refused save can hand them back. */
-  let unsaved: object[] = [];
+  /**
+   * The value this copy last put in each cell. An Undo or Redo puts a cell back, or takes a camera
+   * away, only while it still holds that, so it never undoes a change another window made since.
+   */
+  const mine = new Map<string, string>();
+  /** A change Hubble's undo holds: what `history.forget` takes, and `mine` as it was before it. */
+  interface Step {
+    readonly owner: object;
+    readonly before: readonly (readonly [cell: string, value: string | undefined])[];
+  }
+  /** Steps whose change is shown here but not saved yet, so a refused save can hand them back. */
+  let unsaved: Step[] = [];
+  /** Cells an Undo or Redo set, and cameras one took away, not sent yet: they go only over what this copy last read. */
+  const stepped = new Set<string>();
   const rowElements = new Map<string, HTMLTableRowElement>();
   const cells = new Map<string, HTMLTableCellElement>();
   const key = (address: SpreadsheetAddress) => `${address.rowId}/${address.columnId}`;
+  /** Notes what this copy now holds in cells it changed, and returns what it held there before. */
+  const own = (edits: readonly SpreadsheetEdit[]) =>
+    edits.map((edit) => {
+      const before = [key(edit), mine.get(key(edit))] as const;
+      mine.set(key(edit), edit.value);
+      return before;
+    });
+  /** Every editable cell of a camera, as this copy now holds it. */
+  const cellsOf = (row: RoutingRow): SpreadsheetEdit[] =>
+    EDITABLE.map((columnId) => ({ rowId: row.id, columnId, value: valueOf(row, columnId) }));
+  /** A cell another window has changed since this copy last did. */
+  const changedElsewhere = (row: RoutingRow, columnId: string) => {
+    const left = mine.get(key({ rowId: row.id, columnId }));
+    return left !== undefined && left !== valueOf(row, columnId);
+  };
   const statusOf = (id: string) => live.statuses.find((item) => item.id === id);
   const routerLabel = (id: string) => live.routers.find((router) => router.id === id)?.label;
   let editor: { address: SpreadsheetAddress; input: HTMLInputElement } | undefined;
@@ -133,22 +178,22 @@ export async function mountRoutingView(options: RoutingViewOptions) {
     if (!row) return null;
     switch (address.columnId) {
       case "name":
-        return { value: row.name };
+        return { value: valueOf(row, "name") };
       case "enabled":
-        return { value: row.enabled ? "TRUE" : "FALSE", kind: "boolean" };
+        return { value: valueOf(row, "enabled"), kind: "boolean" };
       case "program":
         return { value: statusOf(row.id)?.program ?? "Unknown", readOnly: true };
       case "status":
         return { value: statusOf(row.id)?.status ?? "", readOnly: true };
       case "router":
         return {
-          value: row.router,
+          value: valueOf(row, "router"),
           choices: live.routers.map((router) => ({ value: router.id, label: router.label })),
         };
       case "indicator":
-        return { value: row.indicator, choices: INDICATORS };
+        return { value: valueOf(row, "indicator"), choices: INDICATORS };
       default:
-        return address.columnId in NUMBERS ? { value: String(row[address.columnId as Numeric]) } : null;
+        return address.columnId in NUMBERS ? { value: valueOf(row, address.columnId) } : null;
     }
   };
   const paint = (address: SpreadsheetAddress) => {
@@ -269,33 +314,74 @@ export async function mountRoutingView(options: RoutingViewOptions) {
     revision = snapshot.revision;
     draw();
   };
+  /** What an Undo or Redo left as it is, in the operator's words: cells, or a camera it would have taken away. */
+  const leftAlone = (items: readonly { readonly id: string; readonly field?: string }[], from: readonly RoutingRow[]) => {
+    const [first] = items;
+    if (items.length > 1 || !first)
+      return `${items.length} ${items.some((item) => !item.field) ? "changes" : "cells"} were changed in another window since, so they were left as they are`;
+    const camera = from.find((row) => row.id === first.id)?.name || "An unnamed camera";
+    if (!first.field) return `${camera} was changed in another window since, so it was left as it is`;
+    const column = COLUMNS.find((item) => item.id === first.field)?.label ?? first.field;
+    return `${camera}'s ${column} was changed in another window since, so it was left as it is`;
+  };
+  /** What an Undo or Redo changed or took away in a change, with each field as this copy last read it. */
+  const expectedFor = (change: RoutingChange) => {
+    const expected: { id: string; fields: Record<string, unknown> }[] = [];
+    const held = (id: string, fields: readonly string[]) => {
+      const was = base.find((row) => row.id === id);
+      const values: Record<string, unknown> = {};
+      for (const field of fields) if (was) values[field] = was[field as keyof RoutingRow];
+      if (Object.keys(values).length) expected.push({ id, fields: values });
+    };
+    for (const { id, fields } of change.changed)
+      held(id, Object.keys(fields).filter((field) => stepped.delete(key({ rowId: id, columnId: field }))));
+    for (const id of change.removed) if (stepped.delete(id)) held(id, EDITABLE);
+    return expected;
+  };
   const save = (): Promise<void> => {
     saving ??= (async () => {
       try {
         while (!options.isDisposed()) {
           const change = routingChange(base, rows);
-          if (noRoutingChange(change)) break;
+          if (noRoutingChange(change)) {
+            // What the steps changed is saved, or came back to what is saved.
+            unsaved = [];
+            break;
+          }
           const sent = rows;
           const carried = unsaved;
           unsaved = [];
+          const expected = expectedFor(change);
           try {
-            const reply = (await options.ask("routing-save", { change })) as RoutingSave;
+            const reply = (await options.ask("routing-save", {
+              change: expected.length ? { ...change, expected } : change,
+            })) as RoutingSave;
             base = reply.rows;
             revision = reply.revision;
             // A change to a camera that another window deleted is not kept, and says so.
             if (reply.missing.length) options.failed(named(sent, reply.missing));
+            // Nor is an Undo of what another window changed a moment ago, before this copy heard.
+            else if (reply.kept.length) options.failed(leftAlone(reply.kept, sent));
           } catch (error) {
             if (options.isDisposed()) return;
             // Refused: only this change is put back, and the copy takes what is saved now, so its
-            // next change is not refused for the same reason.
+            // next change is not refused for the same reason. Undo forgets a change that never held,
+            // and keeps an undo or redo that didn't take to try again. What this copy holds in
+            // those cells is what it held before, unless it has changed them again since.
+            const since = new Set(unsaved.flatMap((step) => step.before.map(([cell]) => cell)));
+            for (const step of [...carried].reverse()) {
+              controls.history?.forget(step.owner);
+              for (const [cell, value] of step.before)
+                if (since.has(cell)) continue;
+                else if (value === undefined) mine.delete(cell);
+                else mine.set(cell, value);
+            }
             const fresh = await readSaved().catch(() => undefined);
             if (fresh) {
               base = structuredClone([...fresh.rows]);
               revision = fresh.revision;
             }
             options.failed(error instanceof Error ? error.message : "The camera mappings could not be saved");
-            // Undo forgets a change that never held, and keeps an undo or redo that didn't take to try again.
-            for (const token of carried) controls.history?.forget(token);
           }
           if (options.isDisposed()) return;
           // Changes made here while that one was saving go on top of what is saved now.
@@ -309,11 +395,11 @@ export async function mountRoutingView(options: RoutingViewOptions) {
     })();
     return saving;
   };
-  /** Shows a change at once and saves it behind. `token` is what Hubble's undo holds for it. */
-  const change = (next: RoutingRow[], token?: object) => {
+  /** Shows a change at once and saves it behind. `step` is what Hubble's undo holds for it. */
+  const change = (next: RoutingRow[], step?: Step) => {
     rows = next;
     edits += 1;
-    if (token) unsaved.push(token);
+    if (step) unsaved.push(step);
     draw();
     void save();
   };
@@ -372,27 +458,47 @@ export async function mountRoutingView(options: RoutingViewOptions) {
       }
     }
   };
-  /** Applies edits from the grid (`batch`) or from typing in a cell (no batch). */
+  /** Applies edits from the grid (`batch`: a gesture, an Undo or a Redo) or from typing in a cell (no batch). */
   const submit = (edits: readonly SpreadsheetEdit[], batch?: SpreadsheetEditBatch) => {
+    const stepping = batch?.source === "undo" || batch?.source === "redo";
     let next = rows;
     const problems: string[] = [];
     const applied: SpreadsheetEdit[] = [];
+    const kept: { id: string; field: string }[] = [];
     for (const edit of edits) {
       // Clearing leaves numbers as they are: a camera always has an address, output and source.
       if (batch?.source === "clear" && edit.columnId in NUMBERS) continue;
       const index = next.findIndex((row) => row.id === edit.rowId);
       if (index < 0 || READ_ONLY.has(edit.columnId)) continue;
+      // An Undo or Redo puts back only what this copy did, never over another window's change since.
+      if (stepping && changedElsewhere(next[index]!, edit.columnId)) {
+        kept.push({ id: edit.rowId, field: edit.columnId });
+        continue;
+      }
       const result = parse(next[index]!, edit);
       if (typeof result === "string") problems.push(result);
       else if (JSON.stringify(result) !== JSON.stringify(next[index])) {
         next = [...next];
         next[index] = result;
-        applied.push(edit);
+        applied.push({ rowId: edit.rowId, columnId: edit.columnId, value: valueOf(result, edit.columnId) });
       }
     }
-    // Hubble's undo already holds the grid's own gestures; typing joins it here, before it shows.
-    if (next !== rows) change(next, batch ?? controls.history?.record(applied));
-    if (problems.length) options.failed(problems[0]!);
+    const history = controls.history;
+    let owner: object | undefined = stepping && applied.length ? batch : undefined;
+    if (history && !stepping) {
+      // Hubble remembered the grid's gesture as it was asked for. The step is what this tab took,
+      // as it shows it now: a value refused here, a number Delete left alone or text that changed
+      // nothing is no step. Typing joins here too, before it shows.
+      if (batch) history.forget(batch);
+      if (applied.length) owner = history.record(applied);
+    }
+    for (const edit of applied)
+      if (stepping) stepped.add(key(edit));
+      else stepped.delete(key(edit));
+    const before = own(applied);
+    if (next !== rows) change(next, owner && { owner, before });
+    if (kept.length) options.failed(leftAlone(kept, rows));
+    else if (problems.length) options.failed(problems[0]!);
   };
 
   const gridOptions: SpreadsheetControlsOptions = {
@@ -504,33 +610,50 @@ export async function mountRoutingView(options: RoutingViewOptions) {
     const next = [...rows];
     const at = index < 0 ? next.length : index + 1;
     next.splice(at, 0, row);
-    change(next, controls.history?.recordChange(cameraChange([{ row, index: at }], true)));
+    const owner = controls.history?.recordChange(cameraChange([{ row, index: at }], true));
+    // Every cell of the new camera holds what this copy put there.
+    const before = own(cellsOf(row));
+    change(next, owner && { owner, before });
     controls.select({ rowId: row.id, columnId: "name" });
   };
   const remove = (ids: readonly string[]) => {
     const gone = rows.flatMap((row, index) => (ids.includes(row.id) ? [{ row, index }] : []));
-    if (gone.length)
-      change(
-        rows.filter((row) => !ids.includes(row.id)),
-        controls.history?.recordChange(cameraChange(gone, false)),
-      );
+    if (!gone.length) return;
+    const owner = controls.history?.recordChange(cameraChange(gone, false));
+    change(
+      rows.filter((row) => !ids.includes(row.id)),
+      owner && { owner, before: [] },
+    );
   };
   /**
    * Adding or deleting cameras, as one step of Hubble's undo. Cameras come back whole, as they were
-   * when they went, in their places; ones another window has already put back or taken away are left.
+   * when they went, in their places; ones another window has already put back or taken away are
+   * left. A camera is taken away only as this copy last left it: one another window has changed
+   * since stays, and the page says so.
    */
   const cameraChange = (cameras: readonly { row: RoutingRow; index: number }[], added: boolean): SpreadsheetHistoryChange => {
     const ids = cameras.map(({ row }) => row.id);
     const putBack = (attempt: object) => {
       const next = [...rows];
+      const back: RoutingRow[] = [];
       for (const { row, index } of [...cameras].sort((a, b) => a.index - b.index))
-        if (!next.some((item) => item.id === row.id)) next.splice(Math.min(index, next.length), 0, structuredClone(row));
-      if (next.length === rows.length) return;
-      change(next, attempt);
+        if (!next.some((item) => item.id === row.id)) {
+          back.push(structuredClone(row));
+          next.splice(Math.min(index, next.length), 0, back.at(-1)!);
+        }
+      if (!back.length) return;
+      change(next, { owner: attempt, before: own(back.flatMap(cellsOf)) });
       controls.select({ rowId: cameras[0]!.row.id, columnId: "name" }, undefined, { focus: document.activeElement === grid });
     };
     const takeAway = (attempt: object) => {
-      if (rows.some((row) => ids.includes(row.id))) change(rows.filter((row) => !ids.includes(row.id)), attempt);
+      const here = rows.filter((row) => ids.includes(row.id));
+      const kept = here.filter((row) => EDITABLE.some((columnId) => changedElsewhere(row, columnId)));
+      const going = new Set(here.filter((row) => !kept.includes(row)).map((row) => row.id));
+      if (going.size) {
+        for (const id of going) stepped.add(id);
+        change(rows.filter((row) => !going.has(row.id)), { owner: attempt, before: [] });
+      }
+      if (kept.length) options.failed(leftAlone(kept.map((row) => ({ id: row.id })), rows));
     };
     return added ? { undo: takeAway, redo: putBack } : { undo: putBack, redo: takeAway };
   };

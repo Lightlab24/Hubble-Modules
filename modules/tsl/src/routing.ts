@@ -16,7 +16,7 @@ import {
   type Mapping,
   type Route,
 } from "./routing-engine.js";
-import { applyRoutingChange, type RoutingChange } from "./changes.js";
+import { applyRoutingChange, type KeptField, type RoutingChange } from "./changes.js";
 
 /** The camera mappings: saved with the workspace, so they travel with it. */
 export const ROUTING_DOCUMENT_ID = "routing";
@@ -90,13 +90,22 @@ export const RoutingChangeSchema = z.strictObject({
     .array(z.strictObject({ id: RowIdSchema, fields: z.partialRecord(z.enum(ROW_FIELDS), z.json()) }))
     .max(MAX_CAMERAS)
     .default([]),
+  // An Undo or Redo: what each field held when the page last read it. Pages before 1.6.0 send none.
+  expected: z
+    .array(z.strictObject({ id: RowIdSchema, fields: z.partialRecord(z.enum(ROW_FIELDS), z.json()) }))
+    .max(MAX_CAMERAS)
+    .optional(),
 });
-/** A saved change: the cameras as saved now, and the cameras it changed that were deleted elsewhere. */
+/**
+ * A saved change: the cameras as saved now, the cameras it changed that were deleted elsewhere,
+ * and the fields an Undo or Redo left alone because another window had changed them since.
+ */
 export interface RoutingSave {
   readonly status: "saved";
   readonly rows: RoutingRow[];
   readonly revision: string | null;
   readonly missing: string[];
+  readonly kept: KeptField[];
 }
 
 const toMapping = (row: RoutingRow): Mapping => ({
@@ -422,13 +431,13 @@ export class TslRouting {
     }
     let current = { rows: this.rows, revision: this.revision };
     for (let attempt = 0; attempt < SAVE_ATTEMPTS; attempt++) {
-      const { rows, missing } = applyRoutingChange(current.rows, change);
+      const { rows, missing, kept } = applyRoutingChange(current.rows, change);
       if (rows.length > MAX_CAMERAS) throw new Error(`A routing sheet holds at most ${MAX_CAMERAS} cameras`);
       if (new Set(rows.map((row) => row.id)).size !== rows.length) throw new Error("Two cameras have the same ID");
       const value = RoutingDocumentSchema.parse({ rows });
       // Nothing to write: already saved, as when a save is sent again after a restart.
       if (JSON.stringify(value.rows) === JSON.stringify(current.rows))
-        return { status: "saved", rows: current.rows, revision: current.revision, missing };
+        return { status: "saved", rows: current.rows, revision: current.revision, missing, kept };
       try {
         const saved = await this.documents().write(
           { id: ROUTING_DOCUMENT_ID, revision: current.revision },
@@ -437,7 +446,7 @@ export class TslRouting {
         );
         const stored = RoutingDocumentSchema.parse(saved.value);
         this.adopt(stored.rows, saved.revision);
-        return { status: "saved", rows: stored.rows, revision: saved.revision, missing };
+        return { status: "saved", rows: stored.rows, revision: saved.revision, missing, kept };
       } catch (error) {
         if (!(error instanceof ModuleDocumentConflictError)) throw error;
         // Another window saved first: this change goes onto what it saved.
