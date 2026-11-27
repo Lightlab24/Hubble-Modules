@@ -11,7 +11,7 @@
  */
 import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, describe, expect, it } from "vitest";
-import { ModuleFrontendValueSchema, ModuleWindowPartsSchema, createModuleFrontendClient, type ModuleFrontendValue } from "@hubble/module-sdk/frontend";
+import { MODULE_WINDOW_PARTS_LIMIT, ModuleFrontendValueSchema, ModuleWindowPartsSchema, createModuleFrontendClient, type ModuleFrontendValue } from "@hubble/module-sdk/frontend";
 import type { ModuleContext } from "@hubble/module-sdk";
 import { createBackend, type LiveReply } from "../src/backend.js";
 import type { PingProcess } from "../src/engine.js";
@@ -40,7 +40,7 @@ import {
   type PingDocument,
 } from "../src/model.js";
 import { openDeviceList, revisionIn } from "../src/page-store.js";
-import { partTitle, sheetWindow, windowParts } from "../src/sheet-window.js";
+import { partTitle, sheetWindow, WINDOW_PARTS_LIMIT, windowParts } from "../src/sheet-window.js";
 import source from "../src/manifest.js";
 
 const cleanup: (() => unknown)[] = [];
@@ -615,6 +615,7 @@ describe("a sheet in a window of its own", () => {
   });
 
   it("lists up to 24 sheets with one-line titles, and the one sheet of a list that never had more", () => {
+    expect(WINDOW_PARTS_LIMIT).toBe(MODULE_WINDOW_PARTS_LIMIT);
     expect(windowParts(defaultDocument())).toEqual([{ view: "devices", title: "Devices" }]);
     const doc = defaultDocument();
     doc.sheets = Array.from({ length: 30 }, (_, index) => ({ id: `sheet-${index + 1}`, name: index === 2 ? "Stage\nleft " : `Sheet ${index + 1}` }));

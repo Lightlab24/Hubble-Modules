@@ -1,4 +1,4 @@
-import { MODULE_WINDOW_PARTS_LIMIT, type ModuleWindowPart } from "@hubble/module-sdk/frontend";
+import type { ModuleWindowPart } from "@hubble/module-sdk/frontend";
 import { newDevice, openSheetId, setDeviceCount, sheetRows, sheetsOf, type DeviceRow, type PingDocument, type Sheet } from "./model.js";
 
 /**
@@ -10,6 +10,13 @@ import { newDevice, openSheetId, setDeviceCount, sheetRows, sheetsOf, type Devic
  * and a timeline of its own, whichever sheet the module's whole page has open. It never saves which
  * sheet is open, so the whole page opens where the operator left it.
  */
+
+/**
+ * The most parts Hubble lists for one page: the SDK's MODULE_WINDOW_PARTS_LIMIT, which a test
+ * compares. It is written out because the worker imports this file, and importing the SDK's
+ * frontend entry there would bundle a second copy of zod into module.mjs.
+ */
+export const WINDOW_PARTS_LIMIT = 24;
 
 /** A sheet's name as a window title: one line of up to 80 characters. */
 export function partTitle(name: string): string {
@@ -28,7 +35,7 @@ export function partTitle(name: string): string {
  */
 export function windowParts(document: PingDocument): ModuleWindowPart[] {
   return sheetsOf(document)
-    .slice(0, MODULE_WINDOW_PARTS_LIMIT)
+    .slice(0, WINDOW_PARTS_LIMIT)
     .map((sheet) => ({ view: sheet.id, title: partTitle(sheet.name) }));
 }
 
