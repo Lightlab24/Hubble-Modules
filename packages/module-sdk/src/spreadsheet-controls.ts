@@ -164,11 +164,20 @@ export interface SpreadsheetControlsOptions {
    * Lets Hubble keep undo and redo for this grid. Requires
    * module-spreadsheet-history-v1. Each paste, fill, clear, cut, choice,
    * toggle, colour and recorded edit is one step, up to `limit` (200). Undo
-   * and Redo send the cells back through onEdit with source `undo` or `redo`.
-   * When set, onHistory is not called.
+   * and Redo send the cells back through onEdit with source `undo` or `redo`,
+   * and leave a cell that changed since this grid's step (in another window,
+   * or by the module) as it is. When set, onHistory is not called.
    */
   readonly history?: boolean | { readonly limit?: number };
   onHistoryChange?(state: { undo: boolean; redo: boolean }): void;
+  /**
+   * The cells Undo or Redo left as they are because they changed since.
+   * Without it, Hubble says so through onError.
+   */
+  onHistoryLeft?(
+    cells: readonly SpreadsheetAddress[],
+    direction: "undo" | "redo",
+  ): void;
   onSelection?(address: SpreadsheetAddress | undefined): void;
   onReferencePick?(address: SpreadsheetAddress): boolean;
   /** Visible rows and columns in display order; IDs must be unique and stable. */

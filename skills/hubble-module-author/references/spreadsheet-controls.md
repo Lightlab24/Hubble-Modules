@@ -315,6 +315,16 @@ const controls = await mountSpreadsheetControls({
 - Cells that have gone, are read-only or already hold the step's values are
   left out. A step with nothing left is passed over, so one press reaches the
   newest step that still changes something.
+- A cell that changed since the grid's step, in another window or by the
+  module, is left as it is, and Hubble says so: it calls
+  `onHistoryLeft(cells, direction)`, or reports it through `onError`
+  (`Source was changed since, so Undo left it as it is`). It compares with
+  what the cell showed once the module had applied the step, so a value the
+  module tidied, such as a trimmed name or an address given its mask, is no
+  change. A step left whole goes, and that press does nothing more. Hubble
+  knows only what this window has seen: a page open in several windows also
+  checks when it saves, so a save from another window it hasn't read yet is
+  not overwritten.
 - Edits the module makes itself, such as typed text, join the history when you
   call `controls.history.record(edits)` **just before** applying them, while
   `getCell` still returns the old values. It returns a token for `forget`.
