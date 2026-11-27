@@ -1,6 +1,6 @@
 # AJA FS-HDR
 
-Module ID `aja-fshdr`, version 2.3.1. Controls AJA FS-HDR frame synchronizers and HDR converters over their REST interface, from one page built on Hubble's shared spreadsheet controls. It needs Hubble 2.2.0 or later, and from 2.3.0 a Hubble with module windows (host feature `module-page-windows-v1`): the page is live in every HubDash window at once, and every window shows the same tab and layout, which are saved with the plan. Each tab, the ones you add too, also opens alone in a window of its own from HubDash's sidebar (Open in its own window ›): that window keeps to its tab whichever tab the page has open, never changes which one that is, takes the tab's new name when it is renamed, and says so when the tab is removed.
+Module ID `aja-fshdr`, version 2.4.0. Controls AJA FS-HDR frame synchronizers and HDR converters over their REST interface, from one page built on Hubble's shared spreadsheet controls. It needs Hubble 2.2.0 or later, and from 2.3.0 a Hubble with module windows (host feature `module-page-windows-v1`): the page is live in every HubDash window at once, and every window shows the same tab and layout, which are saved with the plan. Each tab, the ones you add too, also opens alone in a window of its own from HubDash's sidebar (Open in its own window ›): that window keeps to its tab whichever tab the page has open, never changes which one that is, takes the tab's new name when it is renamed, and says so when the tab is removed.
 
 ## The page
 
