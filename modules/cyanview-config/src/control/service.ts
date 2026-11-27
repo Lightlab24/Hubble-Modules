@@ -252,6 +252,8 @@ export class CameraControl {
     }
     this.watchedRevision = undefined;
   }
+  /** How often a controller has reported a camera added, deleted or renumbered. */
+  cameraChangeCount(id: string) { return this.cameraChanges[id] ?? 0; }
   state() {
     const { enabled, singleSwitch } = this.selection.value();
     // keys and pressed tell the page's setup tour that a key uses Cyanview and that one has been pressed.

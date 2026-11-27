@@ -3,7 +3,7 @@ import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { icons } from 'lucide-react';
 import { isStaleDraft } from './save-conflict.js';
-import { mergePlans, planText, type PlanConflict, type PlanValue } from './plan-merge.js';
+import { mergePlans, planText, samePlan, type PlanConflict, type PlanValue } from './plan-merge.js';
 import './approved-ui.css';
 import './frame.css';
 import './workbook-controls.css';
@@ -66,6 +66,8 @@ if (window.parent !== window) {
     }
     return JSON.parse(text);
   }
+  // Names this copy of the page to the worker for automatic reads, so one copy reads each change a controller reports.
+  const copyId = Array.from(crypto.getRandomValues(new Uint8Array(12)), byte => byte.toString(16).padStart(2, '0')).join('');
   const bridge = {
     preview: false,
     // The module is running against its simulated controllers, which the save status says.
@@ -124,6 +126,8 @@ if (window.parent !== window) {
           if (!isStaleDraft(error)) throw error;
           for (let attempt = 1; ; attempt++) {
             const fresh = await readPlan(), merged = mergePlans(base, mine, fresh.plan);
+            // What this copy changed is in the saved plan already, as when two copies read the same controller change.
+            if (fresh.revision !== null && fresh.plan && samePlan(merged.plan, fresh.plan)) { result = { revision: fresh.revision }; written = fresh.plan; conflicts = merged.conflicts; break; }
             try { result = await write(merged.plan, fresh.revision); written = merged.plan; conflicts = merged.conflicts; break; }
             catch (again) { if (!isStaleDraft(again) || attempt >= 4) throw again; }
           }
@@ -192,7 +196,7 @@ if (window.parent !== window) {
     },
     /** A live read follows a change a controller just reported, and reads the socket that reported it. */
     async refresh(devices?: string[], live = false) {
-      return readBounded(await tracked(client.call('refresh', devices ? payload(live ? { devices, live } : { devices }) : undefined)) as Record<string, any>);
+      return readBounded(await tracked(client.call('refresh', devices ? payload(live ? { devices, live, copy: copyId } : { devices }) : undefined)) as Record<string, any>);
     },
     /** Cyanview's own Enabled on a camera. Its REMI copies follow it. */
     async cameraEnabled(device: string, key: string, enabled: boolean) { return tracked(client.call('camera-enabled', payload({ device, key, enabled }))); },

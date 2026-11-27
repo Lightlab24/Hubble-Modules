@@ -1166,19 +1166,30 @@
   }
   // A send reports its own results, and a read partway through one would show half a change.
   const autoReadWaits = () => sendsRunning || cameras.some(camera => camera.jobs > 0 || camera.deleting) || [...remiPanels.values()].some(state => state.busy);
+  // Changes going out to the controllers from every open copy of the page, this one included, as the worker counts
+  // them. Another copy's send changes the controllers as much as this copy's own does.
+  let controllersChanging = 0;
+  const applyLiveStateBeforeReads = applyLiveState;
+  applyLiveState = function(values) {
+    if (values && 'controllersChanging' in values) controllersChanging = Number(values.controllersChanging) || 0;
+    return applyLiveStateBeforeReads(values);
+  };
+  const readWaits = () => autoReadWaits() || controllersChanging > 0;
   async function runAutoRead() {
     autoReadTimer = null;
     if (!autoReads.size) return;
-    if (autoReadWaits()) { scheduleAutoRead(500); return; }
+    if (readWaits()) { scheduleAutoRead(500); return; }
     const ids = [...autoReads], workBefore = controllerWork;
     autoReads.clear();
     try {
       const reply = await moduleBridge.refresh(ids, true);
       // A send that began during the read may already have changed what it read. The send's own change reads again after it.
-      if (autoReadWaits()) { for (const id of ids) autoReads.add(id); scheduleAutoRead(500); return; }
+      if (readWaits()) { for (const id of ids) autoReads.add(id); scheduleAutoRead(500); return; }
       // So may one that began and finished while the read was out.
       if (controllerWork !== workBefore) { for (const id of ids) autoReads.add(id); scheduleAutoRead(30); return; }
-      for (const snapshot of reply.snapshots || []) mergeSnapshot(snapshot);
+      // Another copy of the page is reading the rest (reply.shared), and this copy follows the plan that copy saves.
+      if (!reply.snapshots?.length) return;
+      for (const snapshot of reply.snapshots) mergeSnapshot(snapshot);
       renderLans();
       renderCameras();
       remember();

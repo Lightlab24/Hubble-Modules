@@ -115,6 +115,21 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
     followPlan(saved.plan);
     publish({ ...service.state(), planRevision: saved.revision }); return { revision: saved.revision };
   };
+  // Every open copy of the page reads a controller again when the controller reports a change: in each HubDash window,
+  // or on each computer. The first copy to ask for a controller's latest change reads it and saves what it found, and
+  // the other copies are told it is shared and follow the plan that copy saves. A copy that asks again for the same
+  // change reads it again, and a claim lapses after a while, so a copy closed partway through holds no one up for long.
+  const autoReaders = new Map<string, { copy: string; mark: string; until: number }>();
+  function claimAutoReads(ids: string[], copy: string) {
+    const now = Date.now(), counts = (service.state().configChanges as { counts?: Record<string, number> } | null)?.counts ?? {};
+    const only: string[] = [], shared: string[] = [];
+    for (const id of ids) {
+      const mark = String(counts[id] ?? 0) + ':' + String(control?.cameraChangeCount(id) ?? 0), held = autoReaders.get(id);
+      if (held && held.copy !== copy && held.mark === mark && held.until > now) shared.push(id);
+      else { autoReaders.set(id, { copy, mark, until: now + 15000 }); only.push(id); }
+    }
+    return { only, shared };
+  }
   const instance: ModuleInstance = {
     async start() {
       // The simulated controllers are put back as they were before anything connects to them.
@@ -203,8 +218,11 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
         }
         case 'stop-scan': service.stopScan(); return { stopped: true };
         case 'refresh': {
-          const began = performance.now();
-          const value = await watched('read-timing', 'Reading the controllers', signal, () => service.refresh(signal, Array.isArray(input.devices) ? input.devices.map(String) : undefined, input.live === true));
+          const began = performance.now(), live = input.live === true;
+          let only = Array.isArray(input.devices) ? input.devices.map(String) : undefined, shared: string[] = [];
+          if (live && only && typeof input.copy === 'string' && input.copy) ({ only, shared } = claimAutoReads(only, input.copy.slice(0, 64)));
+          if (only && !only.length) return { snapshots: [], failed: [], observations: service.state().observations, shared };
+          const value = { ...await watched('read-timing', 'Reading the controllers', signal, () => service.refresh(signal, only, live)), shared };
           // A controller that doesn't answer is waited on until its read times out, so a slow or failed read says which.
           const elapsed = Math.round(performance.now() - began), read = value.snapshots.length + value.failed.length;
           if (elapsed >= 1000 || value.failed.length) context.log({ level: 'info', stage: 'read-timing', message: 'Read ' + read + (read === 1 ? ' controller' : ' controllers') + ' in ' + elapsed + ' ms' +
@@ -269,6 +287,17 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
     async choices(provider) { return (await control!.discover(provider, {}, '', null, 512, lifetime.signal)).choices.map(({ id, label, group }) => ({ id, label, ...(group ? { group } : {}) })); },
     subscribeFeedback(subscriptions, execution) { control!.subscribe(subscriptions, execution.signal); },
     async dispose() { if (stopped) return; stopped = true; lifetime.abort(); service.dispose(); firmware.dispose(); await control!.dispose(); await rig?.dispose(); transfers.clear(); imports.clear(); reads.clear(); },
+  };
+  // A change going out to the controllers from any open copy of the page is counted in the state. While one is out,
+  // every copy holds its automatic reads, since a read partway through a change would show half of it.
+  const controllerChanges = new Set(['send', 'send-commit', 'remi-send', 'remi-route', 'camera-enabled', 'camera-refresh', 'clear-network']);
+  const answer = instance.call!.bind(instance);
+  let changing = 0;
+  instance.call = async (method, raw, execution) => {
+    if (!controllerChanges.has(String(object(raw).commandId))) return answer(method, raw, execution);
+    publish({ controllersChanging: ++changing });
+    try { return await answer(method, raw, execution); }
+    finally { publish({ controllersChanging: --changing }); }
   };
   if (!rigStore) return instance;
   // Simulated keeps what was sent to its controllers in a document. Hubble lets a module write one only during a

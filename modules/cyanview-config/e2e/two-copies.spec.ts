@@ -207,3 +207,55 @@ test('a merged save that lands while another cell is being typed in leaves that 
   await expect(cell(one, 'cam3').locator('input')).toHaveValue('Shot 3');
   await expect(cell(one, 'cam1').locator('input')).toHaveValue('Still typing');
 });
+
+test('a send from one copy is read back by one copy, and the others follow without reading or saving it', async ({ page, request }) => {
+  // On Nov 27, 2026 six copies were open in the packaged app when one sent: each copy read the controller back after
+  // every change it reported and saved what it read, and under that contention three gave up with "Configuration
+  // changed in another editor". Now the worker has one copy read each change, and every copy waits for a send from
+  // any copy to finish before reading.
+  test.setTimeout(60000);
+  await request.post('/__reset', { data: { sample: false, remi: true, live: true } });
+  let counting = false;
+  const counts: { saves: number; reads: number; stale: number }[] = [];
+  const watch = (copy: Page) => {
+    const count = { saves: 0, reads: 0, stale: 0 };
+    counts.push(count);
+    copy.on('requestfinished', async finished => {
+      if (!counting || !finished.url().endsWith('/__rpc')) return;
+      const body = finished.postDataJSON() ?? {}, reply = await (await finished.response())?.json().catch(() => ({})) ?? {};
+      if (['save-plan', 'save-commit'].includes(body.commandId)) { count.saves++; if (String(reply.error ?? '').includes('another editor')) count.stale++; }
+      if (body.commandId === 'refresh' && body.value?.live && reply.result?.snapshots?.length) count.reads++;
+    });
+  };
+  const copies: FrameLocator[] = [];
+  for (let index = 0; index < 4; index++) {
+    const copy = index ? await page.context().newPage() : page;
+    watch(copy);
+    await copy.goto('/');
+    const f = frame(copy);
+    await expect(f.locator('[data-role="saved-label"]')).toContainText('Workspace saved');
+    copies.push(f);
+  }
+  const sender = copies[0]!;
+  await sender.locator('[data-tab="setup"]').click();
+  const row = sender.locator('[data-controller="__camera-setup__"] tbody tr[data-id]').first(), id = await row.getAttribute('data-id');
+  await row.locator('[data-column="name"] input').fill('Sent from one copy');
+  await row.locator('[data-column="name"] input').press('Enter');
+  await settled(request);
+  counting = true;
+  await sender.locator('.hc-panel:not([hidden]) .hc-toolbar [data-action="toggle-pending-sends"]').click();
+  await sender.locator('[data-role="pending-sends"] [data-action="send-all-pending"]').click();
+  await expect(row.locator('[data-column="sync"]')).toHaveText(/Verified|In sync/, { timeout: 15000 });
+  // Every copy shows it, from the plan.
+  for (const f of copies.slice(1)) {
+    await f.locator('[data-tab="setup"]').click();
+    await expect(f.locator(`[data-controller="__camera-setup__"] tbody tr[data-id="${id}"] [data-column="name"] input`)).toHaveValue('Sent from one copy');
+  }
+  await page.waitForTimeout(3000);
+  await settled(request);
+  const reads = counts.reduce((sum, count) => sum + count.reads, 0), followerSaves = counts.slice(1).reduce((sum, count) => sum + count.saves, 0);
+  expect(reads, 'controller read back by one copy, ' + JSON.stringify(counts)).toBeLessThanOrEqual(2);
+  expect(followerSaves, 'the other copies save at most what one of them read, ' + JSON.stringify(counts)).toBeLessThanOrEqual(1);
+  expect(counts.every(count => count.stale === 0), 'no save refused').toBe(true);
+  for (const f of copies) await expect(toast(f)).not.toContainText('another editor');
+});

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { mergePlans, samePlan, type PlanValue } from '../src/plan-merge.js';
 import { pageViewStore } from '../src/page-view-store.js';
-import { fixture } from './helpers.js';
+import { FakeController, fixture, planFor } from './helpers.js';
 
 // The page can be open in two HubDash windows or on two computers at once (Nov 25, 2026). A copy that saves after the
 // other one has saved puts its own changes onto the saved plan instead of its whole plan on top.
@@ -161,5 +161,43 @@ test('where the page was left is kept on this computer, out of the plan, with Si
     assert.deepEqual(await session.call('page-view', { tab: 'assignment' }), { saved: true });
     assert.deepEqual(await session.call('page-view', null), { view: { tab: 'assignment' } });
     assert.equal((await session.call('read-plan')).revision, before.revision);
+  } finally { await session.instance.dispose(); }
+});
+
+test('one copy reads each change a controller reports, and the others follow the plan it saves', async () => {
+  // Six copies open on Nov 27, 2026 each read the controller after a send and saved what they read; under the
+  // contention some gave up with "Configuration changed in another editor".
+  const fake = new FakeController(); await fake.start();
+  const session = fixture({}, { client: address => fake.client(address) });
+  await session.instance.start();
+  try {
+    const written = await session.repository.write(null, planFor(fake), session.signal), id = String(written.plan.devices[0]!.id);
+    const first = await session.call('refresh', { devices: [id], live: true, copy: 'window-a' });
+    assert.equal(first.snapshots.length, 1);
+    assert.deepEqual(first.shared, []);
+    const second = await session.call('refresh', { devices: [id], live: true, copy: 'window-b' });
+    assert.equal(second.snapshots.length, 0);
+    assert.deepEqual(second.shared, [id]);
+    // The copy reading it may read it again, as it does when a send began while it read.
+    assert.equal((await session.call('refresh', { devices: [id], live: true, copy: 'window-a' })).snapshots.length, 1);
+    // Refresh all and a read of one device the operator asked for are never shared.
+    assert.equal((await session.call('refresh', { devices: [id] })).snapshots.length, 1);
+    assert.equal((await session.call('refresh')).snapshots.length, 1);
+  } finally { await session.instance.dispose(); await fake.close(); }
+});
+
+test('a change going out to the controllers is counted for every copy while it is out', async () => {
+  const session = fixture();
+  await session.instance.start();
+  const changing = () => session.states.map(state => (state as { values: { controllersChanging?: number } }).values.controllersChanging);
+  try {
+    assert.equal(changing().at(-1), undefined);
+    await session.call('send', {}).catch(() => undefined);
+    const seen = changing().filter(value => value !== undefined);
+    assert.deepEqual(seen.slice(-2), [1, 0]);
+    // A save is no change to a controller.
+    const before = session.states.length, read = await session.call('read-plan');
+    await session.call('save-plan', { revision: read.revision, plan: { ...read.plan, devices: [], cameras: [], lans: [] } });
+    assert.ok(session.states.slice(before).every(state => (state as { values: { controllersChanging?: number } }).values.controllersChanging === 0));
   } finally { await session.instance.dispose(); }
 });
