@@ -108,8 +108,22 @@ export function createColorsEditor(options: ColorsEditorOptions) {
 
   panel.querySelector(".follow-alert")!.addEventListener("click", () => options.set(null));
 
+  /**
+   * Opens just above the Colors button, 9 px clear of it, on whichever line of the row under the
+   * timeline a narrow window has put it. In a wide window that is where the stylesheet puts it.
+   */
+  function place() {
+    const area = panel.offsetParent;
+    if (!(area instanceof HTMLElement)) return;
+    panel.style.bottom = `${Math.round(area.getBoundingClientRect().bottom - button.getBoundingClientRect().top + 9)}px`;
+  }
+  window.addEventListener("resize", () => {
+    if (!panel.hidden) place();
+  });
+
   function open() {
     panel.hidden = false;
+    place();
     button.setAttribute("aria-expanded", "true");
     refresh();
     inputs.get("green")!.focus();

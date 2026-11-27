@@ -44,8 +44,8 @@ const deviceIn = async (id) => (await saved()).devices.find((row) => row.id === 
 const shot = async (name) => {
   if (shots) for (const [index, page] of pages.entries()) await page.screenshot({ path: `${shots}/${name}-${index + 1}.png` });
 };
-/** Every message a copy has floated over its page, from Hubble's toasts. */
-const toasts = (frame) => frame.locator("[data-hubble-toast], .hubble-toast, [role=status], [role=alert]").allInnerTexts();
+/** Every message a copy shows over its page, from Hubble's toasts, leaving out ones that are hidden. */
+const toasts = (frame) => frame.locator("[data-hubble-toast]:visible, .hubble-toast:visible, [role=status]:visible, [role=alert]:visible").allInnerTexts();
 
 try {
   await fetch(`${origin}/__simulate`, { method: "POST", body: JSON.stringify({ reset: true }) });

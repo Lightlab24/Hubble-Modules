@@ -64,6 +64,27 @@ function reportClashes(clashes: string[]) {
   void showToast({ title, message: `${listed}What you entered here is kept.` }).catch(() => undefined);
 }
 
+/**
+ * A toolbar too wide for its window wraps onto another line. A divider means nothing at either end
+ * of a line, so it is hidden there; it keeps its room, so hiding it never moves anything.
+ */
+function tidyToolbars() {
+  const middle = (element: Element | null) => {
+    if (!element) return Number.NaN;
+    const box = element.getBoundingClientRect();
+    return box.top + box.height / 2;
+  };
+  const tidy = () => {
+    for (const divider of document.querySelectorAll<HTMLElement>(".toolbar-divider")) {
+      const at = middle(divider);
+      const inLine = Math.abs(middle(divider.previousElementSibling) - at) < 4 && Math.abs(middle(divider.nextElementSibling) - at) < 4;
+      divider.style.visibility = inLine ? "" : "hidden";
+    }
+  };
+  const watch = new ResizeObserver(tidy);
+  for (const toolbar of document.querySelectorAll(".toolbar")) for (const part of [toolbar, ...toolbar.children]) watch.observe(part);
+}
+
 try {
   const client = await connectModuleFrontend(window);
   // Every open copy of this page, in any HubDash window, follows what the others save.
@@ -143,7 +164,8 @@ try {
       el("tl-hint").textContent = text ?? "Pinch to zoom · two fingers to move through time";
     },
     onFollow: (following) => {
-      el("tl-live").hidden = following;
+      // It keeps its room while hidden, so its coming and going never moves the controls beside it.
+      el("tl-live").dataset.shown = String(!following);
     },
     onScale: (ms, done) => {
       gestureScale = done ? undefined : ms;
@@ -594,6 +616,7 @@ try {
   });
   setInterval(() => timeline.tick(), 250);
 
+  tidyToolbars();
   el("loading").hidden = true;
   update();
   void followLive();

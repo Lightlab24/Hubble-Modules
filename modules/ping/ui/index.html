@@ -9,24 +9,30 @@
   </header>
   <div id="gone" class="gone" role="status" hidden><h2>This sheet is no longer here</h2><p>It was removed from Ping. If it is put back, it shows here again.</p></div>
   <div class="toolbar" role="toolbar" aria-label="Ping controls">
-    <button id="add-device" class="primary"><span aria-hidden="true">+</span> Add device</button>
-    <label class="field count">Devices <input id="device-count" type="number" min="0" max="128" step="1" inputmode="numeric" autocomplete="off" aria-label="Number of devices"></label>
+    <div class="toolbar-group">
+      <button id="add-device" class="primary"><span aria-hidden="true">+</span> Add device</button>
+      <label class="field count">Devices <input id="device-count" type="number" min="0" max="128" step="1" inputmode="numeric" autocomplete="off" aria-label="Number of devices"></label>
+    </div>
     <span class="toolbar-divider"></span>
-    <div id="pinging"></div>
-    <label class="field">Ping every <select id="every" aria-label="Ping every"></select></label>
-    <label class="field">Size <select id="size" aria-label="Ping size"></select></label>
-    <span class="toolbar-spacer"></span>
-    <div id="span"></div>
-    <div id="text-size" aria-label="Text size"></div>
-    <div id="columns"></div>
+    <div class="toolbar-group">
+      <div id="pinging"></div>
+      <label class="field">Ping every <select id="every" aria-label="Ping every"></select></label>
+      <label class="field">Size <select id="size" aria-label="Ping size"></select></label>
+    </div>
+    <div class="toolbar-group toolbar-end">
+      <div id="span"></div>
+      <div id="text-size" aria-label="Text size"></div>
+      <div id="columns"></div>
+    </div>
   </div>
   <div class="toolbar alerts" role="toolbar" aria-label="Alerts for every device">
-    <span class="group-label">Alerts</span>
-    <label class="field">Answer over <select id="alert-over" aria-label="Alert when an answer is over"></select></label>
-    <label class="field">No answer for <select id="alert-lost" aria-label="Alert when there is no answer for"></select></label>
+    <div class="toolbar-group">
+      <span class="group-label">Alerts</span>
+      <label class="field">Answer over <select id="alert-over" aria-label="Alert when an answer is over"></select></label>
+      <label class="field">No answer for <select id="alert-lost" aria-label="Alert when there is no answer for"></select></label>
+    </div>
     <span class="toolbar-divider"></span>
-    <div id="notify"></div>
-    <span class="toolbar-spacer"></span>
+    <div class="toolbar-group"><div id="notify"></div></div>
     <span class="note">For every device. A device's own Alert cells override these.</span>
   </div>
   <main class="work-area">
@@ -38,7 +44,7 @@
   <section class="timeline" aria-label="Ping timeline">
     <div class="tl-head"><h2 id="tl-name">No device selected</h2><span class="sub" id="tl-sub"></span><div class="stats" id="tl-stats"></div></div>
     <canvas id="chart" role="img" aria-label="Answer time over time" tabindex="0"></canvas>
-    <div class="legend"><span class="legend-chips" id="legend-chips"></span><button id="colors" class="quiet" aria-haspopup="dialog" aria-expanded="false" aria-controls="colors-panel" title="Set a colour for each range of answer times">Colors</button><span class="legend-spacer"></span><button id="tl-live" class="quiet" hidden>Back to now</button><span class="field scale"><span id="scale"></span><button id="scale-auto" class="quiet toggle" aria-pressed="true" title="Auto fits the tallest bar on show">Auto</button></span><button id="clear-history" class="quiet" title="Forgets every device's past pings. Devices and alert settings stay.">Clear history</button><span class="hint" id="tl-hint">Pinch to zoom · two fingers to move through time</span></div>
+    <div class="legend"><div class="legend-start"><span class="legend-chips" id="legend-chips"></span><button id="colors" class="quiet" aria-haspopup="dialog" aria-expanded="false" aria-controls="colors-panel" title="Set a colour for each range of answer times">Colors</button></div><div class="legend-end"><button id="tl-live" class="quiet" data-shown="false">Back to now</button><span class="field scale"><span id="scale"></span><button id="scale-auto" class="quiet toggle" aria-pressed="true" title="Auto fits the tallest bar on show">Auto</button></span><button id="clear-history" class="quiet" title="Forgets every device's past pings. Devices and alert settings stay.">Clear history</button><span class="hint" id="tl-hint">Pinch to zoom · two fingers to move through time</span></div></div>
     <div id="colors-panel" class="colors-panel" role="dialog" aria-label="Bar colors" hidden><h3>Bar colors by answer time</h3><div class="color-rows"></div><p class="colors-note">Type a time to use these colors. Until then, bars are green under the alert limit and amber over it.</p><div class="color-actions"><button type="button" class="quiet follow-alert" title="Green under the alert limit, amber over it">Follow alert limit</button></div></div>
   </section>
   <footer class="app-footer"><output id="save-status" aria-live="polite">Loading…</output><span id="data-use"></span></footer>
