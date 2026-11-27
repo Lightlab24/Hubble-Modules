@@ -62,6 +62,48 @@ it('requires the host feature, and the declaration is only ever true', () => {
   expect(() => ModuleManifestSchema.parse(manifest({ windows: 'camera-3' }))).toThrow()
 })
 
+const parts = (value: unknown) => {
+  const section = ModuleManifestSchema.parse(value).pages?.[0]?.sections[0]
+  return section?.type === 'custom' ? section.parts : undefined
+}
+
+it('lists the parts the sidebar opens in windows: fixed, or a published state value', () => {
+  const fixed = [
+    { view: 'devices', title: 'Devices' },
+    { view: 'setup', title: 'Camera Configuration' },
+  ]
+  expect(parts(manifest({ windows: true, parts: fixed }))).toEqual(fixed)
+  // Parts the operator adds, such as sheets, are read from what the module publishes.
+  expect(parts(manifest({ windows: true, parts: { value: 'sheets' } }))).toEqual({
+    value: 'sheets',
+  })
+  expect(parts(manifest({ windows: true }))).toBeUndefined()
+})
+
+it('refuses parts without windows, a view listed twice, and a title on two lines', () => {
+  expect(() =>
+    ModuleManifestSchema.parse(manifest({ parts: [{ view: 'a', title: 'A' }] })),
+  ).toThrow('windows: true')
+  expect(() =>
+    ModuleManifestSchema.parse(
+      manifest({
+        windows: true,
+        parts: [
+          { view: 'a', title: 'A' },
+          { view: 'a', title: 'Again' },
+        ],
+      }),
+    ),
+  ).toThrow('its own view')
+  expect(() =>
+    ModuleManifestSchema.parse(manifest({ windows: true, parts: [{ view: 'a', title: 'A\nB' }] })),
+  ).toThrow('one line')
+  expect(() => ModuleManifestSchema.parse(manifest({ windows: true, parts: [] }))).toThrow()
+  expect(() =>
+    ModuleManifestSchema.parse(manifest({ windows: true, parts: { value: '' } })),
+  ).toThrow()
+})
+
 it('asks Hubble for a window by a view and a one-line title, and renames its own', async () => {
   const channel = new MessageChannel()
   const client = createModuleFrontendClient(frontendPort(channel.port1), {
