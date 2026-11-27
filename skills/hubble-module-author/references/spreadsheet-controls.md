@@ -318,10 +318,17 @@ const controls = await mountSpreadsheetControls({
 - Edits the module makes itself, such as typed text, join the history when you
   call `controls.history.record(edits)` **just before** applying them, while
   `getCell` still returns the old values. It returns a token for `forget`.
-- When a save fails, roll the cells back and call
-  `controls.history.forget(batch)` with the batch `onEdit` received or the
-  token from `record`. The step goes, so Undo never brings back a value that
-  never held. For a refused `undo` or `redo` batch the step goes back where it
+- Changes that are not cell edits, such as adding or removing a unit, a row or
+  a sheet, join the same history through `controls.history.recordChange`, as
+  below. Hubble calls `undo(attempt)` or `redo(attempt)` in turn with the cell
+  steps around them; the module applies the change at once and saves it like
+  any other. Keep what a removed unit held and where it was, so it comes back
+  whole, in its place.
+- When a save fails, roll the change back and call
+  `controls.history.forget(...)` with the batch `onEdit` received or the token
+  from `record` or `recordChange`. The step goes, so Undo never brings back a
+  value that never held. For a refused `undo` or `redo` batch, or the
+  `attempt` a change's `undo` or `redo` was given, the step goes back where it
   was, ready to try again.
 - For Undo and Redo buttons, mount the toolbar's history section with
   `getHistory: () => controls.history.state()` and
@@ -329,11 +336,39 @@ const controls = await mountSpreadsheetControls({
   toolbar's `refresh()` from `onHistoryChange`.
 - With the search field on Rows, call `search.reveal(address)` for the cells of
   an `undo` or `redo` batch, so a row the search hides comes back.
-- Hubble remembers cell values only. Row inserts, deletes and moves, sheet
-  changes and layout are not steps; a module that needs them keeps its own
-  history with `onHistory`, or uses the workbook session below. The history
-  lasts until the grid is disposed, and `controls.history.clear()` empties it,
-  for example after the page loads a different document.
+- Hubble remembers cell values itself, and anything else only through
+  `recordChange`. Layout and view changes, such as column widths, are not
+  steps. The history lasts until the grid is disposed, and
+  `controls.history.clear()` empties it, for example after the page loads a
+  different document.
+
+```ts
+// Removing a unit, undoable with the cell edits around it.
+function removeUnit(unit) {
+  const index = units.indexOf(unit);
+  applyRemove(unit);
+  const token = controls.history.recordChange({
+    undo(attempt) {
+      applyInsert(unit, index); // Back where it was, with everything it held.
+      saveUnits().catch(() => {
+        applyRemove(unit);
+        controls.history.forget(attempt);
+      });
+    },
+    redo(attempt) {
+      applyRemove(unit);
+      saveUnits().catch(() => {
+        applyInsert(unit, index);
+        controls.history.forget(attempt);
+      });
+    },
+  });
+  saveUnits().catch(() => {
+    applyInsert(unit, index);
+    controls.history.forget(token);
+  });
+}
+```
 
 ## Workbook tools for custom layouts
 

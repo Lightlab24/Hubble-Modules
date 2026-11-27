@@ -103,6 +103,21 @@ export interface SpreadsheetEditBatch {
     | "redo";
   readonly edits: readonly SpreadsheetEdit[];
 }
+/**
+ * A change that is not a cell edit, such as adding or removing a unit, a row
+ * or a sheet. Hubble's undo puts it back by asking the module.
+ */
+export interface SpreadsheetHistoryChange {
+  /**
+   * Puts the change back: removes the unit that was added, or adds back,
+   * where it was, the unit that was removed with everything it held. Apply it
+   * at once and save it as any other edit. If that save fails, roll it back
+   * and pass `attempt` to `forget`, so the step can be undone again.
+   */
+  undo(attempt: object): void;
+  /** Makes the change again, as `undo` describes. */
+  redo(attempt: object): void;
+}
 /** Undo and redo that Hubble keeps for a grid mounted with `history`. */
 export interface SpreadsheetHistory {
   state(): { undo: boolean; redo: boolean };
@@ -115,8 +130,15 @@ export interface SpreadsheetHistory {
    */
   record(edits: readonly SpreadsheetEdit[]): object;
   /**
-   * A save failed: pass the batch onEdit received or a `record` token. A
-   * gesture's step is dropped, so Undo never brings back a value that never
+   * Remembers a change the module makes that is not a cell edit, such as
+   * adding or removing a unit, as one step in the same history. Returns a
+   * token for `forget`.
+   */
+  recordChange(change: SpreadsheetHistoryChange): object;
+  /**
+   * A save failed: pass the batch onEdit received, a `record` or
+   * `recordChange` token, or the `attempt` a change's undo or redo was given.
+   * A gesture's step is dropped, so Undo never brings back a value that never
    * held; a refused undo or redo goes back where it was.
    */
   forget(batchOrToken: object): void;

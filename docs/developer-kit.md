@@ -79,7 +79,8 @@ The next developer kit adds `module-sliders-v1`: Hubble's shared slider, either 
 The next developer kit also adds `module-spreadsheet-history-v1`: a grid mounted with
 `mountSpreadsheetControls({ history: true })` has Hubble keep its undo and redo, so a
 module with no history of its own gets Command+Z, HubDash's Edit menu and the toolbar's
-Undo and Redo buttons without writing any. Check for the feature in the actual host's
+Undo and Redo buttons without writing any. Adding or removing a unit, a row or a sheet
+joins the same history through `controls.history.recordChange`. Check for the feature in the actual host's
 `describe` response; on a host without it the mount throws. See "Undo kept by Hubble" in
 the spreadsheet controls skill reference.
 
