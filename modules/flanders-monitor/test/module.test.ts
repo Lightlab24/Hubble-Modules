@@ -144,6 +144,8 @@ describe("Flanders module", () => {
     expect(parsed.documents?.map((document) => document.id)).toEqual([DOCUMENT_ID]);
     // Live in several HubDash windows at once, which only a Hubble with module windows accepts.
     expect(parsed.pages?.[0]).toMatchObject({ id: "flanders", label: "Flanders", layout: "full-page", sections: [{ type: "custom", id: "frontend", windows: true }] });
+    // One grid, nothing to split: no parts, so the sidebar's Open in its own window stays one item.
+    expect(parsed.pages?.[0]?.sections[0]).not.toHaveProperty("parts");
     expect(parsed.host).toMatchObject({
       requiredFeatures: expect.arrayContaining(["module-spreadsheet-controls-v1", "module-documents-v1", "module-workspace-instances-v1", "module-page-windows-v1"]),
     });

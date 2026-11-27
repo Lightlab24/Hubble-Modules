@@ -53,7 +53,9 @@ export default defineModuleManifest({
           entry: "ui/index.html",
           height: 560,
           // Live in every window at once: each copy follows the others, and none is refused for
-          // being behind or undoes another's work (merge.ts, test/windows.test.ts).
+          // being behind or undoes another's work (merge.ts, test/windows.test.ts). The page is one
+          // grid with nothing to split, so it lists no parts: the sidebar keeps its single
+          // Open in its own window item, which opens the whole page.
           windows: true,
           commands: [
             { id: "snapshot", label: "Read the monitor list" },
