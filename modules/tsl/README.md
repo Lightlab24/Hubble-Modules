@@ -89,9 +89,16 @@ window is its own copy of the page over the one running module:
   form, and each reads the setup when its turn comes.
 - The open tab, Find and scroll are each window's own. The tab last chosen in any window is
   remembered on this computer, for where the page opens next time.
+- One view in a window of its own: right-click TSL Tally in the sidebar, and **Open in its own
+  window ›** offers **Whole module**, then **Tally**, **Routing** and **Setup** (`parts` on the
+  section, from `src/views.ts`). That window, titled "Hubble - <sidebar name> - Routing", shows
+  only that view with its own tools: no View control, and Setup, which has no tools, no
+  toolbar. It never sends `view`, so the whole page still opens where it was left. A view the
+  page does not have says "This part of the page is no longer here."
 
 `e2e/windows.spec.ts` runs two and three copies of the built page against the preview and
-checks all of the above with real clicks and key presses.
+checks all of the above with real clicks and key presses. The preview opens a copy as one
+part's window at `/?view=tally`, `/?view=routing` or `/?view=setup`.
 
 ## Talking to the switcher
 

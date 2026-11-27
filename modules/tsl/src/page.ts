@@ -34,6 +34,7 @@ import {
   type TslRouting,
 } from "./routing.js";
 import { applySetupChange, type RoutingChange, type SetupChange } from "./changes.js";
+import { PAGE_VIEW_IDS, type PageView } from "./views.js";
 
 export const PAGE_ID = "tsl";
 export const PAGE_SECTION_ID = "app";
@@ -126,7 +127,7 @@ export interface SetupSaved {
 }
 export interface PageSnapshot {
   readonly name: string;
-  readonly tab: "tally" | "routing" | "setup";
+  readonly tab: PageView;
   readonly receiver: ReceiverSettings;
   readonly addresses: readonly { id: string; label: string }[];
   readonly peers: readonly { id: string; label: string }[];
@@ -144,7 +145,7 @@ export interface PageSnapshot {
 }
 
 const LocalState = z.object({
-  tab: z.enum(["tally", "routing", "setup"]).default("tally"),
+  tab: z.enum(PAGE_VIEW_IDS).default("tally"),
   reading: z.unknown().optional(),
   readAt: z.number().nullable().default(null),
   readError: z.string().nullable().default(null),
@@ -635,7 +636,7 @@ export class TslPage {
         return json(await this.shared(signal, routing));
       }
       case "view": {
-        const { tab } = z.object({ tab: z.enum(["tally", "routing", "setup"]) }).parse(request.value);
+        const { tab } = z.object({ tab: z.enum(PAGE_VIEW_IDS) }).parse(request.value);
         this.local = { ...this.local, tab };
         await this.remember();
         return null;

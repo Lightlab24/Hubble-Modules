@@ -10,6 +10,7 @@ import {
 } from "./page.js";
 import { defaultSwitcherDocument, SWITCHER_DOCUMENT_ID } from "./setup.js";
 import { defaultRoutingDocument, ROUTING_DOCUMENT_ID } from "./routing.js";
+import { PAGE_VIEWS } from "./views.js";
 
 export default defineModuleManifest({
   formatVersion: 1,
@@ -215,6 +216,9 @@ export default defineModuleManifest({
           // changed, onto what is saved now, and follows what the others save. The open tab is each
           // window's own; the one last chosen is where the page opens next time.
           windows: true,
+          // The sidebar's Open in its own window › offers each view as a part: its window shows
+          // only that view, with no View control, and never changes where the whole page opens.
+          parts: PAGE_VIEWS.map((part) => ({ ...part })),
         },
       ],
     },

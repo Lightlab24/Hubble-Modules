@@ -249,6 +249,7 @@ const pagePath = "/api/module-pages/" + "a".repeat(43);
 // Each address opened is one copy of the page, as each HubDash window is: its own frame and its
 // own bridge to the one running module. Every copy hears of a restart by itself, as each HubDash
 // window does: it sees the module's run change, waits until the module answers, then tells its page.
+// An address ending in ?view=<part> is one part's own window, as the sidebar opens it.
 const html = () => `<!doctype html><html lang="en"><meta charset="utf-8"><title>TSL Tally preview</title><style>html,body{margin:0;height:100%;overflow:hidden;background:#060606}iframe{display:block;width:100%;height:100dvh;border:0}</style><iframe title="TSL Tally" sandbox="allow-scripts" src="${pagePath}/ui/index.html"></iframe><script>
 let port, told = ${generation};
 const tell = (generation) => {
@@ -262,7 +263,9 @@ window.addEventListener('message', event => {
   port.onmessage=async event=>{const message=event.data;try{const response=await fetch('/__rpc',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(message)});const value=await response.json();
     port.postMessage(value.error?{type:'error',id:message.id,message:value.error}:{type:'result',id:message.id,value:value.result});
     if(!value.restarting)tell(value.generation);}catch{port.postMessage({type:'error',id:message.id,message:'Preview bridge disconnected'});}};
-  port.start();frame.contentWindow.postMessage({type:'hubble.module.frontend.connect.v1',id:event.data.id},'*',[channel.port2]);
+  // ?view=routing opens the copy as a part's own window does: page.view is that part.
+  const view=new URLSearchParams(location.search).get('view');
+  port.start();frame.contentWindow.postMessage({type:'hubble.module.frontend.connect.v1',id:event.data.id,window:{view,canOpen:false}},'*',[channel.port2]);
 });
 </script></html>`;
 const types: Record<string, string> = { ".js": "text/javascript", ".css": "text/css", ".html": "text/html", ".svg": "image/svg+xml" };

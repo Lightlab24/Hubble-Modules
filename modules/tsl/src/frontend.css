@@ -6,6 +6,9 @@ html,body{height:100%;margin:0;overflow:hidden;color-scheme:dark}
 body{color:var(--hubble-text,#dedede);font:var(--hubble-text-size,13px) var(--hubble-font,system-ui)}
 .tsl-app{height:100%;display:grid;grid-template-rows:auto auto minmax(0,1fr) auto;background:var(--hubble-sheet,#111)}
 .tsl-app *{box-sizing:border-box}
+/* The Setup part's own window: nothing in the toolbar, so no toolbar. */
+.tsl-app.no-toolbar{grid-template-rows:auto minmax(0,1fr) auto}
+.tsl-app.no-toolbar>.toolbar{display:none}
 [hidden]{display:none!important}
 
 .app-header{min-height:72px;padding:14px 20px;display:flex;align-items:center;gap:20px;border-bottom:1px solid var(--hubble-line,#292929);background:var(--hubble-bar,#151515)}

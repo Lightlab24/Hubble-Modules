@@ -417,3 +417,128 @@ test("a tab change in one copy leaves the other where it is, and saves nothing s
   await expect.poll(async () => (await savedRow(request, "camera-1"))?.name).toBe("Crane");
   await noTrouble([one, two]);
 });
+
+// ----- One part of the page in a window of its own -----
+// Right-click TSL Tally in the sidebar, and Open in its own window › offers Tally, Routing and
+// Setup. HubDash opens the page in a window with page.view set to that part; the preview does the
+// same for an address ending in ?view=<part>.
+
+const PARTS = ["tally", "routing", "setup"] as const;
+/** A copy opened as the sidebar opens one part of the page in a window of its own. */
+async function openPart(page: Page, view: string): Promise<Copy> {
+  await page.goto(`/?view=${view}`);
+  const f = page.frameLocator("iframe");
+  await expect(f.locator("#loading")).toBeHidden({ timeout: 15_000 });
+  return { page, f };
+}
+const viewCalls = async (request: APIRequestContext) => ((await inspect(request)).calls.view as number | undefined) ?? 0;
+
+test("each part opens alone in a window of its own, and the whole page keeps its own tab", async ({ page, request }) => {
+  const [whole] = await copies(page, request, 1);
+  await show(whole!, "Setup");
+  await expect.poll(() => viewCalls(request)).toBe(1);
+
+  const opened: Copy[] = [];
+  for (const view of PARTS) {
+    const part = await openPart(await page.context().newPage(), view);
+    opened.push(part);
+    // That view and nothing else: no View control, no other view, no divider before its tools.
+    await expect(part.f.locator("#tabs")).toBeHidden();
+    await expect(part.f.locator("#tabs [role='radio']")).toHaveCount(0);
+    for (const other of PARTS) {
+      if (other === view) await expect(part.f.locator(`#${other}-view`)).toBeVisible();
+      else await expect(part.f.locator(`#${other}-view`)).toBeHidden();
+    }
+    await expect(part.f.locator(".toolbar-divider")).toHaveCount(0);
+  }
+  const [tally, routing, setup] = opened as [Copy, Copy, Copy];
+  // Each part keeps its own tools, and only those.
+  await expect(tally.f.locator("#find")).toBeVisible();
+  await expect(tally.f.locator("#count")).toBeVisible();
+  await expect(tally.f.locator("#add-camera")).toBeHidden();
+  await expect(routing.f.locator("#add-camera")).toBeVisible();
+  await expect(routing.f.locator("#follow")).toBeVisible();
+  await expect(routing.f.locator("#find")).toBeHidden();
+  // Setup has no tools of its own: no toolbar, and its panels start under the header.
+  await expect(setup.f.locator(".toolbar")).toBeHidden();
+  const header = await setup.f.locator(".app-header").boundingBox();
+  const panels = await setup.f.locator("#setup-view").boundingBox();
+  expect(Math.abs(panels!.y - (header!.y + header!.height))).toBeLessThan(2);
+  // The header and footer are the module's, in every part.
+  for (const part of opened) {
+    await expect(part.f.locator("#listener-text")).toContainText("Listening");
+    await expect(part.f.locator("#status-line")).toBeVisible();
+  }
+
+  // Edits in a part's window show everywhere, and other windows' edits show in it.
+  await typeBox(setup, "device-name", "PARTS");
+  await expect(whole!.f.locator("#device-name")).toHaveValue("PARTS");
+  await toggle(whole!, "center").click();
+  await expect(toggle(setup, "center")).toHaveAttribute("aria-checked", "true");
+  await expect.poll(async () => savedSetup(request)).toMatchObject({ name: "PARTS", center: true });
+  await routing.f.locator("#add-camera").click();
+  await expect(routing.f.locator("#routing-grid tbody tr")).toHaveCount(5);
+  await typeCell(routing, "camera-2", "name", "Jib");
+  await expect(whole!.f.locator("#routing-grid tbody tr")).toHaveCount(5);
+  await expect(cell(whole!, "camera-2", "name")).toHaveText("Jib");
+  await tally.f.locator("#find").fill("Jib");
+  await expect(whole!.f.locator("#find")).toHaveValue("");
+  // TSL_SHOTS=<folder> keeps a picture of each window.
+  const shots = process.env.TSL_SHOTS;
+  if (shots)
+    for (const [name, copy] of [["whole", whole!], ["tally", tally], ["routing", routing], ["setup", setup]] as const)
+      await copy.page.screenshot({ path: `${shots}/part-${name}.png` });
+
+  // No part's window ever said which view is open, so the whole page opens where it was left.
+  await whole!.page.waitForTimeout(500);
+  expect(await viewCalls(request)).toBe(1);
+  await whole!.page.reload();
+  await expect(whole!.f.locator("#loading")).toBeHidden({ timeout: 15_000 });
+  await expect(tab(whole!, "Setup")).toHaveAttribute("aria-checked", "true");
+  await expect(whole!.f.locator("#setup-view")).toBeVisible();
+  await noTrouble([whole!, ...opened]);
+});
+
+test("a part's window keeps what is being typed through other windows' saves and a restart", async ({ page, request }) => {
+  const [whole] = await copies(page, request, 1);
+  await show(whole!, "Routing");
+  const routing = await openPart(await page.context().newPage(), "routing");
+  const setup = await openPart(await page.context().newPage(), "setup");
+
+  // Half a camera name in the Routing window while the whole page renames another and adds one.
+  const typing = await startTyping(routing, "camera-1", "name", "Cra");
+  await typeCell(whole!, "camera-2", "name", "Jib");
+  await whole!.f.locator("#add-camera").click();
+  await expect(cell(routing, "camera-2", "name")).toHaveText("Jib");
+  await expect(routing.f.locator("#routing-grid tbody tr")).toHaveCount(5);
+  await expect(typing).toBeFocused();
+  await expect(typing).toHaveValue("Cra");
+
+  // A receiver setting saved in the Setup window restarts the module; the typing goes on.
+  const restarts = () => routing.page.evaluate(() => (window as unknown as { __restarts?: number }).__restarts ?? 0);
+  await typeBox(setup, "stale", "5000");
+  await expect.poll(async () => (await inspect(request)).settings.staleAfterMs).toBe(5000);
+  await expect.poll(restarts).toBeGreaterThan(0);
+  await expect(typing).toBeFocused();
+  await expect(typing).toHaveValue("Cra");
+  await routing.page.keyboard.type("ne");
+  await routing.page.keyboard.press("Enter");
+  await expect.poll(async () => (await savedRow(request, "camera-1"))?.name).toBe("Crane");
+  await expect(cell(whole!, "camera-1", "name")).toHaveText("Crane");
+  await expect(setup.f.locator("#stale")).toHaveValue("5000");
+  await show(whole!, "Setup");
+  await expect(whole!.f.locator("#stale")).toHaveValue("5000");
+  await noTrouble([whole!, routing, setup]);
+});
+
+test("a part the page does not have says it is no longer here, and asks the module nothing", async ({ page, request }) => {
+  expect((await request.post("/__reset", { data: {} })).ok()).toBe(true);
+  await page.goto("/?view=camera-3");
+  const f = page.frameLocator("iframe");
+  await expect(f.locator("#loading")).toHaveText("This part of the page is no longer here.");
+  await expect(f.locator(".toolbar")).toBeHidden();
+  await expect(f.locator("#listener")).toBeHidden();
+  await page.waitForTimeout(500);
+  await expect(f.locator('.hubble-toast[data-kind="failure"]')).toHaveCount(0);
+  expect((await inspect(request)).calls).toEqual({});
+});

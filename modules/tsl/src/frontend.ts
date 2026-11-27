@@ -27,6 +27,7 @@ import {
 } from "./setup.js";
 import type { SwitcherDeviceRow, SwitcherDeviceSettings, SwitcherReading } from "./switcher/index.js";
 import { mountRoutingView } from "./routing-view.js";
+import { isPageView, PAGE_VIEWS, type PageView } from "./views.js";
 import "./frontend.css";
 
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -92,8 +93,24 @@ const head = (labels: readonly (readonly [string, string, number?])[]) => {
   return thead;
 };
 
+/** This window was opened for a part of the page TSL Tally does not have. */
+class PartGone extends Error {}
+
 try {
   const client = await connectModuleFrontend(window);
+  /**
+   * In a window the sidebar opened for one part (Tally, Routing or Setup): that view, and only
+   * it, with no View control. Null in the whole page. Such a window never saves which view is
+   * open, so the whole page still opens where the operator left it.
+   */
+  const part = client.view;
+  if (part !== null && !isPageView(part)) throw new PartGone();
+  if (part) {
+    // Only what belongs to that view. Setup has no tools of its own, so it has no toolbar.
+    el("tabs").hidden = true;
+    for (const divider of document.querySelectorAll<HTMLElement>(".toolbar-divider")) divider.remove();
+    if (part === "setup") el("app").classList.add("no-toolbar");
+  }
   const snapshot = (await client.call("snapshot")) as unknown as PageSnapshot;
   /** What the page shows for This computer: what the module runs with, plus changes on their way. */
   const receiver: ReceiverSettings = structuredClone(snapshot.receiver);
@@ -113,7 +130,7 @@ try {
   let readAt = snapshot.readAt;
   let readError = snapshot.readError;
   let routeAddress = snapshot.routeAddress;
-  let tab = snapshot.tab;
+  let tab: PageView = part ?? snapshot.tab;
   let live: LiveReply = snapshot.live;
   /** The Routing tab, once mounted. */
   let routingView: Awaited<ReturnType<typeof mountRoutingView>> | undefined;
@@ -1006,28 +1023,27 @@ try {
     el("setup-view").hidden = tab !== "setup";
     for (const item of document.querySelectorAll<HTMLElement>("[data-for]")) item.hidden = item.dataset.for !== tab;
   };
-  controls.push(
-    await mountSegmented({
-      root: el("tabs"),
-      label: "View",
-      // One line in the toolbar (module-controls-inline-v1).
-      ...({ layout: "inline" } as object),
-      getState: () => ({
-        value: tab,
-        options: [
-          { value: "tally", label: "Tally" },
-          { value: "routing", label: "Routing" },
-          { value: "setup", label: "Setup" },
-        ],
+  // A part's window shows one view: it has no View control, so it never says which view is open.
+  if (!part)
+    controls.push(
+      await mountSegmented({
+        root: el("tabs"),
+        label: "View",
+        // One line in the toolbar (module-controls-inline-v1).
+        ...({ layout: "inline" } as object),
+        getState: () => ({
+          value: tab,
+          options: PAGE_VIEWS.map((item) => ({ value: item.view, label: item.title })),
+        }),
+        onValueChange: (value) => {
+          if (!isPageView(value)) return;
+          tab = value;
+          showTab();
+          // Remembered on this computer, so the page comes back to the same tab after a restart.
+          void ask("view", { tab }).catch(() => undefined);
+        },
       }),
-      onValueChange: (value) => {
-        tab = value as typeof tab;
-        showTab();
-        // Remembered on this computer, so the page comes back to the same tab after a restart.
-        void ask("view", { tab }).catch(() => undefined);
-      },
-    }),
-  );
+    );
   drawTally();
   drawStatus();
   drawSwitcher();
@@ -1042,6 +1058,14 @@ try {
     client.dispose();
   });
 } catch (error) {
-  el("loading").textContent = "TSL Tally could not open";
-  toast("failure", text(error, "TSL Tally could not open"));
+  if (error instanceof PartGone) {
+    // Hubble's own words for a part of a page that is gone, with nothing else drawn.
+    el("app").classList.add("no-toolbar");
+    el("listener").hidden = true;
+    el("status-line").textContent = "";
+    el("loading").textContent = "This part of the page is no longer here.";
+  } else {
+    el("loading").textContent = "TSL Tally could not open";
+    toast("failure", text(error, "TSL Tally could not open"));
+  }
 }
