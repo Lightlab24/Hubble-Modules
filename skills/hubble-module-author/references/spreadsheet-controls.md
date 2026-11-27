@@ -325,6 +325,40 @@ Draw exactly what `spreadsheetColumnsOnScreen(items)` returns:
 Older hosts ignore the new fields and show the plain editor, so keep the
 module's own collapsed-field header until it requires this feature.
 
+### Search field
+
+Require `module-spreadsheet-search-v1` to mount the Button Matrix's search field
+in a module-chosen slot with `mountSpreadsheetSearch`. It is one field with
+three choices. **Find** marks the cells whose text has every typed word and
+steps through them; **Rows** keeps only the rows holding one; **Columns** keeps
+only the columns whose names have every word, and a section's name keeps all
+its columns. Hubble searches, counts, and marks matching cells with
+`data-hubble-search="match"` or `"current"`. The page hides rows and columns and
+selects.
+
+- `getItems` is the Columns menu's list. `onColumns(found)` receives the query,
+  `fieldIds` and `groupIds`, or null to show every column. Keep the columns that
+  name each row, show matching columns inside collapsed sections, and leave
+  columns whose **Show** tick is off hidden.
+- `grid`, `getRows`, `getColumns` and `getText` let Find and Rows read cells.
+  `getColumns` lists the columns the page shows with no search. Cells carry
+  `data-hubble-row` and `data-hubble-column`; supply `getCellAttributes` when a
+  flipped layout swaps them.
+- `onRows(rowIds)` receives the rows to show in display order, an empty list
+  when nothing matched, or null for every row. Rows are worked out as the
+  operator types, not when data changes, so an edited row stays on screen.
+  `getRowGroup` keeps rows together.
+- `onSelect` stands on the current match. `onFocusGrid` hands the keyboard back
+  on Return in Columns, and on Escape, which also clears the words.
+- `mode` picks the starting choice. The field keeps the operator's choice while
+  the page is open. Nothing about a search is saved, exported or sent.
+- Call `refresh()` after the data or the column list changes, and
+  `reveal(address)` when Undo changes a row that Rows hides.
+
+`mountSpreadsheetSearch` throws on a host without the feature. Fall back to
+`mountSpreadsheetColumnSearch` (`module-spreadsheet-column-search-v1`), the
+earlier field that only searches column names, or leave the slot empty.
+
 Require `module-spreadsheet-text-size-v1` to mount only the Matrix text-size
 section with `mountSpreadsheetToolbar({ root, textSize: { get, onChange } })`.
 The shared − / + buttons use the native 9–24 range and preserve editor focus.

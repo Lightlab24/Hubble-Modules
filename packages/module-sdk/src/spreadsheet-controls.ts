@@ -16,6 +16,8 @@ export const MODULE_SPREADSHEET_COLUMN_PAINT_FEATURE =
   "module-spreadsheet-column-paint-v1";
 export const MODULE_SPREADSHEET_COLUMN_SEARCH_FEATURE =
   "module-spreadsheet-column-search-v1";
+/** The Button Matrix's search field: Find, Rows and Columns. */
+export const MODULE_SPREADSHEET_SEARCH_FEATURE = "module-spreadsheet-search-v1";
 export const MODULE_SPREADSHEET_COLUMN_SECTIONS_FEATURE =
   "module-spreadsheet-column-sections-v1";
 export const MODULE_SPREADSHEET_TEXT_SIZE_FEATURE =
@@ -51,8 +53,7 @@ export interface SpreadsheetCell {
         query: string,
         signal: AbortSignal,
       ) =>
-        | readonly SpreadsheetChoice[]
-        | Promise<readonly SpreadsheetChoice[]>);
+        readonly SpreadsheetChoice[] | Promise<readonly SpreadsheetChoice[]>);
 }
 export interface SpreadsheetColumn {
   readonly id: string;
@@ -87,13 +88,7 @@ export interface SpreadsheetEdit extends SpreadsheetAddress {
 }
 export interface SpreadsheetEditBatch {
   readonly source:
-    | "choice"
-    | "paste"
-    | "fill"
-    | "clear"
-    | "toggle"
-    | "cut"
-    | "color";
+    "choice" | "paste" | "fill" | "clear" | "toggle" | "cut" | "color";
   readonly edits: readonly SpreadsheetEdit[];
 }
 export interface SpreadsheetControlsOptions {
@@ -252,6 +247,9 @@ async function loadRuntime() {
     mountColumnSearch?: (
       options: SpreadsheetColumnSearchOptions,
     ) => SpreadsheetColumnSearchControls;
+    mountSearch?: (
+      options: SpreadsheetSearchOptions,
+    ) => SpreadsheetSearchControls;
     spreadsheetColumnsOnScreen?: (
       items: readonly SpreadsheetColumnEditorItem[],
     ) => string[];
@@ -545,6 +543,77 @@ export interface SpreadsheetColumnSearchControls {
   focus(): void;
   dispose(): void;
 }
+/** What the search field does: mark matching cells, keep matching rows, or keep matching columns. */
+export type SpreadsheetSearchMode = "find" | "rows" | "columns";
+/**
+ * The Button Matrix's search field in a module page (module-spreadsheet-search-v1). The operator
+ * picks what it does. Find marks the cells whose text has every typed word and steps through
+ * them; Rows keeps only the rows holding one; Columns keeps only the columns whose names have
+ * them, as the column search does. Hubble searches, counts and marks the cells; the page hides
+ * rows and columns and selects. It is a view: never save it.
+ */
+export interface SpreadsheetSearchOptions {
+  /** An empty slot in the page's own toolbar or header. */
+  readonly root: HTMLElement;
+  /** The choice the field starts on. Defaults to "find". */
+  readonly mode?: SpreadsheetSearchMode;
+  /** Columns: the same items as the Columns menu, every column the page has, by stable ID. */
+  getItems(): readonly SpreadsheetColumnEditorItem[];
+  /**
+   * Columns: called as the operator types, again after refresh() when the items change what the
+   * search matches, and with null once it is cleared or another choice is picked. Show only the
+   * matching columns and keep the ones that name each row, exactly as for onSearch.
+   */
+  onColumns(search: SpreadsheetColumnSearch | null): void;
+  /** Find and Rows: the element holding cells with data-hubble-row and data-hubble-column. */
+  grid(): HTMLElement | null;
+  /** Find and Rows: every row that can show, in display order, whatever Rows hides now. */
+  getRows(): readonly string[];
+  /**
+   * Find and Rows: the columns the page shows when the search hides none, in display order. Their
+   * cells are searched. The page's own Show ticks and collapsed sections still apply.
+   */
+  getColumns(): readonly string[];
+  /** What the cell shows. Return an empty string for cells that should not be searched. */
+  getText(address: SpreadsheetAddress): string;
+  /**
+   * Where a cell sits in the grid when its data-hubble-row and data-hubble-column differ from
+   * its address, as when a layout draws columns as rows.
+   */
+  getCellAttributes?(address: SpreadsheetAddress): SpreadsheetAddress;
+  /** Rows that stay together when one of them matches. */
+  getRowGroup?(rowId: string): string;
+  /**
+   * Rows: called with the rows to show, in display order, and with null to show every row again.
+   * No row matched gives an empty list. Rows are worked out as the operator types and not when
+   * data changes, so a row being edited never vanishes under the editor.
+   */
+  onRows(rowIds: readonly string[] | null): void;
+  /** Find and Rows: select and scroll to the match the search stands on. */
+  onSelect?(address: SpreadsheetAddress): void;
+  /** Return in Columns, or Escape: the sheet takes the keyboard back. */
+  onFocusGrid?(): void;
+  onError?(error: Error): void;
+}
+export interface SpreadsheetSearchControls {
+  /** The cells or the items changed: search again. Rows keeps the rows it shows. */
+  refresh(): void;
+  /** Bring back a row Rows hides, for example after Undo changed one of its cells. */
+  reveal(address: SpreadsheetAddress): void;
+  /** Put the cursor in the field, as Command-F does. */
+  focus(): void;
+  /** Clear the words; everything shows again. The choice stays. */
+  clear(): void;
+  /** Where the search stands, for a page's own checks. */
+  state(): {
+    query: string;
+    mode: SpreadsheetSearchMode;
+    matches: number;
+    rows: number | null;
+    columns: number | null;
+  };
+  dispose(): void;
+}
 export interface SpreadsheetSheetsOptions {
   readonly root: HTMLElement;
   getState(): {
@@ -622,6 +691,17 @@ export async function mountSpreadsheetColumnSearch(
       `Host does not supply ${MODULE_SPREADSHEET_COLUMN_SEARCH_FEATURE}`,
     );
   return mountColumnSearch(options);
+}
+/** The search field with Find, Rows and Columns, in a module-chosen slot. */
+export async function mountSpreadsheetSearch(
+  options: SpreadsheetSearchOptions,
+): Promise<SpreadsheetSearchControls> {
+  const { mountSearch } = await loadRuntime();
+  if (!mountSearch)
+    throw new Error(
+      `Host does not supply ${MODULE_SPREADSHEET_SEARCH_FEATURE}`,
+    );
+  return mountSearch(options);
 }
 export async function mountSpreadsheetSheets(
   options: SpreadsheetSheetsOptions,
