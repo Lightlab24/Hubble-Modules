@@ -53,6 +53,11 @@ async function saved(request: APIRequestContext) {
   const reply = await request.post('/__rpc', { data: { operation: 'call', commandId: 'read-plan', value: null } });
   return (await reply.json()).result.plan;
 }
+/** Where the page was last left, kept on the computer Hubble runs on. */
+async function pageView(request: APIRequestContext) {
+  const reply = await request.post('/__rpc', { data: { operation: 'call', commandId: 'page-view', value: null } });
+  return (await reply.json()).result?.view;
+}
 
 test('camera deletion targets the active cell or the right-clicked row after confirmation', async ({ page, request }) => {
   const errors: string[] = [], sends: any[] = [];
@@ -550,7 +555,8 @@ test('full-page sizing keeps chrome visible while long sheets scroll across resi
   expect(await f.locator('#hc-cameras').evaluate(element=>element.scrollHeight>element.clientHeight)).toBe(true);
   await f.locator('[data-tab="devices"]').click();await expect(f.locator('[data-role="device-sheet"]')).toBeVisible();
   await f.locator('[data-tab="assignment"]').click().then(() => f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]').click());await expect(f.locator('[data-action="toggle-controller"][aria-expanded="true"]')).toHaveCount(5);
-  await expect.poll(async()=>(await saved(request))?.uiState?.privateContent?.tab).toBe('cameras');await page.reload();
+  // Where the page is stays out of the workspace, so a second window or computer isn't moved (0.1.112).
+  await expect.poll(async()=>(await pageView(request))?.tab).toBe('cameras');expect((await saved(request))?.uiState?.privateContent).not.toHaveProperty('tab');await page.reload();
   await expect(f.locator('.hc-panel:not([hidden]) [data-remi-view="controllers"]')).toHaveAttribute('aria-pressed','true');await expect(f.locator('.hc-global-foot')).toBeInViewport();
   expect((await inspect(request)).actions).toHaveLength(0);expect(await page.locator('iframe').getAttribute('sandbox')).toBe('allow-scripts');
   await page.locator('iframe').screenshot({path:'artifacts/cyanview-full-page-ui.png'});
@@ -588,7 +594,7 @@ test('camera sheets default to numeric order and retain independent header sorti
   await group.getByRole('button',{name:'Sort by Camera name',exact:true}).click();await expect(group.locator('tbody [data-field="name"]').first()).toHaveValue('Zulu');
   await group.getByRole('button',{name:'Sort by Camera number',exact:true}).click();await group.getByRole('button',{name:'Sort by Camera number',exact:true}).click();
   await expect(group.locator('tbody [data-field="number"]').first()).toHaveValue('10');
-  await expect.poll(async()=>(await saved(request))?.uiState?.privateContent?.cameraSortByDevice?.rcp1).toEqual({field:'number',direction:'desc'});
+  await expect.poll(async()=>(await pageView(request))?.cameraSortByDevice?.rcp1).toEqual({field:'number',direction:'desc'});expect((await saved(request))?.uiState?.privateContent).not.toHaveProperty('cameraSortByDevice');
   await page.reload();await expect(group.locator('[data-sort-header="number"]')).toHaveAttribute('aria-sort','descending');
   await expect(group.locator('tbody [data-field="number"]').first()).toHaveValue('10');
   await expect(f.locator('[data-controller="rcp2"] [data-sort-header="number"]')).toHaveAttribute('aria-sort','ascending');

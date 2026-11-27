@@ -113,8 +113,10 @@ test('every LAN address a device has is listed, with a column to spare', async (
   await expect(more).toHaveText('+2 more');
   await expect(more).toHaveAttribute('title', /10\.20\.101\.201\/16|192\.168\.10\.40\/24/);
   await expect(column(f, DOWNSTREAM, 'lan1').locator('.hc-device-more')).toHaveCount(0);
-  const left = async (id: string) => (await cell(f, id, 'lan1').boundingBox())!.x;
-  expect(await left(MASTER)).toBe(await left(DOWNSTREAM));
+  // Both read at once: the sheet is drawn again each time the worker's state changes, and a box read on one side of a
+  // redraw and the other on the far side is gone (Nov 26, 2026).
+  const lefts = await sheet(f).evaluate((element, ids) => ids.map(id => element.querySelector('[data-device-cell="' + id + ':lan1"]')!.getBoundingClientRect().x), [MASTER, DOWNSTREAM]);
+  expect(lefts[0]).toBe(lefts[1]);
 
   await more.click();
   await expect(group(f, 'lan')).toHaveAttribute('aria-expanded', 'true');

@@ -7,6 +7,7 @@ import { createPingSweep } from '../src/ping.js';
 import { runPingBatch, ipNumber } from '../src/ping-batch.js';
 import { Discovery, networkRange } from '../src/discovery.js';
 import manifest from '../src/manifest.js';
+import { windowParts, windowPartOfTab } from '../src/window-parts.js';
 import { fixture } from './helpers.js';
 
 test('full-page contract preserves the studio frontend identity and bridge commands',()=>{
@@ -15,7 +16,13 @@ test('full-page contract preserves the studio frontend identity and bridge comma
   assert.ok(manifest.capabilities.includes('service.page.studio'));
   assert.equal(manifest.pages.length,1);const page=manifest.pages[0]!;assert.equal(page.id,'studio');assert.equal(page.layout,'full-page');assert.equal(page.sections.length,1);
   const section=page.sections[0]!;assert.equal(section.id,'frontend');assert.equal(section.entry,'ui/index.html');
-  assert.deepEqual(section.commands.map(command=>command.id),['read-plan','read-part','save-plan','save-begin','save-part','save-commit','send','clear-network','send-begin','send-part','send-commit','scan','stop-scan','probe','find-rig','import-device','import-part','refresh','choice-catalogs','options','firmware-begin','firmware-part','firmware-commit','firmware-targets','firmware-install','firmware-status','remi-state','remi-send','remi-route','camera-control-state','camera-control-mutate','camera-enabled','camera-refresh','open-device-page','setup-guide']);
+  // Live in several HubDash windows at once (0.1.112), which needs a Hubble with module windows.
+  assert.equal((section as {windows?:boolean}).windows,true);assert.ok(manifest.host.requiredFeatures.includes('module-page-windows-v1'));
+  // Each tab can be opened from the sidebar in a window of its own (0.1.112), and the view is the tab's own id.
+  assert.deepEqual((section as {parts?:unknown}).parts,[{view:'devices',title:'Devices'},{view:'setup',title:'Camera Configuration'},{view:'assignment',title:'REMI Matrix'},{view:'firmware',title:'Firmware'},{view:'defaults',title:'Defaults'}]);
+  for(const part of windowParts)assert.equal(windowPartOfTab(part.view),part.view);
+  assert.equal(windowPartOfTab('cameras'),'assignment');assert.equal(windowPartOfTab('discovery'),'devices');assert.equal(windowPartOfTab('elsewhere'),null);
+  assert.deepEqual(section.commands.map(command=>command.id),['read-plan','read-part','save-plan','save-begin','save-part','save-commit','send','clear-network','send-begin','send-part','send-commit','scan','stop-scan','probe','find-rig','import-device','import-part','refresh','choice-catalogs','options','firmware-begin','firmware-part','firmware-commit','firmware-targets','firmware-install','firmware-status','remi-state','remi-send','remi-route','camera-control-state','camera-control-mutate','camera-enabled','camera-refresh','open-device-page','setup-guide','page-view']);
 });
 
 test('ping sweep bounds concurrency, covers a /16 exactly and streams batches before completion',async()=>{

@@ -5,11 +5,13 @@ import { cyanviewCameraModels } from './camera-models.js';
 import { PresentationLedger } from './presentation-ledger.js';
 import { nextSetupGuideProgress, parseSetupGuideProgress, setupGuideSteps } from './setup-guide-model.js';
 import { addressPatternProblem, deviceKinds, deviceNumber, fillAddress, fillName, firstNumberIn, highestNumber, initialDefaults, numberFromName, validateDefaults } from './defaults-model.js';
+import { same as samePlanValue } from './plan-merge.js';
+import { windowParts, windowPartOfTab, windowPartTabs } from './window-parts.js';
 (() => {
   const root=document.getElementById('cyanview-design'); if(!root)return;
   const moduleBridge=globalThis.cyanviewModuleBridge;
   if(moduleBridge)root.hidden=true;
-  let persistence='saved',saveSequence=0;
+  let persistence='saved',saveSequence=0,capturingUiState=false;
   const $=role=>root.querySelector('[data-role="'+role+'"]');
   const action=name=>root.querySelector('[data-action="'+name+'"]');
   const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -63,7 +65,7 @@ import { addressPatternProblem, deviceKinds, deviceNumber, fillAddress, fillName
   function toast(message){clearTimeout(toastTimer);$('toast').textContent=message;$('toast').hidden=false;toastTimer=setTimeout(()=>{$('toast').hidden=true;},2800);}
   let lastSavedPrivateContent='';
   function remember(){
-    try{const snapshot={modelContent:{activeTab:tab,layout:'Fleet LAN sheet',cameraOrganization:'Expandable spreadsheet per RCP/RIO',sendMode:ui.sendMode,sendModeScope:'Camera/lens and LAN',density:ui.density,lensColumns:ui.lensColumns,deviceOrder:orderedDevices().slice(0,16).map(d=>d.name),lensPresentation:'Inline Iris, Zoom and Focus column groups',axisGroups:axisGroups('rcp1'),reordering:'Drag handles with Alt+Up/Down keyboard support',columnVisibility:'Individual column checkboxes per sheet',hiddenCameraColumns:[...hiddenCameraColumns('rcp1')],hiddenLanColumns:[...hiddenLanColumns],remiSharing:'Managed camera sources'},privateContent:{revision:6,hiddenCameraColumnsByDevice:Object.fromEntries(Object.entries(hiddenCameraColumnsByDevice).map(([id,fields])=>[id,[...fields]])),hiddenLanColumns:[...hiddenLanColumns],tab,ui:{...ui},axisGroupsByDevice:JSON.parse(JSON.stringify(axisGroupsByDevice)),deviceOrder:orderedDevices().map(d=>d.id),openControllers:[...openControllers],cameraSortByDevice:JSON.parse(JSON.stringify(cameraSortByDevice)),cameraLayouts:saveCameraLayouts(),cameraSheetsByDevice:saveCameraSheets(),remiDrafts:saveRemiDrafts(),remiView:saveRemiView(),scanRange:$('scan-range').value,deviceFilter:$('device-filter').value}};lastSavedPrivateContent=JSON.stringify(snapshot.privateContent);if(moduleBridge){return persistPlan(snapshot);}const p=window.openai?.setWidgetState?.(snapshot);if(p?.catch)p.catch(()=>{});}catch{}
+    try{const snapshot={modelContent:{activeTab:tab,layout:'Fleet LAN sheet',cameraOrganization:'Expandable spreadsheet per RCP/RIO',sendMode:ui.sendMode,sendModeScope:'Camera/lens and LAN',density:ui.density,lensColumns:ui.lensColumns,deviceOrder:orderedDevices().slice(0,16).map(d=>d.name),lensPresentation:'Inline Iris, Zoom and Focus column groups',axisGroups:axisGroups('rcp1'),reordering:'Drag handles with Alt+Up/Down keyboard support',columnVisibility:'Individual column checkboxes per sheet',hiddenCameraColumns:[...hiddenCameraColumns('rcp1')],hiddenLanColumns:[...hiddenLanColumns],remiSharing:'Managed camera sources'},privateContent:{revision:6,hiddenCameraColumnsByDevice:Object.fromEntries(Object.entries(hiddenCameraColumnsByDevice).map(([id,fields])=>[id,[...fields]])),hiddenLanColumns:[...hiddenLanColumns],tab,ui:{...ui},axisGroupsByDevice:JSON.parse(JSON.stringify(axisGroupsByDevice)),deviceOrder:orderedDevices().map(d=>d.id),openControllers:[...openControllers],cameraSortByDevice:JSON.parse(JSON.stringify(cameraSortByDevice)),cameraLayouts:saveCameraLayouts(),cameraSheetsByDevice:saveCameraSheets(),remiDrafts:saveRemiDrafts(),remiView:saveRemiView(),scanRange:$('scan-range').value,deviceFilter:$('device-filter').value}};lastSavedPrivateContent=JSON.stringify(snapshot.privateContent);if(capturingUiState)return snapshot;if(moduleBridge){return persistPlan(snapshot);}const p=window.openai?.setWidgetState?.(snapshot);if(p?.catch)p.catch(()=>{});}catch{}
   }
   function syncFilter(){const select=$('device-filter'),old=select.value;select.innerHTML='<option value="all">All devices</option>'+options(orderedDevices().map(d=>({id:d.id,label:d.name+' · '+d.serial})),old);select.value=devices.some(d=>d.id===old)?old:'all';}
   function syncOrganization(){
@@ -1326,10 +1328,18 @@ import { addressPatternProblem, deviceKinds, deviceNumber, fillAddress, fillName
 
   function plainRow(item){const {deleting,...saved}=item;return {...saved,dirty:[...(item.dirty||[])],jobs:0};}
   function snapshotPlan(uiState){return {formatVersion:1,devices:devices.map(({modelCatalog,models,lensOptions,snapshot,...item})=>({...item})),cameras:cameras.filter(row=>row.device!=='').map(plainRow),lans:lans.map(plainRow),uiState,cameraLogins:savedCameraLogins(),savedDevices:savedDeviceList(),defaults:savedDefaults()};}
+  // Where the page is goes to this copy's own place, and the plan is written only when something in it changed. What a
+  // save writes is taken when its turn comes, after the edit is on screen, so a save queued behind another writes what
+  // the page holds then (ui-plan-follow.js). The page says Saving at once, as it always has, unless all that moved is
+  // where the page is (a tab, sort or expand), which writes nothing; a write that starts anyway says so then.
+  let rememberedPlace='';
   function persistPlan(uiState){
-    const sequence=++saveSequence;persistence='saving';syncSummary();
-    const plan=copyPresentation(snapshotPlan(uiState)),ticket=presentationLedger.ticket();
-    return moduleBridge.save(()=>repairPresentationPlan(plan,ticket),()=>presentationLedger.saved(ticket),()=>rejectPresentation(ticket)).then(()=>{if(sequence===saveSequence){persistence='saved';syncSummary();}}).catch(error=>{if(sequence===saveSequence){persistence='failed';syncSummary();}toast(error.message||'Changes could not be saved');});
+    const place=splitUiState(uiState).view,placeText=JSON.stringify(place),moved=placeText!==rememberedPlace;
+    rememberedPlace=placeText;savePageView(place);
+    const sequence=++saveSequence;
+    if(!moved&&persistence!=='saving'){persistence='saving';syncSummary();}
+    let ticket=null;
+    return moduleBridge.save(()=>{ticket=presentationLedger.ticket();return repairPresentationPlan(currentPlan(),ticket);},()=>{if(ticket)presentationLedger.saved(ticket);},()=>{if(ticket)rejectPresentation(ticket);},()=>{persistence='saving';syncSummary();}).then(()=>{if(sequence===saveSequence&&persistence!=='saved'){persistence='saved';syncSummary();}}).catch(error=>{if(sequence===saveSequence){persistence='failed';syncSummary();}toast(error.message||'Changes could not be saved');});
   }
   function restoredRow(row){
     const dirty=new Set(row.dirty||[]);
@@ -1415,10 +1425,11 @@ import { addressPatternProblem, deviceKinds, deviceNumber, fillAddress, fillName
     $('discovery-method').addEventListener('change',()=>{ui.discoveryMethod=$('discovery-method').value;remember();});
     try{
       // Which Columns menu this Hubble has decides what the first drawing of the sheets shows.
-      const [plan]=await Promise.all([moduleBridge.read(),columnSectionsReady]);
+      const [plan,place]=await Promise.all([moduleBridge.read(),readPageView(),columnSectionsReady]);
       applyCameraControlState(await moduleBridge.controlState());
       await restoreCameraChoiceCatalogs();
-      if(plan){restoreSavedLists(plan);devices.splice(0,devices.length,...plan.devices);cameras=(plan.cameras||[]).map(row=>withoutFormerLensDefaults(restoredRow(row)));lans=withoutDuplicateRows((plan.lans||[]).map(restoredRow));deviceOrder=devices.map(item=>item.id);openControllers.clear();if(devices[0])openControllers.add(devices[0].id);syncConnections();syncFilter();renderLans();renderCameras();if(plan.uiState)restore(plan.uiState);}
+      if(plan){restoreSavedLists(plan);devices.splice(0,devices.length,...plan.devices);cameras=(plan.cameras||[]).map(row=>withoutFormerLensDefaults(restoredRow(row)));lans=withoutDuplicateRows((plan.lans||[]).map(restoredRow));deviceOrder=devices.map(item=>item.id);openControllers.clear();if(devices[0])openControllers.add(devices[0].id);syncConnections();syncFilter();renderLans();renderCameras();const saved=withPageView(plan.uiState,place,true);if(saved)restore(saved);}
+      rememberedPlace=JSON.stringify(splitUiState(uiStateSnapshot())?.view??null);
       moduleBridge.onReceipt(applyReceipts);
       moduleBridge.subscribe(applyLiveState);
       if(plan?.uiState?.privateContent?.ui?.discoveryVersion!==2&&ui.discoveryMethod==='broadcast')ui.discoveryMethod='ping';
@@ -3850,19 +3861,30 @@ import { addressPatternProblem, deviceKinds, deviceNumber, fillAddress, fillName
   }
   // A send reports its own results, and a read partway through one would show half a change.
   const autoReadWaits = () => sendsRunning || cameras.some(camera => camera.jobs > 0 || camera.deleting) || [...remiPanels.values()].some(state => state.busy);
+  // Changes going out to the controllers from every open copy of the page, this one included, as the worker counts
+  // them. Another copy's send changes the controllers as much as this copy's own does.
+  let controllersChanging = 0;
+  const applyLiveStateBeforeReads = applyLiveState;
+  applyLiveState = function(values) {
+    if (values && 'controllersChanging' in values) controllersChanging = Number(values.controllersChanging) || 0;
+    return applyLiveStateBeforeReads(values);
+  };
+  const readWaits = () => autoReadWaits() || controllersChanging > 0;
   async function runAutoRead() {
     autoReadTimer = null;
     if (!autoReads.size) return;
-    if (autoReadWaits()) { scheduleAutoRead(500); return; }
+    if (readWaits()) { scheduleAutoRead(500); return; }
     const ids = [...autoReads], workBefore = controllerWork;
     autoReads.clear();
     try {
       const reply = await moduleBridge.refresh(ids, true);
       // A send that began during the read may already have changed what it read. The send's own change reads again after it.
-      if (autoReadWaits()) { for (const id of ids) autoReads.add(id); scheduleAutoRead(500); return; }
+      if (readWaits()) { for (const id of ids) autoReads.add(id); scheduleAutoRead(500); return; }
       // So may one that began and finished while the read was out.
       if (controllerWork !== workBefore) { for (const id of ids) autoReads.add(id); scheduleAutoRead(30); return; }
-      for (const snapshot of reply.snapshots || []) mergeSnapshot(snapshot);
+      // Another copy of the page is reading the rest (reply.shared), and this copy follows the plan that copy saves.
+      if (!reply.snapshots?.length) return;
+      for (const snapshot of reply.snapshots) mergeSnapshot(snapshot);
       renderLans();
       renderCameras();
       remember();
@@ -6178,6 +6200,134 @@ import { addressPatternProblem, deviceKinds, deviceNumber, fillAddress, fillName
   const initializeFirmwareBeforeDefaults = initializeFirmwareTab;
   initializeFirmwareTab = function() { initializeFirmwareBeforeDefaults(); initializeDefaultsTab(); };
 
+
+  // ── A camera number a controller has twice ─────────────────────────────────
+  // A controller can list a number twice: its own camera and a copy of another controller's camera
+  // under the same number, or two cameras of its own. Keys still work, because the controller's own
+  // camera wins over a copy and its own cameras go together (`numberedCameras` in the control
+  // service). This only says so: a mark in the row's gutter on Camera Configuration, a chip beside
+  // Pending sends and a list that floats over the sheet. None of it moves anything on the page.
+  const conflictCount = count => count === 2 ? 'two' : count === 3 ? 'three' : String(count);
+  const conflictNames = names => names.length < 2 ? names.join('') : names.slice(0, -1).join(', ') + ' and ' + names.at(-1);
+  function numberConflicts() {
+    const groups = new Map();
+    for (const camera of cameras) {
+      const number = Number(camera.number);
+      if (!camera.device || !device(camera.device) || !Number.isInteger(number) || number < 1) continue;
+      const key = camera.device + '\n' + number;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(camera);
+    }
+    const order = orderedDevices().map(item => item.id);
+    return [...groups.values()].filter(rows => rows.length > 1).map(rows => {
+      const controller = device(rows[0].device), number = Number(rows[0].number);
+      const name = row => String(row.name || '').trim() || 'Camera ' + number;
+      const own = rows.filter(row => !importedCamera(row)), used = own.length ? own : rows;
+      const parts = rows.map(row => ({ name: name(row), own: !importedCamera(row), from: importedCamera(row) ? remiDeviceName(row.remi?.peer ?? row.remi?.origin?.serial) : '' }));
+      const what = part => part.own ? 'its own' : 'copied from ' + part.from;
+      const listed = parts.length === 2
+        ? parts[0].name + ', ' + what(parts[0]) + ', and ' + parts[1].name + ', ' + what(parts[1])
+        : conflictNames(parts.map(part => part.name + ' (' + what(part) + ')'));
+      const where = 'Keys for camera ' + number + ' on ' + controller.name;
+      const usedNames = used.map(name);
+      return {
+        controller, number, rows, parts, used, usedNames, where,
+        tip: controller.name + ' has ' + conflictCount(rows.length) + ' cameras numbered ' + number + ': ' + listed + '. ' + where + (used.length === 1 ? ' use ' + usedNames[0] + '.' : ' act on ' + conflictNames(usedNames) + ' together.'),
+      };
+    }).sort((a, b) => order.indexOf(a.controller.id) - order.indexOf(b.controller.id) || a.number - b.number);
+  }
+  // A copy is folded into its camera's row on Camera Configuration, so that row carries the mark for it.
+  function conflictTips(conflicts) {
+    const tips = new Map(), { parents } = routeTree();
+    for (const conflict of conflicts) for (let row of conflict.rows) {
+      for (let hops = 0; parents.has(row) && hops < 8; hops++) row = parents.get(row);
+      const lines = tips.get(row.id) ?? [];
+      if (!lines.includes(conflict.tip)) lines.push(conflict.tip);
+      tips.set(row.id, lines);
+    }
+    return tips;
+  }
+  let conflictListOpen = false, paintedConflicts = null;
+  const conflictChip = document.createElement('button'), conflictList = document.createElement('section');
+  (() => {
+    Object.assign(conflictChip, { type: 'button', className: 'hc-button hc-conflict-chip', hidden: true });
+    conflictChip.dataset.action = 'toggle-number-conflicts';
+    conflictChip.setAttribute('aria-expanded', 'false');
+    conflictChip.setAttribute('aria-controls', 'hc-number-conflicts');
+    conflictChip.innerHTML = icon('triangle-alert') + '<span data-role="number-conflict-count"></span>';
+    // It comes and goes, so it sits left of the fixed controls, where nothing is beside it to push.
+    root.querySelector('#hc-setup .hc-toolbar-title').after(conflictChip);
+    Object.assign(conflictList, { id: 'hc-number-conflicts', className: 'hc-conflict-list', hidden: true });
+    conflictList.setAttribute('aria-label', 'Numbers used twice');
+    conflictList.innerHTML = '<header><h3>Numbers used twice</h3><button type="button" data-action="toggle-number-conflicts" aria-label="Close numbers used twice">' + icon('x') + '</button></header><div data-role="number-conflict-items"></div>';
+    root.querySelector('[data-pending-host="setup"]').append(conflictList);
+  })();
+  function conflictItemMarkup(conflict) {
+    const used = conflict.usedNames.map(name => '<b>' + esc(name) + '</b>');
+    return '<div class="hc-conflict-item"><strong>' + esc('Camera ' + conflict.number + ' on ' + conflict.controller.name) + '</strong><ul>' +
+      conflict.parts.map(part => '<li><span>' + esc(part.name) + '</span><span>' + esc(part.own ? 'its own camera' : 'copied from ' + part.from) + '</span></li>').join('') + '</ul>' +
+      '<p>' + esc(conflict.where) + (used.length === 1 ? ' use ' + used[0] : ' act on ' + conflictNames(used) + ' together') + '. Renumber or remove one to clear this.</p></div>';
+  }
+  function placeConflictList() {
+    const host = conflictList.parentElement.getBoundingClientRect(), chip = conflictChip.getBoundingClientRect();
+    conflictList.style.top = Math.round(chip.bottom + 6 - host.top) + 'px';
+    conflictList.style.right = Math.max(0, Math.round(host.right - chip.right)) + 'px';
+  }
+  function paintNumberConflicts() {
+    const conflicts = numberConflicts(), tips = conflictTips(conflicts);
+    const sheet = $('setup-sheet');
+    for (const mark of sheet.querySelectorAll('.hc-conflict-mark')) if (!tips.has(mark.closest('tr')?.dataset.id)) mark.remove();
+    let drawn = false;
+    for (const [id, lines] of tips) {
+      const gutter = [...sheet.querySelectorAll('tr[data-id]')].find(row => row.dataset.id === id)?.querySelector('td.hc-camera-row-gutter');
+      if (!gutter) continue;
+      const tip = lines.join(' '), mark = gutter.querySelector('.hc-conflict-mark');
+      if (mark?.dataset.tip === tip) continue;
+      gutter.innerHTML = '<span class="hc-conflict-mark" data-tip="' + esc(tip) + '" aria-label="' + esc(tip) + '">' + icon('triangle-alert') + '</span>';
+      drawn = true;
+    }
+    conflictChip.hidden = !conflicts.length;
+    conflictChip.querySelector('[data-role="number-conflict-count"]').textContent = conflicts.length + (conflicts.length === 1 ? ' number used twice' : ' numbers used twice');
+    if (!conflicts.length || tab !== 'setup') conflictListOpen = false;
+    conflictChip.setAttribute('aria-expanded', String(conflictListOpen));
+    conflictList.hidden = !conflictListOpen;
+    if (conflictListOpen) {
+      const markup = conflicts.map(conflictItemMarkup).join('');
+      if (markup !== paintedConflicts) { conflictList.querySelector('[data-role="number-conflict-items"]').innerHTML = markup; paintedConflicts = markup; }
+      placeConflictList();
+    }
+    if (drawn) icons();
+  }
+  function setConflictListOpen(open) {
+    if (conflictListOpen === open) return;
+    // Both lists float over the same corner of the sheet, so one opening puts the other away.
+    if (open) setPendingSendsOpen(false);
+    conflictListOpen = open;
+    paintNumberConflicts();
+  }
+  const renderBeforeConflicts = renderCameras;
+  renderCameras = function(...args) { const drawn = renderBeforeConflicts(...args); paintNumberConflicts(); return drawn; };
+  // Every edit and every send ends here, so a number typed over, a camera moved or a copy taken off updates the marks.
+  const paintPendingBeforeConflicts = paintPendingSends;
+  paintPendingSends = function() { paintPendingBeforeConflicts(); paintNumberConflicts(); };
+  const setPendingOpenBeforeConflicts = setPendingSendsOpen;
+  setPendingSendsOpen = function(open) { if (open) conflictListOpen = false; setPendingOpenBeforeConflicts(open); paintNumberConflicts(); };
+  const setTabBeforeConflicts = setTab;
+  setTab = function(...args) { setTabBeforeConflicts(...args); paintNumberConflicts(); };
+  root.addEventListener('click', event => {
+    if (event.target.closest?.('[data-action="toggle-number-conflicts"]')) setConflictListOpen(!conflictListOpen);
+  });
+  // The list floats over the sheet, so a click anywhere else, or Escape from it, puts it away.
+  root.addEventListener('pointerdown', event => {
+    if (conflictListOpen && !event.target.closest?.('.hc-conflict-list, [data-action="toggle-number-conflicts"]')) setConflictListOpen(false);
+  }, true);
+  root.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || !conflictListOpen || !event.target.closest?.('.hc-conflict-list, [data-action="toggle-number-conflicts"]')) return;
+    event.preventDefault();
+    setConflictListOpen(false);
+    conflictChip.focus();
+  });
+
   // The setup tour: Next and Back walk through this page in the order Cyanview is set up. Each stop
   // rings one part of the page and points at it with a short arrow and its name; a panel fixed at the
   // bottom says what that part is for and what to do there, and keeps Exit tour, Back and Next in the
@@ -6568,6 +6718,263 @@ import { addressPatternProblem, deviceKinds, deviceNumber, fillAddress, fillName
     if (keys === setupGuideKeys && pressed === setupGuidePressed) return;
     setupGuideKeys = keys; setupGuidePressed = pressed; scheduleSetupGuide();
   });
+
+  // ----- Open in two places at once (Nov 25, 2026) -----
+  // This page can be open in two HubDash windows, or in HubDash on two computers, all on one running module. Each
+  // copy used to hold the plan it read when it opened and save its whole plan back, so a second copy silently undid
+  // the first one's edits, and every tab click in one saved the plan and pulled the other along.
+  // - Where the page is (its tab, sorts, open controllers, filter, the Pending sends panel and the REMI view) is
+  //   this copy's own. It isn't saved in the plan; the worker keeps the last one on the computer Hubble runs on,
+  //   for the next copy that opens.
+  // - The worker publishes the saved plan's revision. A copy that sees one it doesn't hold reads the plan again and
+  //   draws it where it is, once it has nothing of its own on the way: no save, no send, no read of a controller
+  //   and no cell being typed in.
+  // - A save made on an older plan than the saved one puts this copy's own changes onto it (plan-merge.ts).
+  const pageViewKeys = ['tab', 'openControllers', 'cameraSortByDevice', 'deviceFilter', 'scanRange'];
+  const remiViewKeys = ['panelOpen', 'byController', 'devices'];
+  // What remember() would save, taken without saving anything.
+  function uiStateSnapshot() {
+    capturingUiState = true;
+    try { return remember(); } finally { capturingUiState = false; }
+  }
+  /** The page's state as remember() makes it, split into what is shared with every copy and where this copy is. */
+  function splitUiState(snapshot) {
+    if (!snapshot?.privateContent) return { shared: snapshot ?? null, view: null };
+    const { activeTab, ...modelContent } = snapshot.modelContent ?? {};
+    const privateContent = { ...snapshot.privateContent }, view = {};
+    for (const key of pageViewKeys) if (key in privateContent) { view[key] = privateContent[key]; delete privateContent[key]; }
+    if (privateContent.remiView) {
+      const remiView = { ...privateContent.remiView };
+      view.remiView = {};
+      for (const key of remiViewKeys) if (key in remiView) { view.remiView[key] = remiView[key]; delete remiView[key]; }
+      privateContent.remiView = remiView;
+    }
+    return { shared: { ...snapshot, modelContent, privateContent }, view };
+  }
+  /**
+   * A saved page state with this copy's place laid over it. A plan last saved before 0.1.112 still holds the place it
+   * was left in, which is newer than any kept on this computer, so a page opening on it (`saved`) starts there. This
+   * version saves the plan without it the first time anything is saved.
+   */
+  const heldPlace = uiState => { const data = uiState?.privateContent; return !!data && (pageViewKeys.some(key => key in data) || remiViewKeys.some(key => key in (data.remiView ?? {}))); };
+  function withPageView(uiState, view, saved = false) {
+    if (!view || saved && heldPlace(uiState)) return uiState;
+    const data = { revision: 6, ...(uiState?.privateContent ?? {}) };
+    for (const key of pageViewKeys) if (key in view) data[key] = view[key];
+    data.remiView = { ...(data.remiView ?? {}), ...(view.remiView ?? {}) };
+    return { ...(uiState ?? {}), privateContent: data };
+  }
+  /** The plan this copy would save now. */
+  function currentPlan() {
+    const snapshot = uiStateSnapshot();
+    if (!snapshot) throw new Error('Changes could not be saved');
+    return copyPresentation(snapshotPlan(splitUiState(snapshot).shared));
+  }
+
+  // Where this copy is, saved as it changes. One save is out at a time and the latest place goes next.
+  let lastPageView = '', pageViewWaiting = null, pageViewWriting = false;
+  function savePageView(view) {
+    if (!view || !moduleBridge?.pageView) return;
+    const text = JSON.stringify(view);
+    if (text === lastPageView) return;
+    lastPageView = text; pageViewWaiting = view;
+    if (!pageViewWriting) void writePageView();
+  }
+  async function writePageView() {
+    pageViewWriting = true;
+    try {
+      while (pageViewWaiting) {
+        const view = pageViewWaiting; pageViewWaiting = null;
+        try { await moduleBridge.pageView(view); } catch { /* The next change saves it again. */ }
+      }
+    } finally { pageViewWriting = false; }
+  }
+  async function readPageView() {
+    try { const reply = await moduleBridge.pageView(null), view = reply?.view ?? null; lastPageView = JSON.stringify(view); return view; }
+    catch { return null; }
+  }
+
+  // ----- Following the saved plan -----
+  let savedPlanRevision, followTimer = null, followReading = false;
+  function typingInPage() {
+    if (root.querySelector('input.hc-cell-editing') || typedDeviceCell) return true;
+    const active = document.activeElement;
+    return !!active && root.contains(active) && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT' && !['checkbox', 'radio', 'button'].includes(active.type)) && active.value !== active.defaultValue;
+  }
+  const followWaits = () => moduleBridge.busy() || autoReadWaits() || addingDiscovered || deviceAddBusy || persistence === 'draft' || typingInPage();
+  function scheduleFollow(wait) { if (followTimer === null) followTimer = setTimeout(followSavedPlan, wait); }
+  async function followSavedPlan() {
+    followTimer = null;
+    if (savedPlanRevision === undefined || savedPlanRevision === moduleBridge.revision || followReading) return;
+    if (followWaits()) { scheduleFollow(250); return; }
+    followReading = true;
+    const held = moduleBridge.revision;
+    let again = 250;
+    try {
+      const fresh = await moduleBridge.latest();
+      // Something of this copy's own started meanwhile, and it brings its own plan back.
+      if (moduleBridge.revision !== held || followWaits()) return;
+      const from = moduleBridge.base;
+      moduleBridge.accept(fresh.plan, fresh.revision);
+      if (fresh.plan) adoptSavedPlan(from, fresh.plan);
+    } catch { again = 2000; }
+    finally {
+      followReading = false;
+      if (savedPlanRevision !== moduleBridge.revision) scheduleFollow(again);
+    }
+  }
+  const applyLiveStateBeforeFollow = applyLiveState;
+  applyLiveState = function(values) {
+    const applied = applyLiveStateBeforeFollow(values);
+    if (values && 'planRevision' in values && values.planRevision !== savedPlanRevision) { savedPlanRevision = values.planRevision; scheduleFollow(0); }
+    return applied;
+  };
+
+  // ----- Drawing a saved plan where the page is -----
+  // Fields that are this copy's own: live reports, work in progress, and what a controller read brought in.
+  const ownFields = new Set(['online', 'lastSeen', 'jobs', 'deleting', 'modelCatalog', 'models', 'lensOptions', 'snapshot']);
+  const plainCopy = value => value === undefined ? undefined : copyPresentation(value);
+  const unassignedIn = plan => plan?.uiState?.privateContent?.remiView?.unassigned ?? [];
+  const cameraRow = row => withoutFormerLensDefaults(restoredRow(row));
+  /** What changed in a row between `was` and `now`, put into `local` where this copy hasn't changed it since `was`. */
+  function adoptFields(local, was, now, restored) {
+    const before = was ? restored(was) : {}, after = restored(now);
+    for (const field of new Set([...Object.keys(before), ...Object.keys(after)])) {
+      if (ownFields.has(field)) continue;
+      if (field === 'dirty') {
+        const old = new Set(before.dirty ?? []), next = new Set(after.dirty ?? []);
+        for (const name of next) if (!old.has(name)) local.dirty.add(name);
+        for (const name of old) if (!next.has(name)) local.dirty.delete(name);
+        continue;
+      }
+      if (samePlanValue(after[field], before[field]) || !samePlanValue(local[field], before[field])) continue;
+      if (after[field] === undefined) delete local[field]; else local[field] = plainCopy(after[field]);
+    }
+  }
+  /** Rows the saved plan added, changed or removed between `fromRows` and `toRows`. A row with a send running is left as it is. */
+  function adoptRows(list, fromRows, toRows, restored, add) {
+    const before = new Map(fromRows.map(row => [row.id, row])), after = new Set(toRows.map(row => row.id));
+    for (const now of toRows) {
+      const local = list().find(row => row.id === now.id);
+      if (!local) add(restored(now));
+      else if (!local.jobs && !local.deleting) adoptFields(local, before.get(now.id), now, restored);
+    }
+    return [...before.keys()].filter(id => !after.has(id) && list().some(row => row.id === id && !row.jobs && !row.deleting));
+  }
+  /**
+   * The saved plan `to` drawn into this copy, which held `from`. Fields this copy changed since `from` keep their
+   * value. The tab, sorts, open controllers, filter, scroll and the cell in use stay as they are.
+   */
+  function adoptSavedPlan(from, to) {
+    // What this copy holds before anything is drawn in, to tell what it has changed since `from`.
+    const held = uiStateSnapshot(), place = splitUiState(held).view;
+    const lists = plan => ({ savedDevices: plan?.savedDevices, cameraLogins: plan?.cameraLogins, defaults: plan?.defaults });
+    const heldLists = { savedDevices: savedDeviceList(), cameraLogins: savedCameraLogins(), defaults: savedDefaults() };
+    const shared = uiState => { const value = splitUiState(uiState).shared; if (value?.privateContent?.remiView) delete value.privateContent.remiView.unassigned; return value; };
+    for (const id of adoptRows(() => devices, from?.devices ?? [], to.devices ?? [], row => plainCopy(row), row => devices.push({ ...row, online: null }))) {
+      devices.splice(devices.findIndex(d => d.id === id), 1);
+    }
+    const goneCameras = new Set(adoptRows(() => cameras, [...(from?.cameras ?? []), ...unassignedIn(from)], [...(to.cameras ?? []), ...unassignedIn(to)], cameraRow, row => cameras.push(row)));
+    if (goneCameras.size) cameras = cameras.filter(row => !goneCameras.has(row.id));
+    const goneLans = new Set(adoptRows(() => lans, from?.lans ?? [], to.lans ?? [], restoredRow, row => lans.push(row)));
+    if (goneLans.size) lans = lans.filter(row => !goneLans.has(row.id));
+    lans = withoutDuplicateRows(lans);
+    // The Defaults tab and Saved devices, where this copy hasn't changed them.
+    if (!samePlanValue(lists(from), lists(to)) && (!from || samePlanValue(heldLists, lists(from)))) restoreSavedLists(to);
+    syncConnections();
+    // Columns, layouts, controller order and settings are shared; where this copy is stays its own.
+    if (!samePlanValue(shared(from?.uiState), shared(to.uiState)) && (!from || samePlanValue(shared(held), shared(from.uiState)))) {
+      for (const state of remiPanels.values()) { state.drafts = new Map(); state.overrides = {}; }
+      restore(withPageView(to.uiState, place));
+    } else {
+      for (const id of [...openControllers]) if (!device(id)) openControllers.delete(id);
+      syncFilter(); renderLans(); renderCameras();
+    }
+    renderResults();
+    syncSummary();
+  }
+  /** Who a merged save found the other copy had changed too, in the page's own words. */
+  function mergeConflictName(item) {
+    const row = item.row ?? {}, on = device(row.device) ? ' on ' + device(row.device).name : '';
+    if (item.kind === 'devices') return row.name || row.serial || 'A controller';
+    if (item.kind === 'lans') return 'The address ' + (row.planned || row.current || '') + on;
+    if (item.kind === 'cameras' || item.kind === 'unassigned') return 'Camera ' + (row.number ?? '') + (row.name ? ' (' + row.name + ')' : '') + on;
+    if (item.kind === 'logins') return 'The ' + (row.model || 'camera model') + ' row on Defaults';
+    return 'Defaults';
+  }
+  function mergeConflictMessage(conflicts) {
+    const kept = conflicts.filter(item => !item.removed), gone = conflicts.filter(item => item.removed);
+    const names = list => list.slice(0, 3).map(mergeConflictName).join(', ') + (list.length > 3 ? ' and ' + (list.length - 3) + ' more' : '');
+    return [
+      kept.length ? names(kept) + (kept.length === 1 ? ' was' : ' were') + ' also changed in another window. What you typed is kept.' : '',
+      gone.length ? names(gone) + (gone.length === 1 ? ' was' : ' were') + ' removed in another window, so your change' + (gone.length === 1 ? ' to it is' : 's to them are') + ' gone.' : '',
+    ].filter(Boolean).join(' ');
+  }
+  if (moduleBridge?.onMerge) moduleBridge.onMerge((from, to, conflicts) => {
+    adoptSavedPlan(from, to);
+    if (conflicts.length) toast(mergeConflictMessage(conflicts));
+  });
+
+  // ----- One part of the page in a window of its own (Nov 27, 2026) -----
+  // Right-click Cyanview in Hubble's sidebar, and Open in its own window › offers each part of this page
+  // (window-parts.ts). Its window gets the part as `view` and shows only that part under the page's header, with no
+  // tabs. Edits there save and follow like any other copy's. Where that window is (its sorts, open controllers and
+  // filter) is its own and never saved, so the whole page opens where the operator left it. A link to another part,
+  // such as Defaults beside a device type, opens that part's window. The Setup tour walks the whole page, so it stays
+  // in the whole page.
+  const partWindow = typeof moduleBridge?.view === 'string';
+  const shownPart = partWindow && windowParts.some(part => part.view === moduleBridge.view) ? moduleBridge.view : null;
+  function openPartWindow(view) {
+    const part = windowParts.find(item => item.view === view);
+    if (!part || !moduleBridge?.canOpenWindows) return;
+    moduleBridge.openWindow(part.view, part.title).catch(() => toast('Hubble could not open ' + part.title + ' in its own window.'));
+  }
+  if (partWindow) {
+    root.classList.add('cv-part-window');
+    const nav = root.querySelector('.hc-tabs');
+    nav.hidden = true;
+    // The tabs can't be seen, but a link may still click one, as Defaults beside a device type does.
+    nav.addEventListener('click', event => {
+      const button = event.target.closest?.('[data-tab]');
+      if (!button) return;
+      const wanted = windowPartOfTab(button.dataset.tab);
+      if (shownPart && wanted === shownPart) return;
+      event.stopImmediatePropagation();
+      event.preventDefault();
+      if (wanted) openPartWindow(wanted);
+    }, true);
+    const gone = document.createElement('p');
+    gone.className = 'cv-part-gone';
+    gone.setAttribute('role', 'status');
+    gone.textContent = 'This part of the page is no longer here.';
+    gone.hidden = shownPart !== null;
+    root.querySelector('.hc-main').insertBefore(gone, root.querySelector('.hc-global-foot'));
+    // This window shows its own part whatever asks for another tab: the page's first drawing, a saved place being
+    // put back, or a link. It never saves which tab it is on.
+    const setTabBeforePart = setTab;
+    setTab = function(next, save = true) {
+      const wanted = windowPartOfTab(next);
+      if (save && wanted && wanted !== shownPart) openPartWindow(wanted);
+      setTabBeforePart(shownPart && wanted === shownPart ? next : windowPartTabs[shownPart ?? 'devices'][0], false);
+      // Firmware and Defaults draw their own panels, which the page's tabs don't know.
+      if (shownPart === 'firmware' || shownPart === 'defaults') root.querySelector('#hc-' + shownPart).hidden = false;
+      if (!shownPart) for (const panel of root.querySelectorAll('.hc-panel')) panel.hidden = true;
+    };
+    // Where the page is belongs to the whole page.
+    const savePageViewOfPage = savePageView;
+    savePageView = function() {};
+    // A plan last saved before 0.1.112 holds where the whole page was left, and this window's first save leaves it
+    // out of the plan, so it is kept for the whole page as the whole page's own first save would keep it.
+    const withPageViewBeforePart = withPageView;
+    withPageView = function(uiState, view, saved = false) {
+      if (saved && heldPlace(uiState)) savePageViewOfPage(splitUiState(uiState).view);
+      return withPageViewBeforePart(uiState, view, saved);
+    };
+    // The Setup tour goes from part to part, so it starts only in the whole page, and its progress is saved there.
+    setupTourToggle.hidden = true;
+    showTourStop = function() {};
+    saveSetupGuide = function() {};
+  }
 
   initializeDeviceWorkflow();initializeFirmwareTab();syncFilter();renderLans();renderCameras();setTab('devices',false);restore(window.openai?.widgetState);
   if(moduleBridge)void initializeBackend();else root.hidden=false;

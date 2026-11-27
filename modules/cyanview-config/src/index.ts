@@ -11,8 +11,14 @@ import { CameraEnabledOperations } from './camera-enabled.js';
 import { CyanviewClient } from './transport.js';
 import { createHostOpenPage } from './open-page.js';
 import { setupGuideStore } from './setup-guide-store.js';
+import { pageViewStore } from './page-view-store.js';
 import { createFirmwareService } from './firmware.js';
 import { SimulatedRig, SimulatedRigStore } from './simulated/rig.js';
+
+// A plan too large for one message is read and saved in parts. The page can be open in several HubDash windows or
+// on several computers at once, each reading the plan again when another saves, so these allow for a few copies
+// each with a save, a send and reads under way. A read is held for a minute or until its last part is fetched.
+const READS_HELD = 12, TRANSFERS_OPEN = 6;
 
 export function createInstance(context: ModuleContext, options: ServiceOptions = {}): ModuleInstance {
   if (!context.services) throw new Error('Module storage is unavailable');
@@ -41,6 +47,10 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
     log: entry => context.log({ level: entry.level, stage: 'firmware', message: entry.message }),
   });
   control = new CameraControl(repository, context, sample, () => publish(), io.control);
+  // Every open copy of the page follows the saved plan's revision: in another HubDash window, or on another computer.
+  // A copy that sees one it doesn't hold reads the plan again, so an edit made in one shows in the others.
+  const publishRevision = (revision: string | null) => { if (serviceState.planRevision !== revision) publish({ planRevision: revision }); };
+  control.onPlanRevision = publishRevision;
   // Cyanview's own Enabled on each camera, with every REMI copy following the camera it comes from.
   const cameraEnabled = new CameraEnabledOperations(repository, io.client ?? (address => new CyanviewClient(address)), service.remi,
     (device, number, key) => control!.cameraOnline(device, number, key), () => publish({ cameraEnabledJobs: cameraEnabled.state() }),
@@ -48,13 +58,14 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
   service.followMqtt(id => control!.controllerDown(id));
   service.observeConfig((device, before, after) => cameraEnabled.observe(device, before, after));
   const guide = setupGuideStore(() => context.runtimeDirectory);
+  const view = pageViewStore(() => context.runtimeDirectory);
   const transfers = new Map<string, { kind: 'save' | 'send'; revision: string | null; parts: string[]; size: number; expires: number }>();
   const imports = new Map<string, { cameras: RecordValue[]; expires: number }>();
   const reads = new Map<string, { text: string; expires: number }>();
   const bounded = (result: RecordValue) => {
     const text = JSON.stringify(result);
     if (text.length < 180000) return result;
-    if (reads.size >= 4) reads.delete(reads.keys().next().value!);
+    if (reads.size >= READS_HELD) reads.delete(reads.keys().next().value!);
     const token = randomUUID(); reads.set(token, { text, expires: Date.now() + 60000 }); return { token, length: text.length };
   };
   // How long each send took and how many controllers it opened, so a slow one can be read back from Hubble's log.
@@ -77,7 +88,7 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
   // The page and the controller sockets follow the saved plan.
   // A plan that was just read comes with its saved revision, which lets the next press act on it without reading again.
   const followPlan = (plan: Plan, revision?: string | null) => { control!.setPlan(plan, revision); service.watch(plan); };
-  const followSaved = async (signal: AbortSignal) => { const saved = await repository.read(signal); followPlan(saved.plan, saved.revision); };
+  const followSaved = async (signal: AbortSignal) => { const saved = await repository.read(signal); followPlan(saved.plan, saved.revision); publishRevision(saved.revision); };
   const reason = (error: unknown) => String(error instanceof Error ? error.message : error || 'no reason given').slice(0, 200);
   // A request that gives up has no result to time, and a timeout is the longest wait a page has. So it's logged here, as is one that was slow.
   const watched = async <T>(stage: string, what: string, signal: AbortSignal, work: () => Promise<T>, slowMs = Infinity): Promise<T> => {
@@ -102,15 +113,31 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
     const saved = await repository.write(revision, validatePlan(value), signal);
     service.forgetManagedDevices(saved.removedDeviceIds);
     followPlan(saved.plan);
-    publish(service.state()); return { revision: saved.revision };
+    publish({ ...service.state(), planRevision: saved.revision }); return { revision: saved.revision };
   };
+  // Every open copy of the page reads a controller again when the controller reports a change: in each HubDash window,
+  // or on each computer. The first copy to ask for a controller's latest change reads it and saves what it found, and
+  // the other copies are told it is shared and follow the plan that copy saves. A copy that asks again for the same
+  // change reads it again, and a claim lapses after a while, so a copy closed partway through holds no one up for long.
+  const autoReaders = new Map<string, { copy: string; mark: string; until: number }>();
+  function claimAutoReads(ids: string[], copy: string) {
+    const now = Date.now(), counts = (service.state().configChanges as { counts?: Record<string, number> } | null)?.counts ?? {};
+    const only: string[] = [], shared: string[] = [];
+    for (const id of ids) {
+      const mark = String(counts[id] ?? 0) + ':' + String(control?.cameraChangeCount(id) ?? 0), held = autoReaders.get(id);
+      if (held && held.copy !== copy && held.mark === mark && held.until > now) shared.push(id);
+      else { autoReaders.set(id, { copy, mark, until: now + 15000 }); only.push(id); }
+    }
+    return { only, shared };
+  }
   const instance: ModuleInstance = {
     async start() {
       // The simulated controllers are put back as they were before anything connects to them.
       await rigStore?.load(lifetime.signal);
       await control!.start(lifetime.signal);
-      service.watch((await repository.read(lifetime.signal)).plan);
-      publish(service.state());
+      const saved = await repository.read(lifetime.signal);
+      service.watch(saved.plan);
+      publish({ ...service.state(), planRevision: saved.revision });
     },
     async call(method, raw, execution) {
       execution.signal.throwIfAborted();
@@ -132,7 +159,7 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
           // `sample` asks the page to show its own made-up rows and send nothing. Simulated is live to the page, so it never does.
           const plan = saved.plan, text = JSON.stringify(plan), mode = { sample: false, simulated: sample };
           if (text.length < 180000) return { revision: saved.revision, ...mode, plan };
-          if (reads.size >= 4) reads.delete(reads.keys().next().value!);
+          if (reads.size >= READS_HELD) reads.delete(reads.keys().next().value!);
           const token = randomUUID(); reads.set(token, { text, expires: Date.now() + 60000 });
           return { revision: saved.revision, ...mode, plan: null, token, length: text.length };
         }
@@ -147,7 +174,7 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
         case 'save-begin':
         case 'send-begin': {
           const kind = request.commandId === 'save-begin' ? 'save' : 'send';
-          if (transfers.size >= 2) throw new Error('Finish the pending configuration transfers first');
+          if (transfers.size >= TRANSFERS_OPEN) throw new Error('Finish the pending configuration transfers first');
           const id = randomUUID(); transfers.set(id, { kind, revision: input.revision ?? null, parts: [], size: 0, expires: Date.now() + 60000 }); return { id };
         }
         case 'save-part':
@@ -191,15 +218,18 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
         }
         case 'stop-scan': service.stopScan(); return { stopped: true };
         case 'refresh': {
-          const began = performance.now();
-          const value = await watched('read-timing', 'Reading the controllers', signal, () => service.refresh(signal, Array.isArray(input.devices) ? input.devices.map(String) : undefined, input.live === true));
+          const began = performance.now(), live = input.live === true;
+          let only = Array.isArray(input.devices) ? input.devices.map(String) : undefined, shared: string[] = [];
+          if (live && only && typeof input.copy === 'string' && input.copy) ({ only, shared } = claimAutoReads(only, input.copy.slice(0, 64)));
+          if (only && !only.length) return { snapshots: [], failed: [], observations: service.state().observations, shared };
+          const value = { ...await watched('read-timing', 'Reading the controllers', signal, () => service.refresh(signal, only, live)), shared };
           // A controller that doesn't answer is waited on until its read times out, so a slow or failed read says which.
           const elapsed = Math.round(performance.now() - began), read = value.snapshots.length + value.failed.length;
           if (elapsed >= 1000 || value.failed.length) context.log({ level: 'info', stage: 'read-timing', message: 'Read ' + read + (read === 1 ? ' controller' : ' controllers') + ' in ' + elapsed + ' ms' +
             (value.failed.length ? ', no answer from ' + value.failed.slice(0, 8).join(', ') : '') });
           const text = JSON.stringify(value);
           if (text.length < 180000) return value;
-          if (reads.size >= 4) reads.delete(reads.keys().next().value!);
+          if (reads.size >= READS_HELD) reads.delete(reads.keys().next().value!);
           const token = randomUUID(); reads.set(token, { text, expires: Date.now() + 60000 }); return { token, length: text.length };
         }
         case 'choice-catalogs': return bounded({ catalogs: await choices.read(signal) });
@@ -247,6 +277,8 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
         }
         // The setup tour's progress on this Mac. Simulated is walked through apart from the real setup.
         case 'setup-guide': return request.value == null ? guide.read(sample ? 'simulated' : 'real') : guide.write(sample ? 'simulated' : 'real', request.value);
+        // Where the page was last left. Each open copy keeps its own while it is open; this is where the next one starts.
+        case 'page-view': return request.value == null ? { view: view.read(sample ? 'simulated' : 'real') } : view.write(sample ? 'simulated' : 'real', request.value);
         default: throw new Error('Unknown Cyanview command');
       }
     },
@@ -255,6 +287,17 @@ export function createInstance(context: ModuleContext, options: ServiceOptions =
     async choices(provider) { return (await control!.discover(provider, {}, '', null, 512, lifetime.signal)).choices.map(({ id, label, group }) => ({ id, label, ...(group ? { group } : {}) })); },
     subscribeFeedback(subscriptions, execution) { control!.subscribe(subscriptions, execution.signal); },
     async dispose() { if (stopped) return; stopped = true; lifetime.abort(); service.dispose(); firmware.dispose(); await control!.dispose(); await rig?.dispose(); transfers.clear(); imports.clear(); reads.clear(); },
+  };
+  // A change going out to the controllers from any open copy of the page is counted in the state. While one is out,
+  // every copy holds its automatic reads, since a read partway through a change would show half of it.
+  const controllerChanges = new Set(['send', 'send-commit', 'remi-send', 'remi-route', 'camera-enabled', 'camera-refresh', 'clear-network']);
+  const answer = instance.call!.bind(instance);
+  let changing = 0;
+  instance.call = async (method, raw, execution) => {
+    if (!controllerChanges.has(String(object(raw).commandId))) return answer(method, raw, execution);
+    publish({ controllersChanging: ++changing });
+    try { return await answer(method, raw, execution); }
+    finally { publish({ controllersChanging: --changing }); }
   };
   if (!rigStore) return instance;
   // Simulated keeps what was sent to its controllers in a document. Hubble lets a module write one only during a

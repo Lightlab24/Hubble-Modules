@@ -190,6 +190,25 @@ body:has(#cyanview-design .hc-veil:not([hidden])) .hubble-column-resize-handles 
 #cyanview-design .hc-assignment-body > .hc-controller-list { flex: 1 1 auto; min-width: 0; }
 #cyanview-design .hc-pending-sends { position: absolute; top: 0; right: 0; z-index: 1250; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; box-sizing: border-box; width: 340px; max-width: 100%; max-height: min(70vh, 520px); overflow: hidden; border: 1px solid light-dark(#c9c9c9, #555); border-radius: 8px; background: light-dark(#fff, #222); box-shadow: 0 10px 28px rgb(0 0 0 / 40%); font-size: 12px; }
 #cyanview-design .hc-pending-sends[hidden] { display: none; }
+/* A camera number a controller has twice: a mark in the row's gutter, a chip beside Pending sends and a list
+   that floats over the sheet like Pending sends does. None of them takes room from anything else. */
+#cyanview-design .hc-conflict-chip { gap: 6px; border-color: color-mix(in srgb, var(--hc-amber) 55%, var(--hc-line)); color: var(--hc-amber); }
+#cyanview-design .hc-conflict-chip[hidden] { display: none; }
+#cyanview-design :is(.hc-conflict-chip, .hc-conflict-mark) .hc-icon { width: 13px; height: 13px; }
+#cyanview-design .hc-conflict-mark { display: grid; place-items: center; width: 100%; height: 100%; color: var(--hc-amber); cursor: default; }
+#cyanview-design .hc-conflict-list { position: absolute; z-index: 1250; box-sizing: border-box; width: 380px; max-width: 100%; max-height: min(70vh, 520px); overflow-y: auto; border: 1px solid light-dark(#c9c9c9, #555); border-radius: 8px; background: light-dark(#fff, #222); box-shadow: 0 10px 28px rgb(0 0 0 / 40%); font-size: 12px; }
+#cyanview-design .hc-conflict-list[hidden] { display: none; }
+#cyanview-design .hc-conflict-list > header { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--hc-line); }
+#cyanview-design .hc-conflict-list h3 { margin: 0; padding: 9px 0 8px 12px; font-size: 12px; }
+#cyanview-design .hc-conflict-list > header button { min-height: 0; margin: 0 6px 0 2px; padding: 3px; border: 0; background: none; color: var(--hc-secondary); }
+#cyanview-design .hc-conflict-item { display: grid; gap: 6px; padding: 10px 12px 12px; }
+#cyanview-design .hc-conflict-item + .hc-conflict-item { border-top: 1px solid var(--hc-grid); }
+#cyanview-design .hc-conflict-item strong { color: var(--hc-strong); font-weight: 500; }
+#cyanview-design .hc-conflict-item ul { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; }
+#cyanview-design .hc-conflict-item li { display: flex; justify-content: space-between; gap: 12px; color: var(--hc-text); }
+#cyanview-design .hc-conflict-item li span:last-child { color: var(--hc-secondary); }
+#cyanview-design .hc-conflict-item p { margin: 0; color: var(--hc-secondary); line-height: 17px; }
+#cyanview-design .hc-conflict-item p b { color: var(--hc-amber); font-weight: 500; }
 /* Hubble's grid draws its handles at 1198 to 1202 and its pop-ups from 1300, with dialogs at 1400.
    The list sits above the handles, and this page's own lists, toasts and dialogs keep the same order. */
 #cyanview-design .hc-toast { z-index: 1360; }

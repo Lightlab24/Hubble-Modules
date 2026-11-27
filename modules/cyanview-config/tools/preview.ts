@@ -15,6 +15,8 @@ let mqtt: Awaited<ReturnType<typeof broker>>;
 let releaseControlWrites: (() => void) | undefined;
 let releasePlanWrites: (() => void) | undefined;
 let planSaves = 0, planSavePending = 0;
+// What the page asked of its window, as Hubble would be asked: open-window and window-title requests, and saves of where the page is.
+let windowRequests: unknown[] = [], pageViewWrites = 0;
 // The addresses the page asked to open in a browser. The preview opens nothing.
 let openedPages: string[] = [], openPageError = '';
 // How long a live read's answer is held back after it is worked out, as when the page hears back late.
@@ -41,7 +43,7 @@ async function reset(sample: boolean, remi = false, gateway = false, direct = fa
   pingDelayMs = 0;
   releaseControlWrites?.(); releaseControlWrites = undefined;
   releasePlanWrites?.(); releasePlanWrites = undefined;
-  planSaves = 0; planSavePending = 0;
+  planSaves = 0; planSavePending = 0; windowRequests = []; pageViewWrites = 0;
   switchedOff.clear(); mqttSockets.clear();
   openedPages = []; openPageError = ''; liveReadDelayMs = 0;
   if (session) await session.instance.dispose();
@@ -134,7 +136,7 @@ let port; window.addEventListener('message', event => {
   const frame=document.querySelector('iframe');if(event.source!==frame.contentWindow||event.data?.type!=='hubble.module.frontend.ready.v1')return;
   port?.close();const channel=new MessageChannel();port=channel.port1;
   port.onmessage=async event=>{const message=event.data;try{const response=await fetch('/__rpc',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(message)});const value=await response.json();port.postMessage(value.error?{type:'error',id:message.id,message:value.error}:{type:'result',id:message.id,value:value.result});}catch{port.postMessage({type:'error',id:message.id,message:'Preview bridge disconnected'});}};
-  port.start();frame.contentWindow.postMessage({type:'hubble.module.frontend.connect.v1',id:event.data.id},'*',[channel.port2]);
+  port.start();frame.contentWindow.postMessage({type:'hubble.module.frontend.connect.v1',id:event.data.id,window:{view:new URLSearchParams(location.search).get('view'),canOpen:true}},'*',[channel.port2]);
 });
 setInterval(async()=>{if(!port)return;try{const response=await fetch('/__state');port.postMessage({type:'state',value:await response.json()});}catch{}},200);
 </script></html>`;
@@ -221,6 +223,9 @@ const server = createServer(async (request, response) => {
         send({ updated: true }); return;
       }
       if (url.pathname !== '/__rpc') { send({ error: 'Unknown fixture route' }, 404); return; }
+      // A page asks Hubble to open one of its parts in a window, or to rename its window. The preview notes it.
+      if (input.operation === 'open-window' || input.operation === 'window-title') { windowRequests.push({ operation: input.operation, view: input.view, title: input.title }); send({ result: null }); return; }
+      if (input.commandId === 'page-view' && input.value != null) pageViewWrites++;
       // Hubble passes a page only the commands its manifest declares, and so does the preview.
       if (input.operation !== 'state' && !declaredCommands.has(input.commandId)) { send({ error: 'Module page command is not declared: ' + input.commandId }); return; }
       const planSave = ['save-plan', 'save-commit'].includes(input.commandId);
@@ -240,7 +245,7 @@ const server = createServer(async (request, response) => {
       if (statePaused) { response.writeHead(204); response.end(); return; }
       send(rendererState()); return;
     }
-    if (url.pathname === '/__inspect') { send({ planSaves, planSavePending, openedPages, opened: controllers.map(device => device.opened), openSockets: controllers.map(device => device.sockets.size), mqttConnections: mqtt.connections, actions: controller.actions, heldReplies: controller.heldActionReplies.length, config: controller.config, records: [...session.records], traces: session.traces, states: session.states.slice(-1), fleet:controllers.map(device=>({config:device.config,actions:device.actions})) }); return; }
+    if (url.pathname === '/__inspect') { send({ planSaves, planSavePending, windowRequests, pageViewWrites, openedPages, opened: controllers.map(device => device.opened), openSockets: controllers.map(device => device.sockets.size), mqttConnections: mqtt.connections, actions: controller.actions, heldReplies: controller.heldActionReplies.length, config: controller.config, records: [...session.records], traces: session.traces, states: session.states.slice(-1), fleet:controllers.map(device=>({config:device.config,actions:device.actions})) }); return; }
     if (url.pathname === '/') { response.writeHead(200, { 'Content-Type': 'text/html' }); response.end(html); return; }
     if (url.pathname === runtimePath) {
       response.writeHead(200, { 'Content-Type': 'text/javascript', 'Access-Control-Allow-Origin': '*' });
