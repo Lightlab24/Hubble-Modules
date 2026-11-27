@@ -1,5 +1,5 @@
 import {
-  mountSpreadsheetControls,mountSpreadsheetColumnGroup,mountSpreadsheetColumnEditor,mountSpreadsheetColumnSearch,createSpreadsheetContextMenu,mountSpreadsheetResize,mountSpreadsheetViewport,
+  mountSpreadsheetControls,mountSpreadsheetColumnGroup,mountSpreadsheetColumnEditor,mountSpreadsheetColumnSearch,mountSpreadsheetSearch,createSpreadsheetContextMenu,mountSpreadsheetResize,mountSpreadsheetViewport,
   type SpreadsheetAddress,type SpreadsheetCell,type SpreadsheetColumnGroup,type SpreadsheetColumnGroupControls,type SpreadsheetEdit,type SpreadsheetMenuItem
 } from '@hubble/module-sdk/spreadsheet-controls';
 import { groups,fieldById,clone,visibleFields,withColumnVisibility,withNoColumns,type View,type Field } from './model.js';
@@ -10,7 +10,12 @@ import type { CameraSummary,Observation,PresetSend } from './backend.js';
 export const cameraColumnId='camera-now';
 export interface Chosen { presetId?:string; camera?:CameraSummary; observation?:Observation; job?:PresetSend; plan?:PlannedSend }
 export interface PresetGridOptions {
-  table:HTMLTableElement; viewport:HTMLElement; columnEditor:HTMLElement; columnSearch?:HTMLElement;
+  table:HTMLTableElement; viewport:HTMLElement; columnEditor:HTMLElement;
+  /**
+   * The header slot for Hubble's search field: Find, Rows or Columns. A Hubble without it gets the earlier
+   * column search there, and one without that leaves the slot empty.
+   */
+  search?:HTMLElement;
   store:Drafts<PresetDocument,PresetMutation>;
   chosen:()=>Chosen;
   /** The values a setting can take: the module's own list, or what the cameras report. */
@@ -47,13 +52,28 @@ export async function createPresetGrid(options:PresetGridOptions){
   const orderedFields=(groupId:string)=>{const group=groups.find(g=>g.id===groupId)!;return [...(view().fields[groupId]??[]),...group.fields.map(f=>f.id).filter(id=>!view().fields[groupId]?.includes(id))].map(id=>fieldById.get(id)!).filter(f=>isPresetField(f.id));};
   const orderedGroups=()=>allGroups().filter(id=>!view().hiddenGroups?.includes(id));
   const folded=()=>withPresetFolding(view());
-  let searchIds:ReadonlySet<string>|null=null;
+  // The search in the header is a view: it is never saved. Columns draws only the settings whose names match, folded
+  // away or not. Rows draws only the settings with a matching cell. The Preset and Holds rows always stay.
+  let searchIds:ReadonlySet<string>|null=null,searchRows:ReadonlySet<string>|null=null;
+  let searchControls:{refresh():void;reveal(address:SpreadsheetAddress):void;state():{query:string}}|undefined,searchRefresh:ReturnType<typeof setTimeout>|undefined,searchDrawing=false;
+  // The sheet changed under a live search, as when the chosen camera reports: look again shortly, once. A redraw the
+  // search asked for needs no second look.
+  const refreshSearchSoon=()=>{if(searchControls&&!searchDrawing&&searchRefresh===undefined)searchRefresh=setTimeout(()=>{
+    searchRefresh=undefined;if(disposed||!searchControls)return;
+    // With nothing typed there is nothing to look for, only a mark left on a cell that was off the sheet to clear.
+    if(!searchControls.state().query.trim()&&!table.querySelector('[data-hubble-search]'))return;
+    searchControls.refresh();
+  },120);};
   /** Folded sections show their chosen settings, plus anything a role changes, so a role's differences never hide. */
-  function shownFields(groupId:string):Field[]{
-    // A search shows every match that isn't hidden, folded away or not, and nothing else.
-    if(searchIds)return orderedFields(groupId).filter(f=>searchIds!.has(f.id)&&!view().hidden.includes(f.id));
+  function unsearchedFields(groupId:string):Field[]{
     const visible=new Set(visibleFields(folded()).map(f=>f.id)),roles=roleFieldIds(doc());
     return orderedFields(groupId).filter(f=>visible.has(f.id)||(roles.has(f.id)&&!view().hidden.includes(f.id)));
+  }
+  function shownFields(groupId:string):Field[]{
+    // A Columns search shows every match that isn't hidden, folded away or not, and nothing else.
+    if(searchIds)return orderedFields(groupId).filter(f=>searchIds!.has(f.id)&&!view().hidden.includes(f.id));
+    const list=unsearchedFields(groupId);
+    return searchRows?list.filter(f=>searchRows!.has(f.id)):list;
   }
   const shownRows=()=>orderedGroups().flatMap(id=>shownFields(id).map(f=>f.id));
   /** The values a setting can take: what the camera allowed when it was captured, else the module's own list or what cameras report now. */
@@ -107,6 +127,15 @@ export async function createPresetGrid(options:PresetGridOptions){
     }});
     return {value,choices:providers.get(key)!.provider};
   }
+  /** What a setting's cell shows, for Find and Rows: a preset's own or Base's value, or the chosen camera's. */
+  function searchText(rowId:string,columnId:string):string{
+    if(columnId===cameraColumnId)return cameraCell(rowId).text;
+    const preset=presetById(doc(),columnId),field=fieldById.get(rowId);
+    if(!preset||!field)return '';
+    const invalid=store.invalid.get(addressKey({rowId,columnId}));
+    const shown=invalid?.edit.value??preset.values[field.id]??(isBase(preset)?undefined:doc().presets[0]!.values[field.id])??'';
+    return shown?label(field,shown):'';
+  }
   function submit(edits:readonly SpreadsheetEdit[],expected?:string):boolean{
     const changes:PresetEdit[]=edits.flatMap(edit=>{
       const preset=presetById(doc(),edit.columnId),cell=cellValue(edit);
@@ -124,7 +153,13 @@ export async function createPresetGrid(options:PresetGridOptions){
     getColumns:()=>[...doc().presets.map(p=>({id:p.id,label:p.name,fill:'copy' as const})),{id:cameraColumnId,label:'Camera now',fill:'copy' as const}],
     getCell:address=>cellValue(address),onEdit:batch=>{submit(batch.edits);},
     onSelection(address){active=address;options.onSelect(address);},
-    onHistory(direction){if(active&&store.invalid.has(addressKey(active))){store.discard(active.rowId,active.columnId);return;}store.history(direction==='redo');},
+    onHistory(direction){
+      if(active&&store.invalid.has(addressKey(active))){store.discard(active.rowId,active.columnId);return;}
+      // Undo or Redo of an edit to a setting Rows hides brings that setting back, so the change shows.
+      const forward=direction==='redo',next=(forward?store.redo:store.undo).at(-1);
+      store.history(forward);
+      if(next?.kind==='edit')for(const edit of next.edits)searchControls?.reveal({rowId:edit.rowId,columnId:edit.columnId});
+    },
     onError:error=>options.onError(error.message)
   });disposers.push(controls);
   function layout(next:View){store.submit({kind:'view',view:next,expected:clone(view())});}
@@ -152,19 +187,52 @@ export async function createPresetGrid(options:PresetGridOptions){
     onVisibilityChange:(id,visible)=>setVisibility([{id,visible}]),
     onVisibilityChanges:setVisibility
   });disposers.push(columnEditor);
-  // A Hubble without the column search leaves its slot empty and the page works as before.
+  /** Where the selection goes when the search hides its row: the first setting that shows, in the same column. */
+  const shownAddress=():SpreadsheetAddress=>{
+    const rowsNow=[nameRowId,holdsRowId,...shownRows()],columnId=active&&columnIds().includes(active.columnId)?active.columnId:columnIds()[0]!;
+    return {rowId:active&&rowsNow.includes(active.rowId)?active.rowId:shownRows()[0]??nameRowId,columnId};
+  };
+  /** Return or Escape in the search: the sheet takes the keyboard, standing on a cell that still shows. */
+  const focusGrid=()=>controls.select(shownAddress());
+  /** After the search hid or showed rows: a selection on a setting that went away moves to one that shows. */
+  const followSelection=()=>{if(active&&active.rowId!==nameRowId&&active.rowId!==holdsRowId&&!shownRows().includes(active.rowId))controls.select(shownAddress(),undefined,{focus:false});};
+  const drawForSearch=()=>{searchDrawing=true;try{render();}finally{searchDrawing=false;}followSelection();};
+  // What the search looks through: the Columns menu's settings, without its Hide all settings row, which is no setting.
+  // A search shows a matching setting that a folded section tucks away, so here a setting can show unless it is hidden.
+  const searchItems=()=>allGroups().map(id=>{
+    const group=groups.find(g=>g.id===id)!;
+    return {id,label:group.label,visible:!view().hiddenGroups?.includes(id),fields:orderedFields(id).map(f=>({id:f.id,label:f.label,visible:!view().hidden.includes(f.id)}))};
+  });
   let columnSearch:Awaited<ReturnType<typeof mountSpreadsheetColumnSearch>>|undefined;
-  if(options.columnSearch){
+  if(options.search){
+    const slot=options.search;
+    const onColumns=(found:{fieldIds:readonly string[]}|null)=>{searchIds=found&&new Set(found.fieldIds);drawForSearch();};
     try{
-      columnSearch=await mountSpreadsheetColumnSearch({
-        root:options.columnSearch,getItems:columnItems,
-        onSearch(found){searchIds=found&&new Set(found.fieldIds);render();},
-        onFocusGrid(){
-          const rowsNow=[nameRowId,holdsRowId,...shownRows()],columnId=active&&columnIds().includes(active.columnId)?active.columnId:columnIds()[0]!;
-          controls.select({rowId:active&&rowsNow.includes(active.rowId)?active.rowId:shownRows()[0]??nameRowId,columnId});
+      // Hubble's search field: Find marks matching cells, Rows keeps the settings with one, Columns keeps the settings
+      // whose names match, as the Columns menu lists settings here. It starts on Columns, as this search always has.
+      const search=await mountSpreadsheetSearch({
+        root:slot,mode:'columns',getItems:searchItems,onColumns,
+        grid:()=>table,
+        // The Preset and Holds rows name the columns, so they are not searched and always stay.
+        getRows:()=>orderedGroups().flatMap(id=>unsearchedFields(id).map(f=>f.id)),
+        getColumns:columnIds,
+        getText:({rowId,columnId})=>searchText(rowId,columnId),
+        onRows(rowIds){searchRows=rowIds&&new Set(rowIds);drawForSearch();},
+        onSelect(address){
+          // A match on a setting Rows hid after it was worked out, as when the camera reported, comes back.
+          if(searchRows&&!searchRows.has(address.rowId))searchControls?.reveal(address);
+          controls.select(address,undefined,{focus:false});
         },
-      });disposers.push(columnSearch);
-    }catch{options.columnSearch.hidden=true;}
+        onFocusGrid:focusGrid,
+        onError:error=>options.onError(error.message),
+      });disposers.push(search);searchControls=search;
+    }catch{
+      // An earlier Hubble: its column search, or nothing.
+      try{
+        columnSearch=await mountSpreadsheetColumnSearch({root:slot,getItems:searchItems,onSearch:onColumns,onFocusGrid:focusGrid});
+        disposers.push(columnSearch);
+      }catch{slot.hidden=true;}
+    }
   }
   function setVisibility(changes:readonly {id:string;visible:boolean}[]){
     const all=changes.find(change=>change.id===hideAllId);
@@ -290,7 +358,8 @@ export async function createPresetGrid(options:PresetGridOptions){
     place(head,[numberRow,...headRows]);
     const bodyRows:HTMLElement[]=[];
     for(const id of orderedGroups()){
-      if(searchIds&&!shownFields(id).length)continue;
+      // While searching, a section with nothing to show stays off the sheet.
+      if((searchIds||searchRows)&&!shownFields(id).length)continue;
       const section=sections.get(id)!;section.filler.colSpan=columns.length;bodyRows.push(section.row);section.controls?.refresh();
       for(const field of shownFields(id)){const row=rowFor(field.id);place(row,[labelFor(field.id,field.label),...columns.map(c=>cellFor(field.id,c))]);row.style.height=(view().settingHeights?.[field.id]??defaultRowHeight)+'px';bodyRows.push(row);}
     }
@@ -299,7 +368,7 @@ export async function createPresetGrid(options:PresetGridOptions){
     let top=0;
     for(const row of [numberRow,...headRows]){for(const cell of row.cells){cell.style.top=top+'px';cell.style.left=cell.classList.contains('setting-label')?'0px':'';}top+=row.offsetHeight;}
     for(const row of bodyRows)for(const cell of (row as HTMLTableRowElement).cells){cell.style.top='';}
-    controls.refresh();resize.refresh();columnEditor.refresh();columnSearch?.refresh();
+    controls.refresh();resize.refresh();columnEditor.refresh();columnSearch?.refresh();refreshSearchSoon();
   }
   const unsubscribe=store.subscribe(render);
   render();
@@ -308,6 +377,6 @@ export async function createPresetGrid(options:PresetGridOptions){
     select:(address:SpreadsheetAddress)=>controls.select(address),
     get active(){return active;},
     get editing(){return editor?.address;},
-    dispose(){disposed=true;unsubscribe();for(const item of disposers.reverse())item.dispose();}
+    dispose(){disposed=true;clearTimeout(searchRefresh);unsubscribe();for(const item of disposers.reverse())item.dispose();}
   };
 }

@@ -11,7 +11,9 @@ features listed in `src/manifest.ts`. From 0.2.0 that includes module windows
 window shows the same tab and layout, which are saved with the plan. Cameras and Presets also
 open alone, each in a window of its own, from HubDash's sidebar (Open in its own window ›).
 Such a window has no tabs and never changes which tab or camera sheet the page opens on; the
-Cameras window shows the camera sheet the page has open.
+Cameras window shows the camera sheet the page has open. From 0.3.0 the header's search is
+Hubble's search field, with Find, Rows and Columns, on a Hubble that has it
+(`module-spreadsheet-search-v1`).
 
 ## Build and test
 
@@ -56,11 +58,19 @@ in, and Undo restores it.
 Each tab along the bottom is a saved view: which settings it shows, their sizes and order,
 and whether cameras are rows or columns. Camera values are the same on every tab. Columns
 can hide whole sections, paint a range of fields on or off in one drag, and clear every
-optional column; right-clicking a column or setting row hides it. **Search columns** in the
-header (⌘F) shows only the settings whose names, or whose section's name, have the words
-typed, on Cameras and on Presets, until it is cleared. It reaches into collapsed sections,
-leaves hidden settings hidden, and is never saved. The toolbar's text size
+optional column; right-clicking a column or setting row hides it. The toolbar's text size
 control changes table text from 9 to 24.
+
+The search in the header (⌘F) has three choices, on Cameras and on Presets, and keeps the
+words when you switch. **Columns**, where it starts, shows only the settings whose names have
+every word you type: a section's name keeps all its settings, collapsed ones included, and
+hidden settings stay hidden. **Find** marks the cells that match and steps through them with
+Return, selecting each; Shift-Return goes back. **Rows** shows only the cameras with a
+matching cell, each keeping its number; with cameras in columns it hides camera columns
+instead, and on Presets it shows only the settings with a matching value. While Rows is on,
+a camera you add shows, as does a hidden one that Undo changes or that Return steps onto.
+Escape clears the search. Nothing about a search is saved. On a Hubble without this field the
+header has the earlier column search, which only filters by setting name.
 
 ## Refresh, offline cameras and Live
 

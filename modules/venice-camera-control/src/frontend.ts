@@ -224,7 +224,7 @@ try {
     dialog.showModal();input('camera-host').focus();
   }
   grid=await createCameraGrid({
-    table:el<HTMLTableElement>('camera-grid'),viewport:el('viewport'),columnEditor:el('column-editor'),columnSearch:el('search-cameras'),store,
+    table:el<HTMLTableElement>('camera-grid'),viewport:el('viewport'),columnEditor:el('column-editor'),search:el('search-cameras'),store,
     observations:()=>observations,onSelect:address=>{active=address;update();},
     onZoom:ratio=>{el('zoom-status').textContent=Math.round(ratio*100)+'%';},
     onRefresh:refreshCamera,

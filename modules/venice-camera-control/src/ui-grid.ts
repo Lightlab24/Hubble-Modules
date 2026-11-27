@@ -1,5 +1,5 @@
 import {
-  mountSpreadsheetControls,mountSpreadsheetColumnGroup,mountSpreadsheetColumnEditor,mountSpreadsheetColumnSearch,spreadsheetColumnSectionsSupported,
+  mountSpreadsheetControls,mountSpreadsheetColumnGroup,mountSpreadsheetColumnEditor,mountSpreadsheetColumnSearch,mountSpreadsheetSearch,spreadsheetColumnSectionsSupported,
   createSpreadsheetContextMenu,mountSpreadsheetReorder,mountSpreadsheetResize,mountSpreadsheetViewport,
   type SpreadsheetAddress,type SpreadsheetCell,type SpreadsheetControls,type SpreadsheetColumn,type SpreadsheetColumnGroup,
   type SpreadsheetEdit,type SpreadsheetReorderItem,type SpreadsheetColumnGroupControls
@@ -9,7 +9,12 @@ import { DraftStore } from './draft-store.js';
 import type { Observations } from './backend.js';
 
 export interface GridOptions {
-  table:HTMLTableElement; viewport:HTMLElement; columnEditor:HTMLElement; columnSearch?:HTMLElement; store:DraftStore;
+  table:HTMLTableElement; viewport:HTMLElement; columnEditor:HTMLElement; store:DraftStore;
+  /**
+   * The header slot for Hubble's search field: Find, Rows or Columns. A Hubble without it gets the earlier
+   * column search there, and one without that leaves the slot empty.
+   */
+  search?:HTMLElement;
   observations:()=>Observations; onSelect:(address:SpreadsheetAddress|undefined)=>void;
   onZoom?:(ratio:number)=>void;
   onRefresh:(rowId:string)=>void; onRemove:(rowId:string)=>void; onError:(message:string)=>void;
@@ -44,12 +49,28 @@ export async function createCameraGrid(options:GridOptions){
   let reorder:Awaited<ReturnType<typeof mountSpreadsheetReorder>>|undefined;
   let zoomRatio=1;
   let viewportControls:Awaited<ReturnType<typeof mountSpreadsheetViewport>>|undefined;
+  let searchControls:{refresh():void;reveal(address:SpreadsheetAddress):void;state():{query:string}}|undefined,searchRefresh:ReturnType<typeof setTimeout>|undefined,searchDrawing=false;
+  // The sheet changed under a live search: look again shortly, once, rather than on every redraw. A Live camera or
+  // a Send all redraws many times a second. A redraw the search asked for needs no second look.
+  const refreshSearchSoon=()=>{if(searchControls&&!searchDrawing&&searchRefresh===undefined)searchRefresh=setTimeout(()=>{
+    searchRefresh=undefined;if(disposed||!searchControls)return;
+    // With nothing typed there is nothing to look for, only a mark left on a cell that was off the sheet to clear.
+    if(!searchControls.state().query.trim()&&!table.querySelector('[data-hubble-search]'))return;
+    searchControls.refresh();
+  },120);};
+  const drawForSearch=()=>{searchDrawing=true;try{render();}finally{searchDrawing=false;}followSelection();};
   const allColumnIds=[...meta.map(c=>c.id),...fields.map(f=>f.id)];
   const view=()=>store.document.view;
   const flipped=()=>isFlipped(store.document);
-  // A column search is a view over the tab: it is never saved, and the names and addresses stay.
-  let searchIds:ReadonlySet<string>|null=null;
+  // The search in the header is a view over the tab: it is never saved, and the names and addresses stay. Columns draws
+  // only the settings it matches, looking inside collapsed sections too. Rows draws only the cameras with a match.
+  let searchIds:ReadonlySet<string>|null=null,searchRows:ReadonlySet<string>|null=null;
   const shownFields=()=>searchIds?searchedFields(view(),searchIds):visibleFields(view());
+  /** The cameras on screen: every one, or while Rows is searching, the ones with a match. */
+  const shownCameras=()=>searchRows?store.document.cameras.filter(row=>searchRows!.has(row.id)):store.document.cameras;
+  /** Each camera's number, which it keeps while Rows hides others. */
+  const cameraNumbers=()=>new Map(store.document.cameras.map((row,index)=>[row.id,index+1]));
+  let knownCameras=new Set(store.document.cameras.map(row=>row.id));
   const loginShown=(id:string)=>loginVisible(view(),id)&&(!searchIds||searchIds.has(id));
   const groupShown=(id:string)=>!view().hiddenGroups?.includes(id)&&(!searchIds||shownFields().some(f=>f.group===id));
   const shownLogin=()=>loginMeta.filter(m=>loginShown(m.id));
@@ -86,6 +107,18 @@ export async function createCameraGrid(options:GridOptions){
       return choices.filter(c=>words.every(w=>(c.label+' '+c.value).toLowerCase().includes(w))).map(c=>({...c,group:groups.find(g=>g.id===field.group)!.label}));
     }});
     return {...base,choices:providerCache.get(key)!.provider};
+  }
+  /** What a cell shows, for Find and Rows. Ticks aren't searched, and a camera that isn't online shows no settings. */
+  function searchText(rowId:string,columnId:string):string{
+    const row=currentRow(rowId);if(!row)return '';
+    const invalid=store.invalid.get(rowId+'/'+columnId);
+    if(invalid)return invalid.edit.value;
+    if(columnId==='recording-status'||columnId==='connection-status')return cellValue({rowId,columnId})?.value??'';
+    if(meta.some(m=>m.id===columnId))return valueOf(row,columnId);
+    const field=fieldById.get(columnId);
+    if(!field||field.kind==='boolean'||!isOnline(row))return '';
+    const value=shown(row,field.id),list=field.choices.length?field.choices:observation(row)?.choices[field.id]??[];
+    return list.find(c=>c.value===value)?.label??value;
   }
   function layout(next:View){store.submit(viewChange(store.document,next));}
   function groupDescriptor(id:string):SpreadsheetColumnGroup{
@@ -142,15 +175,21 @@ export async function createCameraGrid(options:GridOptions){
     const selected=[...table.querySelectorAll<HTMLElement>('[data-hubble-spreadsheet-selected]')];
     const fill=selected.length&&selected.every(cell=>meta.find(m=>m.id===cell.dataset.settingId)?.fill==='series')?'series' as const:'copy' as const;
     const open=active&&settingLabel(active.columnId);
-    return store.document.cameras.map(row=>({id:row.id,label:row.id===active?.rowId&&open?open:valueOf(row,'camera-name'),fill}));
+    return shownCameras().map(row=>({id:row.id,label:row.id===active?.rowId&&open?open:valueOf(row,'camera-name'),fill}));
   }
   controls=await mountSpreadsheetControls({
     root:table,viewport,extendedEditing:true,workbookEditing:true,
-    getRows:()=>flipped()?[...frozenMeta,...shownLogin()].map(m=>m.id).concat(shownFields().map(f=>f.id)):store.document.cameras.map(r=>r.id),
+    getRows:()=>flipped()?[...frozenMeta,...shownLogin()].map(m=>m.id).concat(shownFields().map(f=>f.id)):shownCameras().map(r=>r.id),
     getColumns:()=>flipped()?cameraColumns():[...frozenMeta,...shownLogin(),...shownFields().map(f=>({id:f.id,label:f.label,fill:'copy' as const}))],
     getCell:address=>cellValue(position(address)),onEdit:batch=>submit(batch.edits.map(position)),
     onSelection(address){active=address&&position(address);options.onSelect(active);if(flipped())controls.refresh();},
-    onHistory(direction){if(active&&store.invalid.has(addressKey(active))){store.discard(active.rowId,active.columnId);return;}store.history(direction==='redo');},
+    onHistory(direction){
+      if(active&&store.invalid.has(addressKey(active))){store.discard(active.rowId,active.columnId);return;}
+      // Undo or Redo of an edit to a camera Rows hides brings that camera back, so the change shows.
+      const forward=direction==='redo',next=(forward?store.redo:store.undo).at(-1);
+      store.history(forward);
+      if(next?.kind==='edit')for(const edit of next.edits)searchControls?.reveal({rowId:edit.rowId,columnId:edit.columnId});
+    },
     onError:error=>options.onError(error.message)
   });
   controlsToDispose.push(controls);
@@ -179,21 +218,46 @@ export async function createCameraGrid(options:GridOptions){
       onShownWhenCollapsedChanges(changes:readonly {id:string;shownWhenCollapsed:boolean}[]){layout(withShownWhenCollapsed(view(),changes));followSelection();},
     }:{}),
   });controlsToDispose.push(columnEditor);
-  // A Hubble without the column search leaves its slot empty and the page works as before.
+  /** Return or Escape in the search: the sheet takes the keyboard, standing on a cell that still shows. */
+  const focusGrid=()=>{
+    const cameras=shownCameras(),rowId=active&&cameras.some(row=>row.id===active!.rowId)?active.rowId:cameras[0]?.id;
+    if(!rowId){table.focus();return;}
+    const keep=active&&([...frozenMeta,...shownLogin()].some(m=>m.id===active!.columnId)||shownFields().some(f=>f.id===active!.columnId));
+    controls.select(position({rowId,columnId:keep?active!.columnId:shownLogin()[0]?.id??shownFields()[0]?.id??'camera-name'}));
+  };
+  // What the search looks through: the Columns menu's list without its Clear all columns row, which is no column.
+  const searchItems=()=>columnItems().filter(item=>item.id!==clearAllId);
   let columnSearch:Awaited<ReturnType<typeof mountSpreadsheetColumnSearch>>|undefined;
-  if(options.columnSearch){
+  if(options.search){
+    const slot=options.search;
+    const onColumns=(found:{fieldIds:readonly string[]}|null)=>{searchIds=found&&new Set(found.fieldIds);drawForSearch();};
     try{
-      columnSearch=await mountSpreadsheetColumnSearch({
-        root:options.columnSearch,getItems:columnItems,
-        onSearch(found){searchIds=found&&new Set(found.fieldIds);render();followSelection();},
-        onFocusGrid(){
-          const rowId=active?.rowId??store.document.cameras[0]?.id;
-          if(!rowId){table.focus();return;}
-          const keep=active&&([...frozenMeta,...shownLogin()].some(m=>m.id===active!.columnId)||shownFields().some(f=>f.id===active!.columnId));
-          controls.select(position(keep?active!:{rowId,columnId:shownLogin()[0]?.id??shownFields()[0]?.id??'camera-name'}));
+      // Hubble's search field: Find marks matching cells, Rows keeps the cameras with one, Columns keeps matching settings.
+      // It starts on Columns, as this header's column search always has.
+      const search=await mountSpreadsheetSearch({
+        root:slot,mode:'columns',getItems:searchItems,onColumns,
+        grid:()=>table,
+        getRows:()=>store.document.cameras.map(row=>row.id),
+        // Find and Rows read the names, addresses and status, the logins and the settings this tab shows with no search.
+        getColumns:()=>[...frozenMeta.map(m=>m.id),...loginMeta.filter(m=>loginVisible(view(),m.id)).map(m=>m.id),...visibleFields(view()).map(f=>f.id)],
+        getText:({rowId,columnId})=>searchText(rowId,columnId),
+        getCellAttributes:address=>position(address),
+        onRows(rowIds){searchRows=rowIds&&new Set(rowIds);drawForSearch();},
+        onSelect(address){
+          // A match on a camera Rows hid after it was worked out, as when a Live change made one match, comes back.
+          if(searchRows&&!searchRows.has(address.rowId))searchControls?.reveal(address);
+          controls.select(position(address),undefined,{focus:false});
         },
-      });controlsToDispose.push(columnSearch);
-    }catch{options.columnSearch.hidden=true;}
+        onFocusGrid:focusGrid,
+        onError:error=>options.onError(error.message),
+      });controlsToDispose.push(search);searchControls=search;
+    }catch{
+      // An earlier Hubble: its column search, or nothing.
+      try{
+        columnSearch=await mountSpreadsheetColumnSearch({root:slot,getItems:searchItems,onSearch:onColumns,onFocusGrid:focusGrid});
+        controlsToDispose.push(columnSearch);
+      }catch{slot.hidden=true;}
+    }
   }
   const menu=await createSpreadsheetContextMenu({root:table,onError:error=>options.onError(error.message)});controlsToDispose.push(menu);
   table.addEventListener('contextmenu',event=>{
@@ -225,12 +289,12 @@ export async function createCameraGrid(options:GridOptions){
     root:table,viewport,getScale:()=>zoomRatio,
     getItems:()=>(flipped()?[
       {id:settingLabelsId,label:'setting names',axis:'column' as const,header:numberCorner,size:view().settingLabelWidth??defaultLabelWidth,min:120,max:800},
-      ...store.document.cameras.map(row=>({id:row.id,label:valueOf(row,'camera-name'),axis:'column' as const,header:numberHeads.get(row.id)!,size:view().cameraWidths?.[row.id]??defaultCameraWidth,min:96,max:800})),
+      ...shownCameras().map(row=>({id:row.id,label:valueOf(row,'camera-name'),axis:'column' as const,header:numberHeads.get(row.id)!,size:view().cameraWidths?.[row.id]??defaultCameraWidth,min:96,max:800})),
       ...[...frozenMeta,...shownLogin()].map(m=>m.id).concat(shownFields().map(f=>f.id)).filter(id=>id!=='recording-status').map(id=>({id,label:settingLabel(id)!,axis:'row' as const,header:labelHeads.get(id)!,size:view().settingHeights?.[id]??defaultSettingHeight,min:28,max:200}))
     ]:[
       ...[...frozenMeta,...shownLogin()].filter(m=>m.id!=='connection-status'&&m.id!=='recording-status').map(m=>({id:m.id,label:m.label,axis:'column' as const,header:metaHeads[meta.indexOf(m)]!,size:view().widths[m.id]??m.width,min:96,max:800})),
       ...shownFields().map(f=>({id:f.id,label:f.label,axis:'column' as const,header:fieldHeaders.get(f.id)!,size:view().widths[f.id]??f.width,min:96,max:800})),
-      ...store.document.cameras.map(row=>({id:row.id,label:valueOf(row,'camera-name'),axis:'row' as const,header:rows.get(row.id)!.cells[0] as HTMLElement,size:view().rowHeights[row.id]??36,min:28,max:200}))
+      ...shownCameras().map(row=>({id:row.id,label:valueOf(row,'camera-name'),axis:'row' as const,header:rows.get(row.id)!.cells[0] as HTMLElement,size:view().rowHeights[row.id]??36,min:28,max:200}))
     ]).filter(handleIsExposed),
     onResize(item,size){
       const next=clone(view());
@@ -241,7 +305,7 @@ export async function createCameraGrid(options:GridOptions){
   });controlsToDispose.push(resize);
   reorder=await mountSpreadsheetReorder({
     root:table,getItems:()=>{
-      const result:SpreadsheetReorderItem[]=[],isFlippedNow=flipped(),cameras=store.document.cameras;
+      const result:SpreadsheetReorderItem[]=[],isFlippedNow=flipped(),cameras=shownCameras();
       const axis=isFlippedNow?'row' as const:'column' as const;
       const settingCells=(f:Field)=>cameras.map(row=>cells.get(row.id+'/'+f.id)!);
       const handleOf=(f:Field)=>isFlippedNow?labelHeads.get(f.id)!:fieldHeaders.get(f.id)!;
@@ -312,10 +376,11 @@ export async function createCameraGrid(options:GridOptions){
       groupControls.get(group.id)?.refresh();
     }
     table.style.width=width+'px';
-    place(body,store.document.cameras.map(row=>rows.get(row.id)!));
-    for(const [index,row]of store.document.cameras.entries()){
+    const onScreen=shownCameras(),numbers=cameraNumbers();
+    place(body,onScreen.map(row=>rows.get(row.id)!));
+    for(const row of onScreen){
       const tr=rows.get(row.id)!;
-      tr.style.height=(view().rowHeights[row.id]??36)+'px';tr.cells[0]!.textContent=String(index+1);
+      tr.style.height=(view().rowHeights[row.id]??36)+'px';tr.cells[0]!.textContent=String(numbers.get(row.id));
       tr.cells[0]!.setAttribute('aria-label',valueOf(row,'camera-name'));orderNodes(tr,[tr.cells[0] as HTMLElement,...meta.map(m=>cells.get(row.id+'/'+m.id)!),...groupOrder.flatMap(id=>[...order.filter(f=>f.group===id).map(f=>cells.get(row.id+'/'+f.id)!),placeholders.get(id)!.cells.get(row.id)!])]);
       let left=34;
       for(const m of frozenMeta){const cell=cells.get(row.id+'/'+m.id)!;cell.style.left=left+'px';cell.style.top='';left+=view().widths[m.id]??m.width;}
@@ -323,7 +388,8 @@ export async function createCameraGrid(options:GridOptions){
     }
   }
   function layoutColumns(){
-    const v=view(),cameras=store.document.cameras,labelWidth=v.settingLabelWidth??defaultLabelWidth;
+    // While Rows is searching, only the cameras with a match have a column. Each keeps its number.
+    const v=view(),cameras=shownCameras(),numbers=cameraNumbers(),labelWidth=v.settingLabelWidth??defaultLabelWidth;
     const cameraCells=(id:string)=>cameras.map(row=>cells.get(row.id+'/'+id)!);
     place(tracks,[labelTrack,...cameras.map(row=>cameraTracks.get(row.id)!)]);
     labelTrack.style.width=labelWidth+'px';
@@ -333,7 +399,7 @@ export async function createCameraGrid(options:GridOptions){
     const heightOf=(id:string)=>(v.settingHeights?.[id]??defaultSettingHeight)+'px';
     place(head,[numberRow,...frozenMeta.map(m=>identityRows.get(m.id)!)]);
     place(numberRow,[numberCorner,...cameras.map(row=>numberHeads.get(row.id)!)]);
-    for(const [index,row]of cameras.entries()){const number=numberHeads.get(row.id)!;number.textContent=String(index+1);number.setAttribute('aria-label',valueOf(row,'camera-name'));}
+    for(const row of cameras){const number=numberHeads.get(row.id)!;number.textContent=String(numbers.get(row.id));number.setAttribute('aria-label',valueOf(row,'camera-name'));}
     for(const m of frozenMeta){const row=identityRows.get(m.id)!;place(row,[labelHeads.get(m.id)!,...cameraCells(m.id)]);row.style.height=heightOf(m.id);}
     const list=shownFields(),bodyRows:HTMLElement[]=[];
     if(shownLogin().length){
@@ -359,7 +425,16 @@ export async function createCameraGrid(options:GridOptions){
   function followSelection(){
     if(!active||!currentRow(active.rowId))return;
     const shownOnTab=[...frozenMeta,...shownLogin()].some(m=>m.id===active!.columnId)||shownFields().some(f=>f.id===active!.columnId);
-    controls.select(position(shownOnTab?active:{rowId:active.rowId,columnId:'camera-name'}),undefined,{focus:false});
+    // A camera Rows hides hands the selection to the first one it shows.
+    const cameras=shownCameras(),rowId=cameras.some(row=>row.id===active!.rowId)?active.rowId:cameras[0]?.id;
+    if(!rowId)return;
+    controls.select(position({rowId,columnId:shownOnTab?active.columnId:'camera-name'}),undefined,{focus:false});
+  }
+  // A camera new to the plan, such as one just added, shows while Rows is searching: Rows chose its cameras before it existed.
+  function revealNewCameras(){
+    const added=store.document.cameras.filter(row=>!knownCameras.has(row.id));
+    knownCameras=new Set(store.document.cameras.map(row=>row.id));
+    if(searchRows)for(const row of added)searchControls?.reveal({rowId:row.id,columnId:'camera-name'});
   }
   function render(){
     if(disposed)return;
@@ -371,7 +446,7 @@ export async function createCameraGrid(options:GridOptions){
     for(const row of store.document.cameras)ensureCamera(row);
     if(flip)layoutColumns();else layoutRows();
     const visible=new Set(shownFields().map(f=>f.id)),orderedIds=[...meta.map(m=>m.id),...orderedFields().map(f=>f.id)];
-    for(const row of store.document.cameras){
+    for(const row of shownCameras()){
       for(const id of orderedIds){
         const cell=cells.get(row.id+'/'+id)!,address={rowId:row.id,columnId:id};
         cell.dataset.hubbleRow=flip?id:row.id;cell.dataset.hubbleColumn=flip?row.id:id;
@@ -391,11 +466,12 @@ export async function createCameraGrid(options:GridOptions){
         if(id==='recording-status')cell.dataset.recording=isOnline(row)?obs?.recording??'':'';
       }
     }
-    controls.refresh();resize?.refresh();reorder?.refresh();columnEditor.refresh();columnSearch?.refresh();
+    controls.refresh();resize?.refresh();reorder?.refresh();columnEditor.refresh();columnSearch?.refresh();refreshSearchSoon();
     const nowShowing=activeSheetId(store.document)+'/'+table.dataset.orientation;
     if(nowShowing!==shownLayout){shownLayout=nowShowing;followSelection();}
+    revealNewCameras();
   }
   const unsubscribe=store.subscribe(render);
   render();
-  return {refresh:render,select:(address:SpreadsheetAddress)=>controls.select(position(address)),get active(){return active;},get editing(){return editor?.address;},getValue:(address:SpreadsheetAddress)=>cellValue(address),dispose(){disposed=true;unsubscribe();for(const control of controlsToDispose.reverse())control.dispose();}};
+  return {refresh:render,select:(address:SpreadsheetAddress)=>controls.select(position(address)),get active(){return active;},get editing(){return editor?.address;},getValue:(address:SpreadsheetAddress)=>cellValue(address),dispose(){disposed=true;clearTimeout(searchRefresh);unsubscribe();for(const control of controlsToDispose.reverse())control.dispose();}};
 }
