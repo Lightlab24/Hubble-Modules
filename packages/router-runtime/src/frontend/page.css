@@ -120,6 +120,11 @@ p {
   grid-template-rows: auto minmax(0, 1fr);
   position: relative;
 }
+/* The router keeps the row that fills the page in a part's window too, where the Button Matrix
+   groups above it are left out. */
+.router-page > .router-view {
+  grid-row: 2;
+}
 .router-groups {
   padding: 10px;
   border-bottom: 1px solid var(--line);

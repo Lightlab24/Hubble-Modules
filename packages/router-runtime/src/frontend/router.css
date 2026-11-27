@@ -306,6 +306,12 @@
   justify-self: end;
 }
 
+/* The workspace keeps the row that fills the view in a part's window too, where the Patch and Routes
+   tabs above it are left out. */
+.router-view > .router-workspace {
+  grid-row: 3;
+}
+
 .router-workspace {
   display: grid;
   min-width: 0;
