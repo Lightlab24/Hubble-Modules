@@ -1,5 +1,5 @@
 import {
-  mountSpreadsheetControls, mountSpreadsheetColumnGroup, mountSpreadsheetColumnEditor, mountSpreadsheetColumnSearch, spreadsheetColumnSectionsSupported,
+  mountSpreadsheetControls, mountSpreadsheetColumnGroup, mountSpreadsheetColumnEditor, mountSpreadsheetColumnSearch, mountSpreadsheetSearch, spreadsheetColumnSectionsSupported,
   createSpreadsheetContextMenu, mountSpreadsheetReorder, mountSpreadsheetResize, mountSpreadsheetViewport,
   type SpreadsheetAddress, type SpreadsheetCell, type SpreadsheetControls, type SpreadsheetColumn, type SpreadsheetColumnGroup,
   type SpreadsheetEdit, type SpreadsheetReorderItem, type SpreadsheetColumnGroupControls, type SpreadsheetColumnEditorItem,
@@ -13,8 +13,11 @@ import type { Limits } from './device.js';
 
 export interface GridOptions {
   kind: SheetKind; table: HTMLTableElement; viewport: HTMLElement; columnEditor: HTMLElement; store: DraftStore;
-  /** The toolbar slot for Hubble's column search. A Hubble without it leaves the slot empty. */
-  columnSearch?: HTMLElement;
+  /**
+   * The header slot for Hubble's search field: Find, Rows or Columns. A Hubble without it gets the earlier
+   * column search there, and one without that leaves the slot empty.
+   */
+  search?: HTMLElement;
   observed: () => Observed; onSelect: (address: SpreadsheetAddress | undefined) => void;
   onZoom?: (ratio: number) => void;
   onRefresh: (unitId: string) => void; onRemove: (unitId: string) => void; onError: (message: string) => void;
@@ -65,6 +68,10 @@ export async function createGrid(options: GridOptions) {
   let resize: Awaited<ReturnType<typeof mountSpreadsheetResize>> | undefined;
   let reorder: Awaited<ReturnType<typeof mountSpreadsheetReorder>> | undefined;
   let zoomRatio = 1, rows: Row[] = [], rowById = new Map<string, Row>();
+  let searchControls: { refresh(): void } | undefined, searchRefresh: ReturnType<typeof setTimeout> | undefined;
+  // The grid changed under a live search: look again shortly, once, rather than on every redraw. Forty units' cells
+  // take tens of milliseconds to read, and a Send all redraws many times.
+  const refreshSearchSoon = () => { if (searchControls && searchRefresh === undefined) searchRefresh = setTimeout(() => { searchRefresh = undefined; if (!disposed) searchControls?.refresh(); }, 120); };
   // Each kind of tab keeps its own grid. Only the one whose tab is open draws or answers.
   const showing = () => activeKind(store.shown) === kind;
   // The layout this grid drew last. While another kind of tab is open, the plan's `view` belongs to that tab.
@@ -75,9 +82,10 @@ export async function createGrid(options: GridOptions) {
   const settingLabel = (id: string) => fieldById.get(id)?.label ?? meta.find(m => m.id === id)?.label;
   const orderedGroups = () => [...view().order, ...groups.map(g => g.id).filter(id => !view().order.includes(id))];
   const fieldsOfGroup = (id: string) => { const group = groupById.get(id)!; return [...(view().fields[id] ?? []), ...group.fields.map(f => f.id).filter(f => !view().fields[id]?.includes(f))].map(fieldId => fieldById.get(fieldId)!); };
-  // The column search in the toolbar: only the settings it matches are drawn, until it is cleared. It is never saved.
-  // It looks inside collapsed sections too. Sections and settings that are switched off aren't read from the units, so they stay off.
-  let searchIds: ReadonlySet<string> | null = null;
+  // The search in the header. Columns draws only the settings it matches, until it is cleared, looking inside collapsed
+  // sections too; sections and settings that are switched off aren't read from the units, so they stay off. Rows draws only
+  // the channels with a match, and always the Master row. Neither is ever saved.
+  let searchIds: ReadonlySet<string> | null = null, searchRows: ReadonlySet<string> | null = null;
   const shownFields = () => searchIds ? visibleFields({ ...view(), expanded: Object.fromEntries(groups.map(g => [g.id, true])) }, scope).filter(f => searchIds!.has(f.id)) : visibleFields(view(), scope);
   /** Sections on screen: not hidden, and while searching, holding a match. */
   const shownGroups = () => { const list = shownFields(); return orderedGroups().filter(id => !view().hiddenGroups?.includes(id) && (!searchIds || list.some(f => f.group === id))); };
@@ -86,10 +94,27 @@ export async function createGrid(options: GridOptions) {
   const live = (row: Row) => !!row.unit && row.kind !== 'placeholder' && isLive(observed(), row.unit);
   const staged = (row: Row, fieldId: string) => valueOf(store.shown, row.id, fieldId);
   const shown = (row: Row, fieldId: string) => staged(row, fieldId) || seen(row)?.values[fieldId] || '';
+  /** The rows on screen: every row, or while Rows is searching, the Master row and the channels with a match. */
+  const shownRows = () => searchRows ? rows.filter(row => row.kind === 'master' || searchRows!.has(row.id)) : rows;
+  /** Each channel's number, which it keeps while Rows hides others. */
+  const rowNumbers = () => { let number = 0; return new Map(rows.filter(row => row.kind !== 'master').map(row => [row.id, ++number])); };
   const ticked = () => new Set(masterSelection(store.shown));
   const editedRows = () => masterRows(store.shown, observed());
   const tickable = () => rows.filter(row => row.kind === 'channel');
 
+  /** What a cell shows, for the search. Ticks aren't searched. */
+  function searchText(rowId: string, id: string): string {
+    const row = rowById.get(rowId), address = { rowId, columnId: id }, field = row && cellValue(address);
+    if (!row || !field || field.kind === 'boolean') return '';
+    const invalid = store.invalid.get(addressKey(address));
+    if (invalid) return invalid.edit.value;
+    if (field.mixed) return 'Mixed';
+    if (id === 'unit-mode' && !field.readOnly) return modeLabel(field.value);
+    const definition = fieldById.get(id);
+    if (!definition) return field.value ?? '';
+    const from = row.kind === 'master' ? seen(editedRows().find(target => !fieldCell(target, definition).readOnly) ?? row) : seen(row);
+    return displayValue(observed(), from, definition, field.value ?? '');
+  }
   function fieldCell(row: Row, field: Field): SpreadsheetCell {
     // A unit that isn't live takes presets: the cell shows what is staged, with the choices and ranges the unit will offer.
     // They wait in Pending sends until the unit connects and Send is pressed.
@@ -373,13 +398,13 @@ export async function createGrid(options: GridOptions) {
   // The shared controls take a column's fill and name, but across channels it's the setting that decides them.
   function channelColumns(): SpreadsheetColumn[] {
     const open = active && settingLabel(active.columnId);
-    return rows.map(row => ({ id: row.id, label: row.id === active?.rowId && open ? open : rowName(row), fill: 'copy' as const }));
+    return shownRows().map(row => ({ id: row.id, label: row.id === active?.rowId && open ? open : rowName(row), fill: 'copy' as const }));
   }
   const rowName = (row: Row) => row.kind === 'master' ? 'Master' : row.channel === null || kind === 'setup' ? shownName(observed(), row.unit!) || 'FS-HDR' : shownName(observed(), row.unit!) + ' · ' + (shownLabel(observed(), row.unit!, row.channel) || 'Video ' + row.channel);
   const columnsNow = (): SpreadsheetColumn[] => [...meta.map(m => ({ id: m.id, label: m.label, fill: m.fill })), ...shownFields().map(f => ({ id: f.id, label: f.label, fill: 'copy' as const }))];
   controls = await mountSpreadsheetControls({
     root: table, viewport, extendedEditing: true, workbookEditing: true,
-    getRows: () => flipped() ? columnsNow().map(c => c.id) : rows.map(r => r.id),
+    getRows: () => flipped() ? columnsNow().map(c => c.id) : shownRows().map(r => r.id),
     getColumns: () => flipped() ? channelColumns() : columnsNow(),
     getCell: address => showing() ? cellValue(position(address)) : null, onEdit: batch => submit(batch.edits.map(position)),
     onSelection(address) { active = address && position(address); options.onSelect(active); if (flipped()) controls.refresh(); },
@@ -419,20 +444,42 @@ export async function createGrid(options: GridOptions) {
       onShownWhenCollapsedChanges(changes: readonly { id: string; shownWhenCollapsed: boolean }[]) { layout(withShownWhenCollapsed(view(), changes)); followSelection(); },
     } : {}),
   }); controlsToDispose.push(columnEditor);
-  // A Hubble without the column search leaves its slot empty and the page works as before.
-  if (options.columnSearch) {
+  /** Return or Escape in the search: the sheet takes the keyboard, standing on a cell that still shows. */
+  const focusGrid = () => {
+    const rowId = active && shownRows().some(row => row.id === active!.rowId) ? active.rowId : shownRows()[0]?.id;
+    if (!rowId) { table.focus(); return; }
+    const keep = active && (meta.some(m => m.id === active!.columnId) || shownFields().some(f => f.id === active!.columnId));
+    controls.select(position(keep ? { rowId, columnId: active!.columnId } : { rowId, columnId: shownFields()[0]?.id ?? meta[0]!.id }));
+  };
+  // What the search looks through: the Columns menu's list without its Clear all row, which is no column.
+  const searchItems = () => columnItems().filter(item => item.id !== clearAllId);
+  if (options.search) {
+    const slot = options.search;
+    const onColumns = (found: { fieldIds: readonly string[] } | null) => { searchIds = found && new Set(found.fieldIds); render(); followSelection(); };
     try {
-      const search = await mountSpreadsheetColumnSearch({
-        root: options.columnSearch, getItems: columnItems,
-        onSearch(found) { searchIds = found && new Set(found.fieldIds); render(); followSelection(); },
-        onFocusGrid() {
-          const rowId = active?.rowId ?? rows[0]?.id;
-          if (!rowId) { table.focus(); return; }
-          const keep = active && (meta.some(m => m.id === active!.columnId) || shownFields().some(f => f.id === active!.columnId));
-          controls.select(position(keep ? active! : { rowId, columnId: shownFields()[0]?.id ?? meta[0]!.id }));
-        },
-      }); controlsToDispose.push(search);
-    } catch { options.columnSearch.hidden = true; }
+      // Hubble's search field: Find marks matching cells, Rows keeps the channels with one, Columns keeps matching settings.
+      // It starts on Columns, as this header's column search always has.
+      const search = await mountSpreadsheetSearch({
+        root: slot, mode: 'columns', getItems: searchItems, onColumns,
+        grid: () => table,
+        // The Master row stands for the ticked channels, so it is not searched; Rows always keeps it.
+        getRows: () => rows.filter(row => row.kind !== 'master').map(row => row.id),
+        // Find and Rows read the settings this tab shows with no search, beside the names and labels.
+        getColumns: () => [...meta.map(m => m.id), ...visibleFields(view(), scope).map(f => f.id)],
+        getText: ({ rowId, columnId }) => searchText(rowId, columnId),
+        getCellAttributes: address => position(address),
+        onRows(rowIds) { searchRows = rowIds && new Set(rowIds); render(); followSelection(); },
+        onSelect(address) { controls.select(position(address), undefined, { focus: false }); },
+        onFocusGrid: focusGrid,
+        onError: error => options.onError(error.message),
+      }); controlsToDispose.push(search); searchControls = search;
+    } catch {
+      // An earlier Hubble: its column search, or nothing.
+      try {
+        const search = await mountSpreadsheetColumnSearch({ root: slot, getItems: searchItems, onSearch: onColumns, onFocusGrid: focusGrid });
+        controlsToDispose.push(search);
+      } catch { slot.hidden = true; }
+    }
   }
   const menu = await createSpreadsheetContextMenu({ root: table, onError: error => options.onError(error.message) }); controlsToDispose.push(menu);
   table.addEventListener('contextmenu', event => {
@@ -554,12 +601,12 @@ export async function createGrid(options: GridOptions) {
       groupControls.get(id)?.refresh();
     }
     table.style.width = width + 'px';
-    place(body, rows.map(row => rowNodes.get(row.id)!));
-    let number = 0;
+    const onScreen = shownRows(), numbers = rowNumbers();
+    place(body, onScreen.map(row => rowNodes.get(row.id)!));
     const headHeight = rows[0]?.kind === 'master' ? head.offsetHeight : 0;
-    for (const row of rows) {
+    for (const row of onScreen) {
       const tr = rowNodes.get(row.id)!, first = tr.cells[0] as HTMLTableCellElement;
-      tr.style.height = (view().rowHeights[row.id] ?? 36) + 'px'; first.textContent = row.kind === 'master' ? 'All' : String(++number);
+      tr.style.height = (view().rowHeights[row.id] ?? 36) + 'px'; first.textContent = row.kind === 'master' ? 'All' : String(numbers.get(row.id));
       first.setAttribute('aria-label', rowName(row));
       place(tr, [first, ...meta.map(m => cellFor(row.id, m.id)), ...groupOrder.flatMap(id => isEmpty(id) ? [placeholders.get(id)!.cells.get(row.id)!] : inGroup(id).map(f => cellFor(row.id, f.id)))]);
       for (const m of meta) { const cell = cellFor(row.id, m.id); cell.style.left = lefts.get(m.id) + 'px'; }
@@ -568,23 +615,23 @@ export async function createGrid(options: GridOptions) {
     }
   }
   function layoutColumns() {
-    const v = view(), labelWidth = v.settingLabelWidth ?? defaultLabelWidth;
-    const acrossRows = (id: string) => rows.map(row => cellFor(row.id, id));
-    place(tracks, [labelTrack, ...rows.map(row => channelTracks.get(row.id)!)]);
+    const v = view(), labelWidth = v.settingLabelWidth ?? defaultLabelWidth, onScreen = shownRows(), numbers = rowNumbers();
+    const acrossRows = (id: string) => onScreen.map(row => cellFor(row.id, id));
+    place(tracks, [labelTrack, ...onScreen.map(row => channelTracks.get(row.id)!)]);
     labelTrack.style.width = labelWidth + 'px';
     let width = labelWidth;
-    for (const row of rows) { const w = v.cameraWidths?.[row.id] ?? defaultChannelWidth; channelTracks.get(row.id)!.style.width = w + 'px'; width += w; }
+    for (const row of onScreen) { const w = v.cameraWidths?.[row.id] ?? defaultChannelWidth; channelTracks.get(row.id)!.style.width = w + 'px'; width += w; }
     table.style.width = width + 'px';
     const heightOf = (id: string) => (v.settingHeights?.[id] ?? defaultSettingHeight) + 'px';
     place(head, [numberRow, ...meta.map(m => identityRows.get(m.id)!)]);
-    place(numberRow, [numberCorner, ...rows.map(row => numberHeads.get(row.id)!)]);
-    for (const [index, row] of rows.entries()) { const number = numberHeads.get(row.id)!; number.textContent = String(index + 1); number.setAttribute('aria-label', rowName(row)); }
+    place(numberRow, [numberCorner, ...onScreen.map(row => numberHeads.get(row.id)!)]);
+    for (const row of onScreen) { const number = numberHeads.get(row.id)!; number.textContent = String(numbers.get(row.id) ?? ''); number.setAttribute('aria-label', rowName(row)); }
     for (const m of meta) { const row = identityRows.get(m.id)!; place(row, [labelHead(m.id), ...acrossRows(m.id)]); row.style.height = heightOf(m.id); }
     const list = shownFields(), bodyRows: HTMLElement[] = [];
     for (const id of shownGroups()) {
       const section = sectionRows.get(id)!, th = groupHeaders.get(id)!;
-      th.scope = 'rowgroup'; th.hidden = false; th.colSpan = 1; section.filler.colSpan = Math.max(1, rows.length);
-      place(section.row, rows.length ? [th, section.filler] : [th]); bodyRows.push(section.row); groupControls.get(id)?.refresh();
+      th.scope = 'rowgroup'; th.hidden = false; th.colSpan = 1; section.filler.colSpan = Math.max(1, onScreen.length);
+      place(section.row, onScreen.length ? [th, section.filler] : [th]); bodyRows.push(section.row); groupControls.get(id)?.refresh();
       for (const field of list.filter(f => f.group === id)) { const row = settingRow(field.id); place(row, [labelHead(field.id), ...acrossRows(field.id)]); row.style.height = heightOf(field.id); bodyRows.push(row); for (const cell of row.cells) { (cell as HTMLElement).style.left = ''; (cell as HTMLElement).style.top = ''; } }
     }
     place(body, bodyRows);
@@ -598,7 +645,10 @@ export async function createGrid(options: GridOptions) {
   function followSelection() {
     if (!active || !rowById.has(active.rowId)) return;
     const shownOnTab = meta.some(m => m.id === active!.columnId) || shownFields().some(f => f.id === active!.columnId);
-    controls.select(position(shownOnTab ? active : { rowId: active.rowId, columnId: meta[0]!.id }), undefined, { focus: false });
+    // A channel Rows hides hands the selection to the first one it shows.
+    const rowId = shownRows().some(row => row.id === active!.rowId) ? active.rowId : shownRows()[0]?.id;
+    if (!rowId) return;
+    controls.select(position(shownOnTab ? { rowId, columnId: active.columnId } : { rowId, columnId: meta[0]!.id }), undefined, { focus: false });
   }
   function render() {
     if (disposed) return;
@@ -617,7 +667,7 @@ export async function createGrid(options: GridOptions) {
     for (const row of rows) ensureRow(row);
     if (flip) layoutColumns(); else layoutRows();
     const visible = shownFields(), columnIds = [...meta.map(m => m.id), ...visible.map(f => f.id)], selection = ticked();
-    for (const row of rows) {
+    for (const row of shownRows()) {
       const current = seen(row), about = row.unit && unitObservation(observed(), row.unit), online = live(row);
       rowNodes.get(row.id)!.dataset.selected = String(row.kind === 'channel' && selection.has(row.id));
       for (const id of columnIds) {
@@ -647,7 +697,7 @@ export async function createGrid(options: GridOptions) {
         if (id === 'connection-status' || id === 'row-signal') cell.dataset.connection = about?.state === 'live' ? about.simulated ? 'simulated' : id === 'connection-status' ? 'live' : '' : about?.state ?? (row.unit && (row.unit.values['unit-host'] || isSimulated(row.unit)) ? 'connecting' : 'unset');
       }
     }
-    controls.refresh(); resize?.refresh(); reorder?.refresh(); columnEditor.refresh();
+    controls.refresh(); resize?.refresh(); reorder?.refresh(); columnEditor.refresh(); refreshSearchSoon();
     const nowShowing = activeSheetId(store.shown) + '/' + table.dataset.orientation;
     if (nowShowing !== shownLayout) { shownLayout = nowShowing; followSelection(); }
   }
@@ -660,5 +710,5 @@ export async function createGrid(options: GridOptions) {
   const drawSoon = () => { if (drawQueued) return; drawQueued = true; requestAnimationFrame(() => { drawQueued = false; render(); }); };
   const unsubscribe = store.subscribe(() => { if (batching) drawSoon(); else render(); });
   render();
-  return { kind, refresh: render, refreshSoon: drawSoon, batch<T>(run: () => T): T { batching++; try { return run(); } finally { batching--; drawSoon(); } }, select: (address: SpreadsheetAddress) => controls.select(position(address)), get active() { return active; }, get editing() { return editor?.address; }, getValue: (address: SpreadsheetAddress) => cellValue(address), dispose() { disposed = true; unsubscribe(); for (const key of [...sliders.keys()]) dropSlider(key); for (const control of controlsToDispose.reverse()) control.dispose(); } };
+  return { kind, refresh: render, refreshSoon: drawSoon, batch<T>(run: () => T): T { batching++; try { return run(); } finally { batching--; drawSoon(); } }, select: (address: SpreadsheetAddress) => controls.select(position(address)), get active() { return active; }, get editing() { return editor?.address; }, getValue: (address: SpreadsheetAddress) => cellValue(address), dispose() { disposed = true; clearTimeout(searchRefresh); unsubscribe(); for (const key of [...sliders.keys()]) dropSlider(key); for (const control of controlsToDispose.reverse()) control.dispose(); } };
 }

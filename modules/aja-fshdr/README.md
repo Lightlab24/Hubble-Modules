@@ -1,6 +1,6 @@
 # AJA FS-HDR
 
-Module ID `aja-fshdr`, version 2.3.0. Controls AJA FS-HDR frame synchronizers and HDR converters over their REST interface, from one page built on Hubble's shared spreadsheet controls. It needs Hubble 2.2.0 or later, and from 2.3.0 a Hubble with module windows (host feature `module-page-windows-v1`): the page is live in every HubDash window at once, and every window shows the same tab and layout, which are saved with the plan. Each tab, the ones you add too, also opens alone in a window of its own from HubDash's sidebar (Open in its own window ›): that window keeps to its tab whichever tab the page has open, never changes which one that is, takes the tab's new name when it is renamed, and says so when the tab is removed.
+Module ID `aja-fshdr`, version 2.3.1. Controls AJA FS-HDR frame synchronizers and HDR converters over their REST interface, from one page built on Hubble's shared spreadsheet controls. It needs Hubble 2.2.0 or later, and from 2.3.0 a Hubble with module windows (host feature `module-page-windows-v1`): the page is live in every HubDash window at once, and every window shows the same tab and layout, which are saved with the plan. Each tab, the ones you add too, also opens alone in a window of its own from HubDash's sidebar (Open in its own window ›): that window keeps to its tab whichever tab the page has open, never changes which one that is, takes the tab's new name when it is renamed, and says so when the tab is removed.
 
 ## The page
 
@@ -11,6 +11,8 @@ One **FS-HDR** page with tabs along the bottom.
 | **Setup** | One row per FS-HDR: its name, address, a Simulated tick, connection, operating mode, an Allow sends tick and four input labels. The Units box sets how many rows there are, and addresses fill down as a series. Unit-wide settings such as genlock source and output frame rate can be added from Columns. |
 | **Master** | Tick the channels you are editing. A change in the top Master row is staged on every ticked channel at once. A Master cell reads Mixed where the ticked channels differ. |
 | Settings sheets | One row per channel, named by FS-HDR and input label. Each sheet keeps its own columns, chosen from Columns. Add as many as you like; a new sheet starts as a copy of the one that is open. A sheet can be turned so channels run across the top. |
+
+The search in the header has three choices, and keeps the words when you switch. **Columns**, where it starts, shows only the settings whose names have every word you type: a section's name keeps all its settings, collapsed ones included, and settings that are switched off stay off. **Find** marks the cells that match and steps through them with Return. **Rows** shows only the channels with a matching cell, keeping their numbers, and the Master row stays. Escape clears it. On a Hubble without this field (host feature `module-spreadsheet-search-v1`) the header has the earlier column search, which only filters columns.
 
 A unit in HD/SD mode has four channels and a unit in 4K/UHD mode has one. The FS-HDR name is the unit's own System Name and the input labels are its Channel Names, so they show on the unit as well.
 
@@ -46,7 +48,7 @@ The Button Matrix action **Set HDR transform** takes a unit or All configured un
 
 ## Saved data
 
-Everything is in one workspace document, `fshdr-plan`: the units, staged settings, tabs and their columns, the Master selection and the Auto send choice. It travels with workspace export and import. Units set up in 1.x are brought across once, the first time 2.0 starts with an empty plan, keeping whether each could be controlled. They are read straight away, and saved into the plan by the first page command or button press, because Hubble lets a module save its documents only during a command. Removing them later doesn't bring them back.
+A search is never saved: it only changes what the page shows. Everything else is in one workspace document, `fshdr-plan`: the units, staged settings, tabs and their columns, the Master selection and the Auto send choice. It travels with workspace export and import. Units set up in 1.x are brought across once, the first time 2.0 starts with an empty plan, keeping whether each could be controlled. They are read straight away, and saved into the plan by the first page command or button press, because Hubble lets a module save its documents only during a command. Removing them later doesn't bring them back.
 
 A second document, `fshdr-sim`, holds what has been written to each simulated unit, by the unit's own setting IDs. It is saved by the page command that sends to a simulated unit, and the entry goes when the row stops being simulated. Planned modes and presets are in `fshdr-plan` with everything else staged.
 
