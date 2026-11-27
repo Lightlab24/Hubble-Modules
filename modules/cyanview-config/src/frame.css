@@ -30,6 +30,9 @@ body { overflow: hidden; }
 }
 
 #cyanview-design .hc-main > .hc-panel { min-height: 0; overflow: auto; overscroll-behavior: contain; }
+/* A part's own window has no tabs, so its part takes their row as well. */
+#cyanview-design.cv-part-window > .hc-window > .hc-main { grid-template-rows: auto minmax(0, 1fr) auto; }
+#cyanview-design .cv-part-gone { margin: 0; padding: 24px 20px; color: var(--hc-secondary); }
 #cyanview-design .hc-main > .hc-panel > * { flex-shrink: 0; }
 #cyanview-design .hc-global-foot { margin-top: 0; }
 

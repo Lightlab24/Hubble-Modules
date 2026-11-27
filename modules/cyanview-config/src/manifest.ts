@@ -2,6 +2,7 @@ import { defineModuleManifest } from '@hubble/module-sdk/authoring';
 import { documentDefinitions } from './repository.js';
 import { ModuleFrontendSectionSchema } from '@hubble/module-sdk/frontend';
 import { matrix, controlActions } from './control/matrix.js';
+import { windowParts } from './window-parts.js';
 import {
   MODULE_SPREADSHEET_CONTROLS_FEATURE,
   MODULE_SPREADSHEET_COLUMN_GROUPS_FEATURE,
@@ -56,6 +57,9 @@ export default defineModuleManifest({
     // Built to be open in several windows at once: every copy follows the saved plan's revision, a save on an older
     // plan puts only that copy's own changes onto it, and where each copy is stays its own (ui-plan-follow.js).
     windows: true,
+    // Right-click Cyanview in the sidebar, and Open in its own window › offers each tab in a window of its own
+    // (ui-part-window.js).
+    parts: windowParts.map(part => ({ ...part })),
     commands: ['read-plan', 'read-part', 'save-plan', 'save-begin', 'save-part', 'save-commit', 'send', 'clear-network', 'send-begin', 'send-part', 'send-commit', 'scan', 'stop-scan', 'probe', 'find-rig', 'import-device', 'import-part', 'refresh', 'choice-catalogs', 'options', 'firmware-begin', 'firmware-part', 'firmware-commit', 'firmware-targets', 'firmware-install', 'firmware-status', 'remi-state', 'remi-send', 'remi-route', 'camera-control-state', 'camera-control-mutate', 'camera-enabled', 'camera-refresh', 'open-device-page', 'setup-guide', 'page-view'].map(id => ({ id, label: id })),
   })] }],
 });

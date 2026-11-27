@@ -70,6 +70,11 @@ if (window.parent !== window) {
     preview: false,
     // The module is running against its simulated controllers, which the save status says.
     simulated: false,
+    /** The part of the page this window shows, as Hubble's sidebar opened it, or null for the whole page. */
+    view: typeof client.view === 'string' ? client.view : null,
+    canOpenWindows: client.canOpenWindows === true,
+    /** Opens one part of the page in a HubDash window of its own, or brings that window forward. Only on a click. */
+    openWindow(view: string, title: string) { return client.openWindow(view, title); },
     async read() {
       const result = await readPlan();
       revision = result.revision; setBase(result.plan);
