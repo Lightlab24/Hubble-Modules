@@ -1,6 +1,7 @@
 import { ModuleFrontendValueSchema, type ModuleFrontendValue } from "@hubble/module-sdk/frontend";
 import { DraftStore, followSaved, type SaveReceipt } from "./draft-store.js";
-import type { Mutation } from "./model.js";
+import type { Mutation, PingDocument, SpanId } from "./model.js";
+import { readPlace, startingPlace, type Place } from "./place.js";
 
 /** The parts of Hubble's page client the device list uses. */
 export interface PageClient {
@@ -31,6 +32,68 @@ export async function openDeviceList(client: PageClient) {
     close() {
       follow.dispose();
       stop();
+    },
+  };
+}
+
+/**
+ * Where this window of the page is (place.ts): read once as the page opens, then this window's own.
+ * Each change is kept on this computer for the next time the page opens, the newest last, and a
+ * window never hears of another's. The page draws a change at once and never waits for it to save.
+ */
+export async function openPlace(client: PageClient & { readonly view: string | null }, document: PingDocument) {
+  const key = client.view ?? "";
+  let remembered: Place | null = null;
+  try {
+    remembered = readPlace(((await client.call("place", ModuleFrontendValueSchema.parse({ key }))) as { place?: unknown } | null)?.place);
+  } catch {
+    /* Opens where the list says, as before. */
+  }
+  let place = startingPlace(remembered, document);
+  // A sheet's window keeps to its sheet, so it has no open sheet to remember.
+  if (client.view !== null) delete place.sheetId;
+  let waiting: Place | null = null;
+  let writing = false;
+  async function write() {
+    writing = true;
+    try {
+      while (waiting) {
+        const next = waiting;
+        waiting = null;
+        try {
+          await client.call("place", ModuleFrontendValueSchema.parse({ key, place: next }));
+        } catch {
+          /* The next change says it again. */
+        }
+      }
+    } finally {
+      writing = false;
+    }
+  }
+  function change(next: Place) {
+    place = next;
+    waiting = { ...next };
+    if (!writing) void write();
+  }
+  return {
+    get now(): Readonly<Place> {
+      return place;
+    },
+    setSpan(span: SpanId) {
+      if (span !== place.span) change({ ...place, span });
+    },
+    /** null is Auto. */
+    setScale(ms: number | null) {
+      if (ms === (place.scaleMs ?? null)) return;
+      const { scaleMs: _was, ...rest } = place;
+      change(ms === null ? rest : { ...rest, scaleMs: ms });
+    },
+    setSheet(sheetId: string) {
+      if (client.view === null && sheetId !== place.sheetId) change({ ...place, sheetId });
+    },
+    /** Resolves once every change has been passed on. */
+    async settled() {
+      while (writing || waiting) await new Promise((resolve) => setTimeout(resolve, 5));
     },
   };
 }

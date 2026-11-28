@@ -5,7 +5,8 @@ import { createBackend, type BackendOptions, type LiveReply } from "../src/backe
 import { findFping, parsePingLine, pingArguments, Pinger, type PingProcess, type PingSample } from "../src/engine.js";
 import { History } from "../src/history.js";
 import source from "../src/manifest.js";
-import { addSheet, moveRowsToSheet, moveSheet, openSheetId, removeSheet, renameSheet, sheetOf, sheetRows, sheetsOf, applyMutation, bytesPerSecond, colorFor, colorsOf, defaultDocument, PING_COLORS, roundScale, scaleStep, stepScale, DOCUMENT_ID, deviceHasData, formatRate, insertRows, inverse, newDevice, normalizeValue, rulesOf, ruleText, setDeviceCount, validateDocument, validateValue, type DeviceRow, type Mutation, type PingDocument } from "../src/model.js";
+import { readPlace, startingPlace } from "../src/place.js";
+import { addSheet, moveRowsToSheet, moveSheet, removeSheet, renameSheet, sheetOf, sheetRows, sheetsOf, applyMutation, bytesPerSecond, colorFor, colorsOf, defaultDocument, PING_COLORS, roundScale, scaleStep, stepScale, DOCUMENT_ID, deviceHasData, formatRate, insertRows, inverse, newDevice, normalizeValue, rulesOf, ruleText, setDeviceCount, validateDocument, validateValue, type DeviceRow, type Mutation, type PingDocument } from "../src/model.js";
 import { DeviceWatch } from "../src/watch.js";
 
 const cleanup: (() => unknown)[] = [];
@@ -144,7 +145,7 @@ describe("the saved device list", () => {
     const after = applyMutation(doc, edit);
     expect(after.devices[1]!.values.over).toBe("50");
     expect(applyMutation(after, inverse(doc, edit))).toEqual(doc);
-    const added = newDevice(doc, "c");
+    const added = newDevice(doc, "c", "devices");
     expect(added.values.name).toBe("Device 3");
     expect(applyMutation(doc, insertRows(doc, [added], "b")).devices.map((item) => item.id)).toEqual(["a", "c", "b"]);
   });
@@ -167,20 +168,20 @@ describe("the saved device list", () => {
     const doc = defaultDocument();
     doc.devices = [row("a", "Router", "10.0.0.1"), row("b", "Device 2", "")];
     let next = 0;
-    const grow = setDeviceCount(doc, 5, () => `new-${++next}`)!;
+    const grow = setDeviceCount(doc, 5, () => `new-${++next}`, "devices")!;
     expect(grow.removed).toEqual([]);
     const grown = applyMutation(doc, { kind: grow.kind, rows: grow.rows, expected: grow.expected });
     // "Device 2" is taken, so the new names step past it and stay unique.
     expect(grown.devices.map((item) => item.values.name)).toEqual(["Router", "Device 2", "Device 3", "Device 4", "Device 5"]);
     expect(grown.devices.slice(2).every((item) => item.values.host === "" && item.values.enabled === "TRUE")).toBe(true);
     expect(applyMutation(grown, inverse(doc, { kind: grow.kind, rows: grow.rows, expected: grow.expected }))).toEqual(doc);
-    const shrink = setDeviceCount(grown, 1, () => "x")!;
+    const shrink = setDeviceCount(grown, 1, () => "x", "devices")!;
     expect(shrink.rows.map((item) => item.id)).toEqual(["a"]);
     expect(shrink.removed.map((item) => item.id)).toEqual(["b", "new-1", "new-2", "new-3"]);
-    expect(setDeviceCount(doc, 2, () => "x"), "the same number changes nothing").toBeNull();
-    expect(() => setDeviceCount(doc, 129, () => "x")).toThrow("Use from 0 to 128 devices.");
-    expect(() => setDeviceCount(doc, 2.5, () => "x")).toThrow("Use from 0 to 128 devices.");
-    expect(() => setDeviceCount(doc, NaN, () => "x")).toThrow("Use from 0 to 128 devices.");
+    expect(setDeviceCount(doc, 2, () => "x", "devices"), "the same number changes nothing").toBeNull();
+    expect(() => setDeviceCount(doc, 129, () => "x", "devices")).toThrow("Use from 0 to 128 devices.");
+    expect(() => setDeviceCount(doc, 2.5, () => "x", "devices")).toThrow("Use from 0 to 128 devices.");
+    expect(() => setDeviceCount(doc, NaN, () => "x", "devices")).toThrow("Use from 0 to 128 devices.");
     // Only a row with something filled in is worth asking about before it goes.
     expect(deviceHasData(row("b", "Device 2", ""))).toBe(false);
     expect(deviceHasData(row("a", "Router", ""))).toBe(true);
@@ -195,15 +196,25 @@ describe("the saved device list", () => {
     expect(() => validateDocument({ ...doc, settings: { ...doc.settings, sizeBytes: 9000 } })).toThrow(/ping size/u);
   });
 
-  it("saves the timeline scale with the page, and Auto as no scale at all", () => {
+  it("reads where a window was left, and a list saved before 0.2.1 for where a page opens", () => {
+    const doc = defaultDocument();
+    // A new list says nothing: the page opens on 10 minutes and Auto.
+    expect(startingPlace(null, doc)).toEqual({ span: "10m" });
+    // A list saved by 0.2.0 or older had one place for every window, which a page opens on until it is left somewhere.
+    const old = { ...doc, view: { ...doc.view, span: "1h" as const, scaleMs: 2.5, sheetId: "cams" } };
+    expect(startingPlace(null, old)).toEqual({ span: "1h", scaleMs: 2.5, sheetId: "cams" });
+    expect(startingPlace({ span: "1m" }, old)).toEqual({ span: "1m" });
+    // Anything that isn't a place is left out of one; a place has to say what time to show.
+    expect(readPlace({ span: "6h", scaleMs: 0, sheetId: 4 })).toEqual({ span: "6h" });
+    expect(readPlace({ span: "6h", scaleMs: 2, sheetId: "a", other: true })).toEqual({ span: "6h", scaleMs: 2, sheetId: "a" });
+    expect(readPlace({ span: "2h" })).toBeNull();
+    expect(readPlace(["10m"])).toBeNull();
+    expect(readPlace(null)).toBeNull();
+  });
+
+  it("still reads a timeline scale saved with the list by 0.1.6 to 0.2.0", () => {
     const doc = defaultDocument();
     expect(doc.view.scaleMs).toBeUndefined();
-    const set: Mutation = { kind: "view", view: { ...structuredClone(doc.view), scaleMs: 2 }, expected: structuredClone(doc.view) };
-    const scaled = applyMutation(doc, set);
-    expect(scaled.view.scaleMs).toBe(2);
-    expect(() => validateDocument(scaled)).not.toThrow();
-    // Undo takes it back to Auto, which a document without the field reads as.
-    expect(applyMutation(scaled, inverse(doc, set)).view.scaleMs).toBeUndefined();
     // Any scale in range is allowed, not only round ones.
     expect(() => validateDocument({ ...doc, view: { ...doc.view, scaleMs: 2.5 } })).not.toThrow();
     expect(() => validateDocument({ ...doc, view: { ...doc.view, scaleMs: 0 } })).toThrow(/timeline scale/u);
@@ -261,33 +272,32 @@ describe("the saved device list", () => {
     let doc: PingDocument = { ...defaultDocument(), devices: [device("a", "Router"), device("b", "Camera A"), device("c", "Camera B")] };
     // A document from 0.1.7 has no sheets: one, Devices, holds everything.
     expect(sheetsOf(doc)).toEqual([{ id: "devices", name: "Devices" }]);
-    expect(sheetRows(doc).map((row) => row.id)).toEqual(["a", "b", "c"]);
+    expect(sheetRows(doc, "devices").map((row) => row.id)).toEqual(["a", "b", "c"]);
     const apply = (operation: Mutation | null) => {
       const before = doc;
       doc = applyMutation(doc, operation!);
       return { before, operation: operation! };
     };
 
-    // Adding a sheet opens it, empty; a new device lands on it.
+    // Adding a sheet adds it, empty, and leaves which sheet is open to each window; a new device lands on the sheet it is for.
     const added = apply(addSheet(doc, "cams", " Cameras "));
     expect(sheetsOf(doc).map((sheet) => sheet.name)).toEqual(["Devices", "Cameras"]);
-    expect(openSheetId(doc)).toBe("cams");
-    expect(sheetRows(doc)).toEqual([]);
-    expect(newDevice(doc, "d").sheetId).toBe("cams");
+    expect(doc.view.sheetId).toBeUndefined();
+    expect(sheetRows(doc, "cams")).toEqual([]);
+    expect(newDevice(doc, "d", "cams").sheetId).toBe("cams");
     expect(() => addSheet(doc, "x", "cameras")).toThrow("There is already a sheet called cameras.");
     expect(() => addSheet(doc, "x", "  ")).toThrow("Give the sheet a name.");
     expect(applyMutation(doc, inverse(added.before, added.operation)).sheets).toEqual([{ id: "devices", name: "Devices" }]);
-    expect(openSheetId(applyMutation(doc, inverse(added.before, added.operation)))).toBe("devices");
 
-    // Moving devices keeps their place in the list; the Devices box counts only the open sheet.
+    // Moving devices keeps their place in the list; the Devices box counts only the sheet it is on.
     apply(moveRowsToSheet(doc, ["b", "c"], "cams"));
     expect(sheetRows(doc, "cams").map((row) => row.id)).toEqual(["b", "c"]);
     expect(sheetRows(doc, "devices").map((row) => row.id)).toEqual(["a"]);
     expect(moveRowsToSheet(doc, ["b"], "cams"), "already there").toBeNull();
-    const grow = setDeviceCount(doc, 3, () => "e")!;
+    const grow = setDeviceCount(doc, 3, () => "e", "cams")!;
     expect(grow.rows.filter((row) => sheetOf({ ...doc, devices: grow.rows }, row) === "cams")).toHaveLength(3);
     expect(grow.rows.find((row) => row.id === "a")).toBeDefined();
-    const shrink = setDeviceCount(doc, 1, () => "x")!;
+    const shrink = setDeviceCount(doc, 1, () => "x", "cams")!;
     expect(shrink.removed.map((row) => row.id)).toEqual(["c"]);
     expect(shrink.rows.map((row) => row.id)).toEqual(["a", "b"]);
 
@@ -300,8 +310,8 @@ describe("the saved device list", () => {
     // Router came from before sheets, with no sheet of its own; it stays on Devices when Cameras moves to the front.
     expect(sheetRows(doc, "devices").map((row) => row.id)).toEqual(["a"]);
 
-    // The portable document an export carries keeps sheets, each device's sheet and the open sheet.
-    const portable = validateDocument(JSON.parse(JSON.stringify(ModuleDocumentValueSchema.parse(doc))));
+    // The portable document an export carries keeps sheets and each device's sheet, and an open sheet saved by 0.2.0.
+    const portable = validateDocument(JSON.parse(JSON.stringify(ModuleDocumentValueSchema.parse({ ...doc, view: { ...doc.view, sheetId: "cams" } }))));
     expect(portable.sheets).toEqual(doc.sheets);
     expect(portable.devices.map((row) => row.sheetId)).toEqual(doc.devices.map((row) => row.sheetId));
     expect(portable.view.sheetId).toBe("cams");
@@ -312,11 +322,10 @@ describe("the saved device list", () => {
     const { removed: _gone, ...change } = removing;
     const removed = apply(change);
     expect(doc.devices.map((row) => row.id)).toEqual(["a"]);
-    expect(openSheetId(doc)).toBe("devices");
     expect(removeSheet(doc, "devices"), "the last sheet stays").toBeNull();
     doc = applyMutation(doc, inverse(removed.before, removed.operation));
     expect(sheetRows(doc, "cams").map((row) => row.id)).toEqual(["b", "c"]);
-    expect(openSheetId(doc)).toBe("cams");
+    expect(doc.view.sheetId).toBeUndefined();
 
     // A device that names a sheet that is gone, or none (as 0.1.7 adds them), is on the first sheet.
     expect(sheetOf(doc, device("z", "Old", "gone"))).toBe("cams");

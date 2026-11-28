@@ -140,13 +140,16 @@ export interface View {
   rowHeights: Record<string, number>;
   hidden: string[];
   order: string[];
+  /**
+   * Show last, the timeline's scale and the open sheet, as saved before 0.2.1. Each window keeps its
+   * own now (place.ts) and never saves them here, so these are read only for where a page opens
+   * until it has been left somewhere, and stay for older versions and older files.
+   */
   span: SpanId;
-  /** The answer time at the top of the timeline, in ms. Absent is Auto: it fits the tallest bar on show. */
   scaleMs?: number;
+  sheetId?: string;
   /** The times for green, yellow and orange bars on the timeline and the strips. Absent follows the alert limit. */
   bands?: Bands;
-  /** The sheet on show. Absent, or a sheet that is gone, is the first sheet. */
-  sheetId?: string;
 }
 export interface PingDocument {
   version: 1;
@@ -181,9 +184,9 @@ export type Mutation = (
   | { kind: "view"; view: View; expected: View; moved?: string[] }
   /**
    * Adding, renaming, moving or removing sheets, as one step. Removing a sheet takes its devices
-   * with it, and adding one opens it, so the device list and the open sheet can change too.
+   * with it, so the device list can change too. Which sheet is open is each window's own.
    */
-  | { kind: "sheets"; sheets: Sheet[]; expected: Sheet[]; rows?: DeviceRow[]; expectedRows?: DeviceRow[]; open?: string; expectedOpen?: string; moved?: string[] }
+  | { kind: "sheets"; sheets: Sheet[]; expected: Sheet[]; rows?: DeviceRow[]; expectedRows?: DeviceRow[]; moved?: string[] }
 ) & { strict?: boolean };
 
 export const clone = <T>(value: T): T => structuredClone(value);
@@ -525,11 +528,6 @@ export function applyMutation(document: PingDocument, operation: Mutation, clash
       sheets[index] = { ...sheet, name: `Sheet ${number}` };
     });
     next.sheets = sheets;
-    if (operation.open !== undefined && operation.open !== operation.expectedOpen) {
-      // Opening the sheet next to one this copy removed matters only where that one was open.
-      const leaving = operation.expectedOpen !== undefined && !wanted.has(operation.expectedOpen);
-      if (!leaving || !sheets.some((sheet) => sheet.id === next.view.sheetId)) next.view = { ...next.view, sheetId: operation.open };
-    }
   } else {
     next.view = mergeView(operation.expected, operation.view, next.view, operation.moved);
   }
@@ -554,14 +552,13 @@ export function inverse(before: PingDocument, operation: Mutation): Mutation {
       sheets: clone(operation.expected),
       expected: clone(operation.sheets),
       ...(operation.rows ? { rows: clone(operation.expectedRows!), expectedRows: clone(operation.rows) } : {}),
-      ...(operation.open !== undefined ? { open: before.view.sheetId ?? sheetsOf(before)[0]!.id, expectedOpen: operation.open } : {}),
       ...moved,
     };
   return { kind: "view", view: clone(operation.expected), expected: clone(operation.view), ...moved };
 }
 
-/** A new device, named after the first free "Device N". */
-export function newDevice(document: PingDocument, id: string, sheetId = openSheetId(document)): DeviceRow {
+/** A new device on a sheet, named after the first free "Device N". */
+export function newDevice(document: PingDocument, id: string, sheetId: string): DeviceRow {
   let number = document.devices.length + 1;
   while (document.devices.some((row) => sameName(valueOf(row, "name"), `Device ${number}`))) number++;
   return { id, values: { name: `Device ${number}`, enabled: "TRUE", host: "", over: "", lost: "" }, sheetId };
@@ -574,13 +571,13 @@ export function sheetOf(document: PingDocument, row: DeviceRow): string {
   const sheets = sheetsOf(document);
   return row.sheetId !== undefined && sheets.some((sheet) => sheet.id === row.sheetId) ? row.sheetId : sheets[0]!.id;
 }
-/** The sheet on show. */
+/** The sheet a list saved before 0.2.1 had open, or else the first: where a page opens when it was never left anywhere. */
 export function openSheetId(document: PingDocument): string {
   const sheets = sheetsOf(document);
   return sheets.some((sheet) => sheet.id === document.view.sheetId) ? document.view.sheetId! : sheets[0]!.id;
 }
 /** The devices on a sheet, in list order. */
-export const sheetRows = (document: PingDocument, sheetId = openSheetId(document)) => document.devices.filter((row) => sheetOf(document, row) === sheetId);
+export const sheetRows = (document: PingDocument, sheetId: string) => document.devices.filter((row) => sheetOf(document, row) === sheetId);
 
 type SheetsChange = Extract<Mutation, { kind: "sheets" }>;
 const sheetsChange = (document: PingDocument, sheets: Sheet[], extra: Partial<SheetsChange> = {}): SheetsChange => ({
@@ -596,11 +593,11 @@ function checkName(document: PingDocument, name: string, exceptId?: string) {
   if (sheetsOf(document).some((sheet) => sheet.id !== exceptId && sameName(sheet.name, trimmed))) throw Error(`There is already a sheet called ${trimmed}.`);
   return trimmed;
 }
-/** A new, empty sheet after the others, opened. */
+/** A new, empty sheet after the others. The window that adds it opens it (sheet-window.ts). */
 export function addSheet(document: PingDocument, id: string, name: string): SheetsChange {
   const sheets = sheetsOf(document);
   if (sheets.length >= MAX_SHEETS) throw Error(`Use up to ${MAX_SHEETS} sheets.`);
-  return sheetsChange(document, [...clone(sheets), { id, name: checkName(document, name) }], { open: id, expectedOpen: openSheetId(document) });
+  return sheetsChange(document, [...clone(sheets), { id, name: checkName(document, name) }]);
 }
 export function renameSheet(document: PingDocument, id: string, name: string): SheetsChange | null {
   const trimmed = checkName(document, name, id);
@@ -628,15 +625,7 @@ export function removeSheet(document: PingDocument, id: string): (SheetsChange &
   const removed = sheetRows(document, id);
   // Devices left on the first sheet by default keep it if the first sheet is the one going.
   const rows = document.devices.filter((row) => !removed.includes(row)).map((row) => ({ ...clone(row), sheetId: sheetOf(document, row) }));
-  const open = openSheetId(document);
-  return {
-    ...sheetsChange(document, rest, {
-      rows,
-      expectedRows: clone(document.devices),
-      ...(open === id ? { open: (sheets[index + 1] ?? sheets[index - 1])!.id, expectedOpen: open } : {}),
-    }),
-    removed: clone(removed),
-  };
+  return { ...sheetsChange(document, rest, { rows, expectedRows: clone(document.devices) }), removed: clone(removed) };
 }
 /** Moves devices to another sheet, keeping their place in the list. */
 export function moveRowsToSheet(document: PingDocument, ids: readonly string[], sheetId: string): Mutation | null {
@@ -652,15 +641,12 @@ export const deviceHasData = (row: DeviceRow): boolean =>
     id === "name" ? !/^Device \d+$/u.test(value.trim()) : id === "enabled" ? value !== "TRUE" : value !== "",
   );
 
-/**
- * Sets how many devices a sheet has, the open one unless another is named: adds blank rows at its
- * end, or takes its last rows off, as one undo step.
- */
+/** Sets how many devices a sheet has: adds blank rows at its end, or takes its last rows off, as one undo step. */
 export function setDeviceCount(
   document: PingDocument,
   count: number,
   newId: () => string,
-  sheetId = openSheetId(document),
+  sheetId: string,
 ): (Extract<Mutation, { kind: "rows" }> & { removed: DeviceRow[] }) | null {
   const mine = sheetRows(document, sheetId);
   const others = document.devices.length - mine.length;

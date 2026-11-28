@@ -2,9 +2,9 @@ import { connectModuleFrontend, ModuleFrontendValueSchema } from "@hubble/module
 import { confirm, mountSegmented, mountStepper, mountSwitch, showToast } from "@hubble/module-sdk/controls";
 import { mountSpreadsheetColumnEditor, mountSpreadsheetSheets, mountSpreadsheetToolbar } from "@hubble/module-sdk/spreadsheet-controls";
 import type { LiveReply, LiveRequest } from "./backend.js";
-import { bandsChange, columnMoveChange, columnVisibilityChange, openSheetChange, scaleChange, settingsChange, viewChange } from "./changes.js";
+import { bandsChange, columnMoveChange, columnVisibilityChange, settingsChange, viewChange } from "./changes.js";
 import { createColorsEditor } from "./colors-editor.js";
-import { openDeviceList } from "./page-store.js";
+import { openDeviceList, openPlace } from "./page-store.js";
 import { sheetWindow } from "./sheet-window.js";
 import {
   bytesPerSecond,
@@ -29,7 +29,6 @@ import {
   addSheet,
   moveRowsToSheet,
   moveSheet,
-  openSheetId,
   removeSheet,
   renameSheet,
   sheetRows,
@@ -91,9 +90,11 @@ try {
   const list = await openDeviceList(client);
   const { store, follow } = list;
   store.onClash(reportClashes);
+  // What this window is looking at: its sheet, Show last and scale. Another window never moves it.
+  const place = await openPlace(client, store.document);
   // In a sheet's own window, from the sidebar's Open in its own window ›, the page shows only that
-  // sheet and never saves which sheet is open. The whole page shows the open sheet, as before.
-  const shown = sheetWindow(client, store);
+  // sheet. The whole page shows the sheet open in this window.
+  const shown = sheetWindow(client, store, place.now.sheetId);
   let live: LiveReply = { sequence: 0, now: Date.now(), problem: "", devices: {}, timeline: null };
   let selectedId: string | undefined = shown.rows()[0]?.id;
   let fetching = false;
@@ -107,10 +108,11 @@ try {
   const view = () => store.document.view;
   const setSettings = (change: Partial<Settings>) => store.submit(settingsChange(store.document, change));
   const setView = (change: Partial<View>) => store.submit(viewChange(store.document, change));
-  /** Saves the timeline's scale. Auto is no scale at all, so older versions read the page as before. */
+  /** Sets this window's timeline scale; null is Auto. */
   function setScale(ms: number | null) {
-    const operation = scaleChange(store.document, ms);
-    if (operation) store.submit(operation);
+    if (ms === (place.now.scaleMs ?? null)) return;
+    place.setScale(ms);
+    update();
   }
   /** Saves the times for the bar colours; null goes back to the colours that follow the alert limit. */
   const setBands = (bands: Bands | null) => store.submit(bandsChange(store.document, bands));
@@ -174,13 +176,13 @@ try {
     },
     // On Auto the box shows the scale Auto chose, so − and + start from what is on screen.
     onTop: () => {
-      if ((view().scaleMs ?? null) === null) refreshScale();
+      if ((place.now.scaleMs ?? null) === null) refreshScale();
     },
   });
 
   // The timeline's height: Auto fits the tallest bar on show; any number from the box, − and +,
   // or a drag on the ms numbers holds the top there.
-  const shownScale = () => (gestureScale !== undefined ? gestureScale : (view().scaleMs ?? null));
+  const shownScale = () => (gestureScale !== undefined ? gestureScale : (place.now.scaleMs ?? null));
   /** The stepper rounds a typed number to its step, so this is as fine as a typed scale gets. */
   const TYPED_STEP = 0.1;
   /** Set as − or + (or an arrow key) is pressed, so the change it makes is taken as a round step. */
@@ -259,9 +261,7 @@ try {
     grid.refreshLive();
   }
   timeline.setPingTime(settings().intervalMs);
-  timeline.showLast(spanOf(view().span).ms, true);
-  /** The Show last choice the timeline was last set to, here or in another window. */
-  let shownSpan = view().span;
+  timeline.showLast(spanOf(place.now.span).ms, true);
   el("tl-live").addEventListener("click", () => timeline.backToNow());
   el("clear-history").addEventListener("click", async () => {
     const sure = await confirm({
@@ -286,10 +286,18 @@ try {
     root: el("span"),
     label: "Show last",
     layout: "inline",
-    getState: () => ({ value: view().span, options: SPANS.map((item) => ({ value: item.id, label: item.label })) }),
-    // The timeline follows in update(), whichever window chose it.
-    onValueChange: (value) => setView({ span: value as SpanId }),
+    getState: () => ({ value: place.now.span, options: SPANS.map((item) => ({ value: item.id, label: item.label })) }),
+    onValueChange: (value) => setSpan(value as SpanId),
   });
+  /** Shows a stretch of time in this window: the timeline, the strips and the numbers beside them. */
+  function setSpan(value: SpanId) {
+    if (value === place.now.span) return;
+    place.setSpan(value);
+    // Asks for the new stretch's numbers at once; an answer for the old one is dropped (adopt).
+    timeline.showLast(spanOf(value).ms);
+    grid.refresh();
+    update();
+  }
   const textSize = await mountSpreadsheetToolbar({
     root: el("text-size"),
     textSize: { get: () => view().textSize ?? 13, onChange: (value) => void setView({ textSize: value }) },
@@ -332,6 +340,7 @@ try {
     store,
     live: () => live.devices,
     rows: () => shown.rows(),
+    span: () => place.now.span,
     onInsert: insert,
     onRemove: (rowIds) => void removeDevices(rowIds),
     onSelect(rowId) {
@@ -346,30 +355,37 @@ try {
   });
 
   // Sheets: Hubble's tabs, just above the timeline. Each sheet holds its own devices; all are pinged.
-  const tryChange = (make: () => Mutation | null) => {
+  const tryChange = (make: () => Mutation | null): boolean => {
     try {
       const operation = make();
-      if (operation) store.submit(operation);
+      return !!operation && store.submit(operation);
     } catch (error) {
       report(error instanceof Error ? error.message : String(error));
+      return false;
     }
   };
-  /** Opens a sheet. Which sheet is open is saved with the page but isn't an undo step. */
+  /** Opens a sheet in this window. It is no change to the list, and no undo step. */
   function openSheet(id: string) {
-    const operation = openSheetChange(store.document, id);
-    if (operation) store.submit(operation, false);
+    if (!shown.open(id)) return;
+    place.setSheet(id);
+    grid.refresh();
+    update();
   }
   // A sheet's own window has no sheet tabs: it shows its one sheet and never opens another.
   const sheetTabs = shown.own ? undefined : await mountSpreadsheetSheets({
     root: el("sheet-tabs"),
     getState: () => ({
       sheets: sheetsOf(store.document).map(({ id, name }) => ({ id, name })),
-      activeSheetId: openSheetId(store.document),
+      activeSheetId: shown.openId(),
       counts: new Map(sheetsOf(store.document).map((sheet) => [sheet.id, sheetRows(store.document, sheet.id).length])),
       canMoveSelection: grid.selectedRows().length > 0,
     }),
     onSelect: openSheet,
-    onCreate: (name) => tryChange(() => addSheet(store.document, crypto.randomUUID(), name)),
+    onCreate(name) {
+      // The new sheet opens here, and only here.
+      const id = crypto.randomUUID();
+      if (tryChange(() => addSheet(store.document, id, name))) openSheet(id);
+    },
     onRename: (id, name) => tryChange(() => renameSheet(store.document, id, name)),
     onReorder: (id, beforeId) => tryChange(() => moveSheet(store.document, id, beforeId)),
     onMoveSelection: (id) => tryChange(() => moveRowsToSheet(store.document, grid.selectedRows(), id)),
@@ -392,12 +408,16 @@ try {
       }
       // The sheets may have changed while the question was open, so work it out again.
       void mutation;
-      tryChange(() => {
+      const removing = tryChange(() => {
         const again = removeSheet(store.document, id);
         if (!again) return null;
+        // The sheet beside it opens here if this was the open one; an Undo opens this one again.
+        shown.leave(id);
         const { removed: _gone, ...change } = again;
         return change;
       });
+      if (!removing) shown.open(id);
+      place.setSheet(shown.openId());
     },
   });
 
@@ -412,7 +432,7 @@ try {
     getItems: () =>
       view()
         .order.filter((id) => id !== "name")
-        .map((id) => ({ id, label: id === "strip" ? spanOf(view().span).heading : columnOf(id)!.label, visible: !view().hidden.includes(id) })),
+        .map((id) => ({ id, label: id === "strip" ? spanOf(place.now.span).heading : columnOf(id)!.label, visible: !view().hidden.includes(id) })),
     onVisibilityChange(id, visible) {
       const selected = grid.selected();
       if (!visible && selected?.columnId === id) grid.select({ rowId: selected.rowId, columnId: "name" }, false);
@@ -454,10 +474,6 @@ try {
     if (shown.own && sheet && el("app-sub").textContent !== sheet.name) el("app-sub").textContent = sheet.name;
     textSize.refresh();
     timeline.setPingTime(settings().intervalMs);
-    if (view().span !== shownSpan) {
-      shownSpan = view().span;
-      timeline.showLast(spanOf(shownSpan).ms);
-    }
     pinging.refresh();
     notify.refresh();
     span.refresh();
@@ -468,7 +484,7 @@ try {
     if (alertOver.value !== over) alertOver.value = over;
     const lost = settings().alertLostMs === null ? "" : String(settings().alertLostMs);
     if (alertLost.value !== lost) alertLost.value = lost;
-    timeline.setScale(view().scaleMs ?? null);
+    timeline.setScale(place.now.scaleMs ?? null);
     refreshScale();
     if (store.error !== lastSaveError) {
       lastSaveError = store.error;
@@ -556,8 +572,8 @@ try {
   /** A request, with what it was asked for, so its answer can be told from a later one's. */
   function request(after: number) {
     const wanted = timeline.window();
-    const body: LiveRequest = { after, span: view().span, ...(selectedId ? { timeline: { deviceId: selectedId, ...wanted } } : {}) };
-    return { body, span: view().span, version: windowVersion };
+    const body: LiveRequest = { after, span: place.now.span, ...(selectedId ? { timeline: { deviceId: selectedId, ...wanted } } : {}) };
+    return { body, span: place.now.span, version: windowVersion };
   }
   /**
    * Takes an answer. The worker holds a request open until there is a new ping, so an answer can
@@ -567,7 +583,7 @@ try {
    */
   function adopt(reply: LiveReply, asked: { span: string; version: number }) {
     follow.saw(reply.revision);
-    if (reply.sequence < live.sequence || asked.span !== view().span) return;
+    if (reply.sequence < live.sequence || asked.span !== place.now.span) return;
     const current = asked.version === windowVersion && (!selectedId || reply.timeline?.deviceId === selectedId);
     live = current ? reply : { ...reply, timeline: live.timeline };
     if (current) timelineFresh = true;

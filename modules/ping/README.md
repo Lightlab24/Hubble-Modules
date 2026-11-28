@@ -1,6 +1,6 @@
 # Ping
 
-Module ID `network-ping`, version 0.2.0. Pings network devices, keeps a timeline of each one, and
+Module ID `network-ping`, version 0.2.1. Pings network devices, keeps a timeline of each one, and
 alerts when a device stops answering or answers slowly. It is a workspace module: add it once, and
 its **Ping** page lists every device. It needs a Hubble with module windows
 (`module-page-windows-v1`); 0.1.8 is the last version for Hubble before that.
@@ -41,7 +41,7 @@ menu has Rename sheet…, Move sheet to end and Remove sheet, and tabs drag to r
 get **Move selected rows…** on the tabs line. Add device and the Devices box work on the open sheet.
 Removing a sheet removes its devices, naming any filled-in ones first; Undo brings them back.
 Device names stay unique across sheets, because keys pick devices by name. A list from before
-sheets opens as one sheet called Devices, and the open sheet is saved with the page.
+sheets opens as one sheet called Devices. Which sheet is open is each window's own (see below).
 
 Click a row to see its **timeline**. Pinch (or Ctrl and the wheel) zooms around the pointer, two
 fingers or a drag move through time, and **Back to now** returns to the present. Bars are about two
@@ -61,14 +61,16 @@ yellow, then orange; anything over the last time is red. Leave a time empty to s
 Each time has to be above the one before it. No answer stays red, as a full-height bar. The legend
 lists the ranges, and the colours apply to the timeline and the strips in the sheet; keys keep
 their Online, Slow and Offline colours. Until a time is typed, and after **Follow alert limit**,
-bars are green under the Answer over alert and amber over it. The scale and the colour times are
-each one setting for every device, saved with the page like Show last, and Undo covers them.
+bars are green under the Answer over alert and amber over it. The colour times are one setting for
+every device, saved with the page, and Undo covers them. The scale, like Show last, is the window's
+own view and not an undo step.
 
 ## In several windows
 
 The Ping page can be open in several HubDash windows at once, and on other computers connected to
 the same Hubble. Every copy shows what the others save straight away, without a reload: devices,
-cells, settings, sheets and layout.
+cells, settings, sheets, bar colours, columns and text size. What a window is looking at is its own,
+so two windows can watch different things side by side.
 
 - A change goes onto the list as it is saved now, so a window that hasn't caught up yet is never
   refused for that, and never undoes another window's work. A new device or sheet whose name is
@@ -79,8 +81,13 @@ cells, settings, sheets and layout.
 - While a cell is being typed in, other windows' saves change only the other cells' text. New rows,
   hidden columns, widths and text size wait until the typing is finished, so that cell never moves
   or clears.
-- The open sheet, Show last, Scale, bar colours, columns and text size are saved with the page, so
-  every window shows the same ones. The device whose timeline is shown is each window's own.
+- The open sheet, Show last, Scale, the device whose timeline is shown, and the timeline's zoom
+  and place in time are each window's own. Changing one in a window never moves another window.
+  They are not saved with the workspace: Hubble remembers on this Mac where the page was last left,
+  and a page opens there. A sheet added in a window opens in that window only. If the sheet a window
+  shows is removed in another window, it goes back to the sheet it had open before, and reopens it if
+  an Undo puts it back. A list saved by 0.2.0 or older opens on the sheet, Show last and Scale that
+  version saved, until the page has been left somewhere.
 
 ### A sheet in its own window
 
@@ -89,8 +96,9 @@ and each sheet, such as *Cameras*. A sheet opens in a window titled "Hubble - Pi
 shows only that sheet: its devices, a timeline of its own and the toolbars, with no sheet tabs.
 
 - It keeps to its sheet whichever sheet the whole page has open, and never changes which sheet that
-  is, so Ping's whole page opens where it was left. Devices added there go onto its sheet, and the
-  Devices box and the status count that sheet.
+  is. Its Show last and Scale are its own, and it opens with the ones it was last left on (or the
+  whole page's, the first time). Devices added there go onto its sheet, and the Devices box and the
+  status count that sheet.
 - Rename the sheet in any window and the window's title follows. If the sheet is removed, the window
   says it is no longer here, and shows it again if the sheet is put back.
 - The sidebar lists up to 24 sheets. Every window, a sheet's or the whole page's, follows what the

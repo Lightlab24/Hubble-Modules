@@ -15,7 +15,10 @@ import { MODULE_WINDOW_PARTS_LIMIT, ModuleFrontendValueSchema, ModuleWindowParts
 import type { ModuleContext } from "@hubble/module-sdk";
 import { createBackend, type LiveReply } from "../src/backend.js";
 import type { PingProcess } from "../src/engine.js";
-import { bandsChange, cellEdits, columnMoveChange, columnVisibilityChange, hideColumnChange, openSheetChange, resizeChange, scaleChange, settingsChange, viewChange } from "../src/changes.js";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { bandsChange, cellEdits, columnMoveChange, columnVisibilityChange, hideColumnChange, resizeChange, settingsChange, viewChange } from "../src/changes.js";
 import {
   addSheet,
   defaultDocument,
@@ -25,11 +28,9 @@ import {
   moveRowsToSheet,
   moveSheet,
   newDevice,
-  openSheetId,
   removeRows,
   removeSheet,
   renameSheet,
-  setDeviceCount,
   sheetOf,
   sheetRows,
   sheetsOf,
@@ -39,7 +40,7 @@ import {
   type Mutation,
   type PingDocument,
 } from "../src/model.js";
-import { openDeviceList, revisionIn } from "../src/page-store.js";
+import { openDeviceList, openPlace, revisionIn } from "../src/page-store.js";
 import { partTitle, sheetWindow, WINDOW_PARTS_LIMIT, windowParts } from "../src/sheet-window.js";
 import source from "../src/manifest.js";
 
@@ -57,7 +58,7 @@ const device = (id: string, name: string, host = "", values: Record<string, stri
 });
 
 /** The one running Ping module: the real worker, Hubble's document store as a fake, and no real pings. */
-async function runModule(devices: DeviceRow[], change: (doc: PingDocument) => void = () => undefined) {
+async function runModule(devices: DeviceRow[], change: (doc: PingDocument) => void = () => undefined, runtimeDirectory?: string) {
   const initial = defaultDocument();
   initial.devices = devices;
   change(initial);
@@ -99,6 +100,7 @@ async function runModule(devices: DeviceRow[], change: (doc: PingDocument) => vo
   let published: unknown;
   const context = {
     connectionEnabled: true,
+    ...(runtimeDirectory ? { runtimeDirectory } : {}),
     instanceId: "ping-windows",
     scope: { kind: "host", workspaceId: "11111111-1111-4111-8111-111111111111", capabilityId: "network-ping" },
     settings: {},
@@ -181,8 +183,9 @@ async function openWindow(module: Module, view: string | null = null) {
   module.pages.add(push);
   const client = createModuleFrontendClient(channel.port2 as never, { view, canOpen: true });
   const list = await openDeviceList(client);
-  // The sheet this copy shows, as the page works it out (frontend.ts).
-  const shown = sheetWindow(client, list.store);
+  // Where this copy is, and the sheet it shows, as the page works them out (frontend.ts).
+  const place = await openPlace(client, list.store.document);
+  const shown = sheetWindow(client, list.store, place.now.sheetId);
   const errors: string[] = [];
   const clashes: string[] = [];
   list.store.subscribe(() => {
@@ -193,6 +196,7 @@ async function openWindow(module: Module, view: string | null = null) {
     ...list,
     client,
     shown,
+    place,
     titles,
     operations,
     errors,
@@ -201,6 +205,23 @@ async function openWindow(module: Module, view: string | null = null) {
       return list.store.document;
     },
     submit: (operation: Mutation | null, remember = true) => (operation ? list.store.submit(operation, remember) : true),
+    /** A sheet tab clicked, as the page does it. */
+    openSheet(id: string) {
+      if (shown.open(id)) place.setSheet(id);
+    },
+    /** Add sheet, as the page does it: the new sheet opens in this window. */
+    addSheet(id: string, name: string) {
+      if (list.store.submit(addSheet(list.store.document, id, name))) copy.openSheet(id);
+    },
+    /** Remove sheet, as the page does it once any question is answered. */
+    removeSheet(id: string) {
+      const again = removeSheet(list.store.document, id);
+      if (!again) return;
+      shown.leave(id);
+      const { removed: _gone, ...change } = again;
+      if (!list.store.submit(change)) shown.open(id);
+      place.setSheet(shown.openId());
+    },
     /** Types into cells the way the grid's editor and paste do. */
     type: (edits: { rowId: string; columnId: string; value: string }[], expected?: string) => list.store.submit({ kind: "edit", edits: cellEdits(list.store.document, edits, expected) }),
     hold() {
@@ -238,7 +259,7 @@ describe("the Ping page in several windows", () => {
   it("follows what another window saves, without a reload", async () => {
     const module = await runModule([device("a", "Router", "10.0.0.1")]);
     const [one, two, three] = [await openWindow(module), await openWindow(module), await openWindow(module)];
-    const added = newDevice(one.doc, "b");
+    const added = one.shown.newDevice("b")!;
     one.submit(insertRows(one.doc, [added], null));
     one.type([{ rowId: "b", columnId: "host", value: "10.0.0.2" }]);
     two.submit(settingsChange(two.doc, { intervalMs: 500 }));
@@ -268,28 +289,26 @@ describe("the Ping page in several windows", () => {
     const [one, two] = [await openWindow(module), await openWindow(module)];
     // The second window doesn't hear of anything the first does until the end.
     two.hold();
-    one.submit(insertRows(one.doc, [newDevice(one.doc, "d")], null)); // Device 4
+    one.submit(insertRows(one.doc, [one.shown.newDevice("d")!], null)); // Device 4
     one.type([{ rowId: "a", columnId: "host", value: "10.0.0.254" }]);
     one.submit(settingsChange(one.doc, { intervalMs: 2000 }));
-    one.submit(viewChange(one.doc, { span: "1h" }));
     one.submit(resizeChange(one.doc, "column", "host", 200));
-    one.submit(addSheet(one.doc, "s2", "Cameras"));
-    one.submit(openSheetChange(one.doc, "devices"), false);
+    one.addSheet("s2", "Cameras");
+    one.openSheet("devices");
     await settled(module, [one], "the first window saved everything");
 
     // The second window still shows the list as it was opened, and changes every kind of thing.
     expect(two.doc.devices).toHaveLength(3);
-    expect(two.submit(insertRows(two.doc, [newDevice(two.doc, "e")], null))).toBe(true); // also "Device 4" here
+    expect(two.submit(insertRows(two.doc, [two.shown.newDevice("e")!], null))).toBe(true); // also "Device 4" here
     expect(two.type([{ rowId: "b", columnId: "over", value: "80" }])).toBe(true);
     expect(two.submit(moveRows(two.doc, ["c"], "b"))).toBe(true);
     expect(two.submit(removeRows(two.doc, ["e"]))).toBe(true);
-    expect(two.submit(insertRows(two.doc, [newDevice(two.doc, "f")], "a"))).toBe(true);
+    expect(two.submit(insertRows(two.doc, [two.shown.newDevice("f")!], "a"))).toBe(true);
     expect(two.submit(settingsChange(two.doc, { notify: false }))).toBe(true);
     expect(two.submit(viewChange(two.doc, { textSize: 18 }))).toBe(true);
     expect(two.submit(columnVisibilityChange(two.doc, "best", true))).toBe(true);
     expect(two.submit(columnMoveChange(two.doc, "status", "enabled"))).toBe(true);
     expect(two.submit(resizeChange(two.doc, "column", "name", 220))).toBe(true);
-    expect(two.submit(scaleChange(two.doc, 25))).toBe(true);
     expect(two.submit(bandsChange(two.doc, { green: 5, yellow: 20, orange: null }))).toBe(true);
     expect(two.submit(renameSheet(two.doc, "devices", "Main")!)).toBe(true);
     expect(two.submit(addSheet(two.doc, "s3", "Sheet 2"))).toBe(true);
@@ -306,7 +325,7 @@ describe("the Ping page in several windows", () => {
     expect(valueOf(saved.devices.find((row) => row.id === "a")!, "host")).toBe("10.0.0.254");
     expect(valueOf(saved.devices.find((row) => row.id === "b")!, "over")).toBe("80");
     expect(saved.settings).toMatchObject({ intervalMs: 2000, notify: false });
-    expect(saved.view).toMatchObject({ span: "1h", textSize: 18, scaleMs: 25, bands: { green: 5, yellow: 20, orange: null } });
+    expect(saved.view).toMatchObject({ span: "10m", textSize: 18, bands: { green: 5, yellow: 20, orange: null } });
     expect(saved.view.widths).toEqual({ host: 200, name: 220 });
     expect(saved.view.hidden).not.toContain("best");
     expect(saved.view.order.indexOf("status")).toBe(saved.view.order.indexOf("enabled") - 1);
@@ -337,7 +356,7 @@ describe("the Ping page in several windows", () => {
     expect(two.type([{ rowId: "a", columnId: "host", value: "not an address" }])).toBe(false);
     expect(two.store.invalid.get("a/host")?.edit.value).toBe("not an address");
     one.type([{ rowId: "b", columnId: "name", value: "Core" }]);
-    one.submit(viewChange(one.doc, { span: "6h" }));
+    one.submit(viewChange(one.doc, { textSize: 15 }));
     await settled(module, [one, two]);
     expect(two.store.invalid.get("a/host")?.edit.value).toBe("not an address");
   });
@@ -385,11 +404,11 @@ describe("the Ping page in several windows", () => {
     const module = await runModule([device("a", "Router", "10.0.0.1"), device("b", "Switch", "10.0.0.2")]);
     const [one, two] = [await openWindow(module), await openWindow(module)];
     one.type([{ rowId: "a", columnId: "host", value: "10.0.0.50" }]);
-    one.submit(insertRows(one.doc, [newDevice(one.doc, "c")], null));
+    one.submit(insertRows(one.doc, [one.shown.newDevice("c")!], null));
     await settled(module, [one, two]);
     // The second window changes the device the first window added, and adds one of its own.
     two.type([{ rowId: "c", columnId: "host", value: "10.0.0.60" }]);
-    two.submit(insertRows(two.doc, [newDevice(two.doc, "d")], null));
+    two.submit(insertRows(two.doc, [two.shown.newDevice("d")!], null));
     await settled(module, [one, two]);
 
     // Undo in the first window: taking its device off would lose the second window's address, so it stays.
@@ -441,61 +460,157 @@ describe("the Ping page in several windows", () => {
     for (const copy of [two, three]) copy.hold();
     one.type([{ rowId: "a", columnId: "host", value: "10.0.0.100" }]);
     one.submit(settingsChange(one.doc, { alertOverMs: 50 }));
-    one.submit(insertRows(one.doc, [newDevice(one.doc, "c")], null));
+    one.submit(insertRows(one.doc, [one.shown.newDevice("c")!], null));
     await settled(module, [one]);
     // The other two still show the old list and only change the layout.
-    expect(two.submit(viewChange(two.doc, { span: "24h" }))).toBe(true);
+    expect(two.submit(resizeChange(two.doc, "column", "host", 180))).toBe(true);
     expect(two.submit(hideColumnChange(two.doc, "jitter"))).toBe(true);
     expect(three.submit(viewChange(three.doc, { textSize: 11 }))).toBe(true);
     expect(three.submit(resizeChange(three.doc, "row", "a", 48))).toBe(true);
-    expect(three.submit(openSheetChange(three.doc, "devices"))).toBe(true); // already open: nothing to save
     for (const copy of [two, three]) copy.release();
     await settled(module, [one, two, three]);
     const saved = module.saved();
     expect(valueOf(saved.devices[0]!, "host")).toBe("10.0.0.100");
     expect(saved.settings.alertOverMs).toBe(50);
     expect(saved.devices.map((row) => row.id)).toEqual(["a", "b", "c"]);
-    expect(saved.view).toMatchObject({ span: "24h", textSize: 11, rowHeights: { a: 48 } });
+    expect(saved.view).toMatchObject({ textSize: 11, rowHeights: { a: 48 }, widths: { host: 180 } });
     expect(saved.view.hidden).toContain("jitter");
     expect([...one.errors, ...two.errors, ...three.errors]).toEqual([]);
   });
 
-  it("shares the open sheet: a sheet opened in one window opens in the others, and is never refused", async () => {
-    const module = await runModule([device("a", "Router", "10.0.0.1")]);
+  it("keeps each window's own sheet, Show last and scale, and saves none of them with the list", async () => {
+    const module = await runModule([device("a", "Router", "10.0.0.1"), device("b", "Camera 1", "10.0.0.11")], (doc) => {
+      doc.sheets = [{ id: "devices", name: "Network" }, { id: "cams", name: "Cameras" }];
+      doc.devices[1] = { ...doc.devices[1]!, sheetId: "cams" };
+    });
     const [one, two] = [await openWindow(module), await openWindow(module)];
-    one.submit(addSheet(one.doc, "cams", "Cameras"));
+    const writes = module.writes();
+    // The first window goes to Cameras, the last hour and a 5 ms scale; the second stays where it opened.
+    one.openSheet("cams");
+    one.place.setSpan("1h");
+    one.place.setScale(5);
+    await one.place.settled();
+    // The second picks a time and scale of its own, and adds a sheet, which opens there and only there.
+    two.place.setSpan("1m");
+    two.place.setScale(null);
+    two.addSheet("lights", "Lights");
     await settled(module, [one, two]);
-    expect(openSheetId(two.doc)).toBe("cams");
-    two.hold();
-    one.submit(renameSheet(one.doc, "cams", "Cams")!);
-    await settled(module, [one]);
-    // The second window switches back to Devices from its older copy of the sheets.
-    expect(two.submit(openSheetChange(two.doc, "devices"), false)).toBe(true);
-    two.release();
+    await Promise.all([one.place.settled(), two.place.settled()]);
+    expect(one.shown.openId()).toBe("cams");
+    expect(one.shown.rows().map((row) => row.id)).toEqual(["b"]);
+    expect(one.place.now).toEqual({ span: "1h", scaleMs: 5, sheetId: "cams" });
+    expect(two.shown.openId()).toBe("lights");
+    expect(two.place.now).toEqual({ span: "1m", sheetId: "lights" });
+    // Only the new sheet was saved: what each window looks at is no change to the list.
+    expect(module.writes() - writes).toBe(1);
+    expect(two.operations.map((operation) => operation.kind)).toEqual(["sheets"]);
+    expect(one.operations).toEqual([]);
+    expect(module.saved().view).toEqual(defaultDocument().view);
+    // A window opened now starts where the page was left last, which was the second window.
+    const three = await openWindow(module);
+    expect(three.place.now).toEqual({ span: "1m", sheetId: "lights" });
+    expect(three.shown.openId()).toBe("lights");
+    expect([...one.errors, ...two.errors, ...three.errors]).toEqual([]);
+  });
+
+  it("moves a window off its sheet only when that sheet is removed, and back when an Undo brings it again", async () => {
+    const module = await runModule([device("a", "Router", "10.0.0.1")], (doc) => {
+      doc.sheets = [{ id: "devices", name: "Network" }, { id: "cams", name: "Cameras" }, { id: "lights", name: "Lights" }];
+    });
+    const [one, two] = [await openWindow(module), await openWindow(module)];
+    one.openSheet("cams");
+    two.openSheet("lights");
+    // The first window removes the sheet it shows: the one beside it opens there, and the other window stays put.
+    one.removeSheet("cams");
     await settled(module, [one, two]);
-    expect(openSheetId(one.doc)).toBe("devices");
-    expect(sheetsOf(module.saved()).map((sheet) => sheet.name)).toEqual(["Devices", "Cams"]);
+    expect(one.shown.openId()).toBe("lights");
+    expect(two.shown.openId()).toBe("lights");
+    // Its Undo brings the sheet back, and opens it again in that window only.
+    one.store.history(false);
+    await settled(module, [one, two]);
+    expect(sheetsOf(module.saved()).map((sheet) => sheet.id)).toEqual(["devices", "cams", "lights"]);
+    expect(one.shown.openId()).toBe("cams");
+    expect(two.shown.openId()).toBe("lights");
+    // Now the first window removes the sheet the second one shows: the second goes back to the sheet it had open before.
+    one.removeSheet("lights");
+    await settled(module, [one, two]);
+    expect(one.shown.openId()).toBe("cams");
+    expect(two.shown.openId()).toBe("devices");
+    // An Undo there brings it back to the second window as well, since nothing else was opened there meanwhile.
+    one.store.history(false);
+    await settled(module, [one, two]);
+    expect(two.shown.openId()).toBe("lights");
+    expect(one.shown.openId()).toBe("cams");
+    // Undoing a sheet this window added goes back to the sheet it had open before.
+    two.addSheet("rigs", "Rigs");
+    await settled(module, [one, two]);
+    expect(two.shown.openId()).toBe("rigs");
+    two.store.history(false);
+    await settled(module, [one, two]);
+    expect(two.shown.openId()).toBe("lights");
+    expect(module.saved().view.sheetId).toBeUndefined();
     expect([...one.errors, ...two.errors]).toEqual([]);
+  });
+
+  it("remembers where each window was left on this computer, never in the workspace", async () => {
+    const folder = mkdtempSync(path.join(tmpdir(), "ping-places-"));
+    cleanup.push(() => rmSync(folder, { recursive: true, force: true }));
+    const twoSheets = (doc: PingDocument) => {
+      doc.sheets = [{ id: "devices", name: "Network" }, { id: "cams", name: "Cameras" }];
+      // As 0.2.0 saved it: one place for every window.
+      doc.view = { ...doc.view, span: "6h", sheetId: "cams", scaleMs: 3 };
+    };
+    const module = await runModule([device("a", "Router", "10.0.0.1")], twoSheets, folder);
+    const whole = await openWindow(module);
+    // Never left anywhere yet, so a window opens where the list said before 0.2.1.
+    expect(whole.place.now).toEqual({ span: "6h", sheetId: "cams", scaleMs: 3 });
+    expect(whole.shown.openId()).toBe("cams");
+    // A sheet's own window starts with the whole page's time and scale, and has no open sheet.
+    expect((await openWindow(module, "cams")).place.now).toEqual({ span: "6h", scaleMs: 3 });
+    whole.openSheet("devices");
+    whole.place.setSpan("24h");
+    whole.place.setScale(null);
+    await whole.place.settled();
+    const cams = await openWindow(module, "cams");
+    expect(cams.place.now).toEqual({ span: "24h" });
+    cams.place.setSpan("1m");
+    cams.place.setScale(12.5);
+    await cams.place.settled();
+    const saved = JSON.parse(readFileSync(path.join(folder, "page-view.json"), "utf8")) as { places: Record<string, { place: unknown }> };
+    expect(saved.places[""]?.place).toEqual({ span: "24h", sheetId: "devices" });
+    expect(saved.places.cams?.place).toEqual({ span: "1m", scaleMs: 12.5 });
+    // The list as saved in the workspace is just as it was.
+    expect(module.writes()).toBe(0);
+    expect(module.saved().view).toMatchObject({ span: "6h", sheetId: "cams", scaleMs: 3 });
+    // After a restart the module reads the folder again: each window opens where it was left.
+    const again = await runModule([device("a", "Router", "10.0.0.1")], twoSheets, folder);
+    expect((await openWindow(again)).place.now).toEqual({ span: "24h", sheetId: "devices" });
+    expect((await openWindow(again, "cams")).place.now).toEqual({ span: "1m", scaleMs: 12.5 });
+    // A place that isn't one is refused, and nothing is kept for it.
+    const refused = (value: unknown) => again.instance.call!("page.ping", { sectionId: "frontend", commandId: "place", value } as never, { signal: new AbortController().signal } as never);
+    await expect(refused({ key: "", place: { span: "2 days" } })).rejects.toThrow("That isn't a place on the Ping page.");
+    await expect(refused({ key: "x".repeat(129), place: { span: "1m" } })).rejects.toThrow("That isn't a place on the Ping page.");
+    await expect(refused({ place: { span: "1m" } })).rejects.toThrow("Say which window of the Ping page this is.");
   });
 
   it("counts another window's new devices toward a Devices box number, and never takes them off", async () => {
     const module = await runModule([device("a", "Router", "10.0.0.1")]);
     const [one, two] = [await openWindow(module), await openWindow(module)];
     two.hold();
-    one.submit(insertRows(one.doc, [newDevice(one.doc, "b")], null));
+    one.submit(insertRows(one.doc, [one.shown.newDevice("b")!], null));
     await settled(module, [one]);
     // The second window still counts one device and asks for three.
-    const { removed: _none, ...grow } = setDeviceCount(two.doc, 3, (() => { let n = 0; return () => `new-${++n}`; })())!;
+    const { removed: _none, ...grow } = two.shown.count(3, (() => { let n = 0; return () => `new-${++n}`; })())!;
     expect(two.submit(grow)).toBe(true);
     two.release();
     await settled(module, [one, two]);
-    expect(sheetRows(module.saved())).toHaveLength(3);
+    expect(sheetRows(module.saved(), "devices")).toHaveLength(3);
     expect(module.saved().devices.map((row) => row.id)).toEqual(["a", "b", "new-1"]);
     // Asking for one takes off only what that window was shown; nothing it never saw goes.
     two.hold();
-    one.submit(insertRows(one.doc, [newDevice(one.doc, "c")], null));
+    one.submit(insertRows(one.doc, [one.shown.newDevice("c")!], null));
     await settled(module, [one]);
-    const { removed, ...shrink } = setDeviceCount(two.doc, 1, () => "unused")!;
+    const { removed, ...shrink } = two.shown.count(1, () => "unused")!;
     expect(removed.map((row) => row.id)).toEqual(["b", "new-1"]);
     expect(two.submit(shrink)).toBe(true);
     two.release();
@@ -535,9 +650,9 @@ describe("the Ping page in several windows", () => {
     one!.type([{ rowId: "a", columnId: "over", value: "20" }]);
     two!.type([{ rowId: "b", columnId: "over", value: "30" }]);
     three!.type([{ rowId: "c", columnId: "over", value: "40" }]);
-    one!.submit(insertRows(one!.doc, [newDevice(one!.doc, "d")], null));
-    two!.submit(insertRows(two!.doc, [newDevice(two!.doc, "e")], null));
-    three!.submit(viewChange(three!.doc, { span: "1m" }));
+    one!.submit(insertRows(one!.doc, [one!.shown.newDevice("d")!], null));
+    two!.submit(insertRows(two!.doc, [two!.shown.newDevice("e")!], null));
+    three!.submit(viewChange(three!.doc, { textSize: 12 }));
     await settled(module, copies);
     expect(module.writes() - before).toBe(6);
     // The worker saves one change at a time, so the windows never collide in the store.
@@ -580,7 +695,7 @@ describe("the Ping page in several windows", () => {
     const one = await openWindow(module);
     const states: unknown[] = [];
     const stop = one.client.subscribe((state) => states.push(state));
-    one.submit(insertRows(one.doc, [newDevice(one.doc, "a")], null));
+    one.submit(insertRows(one.doc, [one.shown.newDevice("a")!], null));
     await settled(module, [one]);
     await until(() => states.some((state) => revisionIn(state) === module.revision()), "the state carried the new revision");
     stop();
@@ -627,16 +742,16 @@ describe("a sheet in a window of its own", () => {
     expect(partTitle("Bell\u0007box")).toBe("Bell box");
   });
 
-  it("keeps to its own sheet whichever sheet the whole page opens, and never saves which sheet is open", async () => {
+  it("keeps to its own sheet whichever sheet the whole page opens", async () => {
     const module = await runModule([device("a", "Router", "10.0.0.1"), device("cam-1", "Camera 1", "10.0.0.11")], twoSheets);
     const whole = await openWindow(module);
     const cams = await openWindow(module, "cams");
-    expect(openSheetId(whole.doc)).toBe("devices");
+    expect(whole.shown.openId()).toBe("devices");
     expect(cams.shown.rows().map((row) => row.id)).toEqual(["cam-1"]);
     // The whole page opens Cameras, then Network again: the sheet's window stays on Cameras.
-    whole.submit(openSheetChange(whole.doc, "cams"), false);
+    whole.openSheet("cams");
     await settled(module, [whole, cams]);
-    whole.submit(openSheetChange(whole.doc, "devices"), false);
+    whole.openSheet("devices");
     await settled(module, [whole, cams]);
     expect(cams.shown.sheet()?.id).toBe("cams");
     // What is done in the sheet's window goes onto its sheet: a device added, the Devices box, a
@@ -657,8 +772,8 @@ describe("a sheet in a window of its own", () => {
     expect(saved.view.textSize).toBe(15);
     expect(saved.settings.intervalMs).toBe(2000);
     // The whole page is still on the sheet it had open: nothing the sheet's window sent moves it.
-    expect(saved.view.sheetId).toBe("devices");
-    expect(openSheetId(whole.doc)).toBe("devices");
+    expect(saved.view.sheetId).toBeUndefined();
+    expect(whole.shown.openId()).toBe("devices");
     expect(cams.operations.map((operation) => operation.kind)).toEqual(["rows", "rows", "edit", "edit", "view", "settings"]);
     for (const operation of cams.operations) if (operation.kind === "view") expect(operation.view.sheetId).toBe(operation.expected.sheetId);
     expect([...whole.errors, ...cams.errors]).toEqual([]);

@@ -1,6 +1,7 @@
 /**
  * The changes the Ping page makes from its toolbars, its column list and its grid, built from the
- * document the page holds. They live here rather than in frontend.ts so that tests run exactly
+ * document the page holds. What a window is looking at (its sheet, Show last and scale) is no
+ * change to the list: each window keeps its own (place.ts). They live here rather than in frontend.ts so that tests run exactly
  * what the page sends, from several copies at once.
  */
 import {
@@ -8,7 +9,6 @@ import {
   clone,
   columnOf,
   normalizeValue,
-  openSheetId,
   valueOf,
   type Bands,
   type CellEdit,
@@ -32,27 +32,12 @@ export const viewChange = (document: PingDocument, change: Partial<View>): Chang
   expected: clone(document.view),
 });
 
-/** The timeline's scale. Auto is no scale at all, so older versions read the page as before. */
-export function scaleChange(document: PingDocument, ms: number | null): Change<"view"> | null {
-  if (ms === (document.view.scaleMs ?? null)) return null;
-  const next = clone(document.view);
-  if (ms === null) delete next.scaleMs;
-  else next.scaleMs = ms;
-  return { kind: "view", view: next, expected: clone(document.view) };
-}
-
 /** The times for the bar colours; null goes back to the colours that follow the alert limit. */
 export function bandsChange(document: PingDocument, bands: Bands | null): Change<"view"> {
   const next = clone(document.view);
   if (bands === null) delete next.bands;
   else next.bands = bands;
   return { kind: "view", view: next, expected: clone(document.view) };
-}
-
-/** Opens a sheet. Which sheet is open is saved with the page, but isn't an undo step. */
-export function openSheetChange(document: PingDocument, id: string): Change<"view"> | null {
-  if (id === openSheetId(document)) return null;
-  return viewChange(document, { sheetId: id });
 }
 
 /** Shows or hides a column from the Columns list. Device always shows. */

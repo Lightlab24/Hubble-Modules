@@ -35,6 +35,8 @@ export interface GridOptions {
   live(): Record<string, DeviceSummary>;
   /** The devices on show: the open sheet's, in list order. */
   rows(): DeviceRow[];
+  /** The Show last this window shows, which the strip column is named after. */
+  span(): string;
   onInsert(beforeId: string | null): void;
   /** Removes these devices as one step. */
   onRemove(rowIds: readonly string[]): void;
@@ -93,7 +95,7 @@ export async function createDeviceGrid(options: GridOptions) {
   const rowOf = (id: string) => store.document.devices.find((row) => row.id === id);
   /** The devices on screen that are still on the list. */
   const drawnRows = () => drawn.map(rowOf).filter((row): row is DeviceRow => !!row && rows.has(row.id));
-  const headingOf = (column: Column) => (column.id === "strip" ? spanOf(view().span).heading : column.label);
+  const headingOf = (column: Column) => (column.id === "strip" ? spanOf(options.span()).heading : column.label);
   const pinged = (row: DeviceRow) => valueOf(row, "enabled") === "TRUE" && store.document.settings.pinging;
 
   function liveText(row: DeviceRow, columnId: string): string {

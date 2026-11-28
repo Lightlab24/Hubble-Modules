@@ -38,6 +38,8 @@ export default defineModuleManifest({
       "module-page-badges-v1",
       // The page can be open in several HubDash windows at once.
       "module-page-windows-v1",
+      // Where each window was last left is kept on this computer, out of the workspace.
+      "module-runtime-directory-v1",
     ],
   },
   configVersion: 1,
@@ -73,6 +75,7 @@ export default defineModuleManifest({
             { id: "save", label: "Save the device list" },
             { id: "live", label: "Read the latest ping results" },
             { id: "clear-history", label: "Clear the ping history" },
+            { id: "place", label: "Remember where this window was left" },
           ],
         },
       ],

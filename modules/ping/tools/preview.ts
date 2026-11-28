@@ -159,6 +159,8 @@ const server = createServer(async (request, response) => {
         if (input.reset) {
           saved = { ...saved, revision: `rev-${++writes}`, value: seededDocument() };
           for (const wake of [...watchers]) wake();
+          // And the whole page opens as a fresh one would, on the last 10 minutes and Auto.
+          await instance.call!("page.ping", { sectionId: "frontend", commandId: "place", value: { key: "", place: { span: "10m" } } } as never, { signal: new AbortController().signal } as never);
         }
         return send({ updated: true });
       }
@@ -178,7 +180,11 @@ const server = createServer(async (request, response) => {
       response.writeHead(200, { "Content-Type": "text/html" });
       return void response.end(html);
     }
-    if (url.pathname === "/__inspect") return send({ document: saved.value, revision: saved.revision, writes, logs, alerts, feedback: feedback.slice(-20), state });
+    if (url.pathname === "/__inspect") {
+      // Where the whole page was last left (place.ts), which the worker keeps apart from the list.
+      const remembered = (await instance.call!("page.ping", { sectionId: "frontend", commandId: "place", value: { key: url.searchParams.get("key") ?? "" } } as never, { signal: new AbortController().signal } as never)) as { place?: unknown };
+      return send({ document: saved.value, revision: saved.revision, writes, logs, alerts, feedback: feedback.slice(-20), state, place: remembered.place ?? null });
+    }
     if (url.pathname === "/__state") return send(state);
     if (url.pathname.startsWith("/api/module-controls/")) {
       const name = path.basename(url.pathname);

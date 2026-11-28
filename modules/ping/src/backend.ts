@@ -12,6 +12,7 @@ import { DEVICE_FIELD, DEVICE_PROVIDER, FEEDBACK, MATRIX_ACTION, PAGE_ID } from 
 import { Pinger, type PingerOptions, type PingSample } from "./engine.js";
 import { HISTORY_SPAN_MS, type Series } from "./history.js";
 import { applyMutation, DOCUMENT_ID, rulesOf, same, sameName, spanOf, validateDocument, valueOf, type DeviceRow, type Mutation, type PingDocument } from "./model.js";
+import { placeStore } from "./place-store.js";
 import { windowParts } from "./sheet-window.js";
 import { DeviceWatch, type Alert, type DeviceState, type DeviceSummary } from "./watch.js";
 
@@ -62,6 +63,8 @@ export function createBackend(context: ModuleContext, options: BackendOptions = 
   let wake: ReturnType<typeof setTimeout> | undefined;
   let subscriptions: readonly ModuleFeedbackSubscription[] = [];
   const published = new Map<string, string>();
+  /** Where each window of the page was last left, on this computer only (place.ts). */
+  const places = placeStore(() => context.runtimeDirectory, now);
 
   const pinger = new Pinger(onSample, () => bump(), options);
 
@@ -308,6 +311,14 @@ export function createBackend(context: ModuleContext, options: BackendOptions = 
         return { sequence, cleared: watches.size } as unknown as ModuleJsonValue;
       }
       if (command.commandId === "live") return (await live(command.value ?? {}, signal)) as unknown as ModuleJsonValue;
+      if (command.commandId === "place") {
+        // A page asks where it was left as it opens, and says where it is each time that changes.
+        const { key, place } = (command.value ?? {}) as { key?: unknown; place?: unknown };
+        if (typeof key !== "string") throw Error("Say which window of the Ping page this is.");
+        if (place === undefined || place === null) return { place: places.read(key) } as unknown as ModuleJsonValue;
+        places.write(key, place);
+        return { saved: true };
+      }
       throw Error("Unknown Ping page command.");
     },
     subscribeFeedback(next) {

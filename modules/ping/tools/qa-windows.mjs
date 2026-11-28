@@ -5,10 +5,11 @@
 // would end the other's typing, as switching apps does.)
 //   pnpm build && PING_PREVIEW_FAKE=1 PING_PREVIEW_PORT=43291 npx tsx tools/preview.ts
 //   PLAYWRIGHT=<path to @playwright/test/index.mjs> CHROME=<Chrome for Testing> PREVIEW_ORIGIN=http://127.0.0.1:43291 node tools/qa-windows.mjs
-// Checks that a copy follows the other without a reload, that the cell being typed in one copy
-// stays put and keeps its text while the other adds a row above it, hides a column, changes the
-// text size and Show last and renames another device, that the same cell typed in both keeps
-// the later value and says so, and that neither copy is ever refused.
+// Checks that a copy follows the other's devices, columns and text size without a reload, that the
+// cell being typed in one copy stays put and keeps its text while the other adds a row above it,
+// hides a column, changes the text size and renames another device, that the same cell typed in
+// both keeps the later value and says so, that each copy keeps its own sheet, Show last and scale
+// (place.ts), that a page opens where one was last left, and that neither copy is ever refused.
 import assert from "node:assert/strict";
 const { chromium, expect } = await import(process.env.PLAYWRIGHT ?? "@playwright/test");
 const origin = process.env.PREVIEW_ORIGIN ?? "http://127.0.0.1:43291";
@@ -67,7 +68,7 @@ try {
   const before = await typing.boundingBox();
 
   // Meanwhile the second copy adds a device above it, hides a column, changes the text size and
-  // Show last, and renames the other device.
+  // its own Show last, and renames the other device.
   await cell(two, "seed-1", "name").click({ button: "right" });
   await two.getByRole("menuitem", { name: "Add device above" }).click();
   await two.locator('#device-grid th[data-column-id="average"]').click({ button: "right" });
@@ -78,8 +79,8 @@ try {
   await expect.poll(async () => {
     const doc = await saved();
     return [doc.devices.length, doc.view.hidden.includes("average"), doc.view.textSize, doc.view.span, doc.devices.find((row) => row.id === "seed-1").values.name];
-  }).toEqual([3, true, 14, "1h", "Studio Mac"]);
-  check("the second copy's row, column, text size, Show last and name all saved");
+  }).toEqual([3, true, 14, "10m", "Studio Mac"]);
+  check("the second copy's row, column, text size and name saved; its Show last is its own");
 
   // The first copy's other cells follow while it types, but its cell stays where it was, with its text.
   await expect(cell(one, "seed-1", "name")).toHaveText("Studio Mac");
@@ -94,13 +95,17 @@ try {
   await typing.press("Enter");
   await expect.poll(async () => (await deviceIn("seed-2")).values.host).toBe("192.0.2.55");
   await expect(cell(two, "seed-2", "host")).toHaveText("192.0.2.55");
-  // Now the first copy draws what waited: the new row above, the hidden column, the text size, Show last.
+  // Now the first copy draws what waited: the new row above, the hidden column, the text size.
   await expect(one.locator("#device-grid tbody tr")).toHaveCount(3);
   await expect(one.locator('#device-grid th[data-column-id="average"]')).toHaveCount(0);
   await expect(one.getByLabel("Workbook text size value")).toHaveText("14");
-  await expect(one.getByRole("radio", { name: "1 hr" })).toHaveAttribute("aria-checked", "true");
-  await expect(one.locator('#device-grid th[data-column-id="strip"]')).toHaveText("Last 1 Hr");
-  check("the typed address saved, and the first copy then shows everything the second did");
+  check("the typed address saved, and the first copy then shows the second's devices, columns and text size");
+  // Show last stays as each copy chose it.
+  await expect(one.getByRole("radio", { name: "10 min" })).toHaveAttribute("aria-checked", "true");
+  await expect(one.locator('#device-grid th[data-column-id="strip"]')).toHaveText("Last 10 Min");
+  await expect(two.getByRole("radio", { name: "1 hr" })).toHaveAttribute("aria-checked", "true");
+  await expect(two.locator('#device-grid th[data-column-id="strip"]')).toHaveText("Last 1 Hr");
+  check("the first copy still shows the last 10 minutes while the second shows the last hour");
   await shot("after-typing");
 
   // The same cell in both: the later value is kept, and the copy that typed it is told.
@@ -117,13 +122,46 @@ try {
   await expect(one.getByText("Studio Mac's IP Address was also changed in another window")).toBeVisible();
   check("the same cell typed in both copies keeps the later value, and that copy says so");
 
-  // Sheets are shared: one added and opened in one copy opens in the other, and switching back is never refused.
+  // The sheets are shared, and which one is open is each copy's own.
   await two.getByRole("button", { name: "Add sheet" }).click();
   await two.getByRole("dialog").getByRole("button", { name: "Create sheet" }).click();
+  await expect(two.getByRole("tab", { name: /Sheet 1/ })).toHaveAttribute("aria-selected", "true");
+  await expect(one.getByRole("tab", { name: /Sheet 1/ })).toHaveAttribute("aria-selected", "false");
+  await expect(one.getByRole("tab", { name: /Devices/ })).toHaveAttribute("aria-selected", "true");
+  await expect(one.locator("#device-grid tbody tr")).toHaveCount(3);
+  check("a sheet added in the second copy opens there, and the first copy stays on Devices with the new tab beside it");
+  await one.getByRole("tab", { name: /Sheet 1/ }).click();
+  await two.getByRole("tab", { name: /Devices/ }).click();
   await expect(one.getByRole("tab", { name: /Sheet 1/ })).toHaveAttribute("aria-selected", "true");
-  await one.getByRole("tab", { name: /Devices/ }).click();
   await expect(two.getByRole("tab", { name: /Devices/ })).toHaveAttribute("aria-selected", "true");
-  check("a sheet opened in one copy opens in the other, both ways");
+  await expect(one.locator("#empty")).toBeVisible();
+  await expect(two.locator("#device-grid tbody tr")).toHaveCount(3);
+  check("each copy switches sheets without moving the other");
+
+  // The timeline scale is each copy's own too.
+  const scaleBox = (frame) => frame.locator("#scale .hubble-stepper-input");
+  await expect(one.locator("#scale-auto")).toHaveAttribute("aria-pressed", "true");
+  await scaleBox(two).click();
+  await scaleBox(two).press("Meta+a");
+  await scaleBox(two).pressSequentially("4");
+  await scaleBox(two).press("Enter");
+  await expect(two.locator("#scale-auto")).toHaveAttribute("aria-pressed", "false");
+  await expect(scaleBox(two)).toHaveValue("4.0");
+  await pages[0].waitForTimeout(600);
+  await expect(one.locator("#scale-auto")).toHaveAttribute("aria-pressed", "true");
+  check("a scale set in the second copy leaves the first on Auto");
+  const doc = await saved();
+  assert.deepEqual([doc.view.span, doc.view.sheetId, doc.view.scaleMs], ["10m", undefined, undefined]);
+  check("no copy saved its sheet, Show last or scale with the list");
+  await shot("each-copy-its-own-view");
+
+  // A page opens where one was last left: the second copy, on Devices, the last hour, 4 ms.
+  await pages[0].reload();
+  await expect(one.locator("#loading")).toBeHidden({ timeout: 15_000 });
+  await expect(one.getByRole("tab", { name: /Devices/ })).toHaveAttribute("aria-selected", "true");
+  await expect(one.getByRole("radio", { name: "1 hr" })).toHaveAttribute("aria-checked", "true");
+  await expect(scaleBox(one)).toHaveValue("4.0");
+  check("a reloaded copy opens where the page was last left");
 
   for (const frame of [one, two]) await expect(frame.locator("#save-status")).toHaveText("All changes saved");
   const messages = [...(await toasts(one)), ...(await toasts(two))].join("\n");

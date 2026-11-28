@@ -1,7 +1,8 @@
 // Checks the timeline's Scale and Colors with real input against a running
 // `PING_PREVIEW_FAKE=1 pnpm preview` whose first device answers: dragging and pinching the ms numbers,
-// the Scale box and Auto, a held and a failed save, the green, yellow and orange times, Undo,
-// and that nothing on the right of the row under the timeline ever moves.
+// the Scale box and Auto, that the scale is this window's own and never saved with the list, a held
+// and a failed save of the colour times, Undo, and that nothing on the right of the row under the
+// timeline ever moves.
 // Run it from a folder that has @playwright/test. Screenshots go to the folder given, or /tmp.
 import { createRequire } from "node:module";
 // Playwright comes from the folder it is run in, as this module doesn't carry it.
@@ -15,7 +16,11 @@ const check = (name, ok, detail = "") => {
 };
 const inspect = async () => (await (await fetch(`${base}/__inspect`)).json());
 const view = async () => (await inspect()).document.view;
-const scale = async () => (await view()).scaleMs ?? "auto";
+/** The scale this window is on, as the worker remembers it for the next time the page opens (place.ts). */
+const scale = async () => {
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  return (await inspect()).place?.scaleMs ?? "auto";
+};
 const writes = async () => Number((await inspect()).revision.split("-")[1]);
 const simulate = (body) => fetch(`${base}/__simulate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
@@ -87,11 +92,11 @@ const hint = await frame.locator("#tl-hint").textContent();
 check("Scale, Auto and Clear history stay put on hover", start === overBars && start === (await spots()), hint);
 check("Auto is on, and its box shows Auto's top, dimmed", (await frame.locator("#scale-auto").getAttribute("aria-pressed")) === "true" && (await f.evaluate(() => document.getElementById("scale").dataset.auto)) === "true", `box ${await box.inputValue()}`);
 
-// 2. Drag the numbers: the grabbed number lands under the pointer, and only the release saves.
+// 2. Drag the numbers: the grabbed number lands under the pointer. The scale is this window's own, so the list isn't saved.
 const autoTop = Number(await box.inputValue());
 let before = await writes();
 await drag(yOf(autoTop / 4, autoTop), yOf(autoTop, autoTop));
-check("Dragging a quarter-height number to the top sets that scale", (await scale()) === autoTop / 4 && (await writes()) === before + 1, `Auto ${autoTop} → ${await scale()} in ${(await writes()) - before} save`);
+check("Dragging a quarter-height number to the top sets that scale", (await scale()) === autoTop / 4 && (await writes()) === before && (await view()).scaleMs === undefined, `Auto ${autoTop} → ${await scale()}, ${(await writes()) - before} saves of the list`);
 let top = await scale();
 await drag(yOf(top / 5, top), yOf(top, top));
 check("A second drag goes on from there", (await scale()) === top / 5, `→ ${await scale()}`);
@@ -125,24 +130,21 @@ for (let step = 0; step < 6; step++) { await page.mouse.wheel(0, -20); await pag
 await page.keyboard.up("Control");
 const during = Number(await box.inputValue());
 await page.waitForTimeout(700);
-check("Pinching apart lowers the scale and saves once at rest", during < top && (await scale()) === during && (await writes()) === before + 1, `${top} → ${during}, ${(await writes()) - before} save`);
+check("Pinching apart lowers the scale and keeps it at rest", during < top && (await scale()) === during && (await writes()) === before, `${top} → ${during}, ${(await writes()) - before} saves of the list`);
 await page.mouse.move(bars.x, bars.y); await page.keyboard.down("Control"); await page.mouse.wheel(0, 60); await page.keyboard.up("Control"); await page.waitForTimeout(500);
 check("Pinching over the bars zooms time and leaves the scale", (await scale()) === during);
 ms = await timed(() => page.mouse.dblclick(numbersX, plot.top + 60)); await page.waitForTimeout(300);
 check("Double-clicking the numbers returns to Auto", (await scale()) === "auto", `to new frame ${ms} ms`);
 
-// 6. A held save: the change shows at once, a second change goes on top, both land in order.
+// 6. The scale never waits on the list: with its saves held, a change shows at once and stays.
 await typeScale("10"); await page.waitForTimeout(300);
+before = await writes();
 await simulate({ holdSaves: true });
 ms = await timed(() => typeScale("5"));
-check("5 ms shows while its save is held", Number(await box.inputValue()) === 5 && (await scale()) === 10 && ms !== null, `new frame ${ms} ms, saved still ${await scale()}`);
 await frame.getByRole("button", { name: "Decrease Scale" }).click();
-check("A second change works while the first waits", Number(await box.inputValue()) === 4.5);
-await simulate({ releaseSaves: true }); await page.waitForTimeout(700);
-check("Both land, newest last", (await scale()) === 4.5 && Number(await box.inputValue()) === 4.5, `saved ${await scale()}`);
-await simulate({ failNextSave: true });
-await frame.getByRole("button", { name: "Increase Scale" }).click(); await page.waitForTimeout(900);
-check("A failed save goes back to 4.5 ms and says so", (await scale()) === 4.5 && Number(await box.inputValue()) === 4.5 && /refused/u.test(await f.evaluate(() => document.body.innerText)));
+check("5 ms, then 4.5, show at once while the list's saves are held", Number(await box.inputValue()) === 4.5 && (await scale()) === 4.5 && ms !== null, `new frame ${ms} ms`);
+await simulate({ releaseSaves: true }); await page.waitForTimeout(300);
+check("None of it was saved with the list", (await view()).scaleMs === undefined && (await writes()) === before, `${(await writes()) - before} saves of the list`);
 
 // 7. Colours: fixed green, yellow, orange and red, with the user's times.
 await typeScale("10"); await page.waitForTimeout(300);
